@@ -1,0 +1,111 @@
+'use client'
+
+import { useState } from 'react'
+import { Calendar, ChevronDown } from 'lucide-react'
+import { useStore } from '@/lib/store-context'
+import type { DashboardPeriod } from '@/lib/utils'
+
+const periods = [
+  { id: 'today', label: 'Aujourd\'hui' },
+  { id: 'yesterday', label: 'Hier' },
+  { id: 'week', label: 'Cette semaine' },
+  { id: 'month', label: 'Ce mois' },
+  { id: 'quarter', label: 'Ce trimestre' },
+  { id: 'year', label: 'Cette année' },
+  { id: 'custom', label: 'Période personnalisée' },
+]
+
+const periodLabels: Record<DashboardPeriod, string> = {
+  today: "Aujourd'hui",
+  yesterday: 'Hier',
+  week: 'Cette semaine',
+  month: 'Ce mois',
+  quarter: 'Ce trimestre',
+  year: 'Cette année',
+  custom: 'Période personnalisée',
+}
+
+export default function PeriodFilter() {
+  const {
+    selectedPeriod,
+    setSelectedPeriod,
+    customStartDate,
+    setCustomStartDate,
+    customEndDate,
+    setCustomEndDate,
+  } = useStore()
+  const [isOpen, setIsOpen] = useState(false)
+
+  const selectedLabel = selectedPeriod === 'custom' && customStartDate && customEndDate
+    ? `${customStartDate} → ${customEndDate}`
+    : periodLabels[selectedPeriod] || 'Période'
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full sm:w-auto sm:min-w-[190px] max-w-[220px] flex items-center justify-between gap-2 px-4 py-2 bg-card border border-border rounded-lg hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-foreground"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <Calendar className="w-4 h-4 text-muted-foreground" />
+          <span className="truncate">{selectedLabel}</span>
+        </span>
+        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+      </button>
+
+      {isOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="absolute right-0 mt-2 w-72 bg-card rounded-lg shadow-lg border border-border z-20">
+            <div className="py-1">
+              {periods.map((period) => (
+                <button
+                  key={period.id}
+                  onClick={() => {
+                    setSelectedPeriod(period.id as DashboardPeriod)
+                    if (period.id !== 'custom') {
+                      setIsOpen(false)
+                    }
+                  }}
+                  className={`w-full text-left px-4 py-2 text-sm hover:bg-secondary ${
+                    selectedPeriod === period.id
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-foreground'
+                  }`}
+                >
+                  {period.label}
+                </button>
+              ))}
+
+              {selectedPeriod === 'custom' && (
+                <div className="px-4 py-3 border-t border-border space-y-2">
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Date début</label>
+                    <input
+                      type="date"
+                      value={customStartDate || ''}
+                      onChange={(e) => setCustomStartDate(e.target.value || null)}
+                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-card text-foreground"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Date fin</label>
+                    <input
+                      type="date"
+                      value={customEndDate || ''}
+                      onChange={(e) => setCustomEndDate(e.target.value || null)}
+                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-card text-foreground"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

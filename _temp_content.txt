@@ -1,0 +1,13 @@
+'use client'
+
+import { formatCurrency } from '@/lib/utils'
+import {
+  TrendingUp,
+  MousePointerClick,
+  Eye,
+  Target,
+  DollarSign,
+  BarChart3,
+  ShoppingCart,
+  Percent,
+} from 'lucide-react'

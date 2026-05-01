@@ -1,0 +1,29 @@
+<svg width="800" height="400" viewBox="0 0 800 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rapid Delivery Logo -->
+  <g transform="translate(100, 100)">
+    <!-- Speed Lines (Orange) -->
+    <path d="M0 60H100" stroke="#f97316" stroke-width="24" stroke-linecap="round"/>
+    <path d="M20 100H100" stroke="#f97316" stroke-width="24" stroke-linecap="round"/>
+    <path d="M40 140H100" stroke="#f97316" stroke-width="24" stroke-linecap="round"/>
+    
+    <!-- Delivery Box (Blue) -->
+    <g transform="translate(120, 0)">
+      <rect width="180" height="180" rx="20" fill="#2563eb"/>
+      <!-- Box Top Fold -->
+      <path d="M0 60L90 100L180 60" stroke="white" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Box Center Vertical -->
+      <path d="M90 100V180" stroke="white" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      
+      <!-- Speed Streak on Box -->
+      <path d="M-20 40L20 40" stroke="white" stroke-width="8" stroke-linecap="round" opacity="0.3"/>
+      <path d="M-40 140L0 140" stroke="white" stroke-width="8" stroke-linecap="round" opacity="0.3"/>
+    </g>
+  </g>
+  
+  <!-- Text Content -->
+  <text x="420" y="215" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="84" font-weight="800" fill="#1e293b">RAPID</text>
+  <text x="420" y="295" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="84" font-weight="800" fill="#2563eb">DELIVERY</text>
+  
+  <!-- Slogan -->
+  <text x="420" y="340" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="24" font-weight="400" fill="#64748b" letter-spacing="4">VOTRE LOGISTIQUE LOCALE</text>
+</svg>

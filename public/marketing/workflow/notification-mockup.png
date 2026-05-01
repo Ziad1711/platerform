@@ -1,0 +1,53 @@
+<svg width="600" height="800" viewBox="0 0 600 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- iPhone Frame with 3D Effect -->
+  <rect x="150" y="50" width="300" height="650" rx="45" fill="#1f2937" stroke="#111827" stroke-width="2"/>
+  <rect x="155" y="55" width="290" height="640" rx="40" fill="#111827"/>
+  
+  <!-- Screen Area -->
+  <rect x="165" y="65" width="270" height="620" rx="32" fill="#030712"/>
+  
+  <!-- Notch/Dynamic Island -->
+  <rect x="250" y="75" width="100" height="30" rx="15" fill="#111827"/>
+  <circle cx="330" cy="90" r="4" fill="#1e1b4b"/>
+  
+  <!-- Notification Banner -->
+  <g transform="translate(175, 120)">
+    <!-- Shadow -->
+    <rect x="2" y="4" width="250" height="90" rx="20" fill="black" fill-opacity="0.3"/>
+    <!-- Glassmorphism Background -->
+    <rect width="250" height="90" rx="20" fill="#1f2937" fill-opacity="0.9"/>
+    <rect width="250" height="90" rx="20" stroke="white" stroke-opacity="0.1" stroke-width="0.5"/>
+    
+    <!-- App Icon -->
+    <rect x="15" y="15" width="40" height="40" rx="10" fill="#2563eb"/>
+    <path d="M25 35L30 40L40 30" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Text Content -->
+    <text x="65" y="32" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="white">Jisra</text>
+    <text x="65" y="58" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#f3f4f6">Nouvelle commande - jisra</text>
+    <text x="210" y="32" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9ca3af">maintenant</text>
+    
+    <!-- Pull Bar -->
+    <rect x="110" y="80" width="30" height="4" rx="2" fill="#4b5563"/>
+  </g>
+  
+  <!-- Dashboard Preview (Simulated) -->
+  <g transform="translate(180, 240)" opacity="0.3">
+    <rect width="240" height="40" rx="8" fill="#1f2937"/>
+    <rect y="50" width="240" height="120" rx="8" fill="#1f2937"/>
+    <rect x="10" y="60" width="100" height="15" rx="4" fill="#374151"/>
+    <rect x="10" y="85" width="220" height="10" rx="2" fill="#111827"/>
+    <rect x="10" y="105" width="220" height="10" rx="2" fill="#111827"/>
+    <rect x="10" y="125" width="180" height="10" rx="2" fill="#111827"/>
+  </g>
+  
+  <!-- Reflection/Glare -->
+  <path d="M165 97C165 79.3299 179.33 65 197 65H403C420.67 65 435 79.3299 435 97V300L165 150V97Z" fill="url(#paint0_linear_glare)"/>
+  
+  <defs>
+    <linearGradient id="paint0_linear_glare" x1="300" y1="65" x2="300" y2="300" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+</svg>
