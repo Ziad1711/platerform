@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Store, Globe2, Building2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -28,6 +29,7 @@ const timezones = [
 ]
 
 export default function OnboardingModal() {
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   const [checking, setChecking] = useState(true)
   const [open, setOpen] = useState(false)
@@ -74,7 +76,18 @@ export default function OnboardingModal() {
         const hasStores = storesPayload?.hasStores === true
         const canDecideOnStores = typeof storesPayload?.hasStores === 'boolean'
 
+        // Check pending invitation first
+        const pendingRes = await fetch('/api/team/invitations/pending', { cache: 'no-store' }).catch(() => null)
+        const pendingPayload = pendingRes && pendingRes.ok ? await pendingRes.json() : null
+        const pendingToken = pendingPayload?.invitation?.token || null
+
         if (!active) return
+
+        if (pendingToken) {
+          setChecking(false)
+          router.push('/invite/' + pendingToken)
+          return
+        }
 
         setForm((prev) => ({
           ...prev,

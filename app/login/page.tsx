@@ -5,7 +5,7 @@ import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 
 type LoginPageProps = {
-  searchParams?: Promise<{ signup?: string; recovery?: string }>
+  searchParams?: Promise<{ signup?: string; recovery?: string; error?: string }>
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -19,6 +19,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     redirect('/dashboard')
   }
   const defaultMode = params.recovery === '1' ? 'recovery' : params.signup === '1' ? 'signup' : 'login'
+  const isInvitationExpired = params.error === 'invitation_expired'
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-jisra-ink">
@@ -57,6 +58,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <p className="text-jisra-cream/60 mt-2 text-sm">
                   Connectez-vous à votre tableau de bord
                 </p>
+                {isInvitationExpired && (
+                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-400">
+                    Lien d&apos;invitation invalide ou expiré. Veuillez demander une nouvelle invitation.
+                  </div>
+                )}
                 <p className="mt-3 text-sm text-jisra-cream/45">
                   Nouveau sur Jisra ?{' '}
                   <Link href="/signup" className="font-medium text-jisra-green-light hover:text-jisra-green">

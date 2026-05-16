@@ -6,6 +6,7 @@ import { MarketingFooter } from '@/components/marketing/layout/footer'
 import { PageTransition } from '@/components/marketing/shared/page-transition'
 import { ScrollToTopButton } from '@/components/marketing/shared/scroll-to-top'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
+import HashErrorHandler from '@/components/marketing/hash-error-handler'
 
 export { metadata }
 
@@ -30,6 +31,7 @@ export default function HomePage() {
       <MarketingFooter />
       <CookieBanner />
       <ScrollToTopButton />
+      <HashErrorHandler />
     </div>
   )
 }

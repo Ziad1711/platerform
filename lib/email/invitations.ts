@@ -26,7 +26,7 @@ export async function sendInvitationEmail(
   } = {}
 ) {
   const admin = createAdminClient()
-  const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL}/invite/${token}`
+  const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?next=${encodeURIComponent('/invite/' + token)}`
 
   // 1) Essayer l'invitation classique (nouvel utilisateur)
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
