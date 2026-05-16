@@ -12,6 +12,13 @@ const passwordLevels = [
   { label: 'Fort', color: 'bg-emerald-500', test: (v: string) => /[^A-Za-z0-9]/.test(v) },
 ]
 
+function safeInternalPath(value: string | null, fallback = '/dashboard') {
+  const next = String(value || '').trim()
+  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return fallback
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(next)) return fallback
+  return next
+}
+
 export default function SignupForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -53,7 +60,7 @@ export default function SignupForm() {
       if (!acceptedTerms) throw new Error('Vous devez accepter les conditions d’utilisation')
 
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()
-      const nextPath = next || '/dashboard'
+      const nextPath = safeInternalPath(next)
       const redirectUrl = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
@@ -91,7 +98,7 @@ export default function SignupForm() {
           })
           if (loginError) throw loginError
 
-          router.push(next)
+          router.push(nextPath)
           router.refresh()
           return
         }
@@ -101,7 +108,7 @@ export default function SignupForm() {
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
 
-        router.push(next || '/dashboard?onboarding=1')
+        router.push(next ? nextPath : '/dashboard?onboarding=1')
         router.refresh()
         return
       }

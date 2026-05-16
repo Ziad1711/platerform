@@ -3,6 +3,13 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
 
+function safeInternalPath(value: string | null) {
+  const next = String(value || '').trim()
+  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return '/dashboard'
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(next)) return '/dashboard'
+  return next
+}
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
@@ -41,7 +48,8 @@ export async function middleware(request: NextRequest) {
 
   // Si l'utilisateur est connecté et essaie d'accéder à la page de login
   if (user && (pathname === '/login' || pathname === '/signup')) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+    const nextPath = safeInternalPath(request.nextUrl.searchParams.get('next'))
+    return NextResponse.redirect(new URL(nextPath, request.url))
   }
 
   // Permission guards : vérifier le membership actif et les permissions de route

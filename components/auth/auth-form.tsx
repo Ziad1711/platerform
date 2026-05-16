@@ -10,6 +10,13 @@ type AuthFormProps = {
   defaultMode?: 'login' | 'signup' | 'reset-request' | 'recovery'
 }
 
+function safeInternalPath(value: string | null) {
+  const next = String(value || '').trim()
+  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return '/dashboard'
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(next)) return '/dashboard'
+  return next
+}
+
 export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const [mode, setMode] = useState<'login' | 'signup' | 'reset-request' | 'recovery'>(defaultMode)
   const [email, setEmail] = useState('')
@@ -88,7 +95,10 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
         if (error) throw error
       }
 
-      if (mode === 'login' || mode === 'signup') {
+      if (mode === 'login') {
+        router.replace(safeInternalPath(next))
+        router.refresh()
+      } else if (mode === 'signup') {
         router.refresh()
       }
     } catch (err: any) {

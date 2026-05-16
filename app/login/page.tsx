@@ -3,9 +3,10 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
+import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
 
 type LoginPageProps = {
-  searchParams?: Promise<{ signup?: string; recovery?: string; error?: string }>
+  searchParams?: Promise<{ signup?: string; recovery?: string; error?: string; next?: string }>
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -15,8 +16,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     data: { user },
   } = await supabase.auth.getUser()
 
+  const nextPath = sanitizeInternalRedirectPath(params.next, '/dashboard')
+
   if (user && params.recovery !== '1') {
-    redirect('/dashboard')
+    redirect(nextPath)
   }
   const defaultMode = params.recovery === '1' ? 'recovery' : params.signup === '1' ? 'signup' : 'login'
   const isInvitationExpired = params.error === 'invitation_expired'

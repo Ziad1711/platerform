@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
+import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
 
 type SignupPageProps = {
   searchParams?: Promise<{ next?: string }>
@@ -16,7 +17,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   } = await supabase.auth.getUser()
 
   if (user) {
-    redirect(params.next || '/dashboard')
+    redirect(sanitizeInternalRedirectPath(params.next, '/dashboard'))
   }
 
   return (
