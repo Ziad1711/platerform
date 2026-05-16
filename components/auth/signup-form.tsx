@@ -68,7 +68,24 @@ export default function SignupForm() {
         },
       })
 
-      if (error) throw error
+      if (error) {
+        const alreadyRegistered = error.message.toLowerCase().includes('already registered')
+        if (alreadyRegistered && next?.startsWith('/invite/')) {
+          const { error: otpError } = await supabase.auth.signInWithOtp({
+            email: email.trim(),
+            options: {
+              shouldCreateUser: false,
+              emailRedirectTo: redirectUrl,
+            },
+          })
+          if (otpError) throw otpError
+
+          setPendingEmailConfirmation(email.trim())
+          setSuccess('Invitation trouvée. Vérifiez votre email pour finaliser votre compte.')
+          return
+        }
+        throw error
+      }
 
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
