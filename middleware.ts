@@ -57,8 +57,10 @@ export async function middleware(request: NextRequest) {
       }
 
       // Vérifier les permissions spécifiques à la route
+      // Ne pas rediriger si on est déjà sur /dashboard pour éviter une boucle
+      // (ex: rôle 'confirmation' n'a pas 'dashboard.view')
       const routePerms = MENU_PERMISSIONS[pathname]
-      if (member && routePerms && !routePerms.some((p) => hasPermission(member.role as any, p))) {
+      if (member && routePerms && !routePerms.some((p) => hasPermission(member.role as any, p)) && pathname !== '/dashboard') {
         return NextResponse.redirect(new URL('/dashboard', request.url))
       }
     }

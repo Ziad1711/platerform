@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getServerUser } from '@/lib/supabase/server'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
@@ -11,10 +11,7 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {}
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser()
 
   const nextPath = sanitizeInternalRedirectPath(params.next, '/dashboard')
 
