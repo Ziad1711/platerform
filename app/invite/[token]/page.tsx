@@ -64,7 +64,10 @@ export default function InvitePage() {
       setStatus('success')
       const { data: { user } } = await supabase.auth.getUser()
       const needsPassword = user?.user_metadata?.password_set === false
-      setTimeout(() => router.push(needsPassword ? '/welcome' : '/dashboard'), 1000)
+      // Navigation immédiate avec window.location.href pour éviter
+      // l'erreur "chrome-error://chromewebdata/" qui survient quand
+      // router.push() est appelé depuis un contexte de frame interrompu
+      window.location.href = needsPassword ? '/welcome' : '/dashboard'
     } catch (e) {
       setStatus('error')
       setErrorMsg(e instanceof Error ? e.message : 'Erreur')
