@@ -28,7 +28,7 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   // Routes publiques
-  const publicPaths = ['/login', '/signup', '/invite']
+  const publicPaths = ['/login', '/signup', '/invite', '/auth/finish', '/welcome']
   const isPublic = publicPaths.some(p => pathname === p || pathname.startsWith(p + '/'))
 
   // Routes protégées

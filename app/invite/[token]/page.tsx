@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Loader2, CheckCircle, AlertTriangle } from 'lucide-react'
@@ -9,7 +9,7 @@ export default function InvitePage() {
   const params = useParams()
   const router = useRouter()
   const token = String(params.token || '')
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const [status, setStatus] = useState<'loading' | 'unauthenticated' | 'mismatch' | 'ready' | 'accepting' | 'success' | 'error'>('loading')
   const [invitationEmail, setInvitationEmail] = useState('')
@@ -25,21 +25,17 @@ export default function InvitePage() {
       }
       setUserEmail(user.email || '')
 
-      // Fetch invitation details to verify email match
-      const { data: inv } = await supabase
-        .from('team_invitations')
-        .select('email, status, expires_at')
-        .eq('token', token)
-        .maybeSingle()
+      const res = await fetch(`/api/team/accept?token=${encodeURIComponent(token)}`)
+      const inv = await res.json().catch(() => null)
 
-      if (!inv || inv.status !== 'pending' || new Date(inv.expires_at) < new Date()) {
+      if (!res.ok || !inv || inv.status !== 'pending' || new Date(inv.expiresAt) < new Date()) {
         setStatus('error')
         setErrorMsg('Cette invitation est invalide ou a expiré.')
         return
       }
 
       setInvitationEmail(inv.email)
-      if (inv.email.toLowerCase() !== (user.email || '').toLowerCase()) {
+      if (!inv.matchesCurrentUser) {
         setStatus('mismatch')
         return
       }
@@ -59,8 +55,16 @@ export default function InvitePage() {
       })
       const payload = await res.json().catch(() => null)
       if (!res.ok) throw new Error(payload?.error || 'ACCEPT_FAILED')
+
+      if (payload?.storeId) {
+        localStorage.setItem('current-store-id', payload.storeId)
+        document.cookie = `current-store-id=${payload.storeId}; path=/; max-age=31536000; SameSite=Lax`
+      }
+
       setStatus('success')
-      setTimeout(() => router.push('/dashboard'), 1500)
+      const { data: { user } } = await supabase.auth.getUser()
+      const needsPassword = user?.user_metadata?.password_set === false
+      setTimeout(() => router.push(needsPassword ? '/welcome' : '/dashboard'), 1000)
     } catch (e) {
       setStatus('error')
       setErrorMsg(e instanceof Error ? e.message : 'Erreur')
@@ -103,7 +107,7 @@ export default function InvitePage() {
           <>
             <CheckCircle className="h-10 w-10 mx-auto text-emerald-500"/>
             <h1 className="mt-3 text-xl font-semibold">Invitation acceptée !</h1>
-            <p className="mt-2 text-sm text-muted-foreground">Redirection vers le tableau de bord...</p>
+            <p className="mt-2 text-sm text-muted-foreground">Finalisation de votre accès...</p>
           </>
         )}
 

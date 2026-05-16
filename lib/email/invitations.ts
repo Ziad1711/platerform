@@ -26,7 +26,8 @@ export async function sendInvitationEmail(
   } = {}
 ) {
   const admin = createAdminClient()
-  const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?next=${encodeURIComponent('/invite/' + token)}`
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL!
+  const redirectUrl = `${appUrl}/auth/finish?next=${encodeURIComponent('/invite/' + token)}`
 
   // 1) Essayer l'invitation classique (nouvel utilisateur)
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
@@ -35,6 +36,7 @@ export async function sendInvitationEmail(
       redirectTo: redirectUrl,
       data: {
         invitation_token: token,
+        password_set: false,
         inviter_name: options.inviterName || '',
         store_names: options.storeNames || [],
       },
