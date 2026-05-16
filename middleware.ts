@@ -3,11 +3,9 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
 
-function safeInternalPath(value: string | null) {
-  const next = String(value || '').trim()
-  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return '/dashboard'
-  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(next)) return '/dashboard'
-  return next
+function safeNextPath(request: NextRequest) {
+  const path = `${request.nextUrl.pathname}${request.nextUrl.search}`
+  return `/login?next=${encodeURIComponent(path)}`
 }
 
 export async function middleware(request: NextRequest) {
@@ -43,13 +41,7 @@ export async function middleware(request: NextRequest) {
   const isProtected = protectedPaths.some(p => pathname === p || pathname.startsWith(p + '/'))
 
   if (!user && isProtected) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-
-  // Si l'utilisateur est connecté et essaie d'accéder à la page de login
-  if (user && (pathname === '/login' || pathname === '/signup')) {
-    const nextPath = safeInternalPath(request.nextUrl.searchParams.get('next'))
-    return NextResponse.redirect(new URL(nextPath, request.url))
+    return NextResponse.redirect(new URL(safeNextPath(request), request.url))
   }
 
   // Permission guards : vérifier le membership actif et les permissions de route

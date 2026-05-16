@@ -22,7 +22,7 @@ export default function WelcomePage() {
         router.replace('/login')
         return
       }
-      if (user.user_metadata?.password_set !== false) {
+      if (user.user_metadata?.password_set === true) {
         router.replace('/dashboard')
         return
       }
