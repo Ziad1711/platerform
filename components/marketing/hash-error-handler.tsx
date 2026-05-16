@@ -19,6 +19,13 @@ export default function HashErrorHandler() {
     if (hash.includes('access_token=') && hash.includes('type=invite')) {
       const supabase = createClient()
       const timeout = setTimeout(async () => {
+        const latestRes = await fetch('/api/team/accept').catch(() => null)
+        const latest = await latestRes?.json().catch(() => null)
+        if (latest?.invitation?.token) {
+          router.replace(`/invite/${latest.invitation.token}`)
+          return
+        }
+
         const { data } = await supabase.auth.getUser()
         const token = data.user?.user_metadata?.invitation_token
         if (token) {

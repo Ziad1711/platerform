@@ -7,11 +7,22 @@ export async function GET(request: Request) {
     const user = await requireAuth()
     const token = new URL(request.url).searchParams.get('token')?.trim() || ''
 
+    const admin = createAdminClient()
     if (!token) {
-      return NextResponse.json({ error: 'TOKEN_REQUIRED' }, { status: 400 })
+      const { data: latest, error: latestError } = await admin
+        .from('team_invitations')
+        .select('email, token, status, expires_at')
+        .eq('email', (user.email || '').toLowerCase())
+        .eq('status', 'pending')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (latestError) throw latestError
+      return NextResponse.json({ invitation: latest || null })
     }
 
-    const admin = createAdminClient()
     const { data: invitation, error } = await admin
       .from('team_invitations')
       .select('email, status, expires_at')
