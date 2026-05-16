@@ -6,15 +6,24 @@ export async function GET() {
   try {
     const { user } = await requireAuthenticatedUser()
     const admin = createAdminClient()
-    const { data, error } = await admin
+    const { data: owned, error: ownedErr } = await admin
       .from('stores')
       .select('id')
       .eq('owner_user_id', user.id)
       .limit(1)
 
-    if (error) throw error
+    if (ownedErr) throw ownedErr
 
-    return NextResponse.json({ hasStores: (data || []).length > 0 })
+    const { data: member, error: memberErr } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .limit(1)
+
+    if (memberErr) throw memberErr
+
+    const hasStores = (owned?.length || 0) + (member?.length || 0) > 0
+    return NextResponse.json({ hasStores })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'STORE_FETCH_FAILED'
     return NextResponse.json({ error: message }, { status: 500 })
