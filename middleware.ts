@@ -3,13 +3,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
 
-function safeNextPath(request: NextRequest) {
-  const path = `${request.nextUrl.pathname}${request.nextUrl.search}`
-  return `/login?next=${encodeURIComponent(path)}`
-}
-
 export async function middleware(request: NextRequest) {
-  // Ne pas recréer response à chaque setAll pour éviter la perte de cookies
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -29,29 +23,24 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Utiliser getSession() au lieu de getUser() pour éviter un appel API
-  // et utiliser le cookie local (plus fiable, surtout sur Safari)
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
+  // Utiliser getUser() (vérification JWT via API) avec fallback getSession()
+  // pour être fiable sur Edge Runtime (Vercel) où les cookies SSR peuvent être
+  // inaccessibles localement
+  const { data: { user } } = await supabase.auth.getUser()
+  const sessionUser = user ?? (await supabase.auth.getSession()).data.session?.user ?? null
   const pathname = request.nextUrl.pathname
-
-  // Routes publiques
-  const publicPaths = ['/login', '/signup', '/invite', '/auth/finish', '/welcome']
-  const isPublic = publicPaths.some(p => pathname === p || pathname.startsWith(p + '/'))
 
   // Routes protégées
   const protectedPaths = ['/dashboard', '/sales', '/products', '/stock', '/suppliers', '/advertising', '/expenses', '/integrations', '/delivery', '/ai-assistant', '/staff', '/subscription', '/settings']
   const isProtected = protectedPaths.some(p => pathname === p || pathname.startsWith(p + '/'))
 
-  // NE PAS rediriger si l'utilisateur a une session - laisser la page server gérer
-  // Ceci évite la boucle de redirections quand le middleware et la page server
-  // ont des vues différentes de la session (notamment sur Safari)
-  if (!user && isProtected) {
-    return NextResponse.redirect(new URL(safeNextPath(request), request.url))
-  }
+  // NE PAS rediriger si l'utilisateur n'est pas trouvé - laisser les pages server
+  // gérer l'auth avec getServerUser() qui a un fallback getSession() fiable.
+  // Ceci évite la boucle de redirections quand le middleware (Edge Runtime)
+  // ne trouve pas la session mais que la page server la trouve.
 
-  // Permission guards : vérifier le membership actif et les permissions de route
-  if (user && isProtected && !isPublic) {
+  // Permission guards seulement si l'utilisateur est trouvé
+  if (sessionUser && isProtected) {
     const storeId = request.cookies.get('current-store-id')?.value
 
     if (storeId) {
@@ -59,7 +48,7 @@ export async function middleware(request: NextRequest) {
         .from('store_members')
         .select('role')
         .eq('store_id', storeId)
-        .eq('user_id', user.id)
+        .eq('user_id', sessionUser.id)
         .eq('status', 'active')
         .maybeSingle()
 
