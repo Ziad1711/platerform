@@ -27,3 +27,20 @@ export const createClient = async () => {
     }
   )
 }
+
+/**
+ * Récupère l'utilisateur connecté côté serveur.
+ * Utilise d'abord getUser() (vérification API), puis getSession() en fallback
+ * pour gérer les incohérences de cookies SSR (notamment sur Safari).
+ */
+export async function getServerUser() {
+  const supabase = await createClient()
+  
+  // Essayer getUser() d'abord (vérification JWT via API)
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (user && !error) return user
+
+  // Fallback: getSession() lit le cookie localement
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.user ?? null
+}

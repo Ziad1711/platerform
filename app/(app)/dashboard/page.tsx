@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import KpiCards from '@/components/dashboard/kpi-cards'
 import RevenueChart from '@/components/dashboard/revenue-chart'
@@ -10,12 +10,12 @@ import PeriodFilter from '@/components/dashboard/period-filter'
 import StoreSelector from '@/components/dashboard/store-selector'
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getServerUser()
 
   if (!user) {
     redirect('/login')
   }
+
 
   return (
     <div className="space-y-6 animate-fade-in">

@@ -9,6 +9,7 @@ function safeNextPath(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  // Ne pas recréer response à chaque setAll pour éviter la perte de cookies
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -20,7 +21,6 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          response = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options)
           })
@@ -29,7 +29,10 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Utiliser getSession() au lieu de getUser() pour éviter un appel API
+  // et utiliser le cookie local (plus fiable, surtout sur Safari)
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user ?? null
   const pathname = request.nextUrl.pathname
 
   // Routes publiques
@@ -40,6 +43,9 @@ export async function middleware(request: NextRequest) {
   const protectedPaths = ['/dashboard', '/sales', '/products', '/stock', '/suppliers', '/advertising', '/expenses', '/integrations', '/delivery', '/ai-assistant', '/staff', '/subscription', '/settings']
   const isProtected = protectedPaths.some(p => pathname === p || pathname.startsWith(p + '/'))
 
+  // NE PAS rediriger si l'utilisateur a une session - laisser la page server gérer
+  // Ceci évite la boucle de redirections quand le middleware et la page server
+  // ont des vues différentes de la session (notamment sur Safari)
   if (!user && isProtected) {
     return NextResponse.redirect(new URL(safeNextPath(request), request.url))
   }
