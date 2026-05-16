@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     const admin = createAdminClient()
     const { data: invitation, error: invitationError } = await admin
       .from('team_invitations')
-      .select('email, status, expires_at')
+      .select('id, email, status, expires_at, invited_by')
       .eq('token', token)
       .maybeSingle()
 
@@ -72,16 +72,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVITATION_EMAIL_MISMATCH' }, { status: 403 })
     }
 
-    const { data: result, error } = await admin.rpc('accept_team_invitation', {
-      p_token: token,
-    })
+    const { data: assignmentsData, error: assignmentsError } = await admin
+      .from('team_invitation_assignments')
+      .select('store_id, role')
+      .eq('invitation_id', invitation.id)
 
-    if (error) throw error
-    if (result?.error) {
-      return NextResponse.json({ error: result.error }, { status: 400 })
+    if (assignmentsError) throw assignmentsError
+    const assignments = assignmentsData || []
+
+    for (const assignment of assignments) {
+      const { error: memberError } = await admin.from('store_members').upsert(
+        {
+          store_id: assignment.store_id,
+          user_id: user.id,
+          role: assignment.role,
+          status: 'active',
+          invited_email: invitation.email,
+          invited_by: invitation.invited_by,
+          accepted_at: new Date().toISOString(),
+        },
+        { onConflict: 'store_id,user_id' }
+      )
+      if (memberError) throw memberError
     }
 
-    const assignments = Array.isArray(result?.assignments) ? result.assignments : []
+    const { error: updateError } = await admin
+      .from('team_invitations')
+      .update({ status: 'accepted' })
+      .eq('id', invitation.id)
+
+    if (updateError) throw updateError
     const firstAssignment = assignments[0] || null
 
     return NextResponse.json({
@@ -91,6 +111,7 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'ACCEPT_INVITATION_FAILED'
+    console.error('[ACCEPT_INVITATION_ERROR]', message, error)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
