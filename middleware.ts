@@ -57,13 +57,13 @@ export async function middleware(request: NextRequest) {
         .eq('status', 'active')
         .maybeSingle()
 
-      if (error || !member) {
+      if ((error || !member) && pathname !== '/dashboard') {
         return NextResponse.redirect(new URL('/dashboard', request.url))
       }
 
       // Vérifier les permissions spécifiques à la route
       const routePerms = MENU_PERMISSIONS[pathname]
-      if (routePerms && !routePerms.some((p) => hasPermission(member.role as any, p))) {
+      if (member && routePerms && !routePerms.some((p) => hasPermission(member.role as any, p))) {
         return NextResponse.redirect(new URL('/dashboard', request.url))
       }
     }
