@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { SITE_URL } from '@/lib/marketing/site-url'
+import HashErrorHandler from '@/components/marketing/hash-error-handler'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -36,6 +37,7 @@ export default function RootLayout({
       <body suppressHydrationWarning className="font-sans antialiased">
         <Providers>
           {children}
+          <HashErrorHandler />
         </Providers>
       </body>
     </html>
