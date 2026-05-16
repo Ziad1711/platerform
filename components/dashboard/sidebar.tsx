@@ -22,6 +22,8 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { JisraMark, JisraWordmark } from '@/components/logo'
+import { usePermissions } from '@/lib/auth/use-permissions'
+import { MENU_PERMISSIONS } from '@/lib/auth/permissions'
 
 const menuItems = [
   { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
@@ -43,6 +45,15 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null)
   const supabase = createClient()
+
+  const currentStoreId = typeof window !== 'undefined' ? localStorage.getItem('current-store-id') : null
+  const { can } = usePermissions(currentStoreId)
+
+  const visibleMenuItems = menuItems.filter((item) => {
+    const perms = MENU_PERMISSIONS[item.href]
+    if (!perms) return true
+    return perms.some((p) => can(p))
+  })
 
   useEffect(() => {
     setNavigatingTo(null)
@@ -149,7 +160,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <ul className="space-y-1">
-          {menuItems.map((item, index) => {
+           {visibleMenuItems.map((item, index) => {
             const Icon = item.icon
             const isActive = pathname === item.href || navigatingTo === item.href
 
@@ -285,8 +296,8 @@ export default function Sidebar() {
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 overflow-y-auto text-foreground">
-            <ul className="space-y-1">
-              {menuItems.map((item) => {
+             <ul className="space-y-1">
+               {visibleMenuItems.map((item) => {
                 const Icon = item.icon
                 const isActive = pathname === item.href || navigatingTo === item.href
                 return (

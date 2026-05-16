@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 
 const routes = [
   '',
@@ -19,7 +20,7 @@ const routes = [
 ]
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://jisra.app'
+  const baseUrl = SITE_URL
 
   return routes.map((route) => ({
     url: `${baseUrl}${route}`,

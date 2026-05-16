@@ -29,10 +29,23 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => createClient(), [])
-  const [currentStoreId, setCurrentStoreId] = useState<string | null>(null)
+  const [currentStoreId, setCurrentStoreIdState] = useState<string | null>(null)
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>('month')
   const [customStartDate, setCustomStartDate] = useState<string | null>(null)
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
+
+  const setCurrentStoreId = (storeId: string | null) => {
+    setCurrentStoreIdState(storeId)
+    if (typeof window !== 'undefined') {
+      if (storeId) {
+        localStorage.setItem('current-store-id', storeId)
+        document.cookie = `current-store-id=${storeId}; path=/; max-age=${60 * 60 * 24 * 365}`
+      } else {
+        localStorage.removeItem('current-store-id')
+        document.cookie = 'current-store-id=; path=/; max-age=0'
+      }
+    }
+  }
 
   const { data: accessibleStores = [], isLoading: isStoresLoading } = useQuery({
     queryKey: ['accessible-stores'],

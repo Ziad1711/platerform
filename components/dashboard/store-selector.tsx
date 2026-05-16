@@ -3,7 +3,8 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Store, AlertCircle, Loader2, Sparkles, Globe2, Building2, Plus, X } from 'lucide-react'
+import { ChevronDown, Store, AlertCircle, Loader2, Sparkles, Globe2, Building2, Plus, X, Settings } from 'lucide-react'
+import Link from 'next/link'
 import { useMemo, useState, useEffect } from 'react'
 
 const categories = [
@@ -285,6 +286,17 @@ export default function StoreSelector() {
                     Ajouter un store
                   </div>
                 </button>
+
+                <div className="my-2 h-px bg-border" />
+
+                <Link
+                  href="/settings#stores"
+                  onClick={() => setIsOpen(false)}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground transition hover:bg-secondary flex items-center gap-2"
+                >
+                  <Settings className="w-4 h-4" />
+                  Gérer les stores
+                </Link>
               </div>
             </div>
           </>

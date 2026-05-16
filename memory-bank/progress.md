@@ -67,85 +67,98 @@
 - [x] Database schema documented
 - [x] Memory bank initialized
 
+### ✅ Team & Role Management
+- [x] `store_members` extended: `status`, `invited_email`, `invited_by`, `accepted_at`, `updated_at`
+- [x] `team_invitations` + `team_invitation_assignments` tables
+- [x] 8 roles: owner, admin, confirmation, delivery, stock_manager, accountant, marketer, viewer
+- [x] `ROLE_PERMISSIONS` matrix + `usePermissions` hook + `requirePermission` server guard
+- [x] Sidebar filtered by `MENU_PERMISSIONS`
+- [x] Middleware permission guards (cookie `current-store-id` + active membership check)
+- [x] Invitation modal with multi-store role selection
+- [x] Email invitation via Supabase + public acceptance page `/invite/[token]`
+- [x] RPCs: `accept_team_invitation`, `delete_store`, `change_member_role`, `remove_member`, `get_my_stores`
+- [x] Store CRUD in Settings (`stores-section.tsx`)
+- [x] Team section in Settings (`team-section.tsx`) with members, pending invites, role change, remove, revoke
+
 ## What's Left to Build
 
 ### 🔄 Phase 2 (In Progress)
 
 #### Store Management (High Priority)
-- [ ] Create stores table in Supabase
-- [ ] Create store_members table
-- [ ] Implement store context provider
-- [ ] Build store selector component in header
+- [x] Create stores table in Supabase
+- [x] Create store_members table
+- [x] Implement store context provider
+- [x] Build store selector component in header
 - [x] Add initial "Create Store" flow via onboarding modal
-- [ ] Implement active store persistence (localStorage + DB)
+- [x] Implement active store persistence (localStorage + DB)
 
 #### Dashboard with Real Data (High Priority)
-- [ ] Create Supabase queries for KPIs:
-  - [ ] Total orders count
-  - [ ] Total revenue (sum of order totals)
-  - [ ] Total costs (ads + confirmation + delivery + purchase)
-  - [ ] Net profit calculation
-  - [ ] Profit margin percentage
-  - [ ] Average order value
-- [ ] Implement date range filtering
-- [ ] Build revenue evolution chart with real data
-- [ ] Query top performing products
-- [ ] Query recent orders
-- [ ] Add loading states
-- [ ] Add error handling
-- [ ] Implement React Query caching
+- [x] Create Supabase queries for KPIs:
+  - [x] Total orders count
+  - [x] Total revenue (sum of order totals)
+  - [x] Total costs (ads + confirmation + delivery + purchase)
+  - [x] Net profit calculation
+  - [x] Profit margin percentage
+  - [x] Average order value
+- [x] Implement date range filtering
+- [x] Build revenue evolution chart with real data
+- [x] Query top performing products
+- [x] Query recent orders
+- [x] Add loading states
+- [x] Add error handling
+- [x] Implement React Query caching
 
 #### Sales/Orders Page (High Priority)
-- [ ] Create orders table in Supabase
-- [ ] Create order_items table
-- [ ] Build orders list view with filters
-- [ ] Implement order creation form
-- [ ] Add order details view
-- [ ] Implement order status updates
-- [ ] Add order search functionality
-- [ ] Implement pagination
+- [x] Create orders table in Supabase
+- [x] Create order_items table
+- [x] Build orders list view with filters
+- [x] Implement order creation form
+- [x] Add order details view
+- [x] Implement order status updates
+- [x] Add order search functionality
+- [x] Implement pagination
 
 #### Products Page (High Priority)
-- [ ] Create products table in Supabase
-- [ ] Build products list view
-- [ ] Implement product creation form
-- [ ] Add product editing
-- [ ] Implement product search
-- [ ] Add product image upload
-- [ ] Basic inventory display
+- [x] Create products table in Supabase
+- [x] Build products list view
+- [x] Implement product creation form
+- [x] Add product editing
+- [x] Implement product search
+- [x] Add product image upload
+- [x] Basic inventory display
 
 ### 📋 Phase 3 (Planned)
 
 #### Inventory Management
 - [ ] Create inventory_movements table
-- [ ] Build stock tracking interface
-- [ ] Implement stock adjustments
+- [x] Build stock tracking interface
+- [x] Implement stock adjustments
 - [ ] Add low stock alerts
 - [ ] Create stock history view
 - [ ] Implement product variants UI
 
 #### Supplier Management
-- [ ] Create suppliers table
-- [ ] Create supplier_ledger table
-- [ ] Build suppliers list
-- [ ] Implement supplier creation
-- [ ] Add purchase recording
-- [ ] Build payment tracking
-- [ ] Create supplier balance view
+- [x] Create suppliers table
+- [x] Create supplier_ledger table
+- [x] Build suppliers list
+- [x] Implement supplier creation
+- [x] Add purchase recording
+- [x] Build payment tracking
+- [x] Create supplier balance view
 
 #### Expense Tracking
-- [ ] Create expense_categories table
-- [ ] Create expenses table
-- [ ] Build expense entry form
-- [ ] Implement expense categories management
-- [ ] Add expense reporting
-- [ ] Create expense analytics
+- [x] Create expense_categories table
+- [x] Create expenses table
+- [x] Build expense entry form
+- [x] Implement expense categories management
+- [x] Add expense reporting
+- [x] Create expense analytics
 
 #### Advertising Tracking
 - [x] Create ad_spend_daily table
-- [ ] Build ad spend entry form
-- [ ] Implement platform selection
-- [ ] Add campaign tracking
+- [x] Build ad spend entry form
+- [x] Implement platform selection
+- [x] Add campaign tracking
 - [x] Create ad spend analytics
 - [x] Build ROI calculations
 - [x] Preserve imported historical `ads_cost_allocated` when no daily ad spend exists
@@ -189,8 +202,8 @@
 - [x] Retirer le filtre store de la page Paramètres et appliquer la configuration globalement au niveau utilisateur
 
 #### Delivery Integration
-- [ ] Create delivery_companies table
-- [ ] Build delivery company management
+- [x] Create delivery_companies table
+- [x] Build delivery company management
 - [x] Implement API integration Rapid Delivery (connect, sync référentiels, create parcel, track parcel)
 - [x] Ajouter flux complet Rapid Delivery v2: validate token, mapping shops→stores, pricing groups génériques, delivery states, chiffrement token, wizard frontend, connexion globale user avec multi-stores
 - [x] Corriger la confusion UI entre YouCan et Rapid Delivery sur la page Integrations
@@ -225,8 +238,8 @@
 
 #### Staff Management
 - [ ] Create confirmation_agents table
-- [ ] Build team invitation system
-- [ ] Implement role management
+- [x] Build team invitation system
+- [x] Implement role management
 - [ ] Add confirmation agent tracking
 - [ ] Build commission calculations
 - [ ] Create staff performance reports
@@ -238,29 +251,26 @@
 - Authentication working
 - Basic UI structure in place
 
-**Phase 2**: 🔄 In Progress (0%)
+**Phase 2**: 🔄 In Progress (~85%)
 - Next focus: Store management
 - Then: Dashboard with real data
 - Then: Core CRUD pages
 
-**Overall Progress**: ~15% complete
+**Overall Progress**: ~60% complete
 - Foundation: Strong
-- Core features: Not started
+- Core features: Mostly built
 - Advanced features: Planned
 
 ## Known Issues
 
 ### Critical
-- No store selection implemented (blocks all multi-tenant features)
-- Dashboard showing mock data (not connected to Supabase)
-- No actual database tables created yet (only schema designed)
+- Build global bloqué par une erreur hors scope Rapid Delivery sur `/dashboard/fournisseurs` (`useSearchParams()` sans suspense boundary)
 
 ### Medium
 - No error boundaries implemented
 - No loading states on pages
 - No form validation feedback
 - Missing toast notifications
-- Build global bloqué par une erreur hors scope Rapid Delivery sur `/dashboard/fournisseurs` (`useSearchParams()` sans suspense boundary)
 
 ### Recently Resolved
 - Historical CSV ad costs were being reset by automatic allocation when `ad_spend_daily` had no rows for a day
@@ -272,6 +282,8 @@
 - Le message générique "Connexion Rapid Delivery impossible." masquait une vraie erreur Supabase car les `PostgrestError` n’étaient pas converties proprement
 - L’étape de mapping shops Rapid Delivery échouait avec `there is no unique or exclusion constraint matching the ON CONFLICT specification` car `rapid_delivery_configs` n’a pas de contrainte unique sur `store_id`
 - Des commandes pouvaient être créées avec `city` brute (`casablanca`) mais sans `rapid_delivery_city_key`, ce qui bloquait ensuite la création auto du colis au passage à `confirmed`
+- **Fix 2025-05-14**: `Cannot read properties of undefined (reading 'map')` sur invitation modal — la route `/api/team/invitations` transforme désormais `team_invitation_assignments` en `assignments[]` attendu par le frontend
+- **Fix 2025-05-14**: Les stores n'apparaissaient pas dans le modal d'invitation car `get_my_stores()` RPC utilise `auth.uid()` et la route `/api/stores/list` appelait `createAdminClient()` au lieu de `getServerClient()`
 
 ### Low
 - No dark mode support

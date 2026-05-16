@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload } from 'lucide-react'
+import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users } from 'lucide-react'
+import StoresSection from '@/components/settings/stores-section'
+import TeamSection from '@/components/settings/team-section'
 import { useTheme } from '@/components/providers'
 import { createClient } from '@/lib/supabase/client'
 
@@ -106,7 +108,7 @@ export default function SettingsPage() {
 
   // Scrollspy logic
   useEffect(() => {
-    const sections = ['personal', 'security', 'preferences', 'rates', 'blacklist']
+    const sections = ['personal', 'security', 'preferences', 'rates', 'blacklist', 'stores', 'team']
     const observerOptions = {
       root: null,
       rootMargin: '-10% 0px -80% 0px',
@@ -289,11 +291,13 @@ export default function SettingsPage() {
           <aside className="rounded-2xl border bg-card p-4 lg:sticky lg:top-[88px] lg:h-fit">
           <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Navigation</div>
           <div className="space-y-2 text-sm">
-            <a href="#personal" className={navItemClass('personal')}><User2 className="h-4 w-4" /> Informations personnelles</a>
-            <a href="#security" className={navItemClass('security')}><Lock className="h-4 w-4" /> Sécurité</a>
-            <a href="#preferences" className={navItemClass('preferences')}><Settings2 className="h-4 w-4" /> Préférences</a>
-            <a href="#rates" className={navItemClass('rates')}><RefreshCcw className="h-4 w-4" /> Taux de change</a>
-            <a href="#blacklist" className={navItemClass('blacklist')}><ShieldAlert className="h-4 w-4" /> Blacklist</a>
+           <a href="#personal" className={navItemClass('personal')}><User2 className="h-4 w-4" /> Informations personnelles</a>
+             <a href="#security" className={navItemClass('security')}><Lock className="h-4 w-4" /> Sécurité</a>
+             <a href="#preferences" className={navItemClass('preferences')}><Settings2 className="h-4 w-4" /> Préférences</a>
+             <a href="#rates" className={navItemClass('rates')}><RefreshCcw className="h-4 w-4" /> Taux de change</a>
+             <a href="#blacklist" className={navItemClass('blacklist')}><ShieldAlert className="h-4 w-4" /> Blacklist</a>
+             <a href="#stores" className={navItemClass('stores')}><Building2 className="h-4 w-4" /> Stores</a>
+             <a href="#team" className={navItemClass('team')}><Users className="h-4 w-4" /> Équipe</a>
           </div>
           </aside>
 
@@ -415,43 +419,46 @@ export default function SettingsPage() {
             </div>
             </section>
 
-            <section id="blacklist" className="rounded-2xl border bg-card p-6 scroll-mt-32">
-            <h2 className="text-lg font-semibold">Blacklist configuration</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Cette configuration est définie au niveau utilisateur et sera appliquée à tous vos stores.</p>
-            <div className="mt-4 space-y-4">
-              <label className="flex items-center justify-between rounded-xl border px-4 py-3 text-sm">
-                <span className="font-medium">Activer la blacklist automatique</span>
-                <input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" checked={blacklistForm.isEnabled} onChange={(e) => setBlacklistForm({ ...blacklistForm, isEnabled: e.target.checked })} />
-              </label>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground ml-1">Nombre maximum d'occurrences avant blacklist</label>
-                <input type="number" min={1} value={blacklistForm.maxStatusHits} onChange={(e) => setBlacklistForm({ ...blacklistForm, maxStatusHits: Number(e.target.value || 1) })} className="w-full rounded-xl border bg-background px-4 py-3 text-sm" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground ml-1">Statuts à surveiller</label>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {blacklistStatuses.map((status) => (
-                    <label key={status.value} className="flex items-center gap-3 rounded-xl border px-4 py-3 text-sm hover:bg-secondary/50 cursor-pointer transition-colors">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                        checked={blacklistForm.statusFilters.includes(status.value)}
-                        onChange={(e) => setBlacklistForm((current) => ({
-                          ...current,
-                          statusFilters: e.target.checked
-                            ? [...current.statusFilters, status.value]
-                            : current.statusFilters.filter((item) => item !== status.value),
-                        }))}
-                      />
-                      <span>{status.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <button onClick={saveBlacklistRule} disabled={savingKey === 'blacklist'} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{savingKey === 'blacklist' ? 'Enregistrement...' : 'Sauvegarder la configuration'}</button>
-            </section>
-          </div>
+             <section id="blacklist" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+             <h2 className="text-lg font-semibold">Blacklist configuration</h2>
+             <p className="mt-2 text-sm text-muted-foreground">Cette configuration est définie au niveau utilisateur et sera appliquée à tous vos stores.</p>
+             <div className="mt-4 space-y-4">
+               <label className="flex items-center justify-between rounded-xl border px-4 py-3 text-sm">
+                 <span className="font-medium">Activer la blacklist automatique</span>
+                 <input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" checked={blacklistForm.isEnabled} onChange={(e) => setBlacklistForm({ ...blacklistForm, isEnabled: e.target.checked })} />
+               </label>
+               <div className="space-y-1.5">
+                 <label className="text-xs font-medium text-muted-foreground ml-1">Nombre maximum d'occurrences avant blacklist</label>
+                 <input type="number" min={1} value={blacklistForm.maxStatusHits} onChange={(e) => setBlacklistForm({ ...blacklistForm, maxStatusHits: Number(e.target.value || 1) })} className="w-full rounded-xl border bg-background px-4 py-3 text-sm" />
+               </div>
+               <div className="space-y-2">
+                 <label className="text-xs font-medium text-muted-foreground ml-1">Statuts à surveiller</label>
+                 <div className="grid gap-2 md:grid-cols-2">
+                   {blacklistStatuses.map((status) => (
+                     <label key={status.value} className="flex items-center gap-3 rounded-xl border px-4 py-3 text-sm hover:bg-secondary/50 cursor-pointer transition-colors">
+                       <input
+                         type="checkbox"
+                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                         checked={blacklistForm.statusFilters.includes(status.value)}
+                         onChange={(e) => setBlacklistForm((current) => ({
+                           ...current,
+                           statusFilters: e.target.checked
+                             ? [...current.statusFilters, status.value]
+                             : current.statusFilters.filter((item) => item !== status.value),
+                         }))}
+                       />
+                       <span>{status.label}</span>
+                     </label>
+                   ))}
+                 </div>
+               </div>
+             </div>
+             <button onClick={saveBlacklistRule} disabled={savingKey === 'blacklist'} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{savingKey === 'blacklist' ? 'Enregistrement...' : 'Sauvegarder la configuration'}</button>
+             </section>
+
+             <StoresSection />
+             <TeamSection />
+           </div>
         </div>
       </div>
     </div>

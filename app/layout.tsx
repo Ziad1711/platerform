@@ -2,9 +2,10 @@ import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import './globals.css'
 import { Providers } from '@/components/providers'
+import { SITE_URL } from '@/lib/marketing/site-url'
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://jisra.app'),
+  metadataBase: new URL(SITE_URL),
   title: 'Jisra - SaaS e-commerce/ERP',
   description: 'Plateforme SaaS pour e-commerçants - Gestion business complète',
   applicationName: 'Jisra',

@@ -23,9 +23,31 @@ const nextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'jisra.app',
+        hostname: 'platerform.vercel.app',
       },
     ].filter(Boolean),
+  },
+  async headers() {
+    return [
+      {
+        source: '/manifest.json',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
+      {
+        source: '/icons/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
+      {
+        source: '/marketing/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
+    ]
   },
 }
 
