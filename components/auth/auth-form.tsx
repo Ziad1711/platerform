@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react'
 
@@ -21,7 +21,10 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const [showPassword, setShowPassword] = useState(false)
 
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  const next = searchParams.get('next')
+  const signupHref = next ? `/signup?next=${encodeURIComponent(next)}` : '/signup'
 
   useEffect(() => {
     setMode(defaultMode)
@@ -226,7 +229,7 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       {!isRecovery && (
       <div className="mt-6 text-center">
         {isLogin ? (
-          <Link href="/signup" className="text-jisra-green hover:text-jisra-green-light text-sm font-medium transition-colors">
+          <Link href={signupHref} className="text-jisra-green hover:text-jisra-green-light text-sm font-medium transition-colors">
             Pas de compte ? S'inscrire
           </Link>
         ) : isResetRequest ? (

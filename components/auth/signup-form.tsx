@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, Lock, Mail, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -14,7 +14,9 @@ const passwordLevels = [
 
 export default function SignupForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  const next = searchParams.get('next')
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -51,7 +53,8 @@ export default function SignupForm() {
       if (!acceptedTerms) throw new Error('Vous devez accepter les conditions d’utilisation')
 
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()
-      const redirectUrl = `${window.location.origin}/auth/callback?next=/dashboard`
+      const nextPath = next || '/dashboard'
+      const redirectUrl = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -70,7 +73,7 @@ export default function SignupForm() {
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
 
-        router.push('/dashboard?onboarding=1')
+        router.push(next || '/dashboard?onboarding=1')
         router.refresh()
         return
       }
@@ -185,7 +188,7 @@ export default function SignupForm() {
 
       <p className="text-center text-sm text-jisra-cream/55">
         Déjà un compte ?{' '}
-        <Link href="/login" className="font-medium text-jisra-green-light transition hover:text-jisra-green">
+        <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'} className="font-medium text-jisra-green-light transition hover:text-jisra-green">
           Se connecter
         </Link>
       </p>

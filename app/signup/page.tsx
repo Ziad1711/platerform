@@ -4,14 +4,19 @@ import { createClient } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 
-export default async function SignupPage() {
+type SignupPageProps = {
+  searchParams?: Promise<{ next?: string }>
+}
+
+export default async function SignupPage({ searchParams }: SignupPageProps) {
+  const params = (await searchParams) ?? {}
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
   if (user) {
-    redirect('/dashboard')
+    redirect(params.next || '/dashboard')
   }
 
   return (
