@@ -17,7 +17,6 @@ interface StoreContextType {
   accessibleStores: AccessibleStore[]
   accessibleStoreIds: string[]
   isStoresLoading: boolean
-  isInitialLoading: boolean
   selectedPeriod: DashboardPeriod
   setSelectedPeriod: (period: DashboardPeriod) => void
   customStartDate: string | null
@@ -107,12 +106,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [accessibleStores, currentStoreId, isStoresLoading])
 
-  // isInitialLoading = true uniquement pendant le chargement initial ET qu'aucun store n'est sélectionné
-  // Cas 1 : invité (pas de store en localStorage) → bloque le temps du fetch + auto-select
-  // Cas 2 : utilisateur avec store en localStorage → ne bloque pas, les composants peuvent fetch
-  // Cas 3 : utilisateur sans store → isStoresLoading=false, pas de blocage, OnboardingModal s'affiche
-  const isInitialLoading = isStoresLoading && !currentStoreId
-
   return (
     <StoreContext.Provider
       value={{
@@ -121,7 +114,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         accessibleStores,
         accessibleStoreIds,
         isStoresLoading,
-        isInitialLoading,
         selectedPeriod,
         setSelectedPeriod,
         customStartDate,
