@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useMemo, useState, ReactNode, useEffect } from 'react'
+import { createContext, useContext, useMemo, useState, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { DashboardPeriod } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -96,15 +96,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
   })
 
-  const accessibleStoreIds = accessibleStores.map((store) => store.id)
-
-  // Auto-select immédiat : dès que les stores sont chargés et qu'aucun store n'est sélectionné
-  // On utilise un useEffect séparé pour éviter le flash
-  useEffect(() => {
-    if (!isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
-      setCurrentStoreId(accessibleStores[0].id)
+  // Auto-select synchrone : dès que les stores sont chargés et qu'aucun store n'est sélectionné
+  // On le fait ici pendant le render, avant que les composants enfants ne rendent
+  if (!isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
+    // On ne peut pas appeler setCurrentStoreId pendant le render, donc on set directement le state
+    // via setCurrentStoreIdState et on met à jour localStorage/cookie
+    setCurrentStoreIdState(accessibleStores[0].id)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('current-store-id', accessibleStores[0].id)
+      document.cookie = `current-store-id=${accessibleStores[0].id}; path=/; max-age=${60 * 60 * 24 * 365}`
     }
-  }, [accessibleStores, currentStoreId, isStoresLoading])
+  }
+
+  const accessibleStoreIds = accessibleStores.map((store) => store.id)
 
   return (
     <StoreContext.Provider
