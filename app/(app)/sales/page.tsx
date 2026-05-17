@@ -3548,10 +3548,12 @@ export default function VentesPage() {
                     Actions
                   </th>
                 </tr>
-                <tr>
-                  <th className="px-6 pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Coût</th>
-                  <th className="px-6 pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Facturé</th>
-                </tr>
+                {!isConfirmationRole && (
+                  <tr>
+                    <th className="px-6 pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Coût</th>
+                    <th className="px-6 pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Facturé</th>
+                  </tr>
+                )}
               </thead>
               <tbody className="bg-card divide-y divide-border">
                 {filteredOrders.map((order: any) => {
