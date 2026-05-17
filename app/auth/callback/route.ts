@@ -31,6 +31,7 @@ export async function GET(request: Request) {
   // Rediriger vers la bonne page selon le rôle
   const { data: { user } } = await supabase.auth.getUser()
   let redirectTo = nextParam
+  let storeId: string | null = null
   if (user) {
     const { data: member } = await supabase
       .from('store_members')
@@ -43,7 +44,28 @@ export async function GET(request: Request) {
     if (nextParam === '/dashboard') {
       redirectTo = defaultRoute
     }
+
+    // Récupérer le premier store accessible pour set le cookie
+    // Évite le flash "sélectionnez un store" pour les nouveaux utilisateurs
+    const { data: membership } = await supabase
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle()
+    if (membership?.store_id) {
+      storeId = String(membership.store_id)
+    }
   }
 
-  return NextResponse.redirect(new URL(redirectTo, origin))
+  const response = NextResponse.redirect(new URL(redirectTo, origin))
+  if (storeId) {
+    response.cookies.set('current-store-id', storeId, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: 'lax',
+    })
+  }
+  return response
 }
