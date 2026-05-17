@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { usePermissions } from '@/lib/auth/use-permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 
 async function normalizeOrderCityRequest(city: string, orderId?: string) {
@@ -399,6 +400,8 @@ const areStringMapsEqual = (a: Record<string, string>, b: Record<string, string>
 export default function VentesPage() {
   const PAGE_SIZE = 10
   const { currentStoreId, accessibleStoreIds } = useStore()
+  const { role } = usePermissions(currentStoreId)
+  const isConfirmationRole = role === 'confirmation'
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [blacklistFilter, setBlacklistFilter] = useState<'all' | 'blacklisted' | 'not_blacklisted'>('all')
@@ -3506,34 +3509,41 @@ export default function VentesPage() {
                   <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Adresse</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vente
-                  </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Achat
-                  </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Ads
-                  </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Confirmation
-                  </th>
-                  <th colSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    <div className="group relative inline-flex items-center gap-1">
-                      <span>Livraison</span>
-                      <span className="inline-flex cursor-help rounded-full">
-                        <Info className="w-3.5 h-3.5" />
-                      </span>
-                      <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-lg border border-border bg-popover p-2 text-[11px] normal-case tracking-normal text-popover-foreground shadow-lg group-hover:block space-y-1">
-                        <div>Coût = frais de livraison supportés par le store.</div>
-                        <div>Facturé = montant facturé au client.</div>
-                        <div>Profit = Prix de vente - Prix d’achat - Ads - Coût confirmation - Coût livraison + Livraison facturée.</div>
+                  {!isConfirmationRole && (
+                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Achat
+                    </th>
+                  )}
+                  {!isConfirmationRole && (
+                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Ads
+                    </th>
+                  )}
+                  {!isConfirmationRole && (
+                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Confirmation
+                    </th>
+                  )}
+                  {!isConfirmationRole && (
+                    <th colSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      <div className="group relative inline-flex items-center gap-1">
+                        <span>Livraison</span>
+                        <span className="inline-flex cursor-help rounded-full">
+                          <Info className="w-3.5 h-3.5" />
+                        </span>
+                        <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-lg border border-border bg-popover p-2 text-[11px] normal-case tracking-normal text-popover-foreground shadow-lg group-hover:block space-y-1">
+                          <div>Coût = frais de livraison supportés par le store.</div>
+                          <div>Facturé = montant facturé au client.</div>
+                          <div>Profit = Prix de vente - Prix d'achat - Ads - Coût confirmation - Coût livraison + Livraison facturée.</div>
+                        </div>
                       </div>
-                    </div>
-                  </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Profit
-                  </th>
+                    </th>
+                  )}
+                  {!isConfirmationRole && (
+                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Profit
+                    </th>
+                  )}
                   <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Actions
                   </th>
@@ -3645,24 +3655,36 @@ export default function VentesPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
                         {formatCurrency(order.total_selling_price || 0)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                        {formatCurrency(order.buy_price || 0)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                        {formatCurrency(order.ads_cost_allocated || 0)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                        {formatCurrency(order.confirmation_cost_allocated || 0)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                        {formatCurrency(order.delivery_fee || 0)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                        {formatCurrency(order.delivery_charge_to_customer || 0)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
-                        {formatCurrency(order.profit || 0)}
-                      </td>
+                      {!isConfirmationRole && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                          {formatCurrency(order.buy_price || 0)}
+                        </td>
+                      )}
+                      {!isConfirmationRole && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                          {formatCurrency(order.ads_cost_allocated || 0)}
+                        </td>
+                      )}
+                      {!isConfirmationRole && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                          {formatCurrency(order.confirmation_cost_allocated || 0)}
+                        </td>
+                      )}
+                      {!isConfirmationRole && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                          {formatCurrency(order.delivery_fee || 0)}
+                        </td>
+                      )}
+                      {!isConfirmationRole && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                          {formatCurrency(order.delivery_charge_to_customer || 0)}
+                        </td>
+                      )}
+                      {!isConfirmationRole && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
+                          {formatCurrency(order.profit || 0)}
+                        </td>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
                           onClick={() => setSelectedOrderForDetails(order)}
