@@ -78,7 +78,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'sales.view','sales.update_status',
   ],
   delivery: [
-    'sales.view',
     'delivery.view','delivery.manage',
   ],
   stock_manager: [
