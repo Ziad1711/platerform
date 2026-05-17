@@ -98,25 +98,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Bloquer le rendu des enfants tant que les stores chargent et qu'aucun store n'est sélectionné
   // Cela évite le flash "veuillez sélectionner un store" pour les invités
+  // On retourne un spinner sans rendre les enfants pour éviter que les composants dashboard
+  // recoivent currentStoreId: null et accessibleStores: []
   if (isStoresLoading && !currentStoreId) {
     return (
-      <StoreContext.Provider
-        value={{
-          currentStoreId: null,
-          setCurrentStoreId,
-          accessibleStores: [],
-          accessibleStoreIds: [],
-          isStoresLoading: true,
-          selectedPeriod,
-          setSelectedPeriod,
-          customStartDate,
-          setCustomStartDate,
-          customEndDate,
-          setCustomEndDate,
-        }}
-      >
-        {children}
-      </StoreContext.Provider>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
     )
   }
 
