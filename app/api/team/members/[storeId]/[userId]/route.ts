@@ -16,7 +16,7 @@ export async function PATCH(
     const { error } = await supabase.rpc('change_member_role', {
       p_store_id: storeId,
       p_user_id: userId,
-      p_new_role: newRole,
+      p_role: newRole,
     })
     if (error) throw error
     return NextResponse.json({ success: true })
