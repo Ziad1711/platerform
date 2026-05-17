@@ -17,8 +17,6 @@ interface StoreContextType {
   accessibleStores: AccessibleStore[]
   accessibleStoreIds: string[]
   isStoresLoading: boolean
-  isInitialLoading: boolean
-  hasLoadedOnce: boolean
   selectedPeriod: DashboardPeriod
   setSelectedPeriod: (period: DashboardPeriod) => void
   customStartDate: string | null
@@ -40,9 +38,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>('month')
   const [customStartDate, setCustomStartDate] = useState<string | null>(null)
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
-  const [hasAutoSelected, setHasAutoSelected] = useState(false)
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
 
   const setCurrentStoreId = (storeId: string | null) => {
     setCurrentStoreIdState(storeId)
@@ -103,30 +98,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
 
-  // Marquer hasLoadedOnce dès que le premier fetch est terminé
+  // Auto-select : si on a un store en cache, on l'utilise immédiatement
+  // Sinon on prend le premier store disponible après le fetch
   useEffect(() => {
-    if (!isStoresLoading) {
-      setHasLoadedOnce(true)
+    if (!isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
+      setCurrentStoreId(accessibleStores[0].id)
     }
-  }, [isStoresLoading])
-
-  // Auto-select first store immédiatement après le fetch, sans attendre un cycle useEffect
-  useEffect(() => {
-    if (!hasAutoSelected && !isStoresLoading) {
-      if (accessibleStores.length > 0 && !currentStoreId) {
-        setCurrentStoreId(accessibleStores[0].id)
-      }
-      setHasAutoSelected(true)
-      setIsInitialLoading(false)
-    }
-  }, [accessibleStores, currentStoreId, hasAutoSelected, isStoresLoading, setCurrentStoreId])
-
-  // Si le fetch est terminé mais qu'il n'y a aucun store, on sort aussi du loading initial
-  useEffect(() => {
-    if (!isStoresLoading && accessibleStores.length === 0) {
-      setIsInitialLoading(false)
-    }
-  }, [isStoresLoading, accessibleStores])
+  }, [accessibleStores, currentStoreId, isStoresLoading])
 
   return (
     <StoreContext.Provider
@@ -136,8 +114,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         accessibleStores,
         accessibleStoreIds,
         isStoresLoading,
-        isInitialLoading,
-        hasLoadedOnce,
         selectedPeriod,
         setSelectedPeriod,
         customStartDate,
