@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { getFirstAllowedRoute } from '@/lib/auth/permissions'
 import { Loader2, CheckCircle, AlertTriangle } from 'lucide-react'
 
 export default function InvitePage() {
@@ -67,7 +68,8 @@ export default function InvitePage() {
       // Navigation immédiate avec window.location.href pour éviter
       // l'erreur "chrome-error://chromewebdata/" qui survient quand
       // router.push() est appelé depuis un contexte de frame interrompu
-      window.location.href = needsPassword ? '/welcome' : '/dashboard'
+      const defaultRoute = getFirstAllowedRoute(payload?.role as any)
+      window.location.href = needsPassword ? '/welcome' : defaultRoute
     } catch (e) {
       setStatus('error')
       setErrorMsg(e instanceof Error ? e.message : 'Erreur')

@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
+import { getFirstAllowedRoute, hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -52,16 +52,16 @@ export async function middleware(request: NextRequest) {
         .eq('status', 'active')
         .maybeSingle()
 
-      if ((error || !member) && pathname !== '/dashboard') {
-        return NextResponse.redirect(new URL('/dashboard', request.url))
+      const defaultRoute = getFirstAllowedRoute(member?.role as any)
+
+      if ((error || !member) && pathname !== defaultRoute) {
+        return NextResponse.redirect(new URL(defaultRoute, request.url))
       }
 
       // Vérifier les permissions spécifiques à la route
-      // Ne pas rediriger si on est déjà sur /dashboard pour éviter une boucle
-      // (ex: rôle 'confirmation' n'a pas 'dashboard.view')
       const routePerms = MENU_PERMISSIONS[pathname]
-      if (member && routePerms && !routePerms.some((p) => hasPermission(member.role as any, p)) && pathname !== '/dashboard') {
-        return NextResponse.redirect(new URL('/dashboard', request.url))
+      if (member && routePerms && !routePerms.some((p) => hasPermission(member.role as any, p)) && pathname !== defaultRoute) {
+        return NextResponse.redirect(new URL(defaultRoute, request.url))
       }
     }
   }

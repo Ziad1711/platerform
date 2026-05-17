@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient, getServerUser } from '@/lib/supabase/server'
+import { getFirstAllowedRoute } from '@/lib/auth/permissions'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
@@ -13,7 +14,23 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {}
   const user = await getServerUser()
 
-  const nextPath = sanitizeInternalRedirectPath(params.next, '/dashboard')
+  // Si l'utilisateur est connecté, déterminer la page de redirection
+  // selon son rôle (pour éviter d'envoyer confirmation/delivery sur /dashboard)
+  let defaultRedirect = '/dashboard'
+  if (user) {
+    const supabase = await createClient()
+    const storeId = (await supabase.auth.getSession()).data.session?.user?.id
+    // On cherche le store_member actif
+    const { data: member } = await supabase
+      .from('store_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle()
+    defaultRedirect = getFirstAllowedRoute(member?.role as any)
+  }
+
+  const nextPath = sanitizeInternalRedirectPath(params.next, defaultRedirect)
 
   if (user && params.recovery !== '1') {
     redirect(nextPath)

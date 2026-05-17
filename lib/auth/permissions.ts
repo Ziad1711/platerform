@@ -151,3 +151,18 @@ export const INVITABLE_ROLES: { value: Role; label: string }[] = [
   { value: 'marketer', label: ROLE_LABELS.marketer },
   { value: 'viewer', label: ROLE_LABELS.viewer },
 ]
+
+/**
+ * Retourne la première page autorisée pour un rôle donné.
+ * Utilisé pour rediriger l'utilisateur après connexion/acceptation d'invitation
+ * vers la page la plus pertinente selon son rôle.
+ */
+export function getFirstAllowedRoute(role: Role | null): string {
+  if (!role) return '/dashboard'
+  const routeMap: Partial<Record<Role, string>> = {
+    confirmation: '/sales',
+    delivery: '/delivery',
+    stock_manager: '/products',
+  }
+  return routeMap[role] ?? '/dashboard'
+}
