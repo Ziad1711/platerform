@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useMemo, useState, ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, ReactNode, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { DashboardPeriod } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -29,10 +29,16 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => createClient(), [])
-  const [currentStoreId, setCurrentStoreIdState] = useState<string | null>(null)
+  const [currentStoreId, setCurrentStoreIdState] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('current-store-id')
+    }
+    return null
+  })
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>('month')
   const [customStartDate, setCustomStartDate] = useState<string | null>(null)
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
+  const [hasAutoSelected, setHasAutoSelected] = useState(false)
 
   const setCurrentStoreId = (storeId: string | null) => {
     setCurrentStoreIdState(storeId)
@@ -92,6 +98,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   })
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
+
+  // Auto-select first store when stores are loaded and no current store is selected
+  useEffect(() => {
+    if (!hasAutoSelected && !isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
+      setCurrentStoreId(accessibleStores[0].id)
+      setHasAutoSelected(true)
+    }
+  }, [accessibleStores, currentStoreId, hasAutoSelected, isStoresLoading, setCurrentStoreId])
 
   return (
     <StoreContext.Provider

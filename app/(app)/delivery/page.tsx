@@ -11,7 +11,7 @@ import StoreSelector from '@/components/dashboard/store-selector'
 export default function LivraisonPage() {
   const supabase = createClient()
   const queryClient = useQueryClient()
-  const { currentStoreId } = useStore()
+  const { currentStoreId, isStoresLoading, accessibleStores } = useStore()
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [voucherError, setVoucherError] = useState('')
   const [voucherSuccess, setVoucherSuccess] = useState('')
@@ -149,8 +149,17 @@ export default function LivraisonPage() {
       </div>
 
       {!currentStoreId ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          Sélectionnez un store pour afficher la livraison.
+        <div className="flex items-center justify-center py-12">
+          {isStoresLoading || accessibleStores.length > 0 ? (
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span className="text-sm">Chargement de votre store...</span>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              Sélectionnez un store pour afficher la livraison.
+            </div>
+          )}
         </div>
       ) : (
         <>

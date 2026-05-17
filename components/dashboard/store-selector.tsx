@@ -34,7 +34,6 @@ export default function StoreSelector() {
   const { currentStoreId, setCurrentStoreId, accessibleStores: stores, isStoresLoading } = useStore()
   const [isOpen, setIsOpen] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [hasAutoSelectedDefault, setHasAutoSelectedDefault] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [form, setForm] = useState({
@@ -119,13 +118,6 @@ export default function StoreSelector() {
       setCreateError(error instanceof Error ? error.message : 'Une erreur est survenue')
     },
   })
-
-  useEffect(() => {
-    if (!hasAutoSelectedDefault && !currentStoreId && stores && stores.length > 0) {
-      setCurrentStoreId(stores[0].id)
-      setHasAutoSelectedDefault(true)
-    }
-  }, [currentStoreId, hasAutoSelectedDefault, setCurrentStoreId, stores])
 
   const handleChange = (key: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }))
