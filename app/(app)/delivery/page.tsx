@@ -11,7 +11,7 @@ import StoreSelector from '@/components/dashboard/store-selector'
 export default function LivraisonPage() {
   const supabase = createClient()
   const queryClient = useQueryClient()
-  const { currentStoreId, isStoresLoading, accessibleStores } = useStore()
+  const { currentStoreId, isStoresLoading, isInitialLoading, accessibleStores } = useStore()
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [voucherError, setVoucherError] = useState('')
   const [voucherSuccess, setVoucherSuccess] = useState('')
@@ -142,7 +142,7 @@ export default function LivraisonPage() {
       <div className="bg-card rounded-xl shadow p-4">
         <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
           <StoreSelector />
-          <Link href="/parametres" className="px-3 py-2 rounded-lg border text-sm text-foreground hover:bg-secondary w-fit">
+          <Link href="/settings" className="px-3 py-2 rounded-lg border text-sm text-foreground hover:bg-secondary w-fit">
             Paramètres
           </Link>
         </div>
@@ -150,7 +150,7 @@ export default function LivraisonPage() {
 
       {!currentStoreId ? (
         <div className="flex items-center justify-center py-12">
-          {isStoresLoading || accessibleStores.length > 0 ? (
+          {isInitialLoading || isStoresLoading ? (
             <div className="flex items-center gap-3 text-muted-foreground">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               <span className="text-sm">Chargement de votre store...</span>

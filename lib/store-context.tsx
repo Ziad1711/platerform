@@ -17,6 +17,7 @@ interface StoreContextType {
   accessibleStores: AccessibleStore[]
   accessibleStoreIds: string[]
   isStoresLoading: boolean
+  isInitialLoading: boolean
   selectedPeriod: DashboardPeriod
   setSelectedPeriod: (period: DashboardPeriod) => void
   customStartDate: string | null
@@ -39,6 +40,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [customStartDate, setCustomStartDate] = useState<string | null>(null)
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
   const [hasAutoSelected, setHasAutoSelected] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
 
   const setCurrentStoreId = (storeId: string | null) => {
     setCurrentStoreIdState(storeId)
@@ -99,13 +101,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
 
-  // Auto-select first store when stores are loaded and no current store is selected
+  // Auto-select first store immédiatement après le fetch, sans attendre un cycle useEffect
   useEffect(() => {
-    if (!hasAutoSelected && !isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
-      setCurrentStoreId(accessibleStores[0].id)
+    if (!hasAutoSelected && !isStoresLoading) {
+      if (accessibleStores.length > 0 && !currentStoreId) {
+        setCurrentStoreId(accessibleStores[0].id)
+      }
       setHasAutoSelected(true)
+      setIsInitialLoading(false)
     }
   }, [accessibleStores, currentStoreId, hasAutoSelected, isStoresLoading, setCurrentStoreId])
+
+  // Si le fetch est terminé mais qu'il n'y a aucun store, on sort aussi du loading initial
+  useEffect(() => {
+    if (!isStoresLoading && accessibleStores.length === 0) {
+      setIsInitialLoading(false)
+    }
+  }, [isStoresLoading, accessibleStores])
 
   return (
     <StoreContext.Provider
@@ -115,6 +127,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         accessibleStores,
         accessibleStoreIds,
         isStoresLoading,
+        isInitialLoading,
         selectedPeriod,
         setSelectedPeriod,
         customStartDate,
