@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth/require-permission'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAuth, getServerClient } from '@/lib/auth/require-permission'
 
 export async function PATCH(
   _request: Request,
@@ -13,8 +12,8 @@ export async function PATCH(
     const newRole = String(body.role || '').trim()
     if (!newRole) return NextResponse.json({ error: 'ROLE_REQUIRED' }, { status: 400 })
 
-    const admin = createAdminClient()
-    const { error } = await admin.rpc('change_member_role', {
+    const supabase = await getServerClient()
+    const { error } = await supabase.rpc('change_member_role', {
       p_store_id: storeId,
       p_user_id: userId,
       p_new_role: newRole,
@@ -34,8 +33,8 @@ export async function DELETE(
   try {
     await requireAuth()
     const { storeId, userId } = await params
-    const admin = createAdminClient()
-    const { error } = await admin.rpc('remove_member', {
+    const supabase = await getServerClient()
+    const { error } = await supabase.rpc('remove_member', {
       p_store_id: storeId,
       p_user_id: userId,
     })
