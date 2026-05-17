@@ -96,16 +96,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
   })
 
-  // Auto-select synchrone : dès que les stores sont chargés et qu'aucun store n'est sélectionné
-  // On le fait ici pendant le render, avant que les composants enfants ne rendent
+  // Bloquer le rendu des enfants tant que les stores chargent et qu'aucun store n'est sélectionné
+  // Cela évite le flash "veuillez sélectionner un store" pour les invités
+  if (isStoresLoading && !currentStoreId) {
+    return (
+      <StoreContext.Provider
+        value={{
+          currentStoreId: null,
+          setCurrentStoreId,
+          accessibleStores: [],
+          accessibleStoreIds: [],
+          isStoresLoading: true,
+          selectedPeriod,
+          setSelectedPeriod,
+          customStartDate,
+          setCustomStartDate,
+          customEndDate,
+          setCustomEndDate,
+        }}
+      >
+        {children}
+      </StoreContext.Provider>
+    )
+  }
+
+  // Auto-select : dès que les stores sont chargés et qu'aucun store n'est sélectionné
   if (!isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
-    // On ne peut pas appeler setCurrentStoreId pendant le render, donc on set directement le state
-    // via setCurrentStoreIdState et on met à jour localStorage/cookie
-    setCurrentStoreIdState(accessibleStores[0].id)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('current-store-id', accessibleStores[0].id)
-      document.cookie = `current-store-id=${accessibleStores[0].id}; path=/; max-age=${60 * 60 * 24 * 365}`
-    }
+    setCurrentStoreId(accessibleStores[0].id)
   }
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
