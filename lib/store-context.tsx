@@ -18,6 +18,7 @@ interface StoreContextType {
   accessibleStoreIds: string[]
   isStoresLoading: boolean
   isInitialLoading: boolean
+  hasLoadedOnce: boolean
   selectedPeriod: DashboardPeriod
   setSelectedPeriod: (period: DashboardPeriod) => void
   customStartDate: string | null
@@ -41,6 +42,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
   const [hasAutoSelected, setHasAutoSelected] = useState(false)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
 
   const setCurrentStoreId = (storeId: string | null) => {
     setCurrentStoreIdState(storeId)
@@ -101,6 +103,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
 
+  // Marquer hasLoadedOnce dès que le premier fetch est terminé
+  useEffect(() => {
+    if (!isStoresLoading) {
+      setHasLoadedOnce(true)
+    }
+  }, [isStoresLoading])
+
   // Auto-select first store immédiatement après le fetch, sans attendre un cycle useEffect
   useEffect(() => {
     if (!hasAutoSelected && !isStoresLoading) {
@@ -128,6 +137,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         accessibleStoreIds,
         isStoresLoading,
         isInitialLoading,
+        hasLoadedOnce,
         selectedPeriod,
         setSelectedPeriod,
         customStartDate,

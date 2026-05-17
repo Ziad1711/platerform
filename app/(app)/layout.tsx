@@ -13,11 +13,12 @@ export default function AppLayout({
   const pathname = usePathname()
   const isAssistantPage = pathname === '/ai-assistant'
   const isSettingsPage = pathname === '/settings'
-  const { currentStoreId, isStoresLoading, isInitialLoading, accessibleStores } = useStore()
+  const { currentStoreId, isStoresLoading, isInitialLoading, accessibleStores, hasLoadedOnce } = useStore()
 
   // Attendre que le store soit chargé ET que l'auto-select soit fait
   // avant d'afficher le contenu, pour éviter le flash "Sélectionnez un store"
-  const isStoreReady = !isInitialLoading && !isStoresLoading && (!!currentStoreId || accessibleStores.length === 0)
+  // hasLoadedOnce garantit que le premier fetch a livré un résultat (même vide)
+  const isStoreReady = !isInitialLoading && !isStoresLoading && (!!currentStoreId || (hasLoadedOnce && accessibleStores.length === 0))
 
   if (!isStoreReady) {
     return (
