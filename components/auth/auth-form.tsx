@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react'
+import { getFirstAllowedRoute, type Role } from '@/lib/auth/permissions'
 
 type AuthFormProps = {
   defaultMode?: 'login' | 'signup' | 'reset-request' | 'recovery'
@@ -96,7 +97,21 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       }
 
       if (mode === 'login') {
-        router.replace(safeInternalPath(next))
+        // Chercher le rôle de l'utilisateur pour rediriger vers la bonne page
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: member } = await supabase
+            .from('store_members')
+            .select('role')
+            .eq('user_id', user.id)
+            .eq('status', 'active')
+            .maybeSingle()
+          const role = member?.role as Role | null | undefined
+          const defaultRoute = getFirstAllowedRoute(role ?? null)
+          router.replace(safeInternalPath(next) === '/dashboard' ? defaultRoute : safeInternalPath(next))
+        } else {
+          router.replace(safeInternalPath(next))
+        }
         router.refresh()
       } else if (mode === 'signup') {
         router.refresh()

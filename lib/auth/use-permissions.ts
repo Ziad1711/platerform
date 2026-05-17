@@ -10,6 +10,8 @@ export function usePermissions(storeId: string | null) {
   const { data: role } = useQuery({
     queryKey: ['member-role', storeId],
     enabled: !!storeId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return null
