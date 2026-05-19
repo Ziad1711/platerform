@@ -238,13 +238,7 @@ export async function listYouCanRestHooks(params: { accessToken: string }) {
 
     if (response.ok) {
       const payload = (await response.json().catch(() => null)) as any
-      const rows = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload?.meta?.data)
-            ? payload.meta.data
-            : []
+      const rows = extractYouCanRestHookRows(payload)
 
       return rows as YouCanRestHookRecord[]
     }
@@ -253,6 +247,40 @@ export async function listYouCanRestHooks(params: { accessToken: string }) {
   }
 
   throw new Error(`YOUCAN_LIST_REST_HOOKS_FAILED:${lastError}`)
+}
+
+function extractYouCanRestHookRows(payload: any) {
+  const rows: YouCanRestHookRecord[] = []
+  const seen = new Set<string>()
+
+  function visit(value: any) {
+    if (!value) return
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+
+    if (typeof value !== 'object') return
+
+
+    const event = String(value.event || '').trim()
+    const targetUrl = getYouCanRestHookTargetUrl(value)
+    const id = String(value.id || '').trim()
+
+    if (event || targetUrl || id) {
+      const key = `${id}:${event}:${targetUrl}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        rows.push(value as YouCanRestHookRecord)
+      }
+    }
+
+    for (const child of Object.values(value)) visit(child)
+  }
+
+  visit(payload)
+  return rows
 }
 
 export async function deleteYouCanRestHook(params: { accessToken: string; subscriptionId: string }) {

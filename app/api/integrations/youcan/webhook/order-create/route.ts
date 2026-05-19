@@ -120,15 +120,20 @@ export async function POST(request: Request) {
         .replace(/\.youcan\.shop$/, '')
         .replace(/\/$/, '')
 
-      const { data: ownedStores, error: ownedStoresError } = await supabase
-        .from('stores')
-        .select('id, name')
-        .eq('owner_user_id', integration.user_id)
-        .order('created_at', { ascending: true })
+      const { data: memberStores, error: memberStoresError } = await supabase
+        .from('store_members')
+        .select('store_id, stores(name)')
+        .eq('user_id', integration.user_id)
+        .eq('status', 'active')
 
-      if (ownedStoresError) throw ownedStoresError
+      if (memberStoresError) throw memberStoresError
 
-      const matchedStore = (ownedStores || []).find((store: { id: string; name: string | null }) => {
+      const ownedStores = (memberStores || []).map((m: any) => ({
+        id: m.store_id,
+        name: m.stores?.name || null
+      }))
+
+      const matchedStore = ownedStores.find((store: { id: string; name: string | null }) => {
         const normalizedName = String(store.name || '').trim().toLowerCase()
         return normalizedName.length > 0 && normalizedName === normalizedStoreSlug
       })

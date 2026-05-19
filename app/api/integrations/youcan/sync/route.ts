@@ -100,10 +100,39 @@ export async function POST(request: Request) {
 
     const sinceDate = importOrders ? normalizeSinceDate(body.sinceDate) : DEFAULT_SINCE_DATE
 
+    // Résoudre l'intégration YouCan via le storeId (multi-tenant safe)
+    const { data: youcanConfig, error: configError } = await supabase
+      .from('youcan_integration_configs')
+      .select('integration_id')
+      .eq('store_id', storeId)
+      .maybeSingle()
+
+    if (configError) throw configError
+
+    let integrationId: string | null = youcanConfig?.integration_id || null
+
+    // Fallback: chercher par user_id si pas de config (ancien setup)
+    if (!integrationId) {
+      const { data: fallbackIntegration, error: fallbackError } = await supabase
+        .from('integrations')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('provider', 'youcan')
+        .eq('status', 'connected')
+        .maybeSingle()
+
+      if (fallbackError) throw fallbackError
+      integrationId = fallbackIntegration?.id || null
+    }
+
+    if (!integrationId) {
+      return NextResponse.json({ error: 'YOUCAN_NOT_CONNECTED' }, { status: 400 })
+    }
+
     const { data: integration, error: integrationError } = await supabase
       .from('integrations')
       .select('id, access_token, status')
-      .eq('user_id', user.id)
+      .eq('id', integrationId)
       .eq('provider', 'youcan')
       .maybeSingle()
 
@@ -268,19 +297,37 @@ export async function POST(request: Request) {
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'WEBHOOK_SUBSCRIBE_FAILED'
-        if (!message.includes('429')) {
+        const canRepairExistingSubscription =
+          message.includes('429') ||
+          message.toLowerCase().includes('max of subscriptions') ||
+          message.toLowerCase().includes('max subscriptions')
+
+        if (!canRepairExistingSubscription) {
           throw error
         }
 
-        warnings.push('Webhook subscription returned 429; checking existing subscriptions.')
+        warnings.push('Webhook subscription limit reached; attempting repair.')
 
         let repairedExistingHook = false
 
         try {
           const hooks = await listYouCanRestHooks({ accessToken: decryptedAccessToken })
+
+          console.info('[youcan][sync] hooks listed for repair', {
+            userId: user.id,
+            integrationId: integration.id,
+            totalHooks: hooks.length,
+            hooks: hooks.map((h: YouCanRestHookRecord) => ({
+              id: h.id,
+              event: h.event,
+              targetUrl: getYouCanRestHookTargetUrl(h),
+            })),
+          })
+
           const orderCreateHooks = hooks.filter(
             (hook: YouCanRestHookRecord) => String(hook.event || '').trim() === 'order.create'
           )
+
           const matchingHook = orderCreateHooks.find(
             (hook: YouCanRestHookRecord) => getYouCanRestHookTargetUrl(hook) === targetUrl
           )
@@ -300,17 +347,50 @@ export async function POST(request: Request) {
             warnings.push('Existing order.create webhook already matches current target URL.')
             repairedExistingHook = true
           } else {
+            // Force delete ALL order.create hooks regardless of target URL
             for (const hook of orderCreateHooks) {
               if (!hook.id) continue
+              console.info('[youcan][sync] deleting stale order.create hook', {
+                hookId: hook.id,
+                event: hook.event,
+                targetUrl: getYouCanRestHookTargetUrl(hook),
+              })
               await deleteYouCanRestHook({
                 accessToken: decryptedAccessToken,
                 subscriptionId: hook.id,
               })
             }
 
+            // Also delete any hooks with old/stale target URLs that might be blocking
+            const nonOrderCreateHooks = hooks.filter(
+              (hook: YouCanRestHookRecord) => String(hook.event || '').trim() !== 'order.create'
+            )
+            for (const hook of nonOrderCreateHooks) {
+              const hookTargetUrl = getYouCanRestHookTargetUrl(hook)
+              if (hookTargetUrl && hookTargetUrl.includes('/api/integrations/youcan/webhook/order-create')) {
+                if (!hook.id) continue
+                console.info('[youcan][sync] deleting stale hook with wrong event but our target URL', {
+                  hookId: hook.id,
+                  event: hook.event,
+                  targetUrl: hookTargetUrl,
+                })
+                await deleteYouCanRestHook({
+                  accessToken: decryptedAccessToken,
+                  subscriptionId: hook.id,
+                })
+              }
+            }
+
             const replacement = await subscribeYouCanRestHook({
               accessToken: decryptedAccessToken,
               event: 'order.create',
+              targetUrl,
+            })
+
+            console.info('[youcan][sync] new webhook subscribed after repair', {
+              userId: user.id,
+              integrationId: integration.id,
+              newWebhookId: replacement.id,
               targetUrl,
             })
 
@@ -330,6 +410,11 @@ export async function POST(request: Request) {
           }
         } catch (restHookError) {
           const restHookMessage = restHookError instanceof Error ? restHookError.message : 'RESTHOOK_REPAIR_FAILED'
+          console.error('[youcan][sync] webhook repair failed', {
+            userId: user.id,
+            integrationId: integration.id,
+            error: restHookMessage,
+          })
           warnings.push(`Webhook auto-repair failed: ${restHookMessage}`)
         }
 
@@ -356,6 +441,11 @@ export async function POST(request: Request) {
       importedProducts,
       importedOrders,
       warnings,
+      debug: {
+        publicBaseUrl: publicBaseUrl.origin,
+        webhookId,
+        source: publicBaseUrl.source,
+      }
     })
   } catch (error) {
     const message = extractErrorMessage(error)
