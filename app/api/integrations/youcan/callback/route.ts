@@ -271,26 +271,27 @@ export async function GET(request: Request) {
         storeId: stateStoreId
       })
 
-      // Trigger initial sync automatically
+      // Register webhook immediately and automatically
       try {
-        const syncUrl = new URL('/api/integrations/youcan/sync', origin)
-        // We use a background fetch to not delay the redirect
-        fetch(syncUrl.toString(), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${tokenResponse.access_token}` // The fresh token from YouCan
-          },
-          body: JSON.stringify({
-            storeId: stateStoreId,
-            importProducts: true,
-            importOrders: true
-          })
-        }).catch(err => console.error('[youcan][callback] auto-sync trigger failed', err))
+        const { ensureYouCanOrderCreateWebhook } = await import('@/lib/integrations/youcan')
+        const result = await ensureYouCanOrderCreateWebhook({
+          supabase,
+          integrationId: savedIntegration.id,
+          accessToken, // Raw fresh token from YouCan
+          storeId: stateStoreId,
+          userId,
+          requestUrl: request.url,
+          configuredRedirectUri: process.env.YOUCAN_REDIRECT_URI,
+        })
         
-        console.info('[youcan][callback] auto-sync triggered', { requestId })
-      } catch (syncErr) {
-        console.error('[youcan][callback] failed to setup auto-sync', syncErr)
+        console.info('[youcan][callback] auto-webhook registration result', {
+          requestId,
+          success: result.success,
+          webhookId: result.webhookId,
+          warnings: result.warnings,
+        })
+      } catch (webhookErr) {
+        console.error('[youcan][callback] failed to register webhook automatically', webhookErr)
       }
     }
 

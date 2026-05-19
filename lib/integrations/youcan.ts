@@ -422,3 +422,181 @@ export function parseYouCanOAuthState(
     return null
   }
 }
+
+export async function ensureYouCanOrderCreateWebhook(params: {
+  supabase: any
+  integrationId: string
+  accessToken: string
+  storeId: string
+  userId: string
+  requestUrl: string
+  configuredRedirectUri?: string
+}) {
+  const warnings: string[] = []
+  const { supabase, integrationId, accessToken, storeId, userId, requestUrl, configuredRedirectUri } = params
+
+  const publicBaseUrl = resolveYouCanPublicBaseUrl({
+    requestUrl,
+    configuredRedirectUri,
+  })
+
+  warnings.push(...publicBaseUrl.warnings)
+
+  if (!publicBaseUrl.origin) {
+    return { success: false, webhookId: null, warnings }
+  }
+
+  const targetUrl = `${publicBaseUrl.origin}/api/integrations/youcan/webhook/order-create?integration_id=${encodeURIComponent(integrationId)}`
+
+  try {
+    const hooks = await listYouCanRestHooks({ accessToken })
+    const orderCreateHooks = hooks.filter(
+      (hook: YouCanRestHookRecord) => String(hook.event || '').trim() === 'order.create'
+    )
+    const matchingHook = orderCreateHooks.find(
+      (hook: YouCanRestHookRecord) => getYouCanRestHookTargetUrl(hook) === targetUrl
+    )
+
+    let webhookId = matchingHook?.id || null
+
+    if (!webhookId) {
+      for (const hook of orderCreateHooks) {
+        if (!hook.id) continue
+        await deleteYouCanRestHook({
+          accessToken,
+          subscriptionId: hook.id,
+        })
+      }
+
+      const subscription = await subscribeYouCanRestHook({
+        accessToken,
+        event: 'order.create',
+        targetUrl,
+      })
+      webhookId = subscription.id || null
+      warnings.push('order.create webhook recreated with current target URL.')
+    } else {
+      warnings.push('Existing order.create webhook already matches current target URL.')
+    }
+
+    await supabase.from('youcan_integration_configs').upsert(
+      {
+        integration_id: integrationId,
+        user_id: userId,
+        store_id: storeId,
+        webhook_order_create_id: webhookId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'integration_id' }
+    )
+
+    const verifiedHooks = await listYouCanRestHooks({ accessToken })
+    const verifiedHook = verifiedHooks.find(
+      (hook: YouCanRestHookRecord) =>
+        String(hook.event || '').trim() === 'order.create' &&
+        getYouCanRestHookTargetUrl(hook) === targetUrl
+    )
+
+    if (!verifiedHook?.id) {
+      throw new Error('YOUCAN_WEBHOOK_VERIFY_FAILED: order.create target URL not found after subscribe')
+    }
+
+    console.info('[youcan][webhook] ready', {
+      userId,
+      integrationId,
+      targetUrl,
+      webhookId: verifiedHook.id,
+    })
+
+    return { success: true, webhookId: verifiedHook.id, warnings }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'WEBHOOK_SUBSCRIBE_FAILED'
+    const canRepairExistingSubscription =
+      message.includes('429') ||
+      message.toLowerCase().includes('max of subscriptions') ||
+      message.toLowerCase().includes('max subscriptions')
+
+    if (!canRepairExistingSubscription) {
+      console.error('[youcan][webhook] registration failed', { userId, integrationId, error: message })
+      return { success: false, webhookId: null, warnings: [...warnings, `Error: ${message}`] }
+    }
+
+    warnings.push('Webhook subscription limit reached; attempting repair.')
+
+    try {
+      const hooks = await listYouCanRestHooks({ accessToken })
+      const orderCreateHooks = hooks.filter(
+        (hook: YouCanRestHookRecord) => String(hook.event || '').trim() === 'order.create'
+      )
+
+      const matchingHook = orderCreateHooks.find(
+        (hook: YouCanRestHookRecord) => getYouCanRestHookTargetUrl(hook) === targetUrl
+      )
+
+      if (matchingHook?.id) {
+        await supabase.from('youcan_integration_configs').upsert(
+          {
+            integration_id: integrationId,
+            user_id: userId,
+            store_id: storeId,
+            webhook_order_create_id: matchingHook.id,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'integration_id' }
+        )
+
+        warnings.push('Existing order.create webhook already matches current target URL.')
+        return { success: true, webhookId: matchingHook.id, warnings }
+      } else {
+        // Force delete ALL order.create hooks regardless of target URL
+        for (const hook of orderCreateHooks) {
+          if (!hook.id) continue
+          await deleteYouCanRestHook({
+            accessToken,
+            subscriptionId: hook.id,
+          })
+        }
+
+        // Also delete any hooks with old/stale target URLs that might be blocking
+        const nonOrderCreateHooks = hooks.filter(
+          (hook: YouCanRestHookRecord) => String(hook.event || '').trim() !== 'order.create'
+        )
+        for (const hook of nonOrderCreateHooks) {
+          const hookTargetUrl = getYouCanRestHookTargetUrl(hook)
+          if (hookTargetUrl && hookTargetUrl.includes('/api/integrations/youcan/webhook/order-create')) {
+            if (!hook.id) continue
+            await deleteYouCanRestHook({
+              accessToken,
+              subscriptionId: hook.id,
+            })
+          }
+        }
+
+        const replacement = await subscribeYouCanRestHook({
+          accessToken,
+          event: 'order.create',
+          targetUrl,
+        })
+
+        await supabase.from('youcan_integration_configs').upsert(
+          {
+            integration_id: integrationId,
+            user_id: userId,
+            store_id: storeId,
+            webhook_order_create_id: replacement.id || null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'integration_id' }
+        )
+
+        warnings.push('Stale order.create webhook(s) removed and recreated with current target URL.')
+        return { success: true, webhookId: replacement.id || null, warnings }
+      }
+    } catch (restHookError) {
+      const restHookMessage = restHookError instanceof Error ? restHookError.message : 'RESTHOOK_REPAIR_FAILED'
+      console.error('[youcan][webhook] repair failed', { userId, integrationId, error: restHookMessage })
+      return { success: false, webhookId: null, warnings: [...warnings, `Repair failed: ${restHookMessage}`] }
+    }
+  }
+}
+
