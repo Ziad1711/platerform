@@ -270,6 +270,28 @@ export async function GET(request: Request) {
         integrationId: savedIntegration.id,
         storeId: stateStoreId
       })
+
+      // Trigger initial sync automatically
+      try {
+        const syncUrl = new URL('/api/integrations/youcan/sync', origin)
+        // We use a background fetch to not delay the redirect
+        fetch(syncUrl.toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${tokenResponse.access_token}` // The fresh token from YouCan
+          },
+          body: JSON.stringify({
+            storeId: stateStoreId,
+            importProducts: true,
+            importOrders: true
+          })
+        }).catch(err => console.error('[youcan][callback] auto-sync trigger failed', err))
+        
+        console.info('[youcan][callback] auto-sync triggered', { requestId })
+      } catch (syncErr) {
+        console.error('[youcan][callback] failed to setup auto-sync', syncErr)
+      }
     }
 
     console.info('[youcan][callback] integration saved successfully', {
