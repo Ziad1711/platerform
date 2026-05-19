@@ -285,14 +285,15 @@ function extractYouCanRestHookRows(payload: any) {
 
 export async function deleteYouCanRestHook(params: { accessToken: string; subscriptionId: string }) {
   const candidateUrls = [
-    `${YOUCAN_API_BASE_URL}/resthooks/${encodeURIComponent(params.subscriptionId)}`,
     `${YOUCAN_API_BASE_URL}/resthooks/unsubscribe/${encodeURIComponent(params.subscriptionId)}`,
+    `${YOUCAN_API_BASE_URL}/resthooks/${encodeURIComponent(params.subscriptionId)}`,
   ]
   let lastError = 'YOUCAN_DELETE_REST_HOOK_FAILED'
 
   for (const url of candidateUrls) {
+    // Note: YouCan requires POST for unsubscribe, even though it's a deletion logic.
     const response = await fetch(url, {
-      method: 'DELETE',
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${params.accessToken}`,
         Accept: 'application/json',
