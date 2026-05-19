@@ -1,8 +1,8 @@
--- Migration: Dashboard Performance & Logic Optimization
+-- Migration: Dashboard Performance & Logic Optimization (FIXED COMPATIBILITY)
 -- This migration optimizes the dashboard RPC functions, aligns revenue logic with products, 
 -- and ensures costs are only counted for delivered orders.
 
--- 0. Drop existing functions to allow signature changes (parameters or return types)
+-- 0. Drop existing functions to allow signature changes
 DROP FUNCTION IF EXISTS public.rpc_dashboard_kpi_metrics(uuid[], timestamptz, timestamptz);
 DROP FUNCTION IF EXISTS public.rpc_dashboard_kpi_metrics(uuid, timestamptz, timestamptz);
 DROP FUNCTION IF EXISTS public.rpc_dashboard_revenue_chart(uuid[], timestamptz, timestamptz);
@@ -18,24 +18,24 @@ CREATE INDEX IF NOT EXISTS idx_orders_store_status ON public.orders (store_id, s
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items (order_id);
 
 -- 2. Optimize rpc_dashboard_kpi_metrics
--- Logic: 
--- Revenue = Sum of (quantity * unit_selling_price) for DELIVERED orders only.
--- Charges = Sum of (buy_price + delivery_fee + confirmation_cost) for DELIVERED orders only.
--- Ads = Sum of ads_cost_allocated for ALL orders in period.
 CREATE OR REPLACE FUNCTION public.rpc_dashboard_kpi_metrics(
-  p_store_id uuid, -- Changed to single store to match frontend usage
+  p_store_ids uuid[],
   p_start_date timestamptz DEFAULT NULL,
   p_end_date timestamptz DEFAULT NULL
 )
 RETURNS TABLE (
-  orders_count bigint,
-  delivered_count bigint,
-  revenue numeric,
-  purchase_cost numeric,
-  ad_spend numeric,
-  ad_cost_allocated numeric,
-  delivery_cost numeric,
-  confirmation_cost numeric
+  total_orders bigint,
+  total_revenue numeric,
+  total_profit numeric,
+  total_ads_cost numeric,
+  total_confirmation_cost numeric,
+  total_delivery_fee numeric,
+  total_delivery_charge numeric,
+  total_buy_price numeric,
+  pending_orders bigint,
+  delivered_orders bigint,
+  returned_orders bigint,
+  cancelled_orders bigint
 )
 LANGUAGE sql
 STABLE
@@ -45,7 +45,7 @@ AS $$
     SELECT sm.store_id
     FROM public.store_members sm
     WHERE sm.user_id = auth.uid()
-      AND sm.store_id = p_store_id
+      AND sm.store_id = ANY(p_store_ids)
   ),
   order_items_rev AS (
     SELECT 
@@ -53,21 +53,25 @@ AS $$
       coalesce(sum(oi.quantity * oi.unit_selling_price), 0) as items_rev
     FROM public.order_items oi
     INNER JOIN public.orders o ON o.id = oi.order_id
-    WHERE o.store_id = p_store_id
+    WHERE o.store_id = ANY(p_store_ids)
       AND o.status = 'delivered'
       AND (p_start_date IS NULL OR o.order_date >= p_start_date)
       AND (p_end_date IS NULL OR o.order_date <= p_end_date)
     GROUP BY oi.order_id
   )
   SELECT
-    count(o.id)::bigint as orders_count,
-    count(o.id) FILTER (WHERE o.status = 'delivered')::bigint as delivered_count,
-    coalesce(sum(oir.items_rev), 0) as revenue,
-    coalesce(sum(o.buy_price) FILTER (WHERE o.status = 'delivered'), 0) as purchase_cost,
-    0::numeric as ad_spend, -- placeholder if needed
-    coalesce(sum(o.ads_cost_allocated), 0) as ad_cost_allocated,
-    coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as delivery_cost,
-    coalesce(sum(o.confirmation_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as confirmation_cost
+    count(o.id)::bigint as total_orders,
+    coalesce(sum(oir.items_rev), 0) as total_revenue,
+    coalesce(sum(oir.items_rev - o.buy_price - o.delivery_fee - o.confirmation_cost_allocated - o.ads_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as total_profit,
+    coalesce(sum(o.ads_cost_allocated), 0) as total_ads_cost,
+    coalesce(sum(o.confirmation_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as total_confirmation_cost,
+    coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as total_delivery_fee,
+    coalesce(sum(o.delivery_charge_to_customer) FILTER (WHERE o.status = 'delivered'), 0) as total_delivery_charge,
+    coalesce(sum(o.buy_price) FILTER (WHERE o.status = 'delivered'), 0) as total_buy_price,
+    count(o.id) FILTER (WHERE o.status in ('new', 'confirmation_rejected', 'follow_up_1', 'follow_up_2', 'follow_up_3', 'follow_up_4', 'follow_up_5', 'no_answer', 'wrong_number', 'voicemail'))::bigint as pending_orders,
+    count(o.id) FILTER (WHERE o.status = 'delivered')::bigint as delivered_orders,
+    count(o.id) FILTER (WHERE o.status in ('returned_not_stocked', 'returned_stocked'))::bigint as returned_orders,
+    count(o.id) FILTER (WHERE o.status = 'cancelled')::bigint as cancelled_orders
   FROM public.orders o
   INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
   LEFT JOIN order_items_rev oir ON oir.order_id = o.id
@@ -76,18 +80,17 @@ AS $$
 $$;
 
 -- 3. Optimize rpc_dashboard_top_products
--- Added explicit status = 'delivered' to match revenue logic.
 CREATE OR REPLACE FUNCTION public.rpc_dashboard_top_products(
-  p_store_id uuid,
+  p_store_ids uuid[],
   p_start_date timestamptz DEFAULT NULL,
   p_end_date timestamptz DEFAULT NULL,
   p_limit int DEFAULT 10
 )
 RETURNS TABLE (
-  id uuid,
-  name text,
-  sales bigint,
-  revenue numeric,
+  product_id uuid,
+  product_name text,
+  total_quantity bigint,
+  total_revenue numeric,
   profit numeric
 )
 LANGUAGE sql
@@ -98,13 +101,13 @@ AS $$
     SELECT sm.store_id
     FROM public.store_members sm
     WHERE sm.user_id = auth.uid()
-      AND sm.store_id = p_store_id
+      AND sm.store_id = ANY(p_store_ids)
   )
   SELECT
-    p.id,
-    p.name,
-    coalesce(sum(oi.quantity), 0)::bigint as sales,
-    coalesce(sum(oi.quantity * oi.unit_selling_price), 0) as revenue,
+    p.id as product_id,
+    p.name as product_name,
+    coalesce(sum(oi.quantity), 0)::bigint as total_quantity,
+    coalesce(sum(oi.quantity * oi.unit_selling_price), 0) as total_revenue,
     coalesce(sum(oi.quantity * (oi.unit_selling_price - oi.unit_purchase_cost_snapshot)), 0) as profit
   FROM public.products p
   INNER JOIN public.order_items oi ON oi.product_id = p.id
@@ -114,75 +117,50 @@ AS $$
     AND (p_start_date IS NULL OR o.order_date >= p_start_date)
     AND (p_end_date IS NULL OR o.order_date <= p_end_date)
   GROUP BY p.id, p.name
-  ORDER BY sales DESC
+  ORDER BY total_quantity DESC
   LIMIT p_limit
 $$;
 
 -- 4. Optimize rpc_dashboard_revenue_chart
 CREATE OR REPLACE FUNCTION public.rpc_dashboard_revenue_chart(
-  p_store_id uuid,
+  p_store_ids uuid[],
   p_start_date timestamptz DEFAULT NULL,
   p_end_date timestamptz DEFAULT NULL,
   p_granularity text DEFAULT 'day',
   p_conversion_start timestamptz DEFAULT NULL,
   p_conversion_end timestamptz DEFAULT NULL
 )
-RETURNS jsonb
-LANGUAGE plpgsql
+RETURNS TABLE (
+  date_key text,
+  revenue numeric,
+  profit numeric,
+  ads_cost numeric,
+  purchase_cost numeric,
+  delivery_fee numeric
+)
+LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-DECLARE
-    v_result jsonb;
-BEGIN
-    WITH accessible_stores AS (
-        SELECT sm.store_id
-        FROM public.store_members sm
-        WHERE sm.user_id = auth.uid()
-          AND sm.store_id = p_store_id
-    ),
-    daily_stats AS (
-        SELECT
-            date_trunc(p_granularity, o.order_date) as d,
-            coalesce(sum((SELECT sum(quantity * unit_selling_price) FROM public.order_items WHERE order_id = o.id)) FILTER (WHERE o.status = 'delivered'), 0) as rev,
-            coalesce(sum(o.buy_price) FILTER (WHERE o.status = 'delivered'), 0) as buy,
-            coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as del,
-            coalesce(sum(o.ads_cost_allocated), 0) as ads
-        FROM public.orders o
-        INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
-        WHERE (p_start_date IS NULL OR o.order_date >= p_start_date)
-          AND (p_end_date IS NULL OR o.order_date <= p_end_date)
-        GROUP BY 1
-    )
-    SELECT jsonb_build_object(
-        'points', coalesce(jsonb_agg(jsonb_build_object(
-            'date', d,
-            'revenue', rev,
-            'purchase', buy,
-            'delivery', del,
-            'ads', ads,
-            'profit', (rev - buy - del - ads)
-        ) ORDER BY d), '[]'::jsonb),
-        'totalRevenue', (SELECT coalesce(sum(rev), 0) FROM daily_stats),
-        'totalAds', (SELECT coalesce(sum(ads), 0) FROM daily_stats),
-        'totalPurchase', (SELECT coalesce(sum(buy), 0) FROM daily_stats),
-        'totalProfit', (SELECT coalesce(sum(rev - buy - del - ads), 0) FROM daily_stats),
-        'conversion', (
-            SELECT jsonb_build_object(
-                'total_orders', count(*),
-                'confirmed_orders', count(*) FILTER (WHERE status IN ('confirmed', 'picked_up', 'sent', 'delivered')),
-                'delivered_orders', count(*) FILTER (WHERE status = 'delivered'),
-                'returned_orders', count(*) FILTER (WHERE status IN ('returned_not_stocked', 'returned_stocked')),
-                'sent_orders', count(*) FILTER (WHERE status = 'sent')
-            )
-            FROM public.orders o
-            INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
-            WHERE (p_conversion_start IS NULL OR o.order_date >= p_conversion_start)
-              AND (p_conversion_end IS NULL OR o.order_date <= p_conversion_end)
-        )
-    ) INTO v_result;
-
-    RETURN v_result;
-END;
+  WITH accessible_stores AS (
+    SELECT sm.store_id
+    FROM public.store_members sm
+    WHERE sm.user_id = auth.uid()
+      AND sm.store_id = ANY(p_store_ids)
+  )
+  SELECT
+    to_char(date_trunc(p_granularity, o.order_date), 'YYYY-MM-DD') as date_key,
+    coalesce(sum((SELECT sum(quantity * unit_selling_price) FROM public.order_items WHERE order_id = o.id)) FILTER (WHERE o.status = 'delivered'), 0) as revenue,
+    coalesce(sum((SELECT sum(quantity * (unit_selling_price - unit_purchase_cost_snapshot)) FROM public.order_items WHERE order_id = o.id) - o.delivery_fee - o.confirmation_cost_allocated - o.ads_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as profit,
+    coalesce(sum(o.ads_cost_allocated), 0) as ads_cost,
+    coalesce(sum(o.buy_price) FILTER (WHERE o.status = 'delivered'), 0) as purchase_cost,
+    coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as delivery_fee
+  FROM public.orders o
+  INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
+  WHERE (p_start_date IS NULL OR o.order_date >= p_start_date)
+    AND (p_end_date IS NULL OR o.order_date <= p_end_date)
+  GROUP BY 1
+  ORDER BY 1
 $$;
+
 
