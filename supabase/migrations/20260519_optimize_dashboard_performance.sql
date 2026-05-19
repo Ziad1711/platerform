@@ -2,6 +2,16 @@
 -- This migration optimizes the dashboard RPC functions, aligns revenue logic with products, 
 -- and ensures costs are only counted for delivered orders.
 
+-- 0. Drop existing functions to allow signature changes (parameters or return types)
+DROP FUNCTION IF EXISTS public.rpc_dashboard_kpi_metrics(uuid[], timestamptz, timestamptz);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_kpi_metrics(uuid, timestamptz, timestamptz);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_revenue_chart(uuid[], timestamptz, timestamptz);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_revenue_chart(uuid, timestamptz, timestamptz, text, timestamptz, timestamptz);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_top_products(uuid[], timestamptz, timestamptz, int);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_top_products(uuid, timestamptz, timestamptz, int);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_city_performance(uuid[], timestamptz, timestamptz);
+DROP FUNCTION IF EXISTS public.rpc_dashboard_city_performance(uuid, timestamptz, timestamptz);
+
 -- 1. Add missing indexes for faster dashboard queries
 CREATE INDEX IF NOT EXISTS idx_orders_store_date ON public.orders (store_id, order_date DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_store_status ON public.orders (store_id, status);
