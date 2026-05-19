@@ -69,7 +69,7 @@ AS $$
     coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as delivery_cost,
     coalesce(sum(o.confirmation_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as confirmation_cost
   FROM public.orders o
-  INNER JOIN accessible_stores as on o.store_id = as.store_id
+  INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
   LEFT JOIN order_items_rev oir ON oir.order_id = o.id
   WHERE (p_start_date IS NULL OR o.order_date >= p_start_date)
     AND (p_end_date IS NULL OR o.order_date <= p_end_date)
@@ -109,7 +109,7 @@ AS $$
   FROM public.products p
   INNER JOIN public.order_items oi ON oi.product_id = p.id
   INNER JOIN public.orders o ON o.id = oi.order_id
-  INNER JOIN accessible_stores as on o.store_id = as.store_id
+  INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
   WHERE o.status = 'delivered'
     AND (p_start_date IS NULL OR o.order_date >= p_start_date)
     AND (p_end_date IS NULL OR o.order_date <= p_end_date)
@@ -149,7 +149,7 @@ BEGIN
             coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as del,
             coalesce(sum(o.ads_cost_allocated), 0) as ads
         FROM public.orders o
-        INNER JOIN accessible_stores as on o.store_id = as.store_id
+        INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
         WHERE (p_start_date IS NULL OR o.order_date >= p_start_date)
           AND (p_end_date IS NULL OR o.order_date <= p_end_date)
         GROUP BY 1
@@ -176,7 +176,7 @@ BEGIN
                 'sent_orders', count(*) FILTER (WHERE status = 'sent')
             )
             FROM public.orders o
-            INNER JOIN accessible_stores as on o.store_id = as.store_id
+            INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
             WHERE (p_conversion_start IS NULL OR o.order_date >= p_conversion_start)
               AND (p_conversion_end IS NULL OR o.order_date <= p_conversion_end)
         )
