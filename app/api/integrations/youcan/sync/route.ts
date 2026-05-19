@@ -232,6 +232,8 @@ export async function POST(request: Request) {
       })
     }
 
+    let webhookId: string | null = null
+
     if (publicBaseUrl.origin) {
       const targetUrl = `${publicBaseUrl.origin}/api/integrations/youcan/webhook/order-create?integration_id=${encodeURIComponent(integration.id)}`
 
@@ -244,7 +246,7 @@ export async function POST(request: Request) {
           (hook: YouCanRestHookRecord) => getYouCanRestHookTargetUrl(hook) === targetUrl
         )
 
-        let webhookId = matchingHook?.id || null
+        webhookId = matchingHook?.id || null
 
         if (!webhookId) {
           for (const hook of orderCreateHooks) {
@@ -283,6 +285,10 @@ export async function POST(request: Request) {
             String(hook.event || '').trim() === 'order.create' &&
             getYouCanRestHookTargetUrl(hook) === targetUrl
         )
+
+        if (verifiedHook?.id) {
+          webhookId = verifiedHook.id
+        }
 
         if (!verifiedHook?.id) {
           throw new Error('YOUCAN_WEBHOOK_VERIFY_FAILED: order.create target URL not found after subscribe')
