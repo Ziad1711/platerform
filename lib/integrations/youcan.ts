@@ -383,6 +383,7 @@ type YouCanOAuthStatePayload = {
   store: string
   ts: number
   accessToken?: string
+  storeId?: string
 }
 
 export function createYouCanOAuthState(payload: YouCanOAuthStatePayload, secret: string) {
@@ -410,24 +411,13 @@ export function parseYouCanOAuthState(
   if (!crypto.timingSafeEqual(receivedBuffer, expectedBuffer)) return null
 
   try {
-    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf-8')) as {
-      userId?: string
-      store?: string
-      ts?: number
-    }
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf-8')) as YouCanOAuthStatePayload
 
     if (!payload.userId || !payload.store || typeof payload.ts !== 'number') return null
     const now = Date.now()
     if (now - payload.ts > maxAgeSeconds * 1000) return null
 
-    return {
-      userId: payload.userId,
-      store: payload.store,
-      ts: payload.ts,
-      accessToken: typeof (payload as { accessToken?: unknown }).accessToken === 'string'
-        ? (payload as { accessToken?: string }).accessToken
-        : undefined,
-    }
+    return payload
   } catch {
     return null
   }
