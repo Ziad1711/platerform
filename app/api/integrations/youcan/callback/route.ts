@@ -233,7 +233,7 @@ export async function GET(request: Request) {
       {
         onConflict: 'user_id,provider',
       }
-    )
+    ).select('id').single()
 
     if (error) {
       console.error('[youcan][callback] integration upsert failed', {
@@ -247,6 +247,29 @@ export async function GET(request: Request) {
         })
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    const { data: savedIntegration } = await supabase
+      .from('integrations')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('provider', 'youcan')
+      .maybeSingle()
+
+    const stateStoreId = (parsedState as any)?.storeId || null
+    if (savedIntegration?.id && stateStoreId) {
+      await supabase.from('youcan_integration_configs').upsert({
+        integration_id: savedIntegration.id,
+        user_id: userId,
+        store_id: stateStoreId,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'integration_id' })
+      
+      console.info('[youcan][callback] integration config saved', {
+        requestId,
+        integrationId: savedIntegration.id,
+        storeId: stateStoreId
+      })
     }
 
     console.info('[youcan][callback] integration saved successfully', {

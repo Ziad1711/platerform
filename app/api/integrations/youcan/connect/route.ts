@@ -32,6 +32,7 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const store = (searchParams.get('store') || process.env.YOUCAN_DEFAULT_STORE || '').trim()
+    const storeId = (searchParams.get('storeId') || '').trim()
 
     if (!store) {
       return NextResponse.json({ error: 'MISSING_STORE' }, { status: 400 })
@@ -55,7 +56,8 @@ export async function GET(request: Request) {
         store,
         ts: Date.now(),
         accessToken: authenticatedAccessToken || undefined,
-      },
+        storeId: storeId || undefined,
+      } as any,
       stateSecret
     )
 
