@@ -206,101 +206,81 @@ export async function POST(request: Request) {
     if (publicBaseUrl.origin) {
       const targetUrl = `${publicBaseUrl.origin}/api/integrations/youcan/webhook/order-create?integration_id=${encodeURIComponent(integration.id)}`
 
+      // Étape 1 : lister et supprimer les anciens webhooks order.create qui ne correspondent pas à l'URL actuelle
+      let existingHooks: YouCanRestHookRecord[] = []
       try {
-        const subscription = await subscribeYouCanRestHook({
-          accessToken: decryptedAccessToken,
-          event: 'order.create',
-          targetUrl,
-        })
+        existingHooks = await listYouCanRestHooks({ accessToken: decryptedAccessToken })
+      } catch {
+        warnings.push('Unable to list existing YouCan resthooks.')
+      }
 
+      const orderCreateHooks = existingHooks.filter(
+        (hook: YouCanRestHookRecord) => String(hook.event || '').trim() === 'order.create'
+      )
+
+      const matchingHook = orderCreateHooks.find(
+        (hook: YouCanRestHookRecord) => getYouCanRestHookTargetUrl(hook) === targetUrl
+      )
+
+      if (matchingHook?.id) {
+        // Le webhook existe déjà avec la bonne URL → on le garde
         await supabase.from('youcan_integration_configs').upsert(
           {
             integration_id: integration.id,
             user_id: user.id,
             store_id: storeId,
-            webhook_order_create_id: subscription.id || null,
+            webhook_order_create_id: matchingHook.id,
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'integration_id' }
         )
-        console.info('[youcan][sync] webhook subscribed', {
-          userId: user.id,
-          integrationId: integration.id,
-          targetUrl,
-          source: publicBaseUrl.source,
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'WEBHOOK_SUBSCRIBE_FAILED'
-        if (!message.includes('429')) {
-          throw error
-        }
-
-        warnings.push('Webhook subscription returned 429; checking existing subscriptions.')
-
-        let repairedExistingHook = false
-
-        try {
-          const hooks = await listYouCanRestHooks({ accessToken: decryptedAccessToken })
-          const orderCreateHooks = hooks.filter(
-            (hook: YouCanRestHookRecord) => String(hook.event || '').trim() === 'order.create'
-          )
-          const matchingHook = orderCreateHooks.find(
-            (hook: YouCanRestHookRecord) => getYouCanRestHookTargetUrl(hook) === targetUrl
-          )
-
-          if (matchingHook?.id) {
-            await supabase.from('youcan_integration_configs').upsert(
-              {
-                integration_id: integration.id,
-                user_id: user.id,
-                store_id: storeId,
-                webhook_order_create_id: matchingHook.id,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: 'integration_id' }
-            )
-
-            warnings.push('Existing order.create webhook already matches current target URL.')
-            repairedExistingHook = true
-          } else {
-            for (const hook of orderCreateHooks) {
-              if (!hook.id) continue
-              await deleteYouCanRestHook({
-                accessToken: decryptedAccessToken,
-                subscriptionId: hook.id,
-              })
-            }
-
-            const replacement = await subscribeYouCanRestHook({
+        warnings.push('Existing order.create webhook already matches current target URL.')
+      } else {
+        // Supprimer tous les anciens webhooks order.create (qui pointent vers l'ancien domaine)
+        for (const hook of orderCreateHooks) {
+          if (!hook.id) continue
+          try {
+            await deleteYouCanRestHook({
               accessToken: decryptedAccessToken,
-              event: 'order.create',
-              targetUrl,
+              subscriptionId: hook.id,
             })
-
-            await supabase.from('youcan_integration_configs').upsert(
-              {
-                integration_id: integration.id,
-                user_id: user.id,
-                store_id: storeId,
-                webhook_order_create_id: replacement.id || null,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: 'integration_id' }
-            )
-
-            warnings.push('Stale order.create webhook(s) removed and recreated with current target URL.')
-            repairedExistingHook = true
+            warnings.push(`Deleted stale order.create webhook: ${hook.id}`)
+          } catch {
+            warnings.push(`Failed to delete stale webhook: ${hook.id}`)
           }
-        } catch (restHookError) {
-          const restHookMessage = restHookError instanceof Error ? restHookError.message : 'RESTHOOK_REPAIR_FAILED'
-          warnings.push(`Webhook auto-repair failed: ${restHookMessage}`)
         }
 
-        if (!repairedExistingHook) {
-          warnings.push('Unable to confirm current webhook target automatically.');
+        // Étape 2 : souscrire le nouveau webhook
+        try {
+          const subscription = await subscribeYouCanRestHook({
+            accessToken: decryptedAccessToken,
+            event: 'order.create',
+            targetUrl,
+          })
+
+          await supabase.from('youcan_integration_configs').upsert(
+            {
+              integration_id: integration.id,
+              user_id: user.id,
+              store_id: storeId,
+              webhook_order_create_id: subscription.id || null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'integration_id' }
+          )
+          console.info('[youcan][sync] webhook subscribed', {
+            userId: user.id,
+            integrationId: integration.id,
+            targetUrl,
+            source: publicBaseUrl.source,
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'WEBHOOK_SUBSCRIBE_FAILED'
+          warnings.push(`Webhook subscription failed: ${message}`)
         }
       }
     }
+
 
     await supabase
       .from('youcan_sync_jobs')
