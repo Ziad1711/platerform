@@ -105,7 +105,7 @@ AS $$
     p.name,
     coalesce(sum(oi.quantity), 0)::bigint as sales,
     coalesce(sum(oi.quantity * oi.unit_selling_price), 0) as revenue,
-    coalesce(sum(oi.quantity * (oi.unit_selling_price - p.buy_price)), 0) as profit
+    coalesce(sum(oi.quantity * (oi.unit_selling_price - oi.unit_purchase_cost_snapshot)), 0) as profit
   FROM public.products p
   INNER JOIN public.order_items oi ON oi.product_id = p.id
   INNER JOIN public.orders o ON o.id = oi.order_id
