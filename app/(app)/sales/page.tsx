@@ -3509,6 +3509,9 @@ export default function VentesPage() {
                   <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Adresse</div>
                   </th>
+                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="flex items-center justify-center text-center">Vente</div>
+                  </th>
                   {!isConfirmationRole && (
                     <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Achat
