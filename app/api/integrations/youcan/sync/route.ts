@@ -220,6 +220,8 @@ export async function POST(request: Request) {
 
     warnings.push(...publicBaseUrl.warnings)
 
+    let webhookId: string | null = null
+
     if (publicBaseUrl.origin) {
       const { ensureYouCanOrderCreateWebhook } = await import('@/lib/integrations/youcan')
       const result = await ensureYouCanOrderCreateWebhook({
