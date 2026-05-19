@@ -220,7 +220,11 @@ export async function subscribeYouCanRestHook(params: {
 }
 
 export async function listYouCanRestHooks(params: { accessToken: string }) {
-  const candidateUrls = [`${YOUCAN_API_BASE_URL}/resthooks`, `${YOUCAN_API_BASE_URL}/resthooks/subscriptions`]
+  const candidateUrls = [
+    `${YOUCAN_API_BASE_URL}/resthooks/list`,
+    `${YOUCAN_API_BASE_URL}/resthooks`,
+    `${YOUCAN_API_BASE_URL}/resthooks/subscriptions`,
+  ]
   let lastError = 'YOUCAN_LIST_REST_HOOKS_FAILED'
 
   for (const url of candidateUrls) {
