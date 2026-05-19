@@ -12,6 +12,7 @@ const periods = [
   { id: 'month', label: 'Ce mois' },
   { id: 'quarter', label: 'Ce trimestre' },
   { id: 'year', label: 'Cette année' },
+  { id: 'all_time', label: 'Maximum' },
   { id: 'custom', label: 'Période personnalisée' },
 ]
 
@@ -22,6 +23,7 @@ const periodLabels: Record<DashboardPeriod, string> = {
   month: 'Ce mois',
   quarter: 'Ce trimestre',
   year: 'Cette année',
+  all_time: 'Maximum',
   custom: 'Période personnalisée',
 }
 
@@ -41,9 +43,15 @@ export default function PeriodFilter() {
   const [localEndDate, setLocalEndDate] = useState<string | null>(customEndDate)
 
   const handleApplyCustom = () => {
-    setCustomStartDate(localStartDate)
-    setCustomEndDate(localEndDate)
-    setIsOpen(false)
+    // Only apply and close if we have both dates
+    if (localStartDate && localEndDate) {
+      // First set the dates
+      setCustomStartDate(localStartDate)
+      setCustomEndDate(localEndDate)
+      // Then change the period mode to trigger the fetch
+      setSelectedPeriod('custom')
+      setIsOpen(false)
+    }
   }
 
   const selectedLabel = selectedPeriod === 'custom' && customStartDate && customEndDate
@@ -81,13 +89,16 @@ export default function PeriodFilter() {
                 <button
                   key={period.id}
                   onClick={() => {
-                    setSelectedPeriod(period.id as DashboardPeriod)
                     if (period.id !== 'custom') {
+                      setSelectedPeriod(period.id as DashboardPeriod)
                       setIsOpen(false)
+                    } else {
+                      // If clicking custom, don't set period yet, just stay open to pick dates
+                      // We don't call setSelectedPeriod here to prevent eager fetch
                     }
                   }}
                   className={`w-full text-left px-4 py-2 text-sm hover:bg-secondary ${
-                    selectedPeriod === period.id
+                    (selectedPeriod === period.id || (period.id === 'custom' && !['today', 'yesterday', 'week', 'month', 'quarter', 'year', 'all_time'].includes(selectedPeriod)))
                       ? 'bg-primary/10 text-primary'
                       : 'text-foreground'
                   }`}
@@ -96,35 +107,34 @@ export default function PeriodFilter() {
                 </button>
               ))}
 
-              {selectedPeriod === 'custom' && (
-                <div className="px-4 py-3 border-t border-border space-y-3">
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Date début</label>
-                    <input
-                      type="date"
-                      value={localStartDate || ''}
-                      onChange={(e) => setLocalStartDate(e.target.value || null)}
-                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-card text-foreground"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Date fin</label>
-                    <input
-                      type="date"
-                      value={localEndDate || ''}
-                      onChange={(e) => setLocalEndDate(e.target.value || null)}
-                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-card text-foreground"
-                    />
-                  </div>
-                  <button
-                    onClick={handleApplyCustom}
-                    disabled={!localStartDate || !localEndDate}
-                    className="w-full bg-primary text-white text-sm font-medium py-2 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Appliquer
-                  </button>
+              <div className="px-4 py-3 border-t border-border space-y-3">
+                <div className="text-xs font-semibold text-primary uppercase tracking-wider mb-2">Dates personnalisées</div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Date début</label>
+                  <input
+                    type="date"
+                    value={localStartDate || ''}
+                    onChange={(e) => setLocalStartDate(e.target.value || null)}
+                    className="w-full border border-border rounded px-2 py-1.5 text-sm bg-card text-foreground"
+                  />
                 </div>
-              )}
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Date fin</label>
+                  <input
+                    type="date"
+                    value={localEndDate || ''}
+                    onChange={(e) => setLocalEndDate(e.target.value || null)}
+                    className="w-full border border-border rounded px-2 py-1.5 text-sm bg-card text-foreground"
+                  />
+                </div>
+                <button
+                  onClick={handleApplyCustom}
+                  disabled={!localStartDate || !localEndDate}
+                  className="w-full bg-primary text-white text-sm font-medium py-2 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Appliquer
+                </button>
+              </div>
             </div>
           </div>
         </>
