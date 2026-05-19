@@ -120,14 +120,9 @@ export default function IntegrationsPage() {
   const featuredIntegrations = sortedIntegrations.slice(0, 2)
   const regularIntegrations = sortedIntegrations.slice(2)
 
-  const [isDisconnectModalOpen, setIsDisconnectModalOpen] = useState(false)
-  const [disconnectProviderSlug, setDisconnectProviderSlug] = useState<string | null>(null)
-  const [isDisconnecting, setIsDisconnecting] = useState(false)
-
   const handleAction = (providerSlug: string, isConnected: boolean) => {
     if (isConnected) {
-      setDisconnectProviderSlug(providerSlug)
-      setIsDisconnectModalOpen(true)
+      router.push(`/integrations/${providerSlug}/settings`)
     } else {
       setConnectProviderSlug(providerSlug)
       if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery') {
@@ -135,30 +130,6 @@ export default function IntegrationsPage() {
       }
       setConnectError('')
       setIsConnectModalOpen(true)
-    }
-  }
-
-  const handleDisconnect = async () => {
-    if (!disconnectProviderSlug) return
-    setIsDisconnecting(true)
-
-    try {
-      const response = await fetch(`/api/integrations/${disconnectProviderSlug}/disconnect`, {
-        method: 'POST',
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to disconnect')
-      }
-
-      await queryClient.invalidateQueries({ queryKey: ['integration-marketplace'] })
-      setIsDisconnectModalOpen(false)
-      setDisconnectProviderSlug(null)
-    } catch (err) {
-      console.error('Disconnect error:', err)
-      alert('Erreur lors de la déconnexion.')
-    } finally {
-      setIsDisconnecting(false)
     }
   }
 
@@ -629,55 +600,6 @@ export default function IntegrationsPage() {
                 className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isStartingImport ? 'Import en cours...' : 'Démarrer import'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Disconnect Confirmation Modal */}
-      {isDisconnectModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => {
-              if (!isDisconnecting) {
-                setIsDisconnectModalOpen(false)
-                setDisconnectProviderSlug(null)
-              }
-            }}
-          />
-
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
-            <div className="mb-5">
-              <h3 className="text-lg font-semibold text-foreground">
-                Déconnecter {disconnectProviderSlug === 'youcan' ? 'YouCan' : disconnectProviderSlug} ?
-              </h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Êtes-vous sûr de vouloir déconnecter cette intégration ? 
-                {disconnectProviderSlug === 'youcan' && " Cela supprimera également le webhook automatique sur YouCan."}
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsDisconnectModalOpen(false)
-                  setDisconnectProviderSlug(null)
-                }}
-                disabled={isDisconnecting}
-                className="flex-1 rounded-xl border border-border bg-background py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDisconnect()}
-                disabled={isDisconnecting}
-                className="flex-1 rounded-xl bg-destructive py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {isDisconnecting ? 'Déconnexion...' : 'Déconnecter'}
               </button>
             </div>
           </div>
