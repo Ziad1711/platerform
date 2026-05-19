@@ -247,7 +247,11 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
         const adCost = effectiveAdSpend
         const deliveryCost = aggregated.delivery_cost // This is usually the cost paid to delivery company
         const confirmationCost = aggregated.confirmation_cost
-        const profit = totalSellingPrice - purchaseCost - adCost - deliveryCost - confirmationCost
+        
+        // Profit = Revenue - (Purchase + Delivery + Confirmation) - Ad Cost
+        // Note: Revenue here is already (totalSellingPrice - deliveryFeesCharged)
+        const profit = revenue - purchaseCost - deliveryCost - confirmationCost - adCost
+        
         const averageOrderValue = deliveredOrdersCount > 0 ? revenue / deliveredOrdersCount : 0
         const deliveredRate = ordersCount > 0 ? (deliveredOrdersCount / ordersCount) * 100 : 0
         const roas = adCost > 0 ? revenue / adCost : 0
