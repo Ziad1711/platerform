@@ -1,4 +1,4 @@
--- Migration: Dashboard Performance & Logic Optimization (FIXED COMPATIBILITY)
+-- Migration: Dashboard Performance & Logic Optimization (FIXED DATA VISIBILITY)
 -- This migration optimizes the dashboard RPC functions, aligns revenue logic with products, 
 -- and ensures costs are only counted for delivered orders.
 
@@ -41,28 +41,10 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-  WITH accessible_stores AS (
-    SELECT sm.store_id
-    FROM public.store_members sm
-    WHERE sm.user_id = auth.uid()
-      AND sm.store_id = ANY(p_store_ids)
-  ),
-  order_items_rev AS (
-    SELECT 
-      oi.order_id,
-      coalesce(sum(oi.quantity * oi.unit_selling_price), 0) as items_rev
-    FROM public.order_items oi
-    INNER JOIN public.orders o ON o.id = oi.order_id
-    WHERE o.store_id = ANY(p_store_ids)
-      AND o.status = 'delivered'
-      AND (p_start_date IS NULL OR o.order_date >= p_start_date)
-      AND (p_end_date IS NULL OR o.order_date <= p_end_date)
-    GROUP BY oi.order_id
-  )
   SELECT
     count(o.id)::bigint as total_orders,
-    coalesce(sum(oir.items_rev), 0) as total_revenue,
-    coalesce(sum(oir.items_rev - o.buy_price - o.delivery_fee - o.confirmation_cost_allocated - o.ads_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as total_profit,
+    coalesce(sum((SELECT sum(quantity * unit_selling_price) FROM public.order_items WHERE order_id = o.id)) FILTER (WHERE o.status = 'delivered'), 0) as total_revenue,
+    coalesce(sum((SELECT sum(quantity * (unit_selling_price - unit_purchase_cost_snapshot)) FROM public.order_items WHERE order_id = o.id) - o.delivery_fee - o.confirmation_cost_allocated - o.ads_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as total_profit,
     coalesce(sum(o.ads_cost_allocated), 0) as total_ads_cost,
     coalesce(sum(o.confirmation_cost_allocated) FILTER (WHERE o.status = 'delivered'), 0) as total_confirmation_cost,
     coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as total_delivery_fee,
@@ -73,9 +55,12 @@ AS $$
     count(o.id) FILTER (WHERE o.status in ('returned_not_stocked', 'returned_stocked'))::bigint as returned_orders,
     count(o.id) FILTER (WHERE o.status = 'cancelled')::bigint as cancelled_orders
   FROM public.orders o
-  INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
-  LEFT JOIN order_items_rev oir ON oir.order_id = o.id
-  WHERE (p_start_date IS NULL OR o.order_date >= p_start_date)
+  WHERE o.store_id = ANY(p_store_ids)
+    AND EXISTS (
+      SELECT 1 FROM public.store_members sm
+      WHERE sm.store_id = o.store_id AND sm.user_id = auth.uid() AND sm.status = 'active'
+    )
+    AND (p_start_date IS NULL OR o.order_date >= p_start_date)
     AND (p_end_date IS NULL OR o.order_date <= p_end_date)
 $$;
 
@@ -97,12 +82,6 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-  WITH accessible_stores AS (
-    SELECT sm.store_id
-    FROM public.store_members sm
-    WHERE sm.user_id = auth.uid()
-      AND sm.store_id = ANY(p_store_ids)
-  )
   SELECT
     p.id as product_id,
     p.name as product_name,
@@ -112,8 +91,12 @@ AS $$
   FROM public.products p
   INNER JOIN public.order_items oi ON oi.product_id = p.id
   INNER JOIN public.orders o ON o.id = oi.order_id
-  INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
-  WHERE o.status = 'delivered'
+  WHERE o.store_id = ANY(p_store_ids)
+    AND o.status = 'delivered'
+    AND EXISTS (
+      SELECT 1 FROM public.store_members sm
+      WHERE sm.store_id = o.store_id AND sm.user_id = auth.uid() AND sm.status = 'active'
+    )
     AND (p_start_date IS NULL OR o.order_date >= p_start_date)
     AND (p_end_date IS NULL OR o.order_date <= p_end_date)
   GROUP BY p.id, p.name
@@ -142,12 +125,6 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-  WITH accessible_stores AS (
-    SELECT sm.store_id
-    FROM public.store_members sm
-    WHERE sm.user_id = auth.uid()
-      AND sm.store_id = ANY(p_store_ids)
-  )
   SELECT
     to_char(date_trunc(p_granularity, o.order_date), 'YYYY-MM-DD') as date_key,
     coalesce(sum((SELECT sum(quantity * unit_selling_price) FROM public.order_items WHERE order_id = o.id)) FILTER (WHERE o.status = 'delivered'), 0) as revenue,
@@ -156,11 +133,16 @@ AS $$
     coalesce(sum(o.buy_price) FILTER (WHERE o.status = 'delivered'), 0) as purchase_cost,
     coalesce(sum(o.delivery_fee) FILTER (WHERE o.status = 'delivered'), 0) as delivery_fee
   FROM public.orders o
-  INNER JOIN accessible_stores ast ON o.store_id = ast.store_id
-  WHERE (p_start_date IS NULL OR o.order_date >= p_start_date)
+  WHERE o.store_id = ANY(p_store_ids)
+    AND EXISTS (
+      SELECT 1 FROM public.store_members sm
+      WHERE sm.store_id = o.store_id AND sm.user_id = auth.uid() AND sm.status = 'active'
+    )
+    AND (p_start_date IS NULL OR o.order_date >= p_start_date)
     AND (p_end_date IS NULL OR o.order_date <= p_end_date)
   GROUP BY 1
   ORDER BY 1
 $$;
+
 
 
