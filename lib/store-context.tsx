@@ -1,7 +1,7 @@
 'use client'
 
-import { createContext, useContext, useMemo, useState, ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { DashboardPeriod } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 
@@ -29,6 +29,9 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => createClient(), [])
+  const queryClient = useQueryClient()
+  const [authReady, setAuthReady] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
   const [currentStoreId, setCurrentStoreIdState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('current-store-id')
@@ -52,26 +55,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const { data: accessibleStores = [], isLoading: isStoresLoading } = useQuery({
-    queryKey: ['accessible-stores'],
-    queryFn: async () => {
+  useEffect(() => {
+    let active = true
+
+    const loadUser = async () => {
       const {
         data: { user },
-        error: userError,
       } = await supabase.auth.getUser()
 
-      if (userError) {
-        throw userError
-      }
+      if (!active) return
+      setUserId(user?.id ?? null)
+      setAuthReady(true)
+    }
 
-      if (!user) {
+    void loadUser()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUserId = session?.user?.id ?? null
+      setUserId(nextUserId)
+      setAuthReady(true)
+      void queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
+
+      if (!nextUserId) {
+        setCurrentStoreId(null)
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [queryClient, supabase])
+
+  const { data: accessibleStores = [], isLoading } = useQuery({
+    queryKey: ['accessible-stores', userId],
+    enabled: authReady && Boolean(userId),
+    queryFn: async () => {
+      if (!userId) {
         return [] as AccessibleStore[]
       }
 
       const { data: memberships, error: membershipsError } = await supabase
         .from('store_members')
         .select('store_id')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
+        .eq('status', 'active')
 
       if (membershipsError) {
         throw membershipsError
@@ -96,6 +126,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
   })
 
+  const isStoresLoading = !authReady || (Boolean(userId) && isLoading)
+
+  useEffect(() => {
+    if (isStoresLoading) return
+
+    if (accessibleStores.length === 0) {
+      if (currentStoreId) setCurrentStoreId(null)
+      return
+    }
+
+    const hasCurrentStore = currentStoreId
+      ? accessibleStores.some((store) => store.id === currentStoreId)
+      : false
+
+    if (!hasCurrentStore) {
+      setCurrentStoreId(accessibleStores[0].id)
+    }
+  }, [accessibleStores, currentStoreId, isStoresLoading])
+
   // Bloquer le rendu des enfants tant que les stores chargent et qu'aucun store n'est sélectionné
   // Cela évite le flash "veuillez sélectionner un store" pour les invités
   // On retourne un spinner sans rendre les enfants pour éviter que les composants dashboard
@@ -106,11 +155,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     )
-  }
-
-  // Auto-select : dès que les stores sont chargés et qu'aucun store n'est sélectionné
-  if (!isStoresLoading && accessibleStores.length > 0 && !currentStoreId) {
-    setCurrentStoreId(accessibleStores[0].id)
   }
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
