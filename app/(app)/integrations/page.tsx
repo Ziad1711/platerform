@@ -167,7 +167,7 @@ export default function IntegrationsPage() {
     }
 
     const response = await fetch(
-      `/api/integrations/${connectProviderSlug}/connect?store=${encodeURIComponent(slug)}`,
+      `/api/integrations/${connectProviderSlug}/connect?store=${encodeURIComponent(slug)}&storeId=${currentStoreId || ''}`,
       {
         method: 'GET',
         headers: {
