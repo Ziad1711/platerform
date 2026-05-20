@@ -225,10 +225,20 @@ export async function POST(request: Request) {
       return /^\d+$/.test(key) ? Number(key) : key
     })
 
+    console.log('Rapid Delivery voucher request details', {
+      shop: resolvedShopKey,
+      parcels: finalParcelKeys,
+      parcelTypes: finalParcelKeys.map(k => typeof k)
+    })
+
     const created = await createRapidDeliveryVoucher(token, {
       shop: resolvedShopKey,
       parcels: finalParcelKeys,
     }, baseUrl)
+
+    console.log('Rapid Delivery voucher creation response', {
+      createdRaw: JSON.stringify(created)
+    })
 
     const voucherKey = String(created?.data?.key || '').trim()
     if (!voucherKey) {
