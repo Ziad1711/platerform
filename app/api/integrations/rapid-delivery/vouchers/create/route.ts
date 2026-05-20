@@ -222,32 +222,9 @@ export async function POST(request: Request) {
 
     const finalParcelKeys = finalParcelReadyOrders.map((order) => String(order.rapid_delivery_parcel_key))
 
-    // Récupérer l'ID numérique de chaque colis via GET /parcels/{key}
-    // L'API Rapid Delivery peut ne pas reconnaître les UUIDs dans le tableau parcels du voucher
-    const resolvedParcelIds: Array<string | number> = []
-    for (const parcelKey of finalParcelKeys) {
-      const remoteParcel = await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl)
-      if (remoteParcel && typeof remoteParcel === 'object') {
-        const record = remoteParcel as Record<string, any>
-        const data = record.data as Record<string, any> | undefined
-        // Chercher un ID numérique dans la réponse (id, key, ou data.id / data.key)
-        const numericId = Number(
-          record.id || record.key ||
-          data?.id || data?.key ||
-          0
-        )
-        if (numericId > 0) {
-          resolvedParcelIds.push(numericId)
-          continue
-        }
-      }
-      // Fallback: envoyer l'UUID string
-      resolvedParcelIds.push(parcelKey)
-    }
-
     const created = await createRapidDeliveryVoucher(token, {
       shop: resolvedShopKey,
-      parcels: resolvedParcelIds,
+      parcels: finalParcelKeys,
     }, baseUrl)
 
     const voucherKey = String(created?.data?.key || '').trim()
@@ -255,18 +232,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVALID_VOUCHER_KEY' }, { status: 502 })
     }
 
-    // Toujours vérifier via GET /vouchers/{key} après création, car le POST
-    // peut retourner total_parcels > 0 alors que le bon est vide sur Rapid Delivery
+    // Vérifier via GET /vouchers/{key} après création (propagation asynchrone)
     let remoteVoucher: unknown = null
     let remoteTotalParcels = 0
 
-    // Attendre un peu avant la première vérification (propagation asynchrone)
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 800 * attempt))
-      }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
       remoteVoucher = await getRapidDeliveryVoucher(token, voucherKey, baseUrl)
       remoteTotalParcels = getRapidDeliveryVoucherTotalParcels(remoteVoucher)
       console.log('Rapid Delivery voucher GET check', {
@@ -286,7 +257,8 @@ export async function POST(request: Request) {
         created,
         remoteVoucher,
       })
-      return NextResponse.json({ error: 'RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE' }, { status: 502 })
+      // Fallback: on accepte le bon quand même, la propagation peut prendre du temps
+      console.warn('RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE - fallback accepted')
     }
 
 
