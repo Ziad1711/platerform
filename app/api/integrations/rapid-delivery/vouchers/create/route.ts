@@ -231,37 +231,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVALID_VOUCHER_KEY' }, { status: 502 })
     }
 
-    // Vérifier le total_parcels directement depuis la réponse POST
+    // Toujours vérifier via GET /vouchers/{key} après création, car le POST
+    // peut retourner total_parcels > 0 alors que le bon est vide sur Rapid Delivery
     let remoteVoucher: unknown = null
-    const postTotalParcels = getRapidDeliveryVoucherTotalParcels(created)
-    if (postTotalParcels > 0) {
-      // Le POST a déjà confirmé les parcels, pas besoin de vérifier via GET
-      console.log('Rapid Delivery voucher created with parcels confirmed by POST', {
-        voucherKey,
-        totalParcels: postTotalParcels,
-      })
-    } else {
-      // Réessayer GET /vouchers/{key} jusqu'à 3 fois avec délai
-      let remoteTotalParcels = 0
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        if (attempt > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
-        }
-        remoteVoucher = await getRapidDeliveryVoucher(token, voucherKey, baseUrl)
-        remoteTotalParcels = getRapidDeliveryVoucherTotalParcels(remoteVoucher)
-        if (remoteTotalParcels > 0) break
-      }
+    let remoteTotalParcels = 0
 
-      if (remoteTotalParcels <= 0) {
-        console.error('Rapid Delivery voucher created empty remotely', {
-          voucherKey,
-          shop: resolvedShopKey,
-          parcels: finalParcelKeys,
-          created,
-        })
-        return NextResponse.json({ error: 'RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE' }, { status: 502 })
+    // Attendre un peu avant la première vérification (propagation asynchrone)
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt))
       }
+      remoteVoucher = await getRapidDeliveryVoucher(token, voucherKey, baseUrl)
+      remoteTotalParcels = getRapidDeliveryVoucherTotalParcels(remoteVoucher)
+      console.log('Rapid Delivery voucher GET check', {
+        voucherKey,
+        attempt: attempt + 1,
+        remoteTotalParcels,
+        remoteVoucherRaw: JSON.stringify(remoteVoucher).slice(0, 500),
+      })
+      if (remoteTotalParcels > 0) break
     }
+
+    if (remoteTotalParcels <= 0) {
+      console.error('Rapid Delivery voucher created empty remotely', {
+        voucherKey,
+        shop: resolvedShopKey,
+        parcels: finalParcelKeys,
+        created,
+        remoteVoucher,
+      })
+      return NextResponse.json({ error: 'RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE' }, { status: 502 })
+    }
+
 
     const now = new Date().toISOString()
     const { error: updateOrdersError } = await admin
