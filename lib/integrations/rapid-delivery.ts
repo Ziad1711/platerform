@@ -271,6 +271,28 @@ export async function downloadRapidDeliveryHtml(token: string, path: string, bas
   return response.text()
 }
 
+export function getRapidDeliveryShortTrackingKey(payload: RapidDeliveryTrackingPayload | unknown): string | null {
+  const item = extractRapidDeliveryPayloadItem(payload)
+  if (!item) return null
+  
+  // Si le champ key est un UUID, on cherche s'il y a un autre champ qui ressemble à un code court (ex: uC6qBO1oBq)
+  const key = String(item.key || '').trim()
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)
+  
+  if (!isUuid && key.length > 0) return key
+  
+  // Parcourir les propriétés pour trouver un code de 8-12 caractères alphanumériques qui n'est pas un UUID
+  for (const [vKey, value] of Object.entries(item)) {
+    if (typeof value === 'string' && value.length >= 8 && value.length <= 15) {
+      if (!/^[0-9a-f-]{36}$/i.test(value) && /^[A-Za-z0-9]+$/.test(value)) {
+        console.log('Found potential Rapid Delivery short key', { field: vKey, value })
+        return value
+      }
+    }
+  }
+
+  return null
+}
 export async function downloadRapidDeliveryFile(token: string, path: string, baseUrl?: string | null) {
   const response = await fetch(`${resolveRapidDeliveryApiBaseUrl(baseUrl)}${path}`, {
     method: 'GET',

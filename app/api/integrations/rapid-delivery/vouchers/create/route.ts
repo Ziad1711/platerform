@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
-import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem } from '@/lib/integrations/rapid-delivery'
+import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem, downloadRapidDeliveryHtml } from '@/lib/integrations/rapid-delivery'
 import type { RapidDeliveryTrackingPayload } from '@/lib/integrations/rapid-delivery'
 
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
+
+function extractShortKeyFromHtml(html: string): string | null {
+  const matches = html.match(/[A-Za-z0-9]{10}/g) || []
+  return matches.find(m => !['Imprimer', 'etiquetes', 'DOCTYPE'].includes(m)) || null
+}
 
 function toRapidDeliveryVoucherErrorMessage(error: unknown) {
   console.error('Rapid Delivery voucher create error:', error)
@@ -174,8 +179,30 @@ export async function POST(request: Request) {
     const finalParcelReadyOrders = []
 
     for (const order of parcelReadyOrders) {
-      const parcelKey = String(order.rapid_delivery_parcel_key || '').trim()
-      const remoteParcel = parcelKey ? await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl) : null
+      let parcelKey = String(order.rapid_delivery_parcel_key || '').trim()
+      let remoteParcel = parcelKey ? await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl) : null
+      
+      // Si la clé est un UUID, on tente de récupérer le numéro de suivi court
+      if (parcelKey.includes('-')) {
+        const item = extractRapidDeliveryPayloadItem(remoteParcel) as RapidDeliveryTrackingPayload | undefined
+        if (!item?.key || String(item.key).includes('-')) {
+          try {
+            const labelHtml = await downloadRapidDeliveryHtml(token, `/parcels/${encodeURIComponent(parcelKey)}/label`, baseUrl)
+            const shortKey = extractShortKeyFromHtml(labelHtml)
+            if (shortKey) {
+              parcelKey = shortKey
+              remoteParcel = await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl)
+              console.log('Resolved short key during voucher creation', { oldKey: order.rapid_delivery_parcel_key, newKey: parcelKey })
+            }
+          } catch (e) {
+            console.warn('Failed to resolve short key during voucher creation', e)
+          }
+        } else {
+          parcelKey = String(item.key).trim()
+          remoteParcel = await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl)
+        }
+      }
+
       const remoteShopKey = getRemoteParcelShopKey(remoteParcel)
 
       if (!remoteParcel || remoteShopKey !== resolvedShopKey) {
@@ -216,7 +243,7 @@ export async function POST(request: Request) {
 
         finalParcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: result.trackingNumber })
       } else {
-        finalParcelReadyOrders.push(order)
+        finalParcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: parcelKey })
       }
     }
 

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem } from '@/lib/integrations/rapid-delivery'
+import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem, downloadRapidDeliveryHtml } from '@/lib/integrations/rapid-delivery'
 import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 
@@ -19,6 +19,14 @@ type OrderLike = {
   order_items?: Array<{ products?: { name?: string | null } | null }> | null
 }
 
+function extractShortKeyFromHtml(html: string): string | null {
+  // Chercher un pattern qui ressemble à un code court dans le HTML du label
+  // Souvent c'est dans une div ou près d'un barcode
+  const matches = html.match(/[A-Za-z0-9]{10}/g) || []
+  // On élimine les mots courants et on prend le premier qui ressemble à un ID unique
+  return matches.find(m => !['Imprimer', 'etiquetes', 'DOCTYPE'].includes(m)) || null
+}
+
 export async function autoCreateRapidDeliveryParcelForOrder(params: {
   admin: AdminClient
   userId: string
@@ -31,7 +39,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
   const now = new Date().toISOString()
   const existingTracking = String(order.tracking_number || '').trim()
 
-  if (existingTracking) {
+  if (existingTracking && !existingTracking.includes('-')) {
     return { warning: '', trackingNumber: existingTracking }
   }
 
@@ -70,6 +78,8 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
   const article = orderProductNames || String(defaultArticleName || '').trim() || 'Commande'
 
   const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integrationId)
+
+  // 1. Création du colis (récupère l'UUID)
   const created = await createRapidDeliveryParcel(token, {
     article,
     price: Number(order.total_selling_price || 0),
@@ -80,13 +90,34 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     recipient: String(order.customer_name || '').trim() || undefined,
   }, baseUrl)
 
-  const initialTrackingNumber = String(created?.data?.key || '').trim()
-  if (!initialTrackingNumber) throw new Error('INVALID_TRACKING_NUMBER')
+  const uuid = String(created?.data?.key || '').trim()
+  if (!uuid) throw new Error('INVALID_TRACKING_NUMBER_UUID')
 
-  // Récupérer le numéro de suivi court (ex: uC6qBO1oBq) via le tracking car l'UUID ne marche pas pour les bons
-  const remoteParcel = await tryTrackRapidDeliveryParcel(token, initialTrackingNumber, baseUrl)
-  const item = extractRapidDeliveryPayloadItem(remoteParcel)
-  const trackingNumber = String(item?.key || initialTrackingNumber).trim()
+  // 2. Récupérer le numéro de suivi court (ex: uC6qBO1oBq)
+  // On attend un peu que le backend génère le code
+  await new Promise(resolve => setTimeout(resolve, 2000))
+
+  let trackingNumber = uuid
+
+  try {
+    // Essayer de le trouver dans le tracking JSON
+    const remoteParcel = await tryTrackRapidDeliveryParcel(token, uuid, baseUrl)
+    const item = extractRapidDeliveryPayloadItem(remoteParcel)
+
+    // Si l'API renvoie toujours l'UUID, on tente de télécharger le label HTML pour extraire le code
+    if (!item?.key || String(item.key).includes('-')) {
+      const labelHtml = await downloadRapidDeliveryHtml(token, `/parcels/${encodeURIComponent(uuid)}/label`, baseUrl)
+      const shortKey = extractShortKeyFromHtml(labelHtml)
+      if (shortKey) {
+        trackingNumber = shortKey
+        console.log('Extracted short key from HTML label', { uuid, shortKey })
+      }
+    } else {
+      trackingNumber = String(item.key).trim()
+    }
+  } catch (e) {
+    console.warn('Failed to fetch short tracking key, falling back to UUID', e)
+  }
 
   const { error: updateOrderError } = await admin
     .from('orders')
@@ -111,7 +142,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
       entity_type: 'parcel',
       rapid_delivery_id: trackingNumber,
       internal_id: order.id,
-      payload: { ...created, remote_parcel: remoteParcel },
+      payload: { ...created, uuid, extracted_tracking: trackingNumber },
       updated_at: now,
     },
     { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
