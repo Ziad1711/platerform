@@ -286,7 +286,7 @@ export default function LivraisonPage() {
                         Télécharger étiquettes
                       </Link>
                       <Link
-                        href={`/dashboard/livraison/vouchers/${encodeURIComponent(voucher.rapid_delivery_id)}`}
+                        href={`/delivery/vouchers/${encodeURIComponent(voucher.rapid_delivery_id)}`}
                         target="_blank"
                         className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                       >
