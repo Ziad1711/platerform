@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel } from '@/lib/integrations/rapid-delivery'
+
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
@@ -47,7 +48,14 @@ async function isValidRapidDeliveryParcel(params: {
 function getRemoteParcelShopKey(parcel: unknown) {
   if (!parcel || typeof parcel !== 'object') return 0
   const record = parcel as Record<string, any>
-  return Number(record.shop?.key || record.shop?.id || record.shop_id || 0) || 0
+  const data = record.data as Record<string, any> | undefined
+  return Number(
+    record.shop?.key || record.shop?.id ||
+    record.shop_id ||
+    data?.shop?.key || data?.shop?.id ||
+    data?.shop_id ||
+    0
+  ) || 0
 }
 
 function getRapidDeliveryVoucherTotalParcels(voucher: unknown) {
@@ -223,17 +231,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVALID_VOUCHER_KEY' }, { status: 502 })
     }
 
-    const remoteVoucher = await getRapidDeliveryVoucher(token, voucherKey, baseUrl)
-    const remoteTotalParcels = getRapidDeliveryVoucherTotalParcels(remoteVoucher)
-    if (remoteTotalParcels <= 0) {
-      console.error('Rapid Delivery voucher created empty remotely', {
+    // Vérifier le total_parcels directement depuis la réponse POST
+    let remoteVoucher: unknown = null
+    const postTotalParcels = getRapidDeliveryVoucherTotalParcels(created)
+    if (postTotalParcels > 0) {
+      // Le POST a déjà confirmé les parcels, pas besoin de vérifier via GET
+      console.log('Rapid Delivery voucher created with parcels confirmed by POST', {
         voucherKey,
-        shop: resolvedShopKey,
-        parcels: finalParcelKeys,
-        created,
-        remoteVoucher,
+        totalParcels: postTotalParcels,
       })
-      return NextResponse.json({ error: 'RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE' }, { status: 502 })
+    } else {
+      // Réessayer GET /vouchers/{key} jusqu'à 3 fois avec délai
+      let remoteTotalParcels = 0
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+        }
+        remoteVoucher = await getRapidDeliveryVoucher(token, voucherKey, baseUrl)
+        remoteTotalParcels = getRapidDeliveryVoucherTotalParcels(remoteVoucher)
+        if (remoteTotalParcels > 0) break
+      }
+
+      if (remoteTotalParcels <= 0) {
+        console.error('Rapid Delivery voucher created empty remotely', {
+          voucherKey,
+          shop: resolvedShopKey,
+          parcels: finalParcelKeys,
+          created,
+        })
+        return NextResponse.json({ error: 'RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE' }, { status: 502 })
+      }
     }
 
     const now = new Date().toISOString()
