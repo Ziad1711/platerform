@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
-import { downloadRapidDeliveryHtml } from '@/lib/integrations/rapid-delivery'
+import { downloadRapidDeliveryFile } from '@/lib/integrations/rapid-delivery'
 import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
+
+const LABEL_VERSIONS = ['v1', 'v2', 'v3']
 
 export async function GET(_request: Request, context: { params: Promise<{ key: string }> }) {
   try {
@@ -28,13 +30,45 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
     }
 
     const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, mapping.integration_id)
-    const html = await downloadRapidDeliveryHtml(token, `/vouchers/${encodeURIComponent(voucherKey)}/labels/v1/download`, baseUrl)
+    let downloaded: Awaited<ReturnType<typeof downloadRapidDeliveryFile>> | null = null
+    let selectedVersion = ''
+    const errors: string[] = []
 
-    return new NextResponse(html, {
+    for (const version of LABEL_VERSIONS) {
+      const path = `/vouchers/${encodeURIComponent(voucherKey)}/labels/${version}/download`
+      try {
+        const file = await downloadRapidDeliveryFile(token, path, baseUrl)
+        console.info('Rapid Delivery voucher labels download result', {
+          voucherKey,
+          version,
+          contentType: file.contentType,
+          byteLength: file.byteLength,
+        })
+
+        if (file.byteLength > 0) {
+          downloaded = file
+          selectedVersion = version
+          break
+        }
+
+        errors.push(`${version}:EMPTY_RESPONSE`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn('Rapid Delivery voucher labels version failed', { voucherKey, version, message })
+        errors.push(`${version}:${message}`)
+      }
+    }
+
+    if (!downloaded) {
+      return NextResponse.json({ error: 'RAPID_DELIVERY_LABELS_EMPTY', details: errors }, { status: 502 })
+    }
+
+    return new NextResponse(downloaded.body, {
       status: 200,
       headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Content-Disposition': `attachment; filename="rapid-delivery-voucher-${voucherKey}-labels-v1.html"`,
+        'Content-Type': downloaded.contentType,
+        'Content-Disposition': downloaded.contentDisposition || `attachment; filename="rapid-delivery-voucher-${voucherKey}-labels-${selectedVersion}.html"`,
+        'Content-Length': String(downloaded.byteLength),
       },
     })
   } catch (error) {

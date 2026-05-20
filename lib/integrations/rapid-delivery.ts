@@ -85,6 +85,11 @@ export type RapidDeliveryState = {
 
 export type RapidDeliveryTrackingPayload = {
   key?: string | number
+  shop?: {
+    id?: string | number | null
+    shop_name?: string | null
+    key?: string | number | null
+  } | null
   state?: {
     state_name?: string | null
     key?: string | number | null
@@ -237,6 +242,18 @@ export async function getRapidDeliveryVoucher(token: string, key: string, baseUr
   return rapidDeliveryFetch<any>({ token, baseUrl, path: `/vouchers/${encodeURIComponent(key)}` })
 }
 
+export async function tryTrackRapidDeliveryParcel(token: string, trackingNumber: string, baseUrl?: string | null) {
+  try {
+    return await trackRapidDeliveryParcel(token, trackingNumber, baseUrl)
+  } catch (error) {
+    console.warn('Rapid Delivery parcel remote validation failed', {
+      trackingNumber,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+}
+
 export async function downloadRapidDeliveryHtml(token: string, path: string, baseUrl?: string | null) {
   const response = await fetch(`${resolveRapidDeliveryApiBaseUrl(baseUrl)}${path}`, {
     method: 'GET',
@@ -252,4 +269,30 @@ export async function downloadRapidDeliveryHtml(token: string, path: string, bas
   }
 
   return response.text()
+}
+
+export async function downloadRapidDeliveryFile(token: string, path: string, baseUrl?: string | null) {
+  const response = await fetch(`${resolveRapidDeliveryApiBaseUrl(baseUrl)}${path}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'text/html,application/pdf,application/octet-stream,*/*',
+    },
+  })
+
+  const contentType = response.headers.get('content-type') || 'text/html; charset=utf-8'
+  const contentDisposition = response.headers.get('content-disposition') || ''
+  const bytes = await response.arrayBuffer()
+
+  if (!response.ok) {
+    const message = new TextDecoder().decode(bytes).slice(0, 500)
+    throw new Error(`RAPID_DELIVERY_DOWNLOAD_ERROR:${response.status}:${message}`)
+  }
+
+  return {
+    body: bytes,
+    contentType,
+    contentDisposition,
+    byteLength: bytes.byteLength,
+  }
 }
