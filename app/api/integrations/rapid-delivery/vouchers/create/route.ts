@@ -221,9 +221,33 @@ export async function POST(request: Request) {
     }
 
     const finalParcelKeys = finalParcelReadyOrders.map((order) => String(order.rapid_delivery_parcel_key))
+
+    // Récupérer l'ID numérique de chaque colis via GET /parcels/{key}
+    // L'API Rapid Delivery peut ne pas reconnaître les UUIDs dans le tableau parcels du voucher
+    const resolvedParcelIds: Array<string | number> = []
+    for (const parcelKey of finalParcelKeys) {
+      const remoteParcel = await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl)
+      if (remoteParcel && typeof remoteParcel === 'object') {
+        const record = remoteParcel as Record<string, any>
+        const data = record.data as Record<string, any> | undefined
+        // Chercher un ID numérique dans la réponse (id, key, ou data.id / data.key)
+        const numericId = Number(
+          record.id || record.key ||
+          data?.id || data?.key ||
+          0
+        )
+        if (numericId > 0) {
+          resolvedParcelIds.push(numericId)
+          continue
+        }
+      }
+      // Fallback: envoyer l'UUID string
+      resolvedParcelIds.push(parcelKey)
+    }
+
     const created = await createRapidDeliveryVoucher(token, {
       shop: resolvedShopKey,
-      parcels: finalParcelKeys.map((value) => Number(value) || value),
+      parcels: resolvedParcelIds,
     }, baseUrl)
 
     const voucherKey = String(created?.data?.key || '').trim()

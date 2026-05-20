@@ -76,7 +76,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     phone: normalizeRapidDeliveryPhone(order.phone || ''),
     city: cityKey,
     shop: resolvedShopKey,
-    address: String(order.address || '').trim() || undefined,
+    address: (order.address && String(order.address).trim()) || undefined,
     recipient: String(order.customer_name || '').trim() || undefined,
   }, baseUrl)
 
