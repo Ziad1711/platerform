@@ -96,7 +96,6 @@ export default function LivraisonPage() {
         .select('id, customer_name, phone, city, total_selling_price, rapid_delivery_parcel_key, confirmed_at, rapid_delivery_voucher_key, status')
         .eq('store_id', currentStoreId!)
         .eq('status', 'confirmed')
-        .not('rapid_delivery_parcel_key', 'is', null)
         .is('rapid_delivery_voucher_key', null)
         .order('confirmed_at', { ascending: false })
 
@@ -204,7 +203,7 @@ export default function LivraisonPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Colis confirmés à ramasser</h2>
-                <p className="text-xs text-muted-foreground">Seuls les colis avec statut confirmé apparaissent ici pour créer un bon de ramassage.</p>
+                <p className="text-xs text-muted-foreground">Les commandes confirmées apparaissent ici. Si le colis n'existe pas encore, il sera créé automatiquement avant le bon.</p>
               </div>
               <button
                 type="button"
@@ -233,7 +232,7 @@ export default function LivraisonPage() {
                           onChange={(e) => setSelectedOrderIds(e.target.checked ? confirmedParcels.map((row: any) => row.id) : [])}
                         />
                       </th>
-                      <th className="px-2 py-2">Tracking</th>
+                      <th className="px-2 py-2">Colis</th>
                       <th className="px-2 py-2">Client</th>
                       <th className="px-2 py-2">Téléphone</th>
                       <th className="px-2 py-2">Ville</th>
@@ -252,7 +251,7 @@ export default function LivraisonPage() {
                               onChange={(e) => setSelectedOrderIds((current) => e.target.checked ? [...current, order.id] : current.filter((id) => id !== order.id))}
                             />
                           </td>
-                          <td className="px-2 py-2 text-foreground">{order.rapid_delivery_parcel_key}</td>
+                          <td className="px-2 py-2 text-foreground">{order.rapid_delivery_parcel_key || 'À créer'}</td>
                           <td className="px-2 py-2 text-foreground">{order.customer_name || '-'}</td>
                           <td className="px-2 py-2">{order.phone || '-'}</td>
                           <td className="px-2 py-2">{order.city || '-'}</td>

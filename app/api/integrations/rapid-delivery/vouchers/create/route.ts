@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRapidDeliveryVoucher } from '@/lib/integrations/rapid-delivery'
+import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
+import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 
 function toRapidDeliveryVoucherErrorMessage(error: unknown) {
@@ -62,22 +64,49 @@ export async function POST(request: Request) {
 
     const { data: orders, error: ordersError } = await admin
       .from('orders')
-      .select('id, status, rapid_delivery_parcel_key, rapid_delivery_voucher_key, store_id')
+      .select('id, status, rapid_delivery_parcel_key, rapid_delivery_voucher_key, store_id, city, address, phone, customer_name, total_selling_price, tracking_number, rapid_delivery_city_key, order_items(quantity, products(name))')
       .eq('store_id', storeId)
       .in('id', orderIds)
 
     if (ordersError) throw ordersError
 
-    const validOrders = (orders || []).filter((order) =>
-      order.status === 'confirmed' && order.rapid_delivery_parcel_key && !order.rapid_delivery_voucher_key
-    )
+    const confirmedOrders = (orders || []).filter((order) => order.status === 'confirmed' && !order.rapid_delivery_voucher_key)
 
-    if (validOrders.length !== orderIds.length) {
+    if (confirmedOrders.length !== orderIds.length) {
       return NextResponse.json({ error: 'INVALID_ORDERS_FOR_VOUCHER' }, { status: 400 })
     }
 
+    const parcelReadyOrders = []
+    for (const order of confirmedOrders) {
+      if (!order.rapid_delivery_parcel_key) {
+        await normalizeOrderCityById(order.id, admin)
+        const result = await autoCreateRapidDeliveryParcelForOrder({
+          admin,
+          userId: user.id,
+          integrationId: config.integration_id,
+          order: {
+            ...order,
+            order_items: (order.order_items || []).map((oi: any) => ({
+              ...oi,
+              products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+            })),
+          },
+          defaultShopKey: resolvedShopKey,
+          defaultArticleName: 'Commande',
+        })
+
+        if (!result.trackingNumber) {
+          return NextResponse.json({ error: result.warning || 'RAPID_DELIVERY_PARCEL_NOT_CREATED' }, { status: 400 })
+        }
+
+        parcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: result.trackingNumber })
+      } else {
+        parcelReadyOrders.push(order)
+      }
+    }
+
     const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, config.integration_id)
-    const parcelKeys = validOrders.map((order) => String(order.rapid_delivery_parcel_key))
+    const parcelKeys = parcelReadyOrders.map((order) => String(order.rapid_delivery_parcel_key))
     const created = await createRapidDeliveryVoucher(token, {
       shop: resolvedShopKey,
       parcels: parcelKeys,
@@ -97,7 +126,7 @@ export async function POST(request: Request) {
         delivery_status: 'pickup_pending',
         updated_at: now,
       })
-      .in('id', validOrders.map((order) => order.id))
+      .in('id', parcelReadyOrders.map((order) => order.id))
 
     if (updateOrdersError) throw updateOrdersError
 
@@ -108,15 +137,15 @@ export async function POST(request: Request) {
         store_id: storeId,
         entity_type: 'voucher',
         rapid_delivery_id: voucherKey,
-        internal_id: validOrders[0].id,
-        payload: { ...created, order_ids: validOrders.map((order) => order.id), parcels: parcelKeys },
+        internal_id: parcelReadyOrders[0].id,
+        payload: { ...created, order_ids: parcelReadyOrders.map((order) => order.id), parcels: parcelKeys },
         updated_at: now,
       },
       { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
     )
 
     if (mappingError) throw mappingError
-    return NextResponse.json({ ok: true, voucherKey, count: validOrders.length, message: created.message })
+    return NextResponse.json({ ok: true, voucherKey, count: parcelReadyOrders.length, message: created.message })
   } catch (error) {
     const message = toRapidDeliveryVoucherErrorMessage(error)
     return NextResponse.json({ error: message }, { status: 500 })
