@@ -47,6 +47,32 @@ export default function LivraisonPage() {
     },
   })
 
+  const { data: rapidDeliveryShops = [] } = useQuery({
+    queryKey: ['delivery-page-rapid-shops', currentStoreId, rapidDeliveryConfig?.integration_id],
+    enabled: !!currentStoreId && !!rapidDeliveryConfig?.integration_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_shops')
+        .select('id, external_name, external_shop_id')
+        .eq('store_id', currentStoreId!)
+        .eq('integration_id', rapidDeliveryConfig!.integration_id)
+        .order('external_name', { ascending: true })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const activeDeliveryCompanies = [
+    ...deliveryCompanies,
+    ...rapidDeliveryShops.map((shop: any) => ({
+      id: `rapid-${shop.id}`,
+      name: shop.external_name || `Shop #${shop.external_shop_id}`,
+      api_provider: 'rapid-delivery',
+      is_active: true,
+    })),
+  ]
+
   const { data: customCities = [] } = useQuery({
     queryKey: ['delivery-page-custom-cities', rapidDeliveryConfig?.integration_id],
     enabled: !!rapidDeliveryConfig?.integration_id,
@@ -166,7 +192,7 @@ export default function LivraisonPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="rounded-xl border bg-card p-4">
               <div className="text-sm text-muted-foreground">Sociétés actives</div>
-              <div className="mt-2 text-2xl font-semibold text-foreground">{deliveryCompanies.length}</div>
+              <div className="mt-2 text-2xl font-semibold text-foreground">{activeDeliveryCompanies.length}</div>
             </div>
             <div className="rounded-xl border bg-card p-4">
               <div className="text-sm text-muted-foreground">Mode Rapid Delivery</div>
@@ -277,11 +303,11 @@ export default function LivraisonPage() {
 
           <div className="rounded-xl border bg-card p-4 space-y-3">
             <h2 className="text-lg font-semibold text-foreground">Sociétés de livraison</h2>
-            {deliveryCompanies.length === 0 ? (
+            {activeDeliveryCompanies.length === 0 ? (
               <p className="text-sm text-muted-foreground">Aucune société active.</p>
             ) : (
               <div className="space-y-2">
-                {deliveryCompanies.map((company: any) => (
+                {activeDeliveryCompanies.map((company: any) => (
                   <div key={company.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
                     <div>
                       <div className="font-medium text-foreground">{company.name}</div>
