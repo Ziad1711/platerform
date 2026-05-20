@@ -25,6 +25,25 @@ function toRapidDeliveryVoucherErrorMessage(error: unknown) {
   return [message, details, hint].filter(Boolean).join(' | ') || fallbackMessage
 }
 
+async function isValidRapidDeliveryParcel(params: {
+  admin: ReturnType<typeof createAdminClient>
+  integrationId: string
+  storeId: string
+  parcelKey: string
+}) {
+  const { data, error } = await params.admin
+    .from('rapid_delivery_entity_mappings')
+    .select('rapid_delivery_id')
+    .eq('integration_id', params.integrationId)
+    .eq('store_id', params.storeId)
+    .eq('entity_type', 'parcel')
+    .eq('rapid_delivery_id', params.parcelKey)
+    .maybeSingle()
+
+  if (error) throw error
+  return Boolean(data?.rapid_delivery_id)
+}
+
 export async function POST(request: Request) {
   try {
     assertTrustedOrigin(request)
@@ -78,7 +97,31 @@ export async function POST(request: Request) {
 
     const parcelReadyOrders = []
     for (const order of confirmedOrders) {
-      if (!order.rapid_delivery_parcel_key) {
+      const parcelKey = String(order.rapid_delivery_parcel_key || '').trim()
+      const hasValidParcel = parcelKey
+        ? await isValidRapidDeliveryParcel({
+          admin,
+          integrationId: config.integration_id,
+          storeId,
+          parcelKey,
+        })
+        : false
+
+      if (!hasValidParcel) {
+        if (parcelKey) {
+          console.warn('Rapid Delivery voucher ignored invalid parcel key', {
+            orderId: order.id,
+            parcelKey,
+            storeId,
+            integrationId: config.integration_id,
+          })
+        }
+
+        await admin
+          .from('orders')
+          .update({ rapid_delivery_parcel_key: null, updated_at: new Date().toISOString() })
+          .eq('id', order.id)
+
         await normalizeOrderCityById(order.id, admin)
         const result = await autoCreateRapidDeliveryParcelForOrder({
           admin,
@@ -86,6 +129,8 @@ export async function POST(request: Request) {
           integrationId: config.integration_id,
           order: {
             ...order,
+            tracking_number: null,
+            rapid_delivery_parcel_key: null,
             order_items: (order.order_items || []).map((oi: any) => ({
               ...oi,
               products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
@@ -101,7 +146,7 @@ export async function POST(request: Request) {
 
         parcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: result.trackingNumber })
       } else {
-        parcelReadyOrders.push(order)
+        parcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: parcelKey })
       }
     }
 

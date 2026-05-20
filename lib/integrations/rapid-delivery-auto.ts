@@ -15,6 +15,7 @@ type OrderLike = {
   total_selling_price?: number | string | null
   tracking_number?: string | null
   rapid_delivery_city_key?: number | string | null
+  rapid_delivery_parcel_key?: string | null
   order_items?: Array<{ products?: { name?: string | null } | null }> | null
 }
 
