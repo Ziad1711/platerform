@@ -232,13 +232,8 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
         const ordersCount = aggregated.orders_count
         const deliveredOrdersCount = aggregated.delivered_count
-        const totalSellingPrice = aggregated.revenue
-        const deliveryFeesCharged = aggregated.delivery_cost // Note: Assuming this is delivery_charge_to_customer based on RPC
-        
-        // Match TopProducts: Revenue should only be product items revenue, excluding delivery fees
-        // In the current database, total_selling_price includes delivery_charge_to_customer
-        // So we subtract it to get the product-only revenue
-        const revenue = totalSellingPrice - deliveryFeesCharged
+        // RPC returns product-only revenue from order_items, same logic as TopProducts.
+        const revenue = aggregated.revenue
         
         const purchaseCost = aggregated.purchase_cost
         const adSpendTotal = aggregated.ad_spend
