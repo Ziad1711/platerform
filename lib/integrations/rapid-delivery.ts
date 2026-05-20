@@ -1,7 +1,19 @@
-const RAPID_DELIVERY_API_BASE_URL = 'https://www.rapiddelivery.ma/api/v1'
+export const RAPID_DELIVERY_STANDARD_API_BASE_URL = 'https://www.rapiddelivery.ma/api/v1'
+export const RAPID_DELIVERY_SPECIAL_API_BASE_URL = 'https://www.marocgodelivery.com/api/v1'
+
+export type RapidDeliveryEndpointType = 'standard' | 'special'
+
+export function resolveRapidDeliveryApiBaseUrl(value?: string | null) {
+  const raw = String(value || '').trim()
+  if (raw === 'special' || raw.includes('marocgodelivery.com')) return RAPID_DELIVERY_SPECIAL_API_BASE_URL
+  if (raw === 'standard' || raw.includes('rapiddelivery.ma')) return RAPID_DELIVERY_STANDARD_API_BASE_URL
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, '')
+  return RAPID_DELIVERY_STANDARD_API_BASE_URL
+}
 
 type RapidDeliveryRequestInit = {
   token: string
+  baseUrl?: string | null
   method?: 'GET' | 'POST'
   path: string
   body?: Record<string, unknown>
@@ -10,8 +22,9 @@ type RapidDeliveryRequestInit = {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function rapidDeliveryFetch<T>(params: RapidDeliveryRequestInit): Promise<T> {
+  const baseUrl = resolveRapidDeliveryApiBaseUrl(params.baseUrl)
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await fetch(`${RAPID_DELIVERY_API_BASE_URL}${params.path}`, {
+    const response = await fetch(`${baseUrl}${params.path}`, {
       method: params.method || 'GET',
       headers: {
         Authorization: `Bearer ${params.token}`,
@@ -184,46 +197,48 @@ export function normalizeRapidDeliveryPhone(value: string) {
   return String(value || '').replace(/\s+/g, '').trim()
 }
 
-export async function listRapidDeliveryShops(token: string) {
-  return rapidDeliveryFetch<RapidDeliveryShop[]>({ token, path: '/shops' })
+export async function listRapidDeliveryShops(token: string, baseUrl?: string | null) {
+  return rapidDeliveryFetch<RapidDeliveryShop[]>({ token, baseUrl, path: '/shops' })
 }
 
-export async function listRapidDeliveryCities(token: string) {
-  return rapidDeliveryFetch<RapidDeliveryCity[]>({ token, path: '/cities' })
+export async function listRapidDeliveryCities(token: string, baseUrl?: string | null) {
+  return rapidDeliveryFetch<RapidDeliveryCity[]>({ token, baseUrl, path: '/cities' })
 }
 
-export async function listRapidDeliveryStates(token: string) {
-  return rapidDeliveryFetch<RapidDeliveryState[]>({ token, path: '/states' })
+export async function listRapidDeliveryStates(token: string, baseUrl?: string | null) {
+  return rapidDeliveryFetch<RapidDeliveryState[]>({ token, baseUrl, path: '/states' })
 }
 
-export async function createRapidDeliveryParcel(token: string, payload: RapidDeliveryParcelPayload) {
+export async function createRapidDeliveryParcel(token: string, payload: RapidDeliveryParcelPayload, baseUrl?: string | null) {
   return rapidDeliveryFetch<{ message: string; data: { key: string } }>({
     token,
+    baseUrl,
     path: '/parcels',
     method: 'POST',
     body: payload,
   })
 }
 
-export async function trackRapidDeliveryParcel(token: string, trackingNumber: string) {
-  return rapidDeliveryFetch<RapidDeliveryTrackingPayload>({ token, path: `/parcels/${encodeURIComponent(trackingNumber)}` })
+export async function trackRapidDeliveryParcel(token: string, trackingNumber: string, baseUrl?: string | null) {
+  return rapidDeliveryFetch<RapidDeliveryTrackingPayload>({ token, baseUrl, path: `/parcels/${encodeURIComponent(trackingNumber)}` })
 }
 
-export async function createRapidDeliveryVoucher(token: string, payload: { shop: number; parcels: Array<string | number> }) {
+export async function createRapidDeliveryVoucher(token: string, payload: { shop: number; parcels: Array<string | number> }, baseUrl?: string | null) {
   return rapidDeliveryFetch<{ message: string; data: { key: string } }>({
     token,
+    baseUrl,
     path: '/vouchers',
     method: 'POST',
     body: payload,
   })
 }
 
-export async function getRapidDeliveryVoucher(token: string, key: string) {
-  return rapidDeliveryFetch<any>({ token, path: `/vouchers/${encodeURIComponent(key)}` })
+export async function getRapidDeliveryVoucher(token: string, key: string, baseUrl?: string | null) {
+  return rapidDeliveryFetch<any>({ token, baseUrl, path: `/vouchers/${encodeURIComponent(key)}` })
 }
 
-export async function downloadRapidDeliveryHtml(token: string, path: string) {
-  const response = await fetch(`${RAPID_DELIVERY_API_BASE_URL}${path}`, {
+export async function downloadRapidDeliveryHtml(token: string, path: string, baseUrl?: string | null) {
+  const response = await fetch(`${resolveRapidDeliveryApiBaseUrl(baseUrl)}${path}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,

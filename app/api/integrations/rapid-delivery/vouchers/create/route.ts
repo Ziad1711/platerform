@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRapidDeliveryVoucher } from '@/lib/integrations/rapid-delivery'
-import { getDecryptedIntegrationToken, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
+import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 
 function toRapidDeliveryVoucherErrorMessage(error: unknown) {
   console.error('Rapid Delivery voucher create error:', error)
@@ -76,12 +76,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVALID_ORDERS_FOR_VOUCHER' }, { status: 400 })
     }
 
-    const token = await getDecryptedIntegrationToken(admin, config.integration_id)
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, config.integration_id)
     const parcelKeys = validOrders.map((order) => String(order.rapid_delivery_parcel_key))
     const created = await createRapidDeliveryVoucher(token, {
       shop: resolvedShopKey,
       parcels: parcelKeys,
-    })
+    }, baseUrl)
 
     const voucherKey = String(created?.data?.key || '').trim()
     if (!voucherKey) {

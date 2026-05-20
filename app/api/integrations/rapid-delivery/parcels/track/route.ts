@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { getRapidDeliveryStateName, mapRapidDeliveryStateToOrderStatus, trackRapidDeliveryParcel } from '@/lib/integrations/rapid-delivery'
-import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
+import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
 
 export async function GET(request: Request) {
   try {
@@ -26,8 +26,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'RAPID_DELIVERY_NOT_CONNECTED' }, { status: 400 })
     }
 
-    const token = await getDecryptedIntegrationToken(admin, integration.id)
-    const payload = await trackRapidDeliveryParcel(token, trackingNumber)
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integration.id)
+    const payload = await trackRapidDeliveryParcel(token, trackingNumber, baseUrl)
     const stateName = getRapidDeliveryStateName(payload)
     const mapped = mapRapidDeliveryStateToOrderStatus(stateName)
 

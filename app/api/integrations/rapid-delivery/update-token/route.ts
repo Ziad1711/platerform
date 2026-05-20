@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
-import { listRapidDeliveryCities, listRapidDeliveryShops } from '@/lib/integrations/rapid-delivery'
+import { listRapidDeliveryCities, listRapidDeliveryShops, resolveRapidDeliveryApiBaseUrl } from '@/lib/integrations/rapid-delivery'
 import { encryptSecret } from '@/lib/security/crypto'
 
 export async function POST(request: Request) {
@@ -28,14 +28,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'RAPID_DELIVERY_NOT_CONNECTED' }, { status: 400 })
     }
 
-    const [cities, shops] = await Promise.all([
-      listRapidDeliveryCities(apiToken),
-      listRapidDeliveryShops(apiToken),
-    ])
-
     const now = new Date().toISOString()
     const integrationId = config.integration_id
     const encryptedToken = encryptSecret(apiToken)
+    const { data: integrationRow, error: integrationRowError } = await admin
+      .from('integrations')
+      .select('store_domain')
+      .eq('id', integrationId)
+      .eq('user_id', user.id)
+      .single()
+
+    if (integrationRowError) throw integrationRowError
+
+    const baseUrl = resolveRapidDeliveryApiBaseUrl(integrationRow?.store_domain)
+    const [cities, shops] = await Promise.all([
+      listRapidDeliveryCities(apiToken, baseUrl),
+      listRapidDeliveryShops(apiToken, baseUrl),
+    ])
 
     const { error: integrationError } = await admin
       .from('integrations')

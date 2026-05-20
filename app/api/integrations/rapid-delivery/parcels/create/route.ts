@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone } from '@/lib/integrations/rapid-delivery'
-import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
+import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
 
 export async function POST(request: Request) {
   try {
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     }
     if (!order) return NextResponse.json({ error: 'ORDER_NOT_FOUND' }, { status: 404 })
 
-    const token = await getDecryptedIntegrationToken(admin, config.integration_id)
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, config.integration_id)
 
     const article = (order.order_items || [])
       .map((item: any) => String(item?.products?.name || '').trim())
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       address: String(order.address || '').trim() || undefined,
       recipient: String(order.customer_name || '').trim() || undefined,
       remark: String(body.remark || '').trim() || undefined,
-    })
+    }, baseUrl)
 
     const trackingNumber = String(created?.data?.key || '')
     if (!trackingNumber) return NextResponse.json({ error: 'INVALID_TRACKING_NUMBER' }, { status: 502 })

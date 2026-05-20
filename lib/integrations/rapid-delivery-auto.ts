@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone } from '@/lib/integrations/rapid-delivery'
-import { getDecryptedIntegrationToken, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
+import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 
 type AdminClient = SupabaseClient<any, 'public', any>
@@ -68,7 +68,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
 
   const article = orderProductNames || String(defaultArticleName || '').trim() || 'Commande'
 
-  const token = await getDecryptedIntegrationToken(admin, integrationId)
+  const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integrationId)
   const created = await createRapidDeliveryParcel(token, {
     article,
     price: Number(order.total_selling_price || 0),
@@ -77,7 +77,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     shop: resolvedShopKey,
     address: String(order.address || '').trim() || undefined,
     recipient: String(order.customer_name || '').trim() || undefined,
-  })
+  }, baseUrl)
 
   const trackingNumber = String(created?.data?.key || '').trim()
   if (!trackingNumber) throw new Error('INVALID_TRACKING_NUMBER')

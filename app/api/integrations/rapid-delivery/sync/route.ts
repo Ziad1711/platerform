@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { listRapidDeliveryCities, listRapidDeliveryShops, listRapidDeliveryStates } from '@/lib/integrations/rapid-delivery'
 import {
-  getDecryptedIntegrationToken,
+  getRapidDeliveryIntegrationCredentials,
   getRapidDeliveryProviderId,
   syncDeliveryShops,
   syncDeliveryStates,
@@ -45,13 +45,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'RAPID_DELIVERY_NOT_CONNECTED' }, { status: 400 })
     }
 
-    const token = await getDecryptedIntegrationToken(admin, integration.id)
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integration.id)
     const providerId = await getRapidDeliveryProviderId(admin)
 
     const [shops, cities, states, mappedShopsResult] = await Promise.all([
-      listRapidDeliveryShops(token),
-      listRapidDeliveryCities(token),
-      listRapidDeliveryStates(token),
+      listRapidDeliveryShops(token, baseUrl),
+      listRapidDeliveryCities(token, baseUrl),
+      listRapidDeliveryStates(token, baseUrl),
       admin
         .from('delivery_shops')
         .select('external_shop_id, store_id')

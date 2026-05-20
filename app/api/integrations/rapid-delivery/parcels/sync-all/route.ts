@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
-import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
+import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
 import { getRapidDeliveryStateName, mapRapidDeliveryStateToOrderStatus, trackRapidDeliveryParcel } from '@/lib/integrations/rapid-delivery'
 
 const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused']
@@ -23,7 +23,7 @@ export async function POST() {
       return NextResponse.json({ error: 'RAPID_DELIVERY_NOT_CONNECTED' }, { status: 400 })
     }
 
-    const token = await getDecryptedIntegrationToken(admin, integration.id)
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integration.id)
     const { data: orders, error: ordersError } = await admin
       .from('orders')
       .select('id, tracking_number, status')
@@ -41,7 +41,7 @@ export async function POST() {
         const trackingNumber = String(order.tracking_number || '').trim()
         if (!trackingNumber) continue
 
-        const payload = await trackRapidDeliveryParcel(token, trackingNumber)
+        const payload = await trackRapidDeliveryParcel(token, trackingNumber, baseUrl)
         const mapped = mapRapidDeliveryStateToOrderStatus(getRapidDeliveryStateName(payload))
         const now = new Date().toISOString()
         const updatePayload: Record<string, unknown> = {

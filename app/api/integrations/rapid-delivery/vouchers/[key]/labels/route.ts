@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { downloadRapidDeliveryHtml } from '@/lib/integrations/rapid-delivery'
-import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
+import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
 
 export async function GET(_request: Request, context: { params: Promise<{ key: string }> }) {
   try {
@@ -27,8 +27,8 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
       return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
     }
 
-    const token = await getDecryptedIntegrationToken(admin, mapping.integration_id)
-    const html = await downloadRapidDeliveryHtml(token, `/vouchers/${encodeURIComponent(voucherKey)}/labels/v1/download`)
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, mapping.integration_id)
+    const html = await downloadRapidDeliveryHtml(token, `/vouchers/${encodeURIComponent(voucherKey)}/labels/v1/download`, baseUrl)
 
     return new NextResponse(html, {
       status: 200,

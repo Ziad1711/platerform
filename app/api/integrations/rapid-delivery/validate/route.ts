@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { assertTrustedOrigin, requireAuthenticatedUser } from '@/lib/assistant/security'
-import { listRapidDeliveryShops } from '@/lib/integrations/rapid-delivery'
+import { listRapidDeliveryShops, resolveRapidDeliveryApiBaseUrl } from '@/lib/integrations/rapid-delivery'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listUserStores } from '@/lib/integrations/rapid-delivery-connect'
 
@@ -39,13 +39,14 @@ export async function POST(request: Request) {
   try {
     assertTrustedOrigin(request)
     const { user } = await requireAuthenticatedUser()
-    const body = (await request.json().catch(() => ({}))) as { apiToken?: string }
+    const body = (await request.json().catch(() => ({}))) as { apiToken?: string; endpointType?: string }
     const apiToken = String(body.apiToken || '').trim()
+    const baseUrl = resolveRapidDeliveryApiBaseUrl(body.endpointType)
 
     if (!apiToken) return NextResponse.json({ error: 'MISSING_API_TOKEN' }, { status: 400 })
 
     const [shops, stores] = await Promise.all([
-      listRapidDeliveryShops(apiToken),
+      listRapidDeliveryShops(apiToken, baseUrl),
       listUserStores(createAdminClient(), user.id),
     ])
 
