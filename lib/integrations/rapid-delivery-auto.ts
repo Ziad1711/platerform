@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone } from '@/lib/integrations/rapid-delivery'
+import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem } from '@/lib/integrations/rapid-delivery'
 import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 
@@ -80,8 +80,13 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     recipient: String(order.customer_name || '').trim() || undefined,
   }, baseUrl)
 
-  const trackingNumber = String(created?.data?.key || '').trim()
-  if (!trackingNumber) throw new Error('INVALID_TRACKING_NUMBER')
+  const initialTrackingNumber = String(created?.data?.key || '').trim()
+  if (!initialTrackingNumber) throw new Error('INVALID_TRACKING_NUMBER')
+
+  // Récupérer le numéro de suivi court (ex: uC6qBO1oBq) via le tracking car l'UUID ne marche pas pour les bons
+  const remoteParcel = await tryTrackRapidDeliveryParcel(token, initialTrackingNumber, baseUrl)
+  const item = extractRapidDeliveryPayloadItem(remoteParcel)
+  const trackingNumber = String(item?.key || initialTrackingNumber).trim()
 
   const { error: updateOrderError } = await admin
     .from('orders')
@@ -106,7 +111,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
       entity_type: 'parcel',
       rapid_delivery_id: trackingNumber,
       internal_id: order.id,
-      payload: created,
+      payload: { ...created, remote_parcel: remoteParcel },
       updated_at: now,
     },
     { onConflict: 'integration_id,entity_type,rapid_delivery_id' }

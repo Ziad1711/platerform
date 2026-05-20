@@ -104,7 +104,7 @@ export type RapidDeliveryMappedOrderStatus = {
   rawStatus: string
 }
 
-function extractRapidDeliveryPayloadItem(payload: RapidDeliveryTrackingPayload | unknown) {
+export function extractRapidDeliveryPayloadItem(payload: RapidDeliveryTrackingPayload | unknown) {
   if (Array.isArray(payload)) return payload[0] as Record<string, unknown> | undefined
   if (payload && typeof payload === 'object') {
     const record = payload as Record<string, unknown>

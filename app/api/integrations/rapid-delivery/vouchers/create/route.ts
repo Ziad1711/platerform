@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
-import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel } from '@/lib/integrations/rapid-delivery'
+import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem } from '@/lib/integrations/rapid-delivery'
 
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
@@ -46,22 +46,21 @@ async function isValidRapidDeliveryParcel(params: {
 }
 
 function getRemoteParcelShopKey(parcel: unknown) {
-  if (!parcel || typeof parcel !== 'object') return 0
-  const record = parcel as Record<string, any>
-  const data = record.data as Record<string, any> | undefined
+  const item = extractRapidDeliveryPayloadItem(parcel)
+  if (!item) return 0
+  
   return Number(
-    record.shop?.key || record.shop?.id ||
-    record.shop_id ||
-    data?.shop?.key || data?.shop?.id ||
-    data?.shop_id ||
+    item.shop?.key || item.shop?.id ||
+    item.shop_id ||
     0
   ) || 0
 }
 
 function getRapidDeliveryVoucherTotalParcels(voucher: unknown) {
-  if (!voucher || typeof voucher !== 'object') return 0
-  const record = voucher as Record<string, any>
-  return Number(record.total_parcels || record.parcels_count || record.data?.total_parcels || record.data?.parcels_count || 0) || 0
+  const item = extractRapidDeliveryPayloadItem(voucher)
+  if (!item) return 0
+  
+  return Number(item.total_parcels || item.parcels_count || 0) || 0
 }
 
 export async function POST(request: Request) {
@@ -220,7 +219,10 @@ export async function POST(request: Request) {
       }
     }
 
-    const finalParcelKeys = finalParcelReadyOrders.map((order) => String(order.rapid_delivery_parcel_key))
+    const finalParcelKeys = finalParcelReadyOrders.map((order) => {
+      const key = String(order.rapid_delivery_parcel_key || '').trim()
+      return /^\d+$/.test(key) ? Number(key) : key
+    })
 
     const created = await createRapidDeliveryVoucher(token, {
       shop: resolvedShopKey,
