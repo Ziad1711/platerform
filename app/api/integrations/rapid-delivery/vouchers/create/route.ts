@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem } from '@/lib/integrations/rapid-delivery'
+import type { RapidDeliveryTrackingPayload } from '@/lib/integrations/rapid-delivery'
 
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
@@ -46,7 +47,7 @@ async function isValidRapidDeliveryParcel(params: {
 }
 
 function getRemoteParcelShopKey(parcel: unknown) {
-  const item = extractRapidDeliveryPayloadItem(parcel)
+  const item = extractRapidDeliveryPayloadItem(parcel) as RapidDeliveryTrackingPayload | undefined
   if (!item) return 0
   
   return Number(
@@ -57,7 +58,7 @@ function getRemoteParcelShopKey(parcel: unknown) {
 }
 
 function getRapidDeliveryVoucherTotalParcels(voucher: unknown) {
-  const item = extractRapidDeliveryPayloadItem(voucher)
+  const item = extractRapidDeliveryPayloadItem(voucher) as Record<string, any> | undefined
   if (!item) return 0
   
   return Number(item.total_parcels || item.parcels_count || 0) || 0
