@@ -2030,70 +2030,70 @@ export default function VentesPage() {
         throw new Error('Aucune ligne valide à importer.')
       }
 
-  const dedupedRows: Array<{
-    rowNumber: number
-    payload: Record<string, any>
-    linkedProductId: string | null
-    linkedUnitPurchaseCost: number
-  }> = validRows
-  const duplicates = 0
+      const dedupedRows: Array<{
+        rowNumber: number
+        payload: Record<string, any>
+        linkedProductId: string | null
+        linkedUnitPurchaseCost: number
+      }> = validRows
+      const duplicates = 0
 
-  if (dedupedRows.length > 0) {
-    const CHUNK_SIZE = 200
-    const totalToInsert = dedupedRows.length
-    setImportProgress({ processed: 0, total: totalToInsert, phase: 'Insertion des commandes...' })
-    for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
-      const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
-      const chunk = chunkRows.map((row) => row.payload)
-      setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Insertion des commandes...' })
-      const { data: insertedOrders, error } = await supabase
-        .from('orders')
-        .insert(chunk)
-        .select('id, phone, order_date, total_selling_price')
-      if (error) throw error
+      if (dedupedRows.length > 0) {
+        const CHUNK_SIZE = 200
+        const totalToInsert = dedupedRows.length
+        setImportProgress({ processed: 0, total: totalToInsert, phase: 'Insertion des commandes...' })
+        for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
+          const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
+          const chunk = chunkRows.map((row) => row.payload)
+          setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Insertion des commandes...' })
+          const { data: insertedOrders, error } = await supabase
+            .from('orders')
+            .insert(chunk)
+            .select('id, phone, order_date, total_selling_price')
+          if (error) throw error
 
-      if (linkImportedProducts) {
-        setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Liaison des produits...' })
-        const insertedByKey = new Map<string, string>()
-        ;(insertedOrders || []).forEach((inserted: any) => {
-          const key = buildDedupeKey(
-            String(inserted.phone || ''),
-            String(inserted.order_date || ''),
-            Number(inserted.total_selling_price || 0)
-          )
-          insertedByKey.set(key, String(inserted.id || ''))
-        })
+          if (linkImportedProducts) {
+            setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Liaison des produits...' })
+            const insertedByKey = new Map<string, string>()
+            ;(insertedOrders || []).forEach((inserted: any) => {
+              const key = buildDedupeKey(
+                String(inserted.phone || ''),
+                String(inserted.order_date || ''),
+                Number(inserted.total_selling_price || 0)
+              )
+              insertedByKey.set(key, String(inserted.id || ''))
+            })
 
-        const orderItemsPayload = chunkRows
-          .filter((row) => !!row.linkedProductId)
-          .map((row) => {
-            const orderKey = buildDedupeKey(
-              String(row.payload.phone || ''),
-              String(row.payload.order_date || ''),
-              Number(row.payload.total_selling_price || 0)
-            )
-            const orderId = insertedByKey.get(orderKey) || ''
-            if (!orderId) return null
+            const orderItemsPayload = chunkRows
+              .filter((row) => !!row.linkedProductId)
+              .map((row) => {
+                const orderKey = buildDedupeKey(
+                  String(row.payload.phone || ''),
+                  String(row.payload.order_date || ''),
+                  Number(row.payload.total_selling_price || 0)
+                )
+                const orderId = insertedByKey.get(orderKey) || ''
+                if (!orderId) return null
 
-            return {
-              store_id: currentStoreId,
-              order_id: orderId,
-              product_id: row.linkedProductId,
-              product_variant_id: null,
-              quantity: 1,
-              unit_selling_price: Number(row.payload.total_selling_price || 0),
-              unit_purchase_cost_snapshot: Number(row.linkedUnitPurchaseCost || 0),
+                return {
+                  store_id: currentStoreId,
+                  order_id: orderId,
+                  product_id: row.linkedProductId,
+                  product_variant_id: null,
+                  quantity: 1,
+                  unit_selling_price: Number(row.payload.total_selling_price || 0),
+                  unit_purchase_cost_snapshot: Number(row.linkedUnitPurchaseCost || 0),
+                }
+              })
+              .filter(Boolean)
+
+            if (orderItemsPayload.length > 0) {
+              const { error: orderItemsError } = await supabase.from('order_items').insert(orderItemsPayload as any[])
+              if (orderItemsError) throw orderItemsError
             }
-          })
-          .filter(Boolean)
-
-        if (orderItemsPayload.length > 0) {
-          const { error: orderItemsError } = await supabase.from('order_items').insert(orderItemsPayload as any[])
-          if (orderItemsError) throw orderItemsError
+          }
         }
       }
-    }
-  }
 
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
