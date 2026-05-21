@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 
@@ -460,6 +460,13 @@ export default function VentesPage() {
   const [defaultDeliveryCompanyOtherName, setDefaultDeliveryCompanyOtherName] = useState('')
   const [importError, setImportError] = useState('')
   const [importProgress, setImportProgress] = useState<{ processed: number; total: number; phase: string } | null>(null)
+  const importProgressRef = useRef<{ processed: number; total: number; phase: string } | null>(null)
+  const [, forceRender] = useReducer((x: number) => x + 1, 0)
+  const updateImportProgress = useCallback((progress: { processed: number; total: number; phase: string } | null) => {
+    importProgressRef.current = progress
+    setImportProgress(progress)
+    forceRender()
+  }, [])
   const [importSummary, setImportSummary] = useState<{
     inserted: number
     duplicates: number
@@ -1767,7 +1774,7 @@ export default function VentesPage() {
       }
 
       // Initialiser la progression immédiatement pour que l'UI affiche la barre dès le clic
-      setImportProgress({ processed: 0, total: importRows.length, phase: 'Préparation des lignes...' })
+      updateImportProgress({ processed: 0, total: importRows.length, phase: 'Préparation des lignes...' })
 
       const confirmationAgentsById = new Map<string, any>(
         (importConfirmationAgents || []).map((agent: any) => [String(agent.id || ''), agent])
@@ -1805,7 +1812,7 @@ export default function VentesPage() {
       for (let rowIndex = 0; rowIndex < importRows.length; rowIndex += 1) {
         // Mettre à jour la progression pendant la préparation
         if (rowIndex % 10 === 0 || rowIndex === importRows.length - 1) {
-          setImportProgress({ processed: rowIndex + 1, total: importRows.length, phase: 'Préparation des lignes...' })
+          updateImportProgress({ processed: rowIndex + 1, total: importRows.length, phase: 'Préparation des lignes...' })
         }
         const row = importRows[rowIndex]
         const rowNumber = rowIndex + 2
@@ -2051,11 +2058,11 @@ export default function VentesPage() {
       if (dedupedRows.length > 0) {
         const CHUNK_SIZE = 200
         const totalToInsert = dedupedRows.length
-        setImportProgress({ processed: 0, total: totalToInsert, phase: 'Insertion des commandes...' })
+        updateImportProgress({ processed: 0, total: totalToInsert, phase: 'Insertion des commandes...' })
         for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
           const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
           const chunk = chunkRows.map((row) => row.payload)
-          setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Insertion des commandes...' })
+          updateImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Insertion des commandes...' })
           const { data: insertedOrders, error } = await supabase
             .from('orders')
             .insert(chunk)
@@ -2063,7 +2070,7 @@ export default function VentesPage() {
           if (error) throw error
 
           if (linkImportedProducts) {
-            setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Liaison des produits...' })
+            updateImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Liaison des produits...' })
             const insertedByKey = new Map<string, string>()
             ;(insertedOrders || []).forEach((inserted: any) => {
               const key = buildDedupeKey(
