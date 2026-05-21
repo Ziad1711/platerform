@@ -459,6 +459,7 @@ export default function VentesPage() {
   const [defaultDeliveryCompanySelection, setDefaultDeliveryCompanySelection] = useState(IMPORT_INTERNAL_DELIVERY)
   const [defaultDeliveryCompanyOtherName, setDefaultDeliveryCompanyOtherName] = useState('')
   const [importError, setImportError] = useState('')
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number; phase: string } | null>(null)
   const [importSummary, setImportSummary] = useState<{
     inserted: number
     duplicates: number
@@ -2039,9 +2040,12 @@ export default function VentesPage() {
 
   if (dedupedRows.length > 0) {
     const CHUNK_SIZE = 200
+    const totalToInsert = dedupedRows.length
+    setImportProgress({ processed: 0, total: totalToInsert, phase: 'Insertion des commandes...' })
     for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
       const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
       const chunk = chunkRows.map((row) => row.payload)
+      setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Insertion des commandes...' })
       const { data: insertedOrders, error } = await supabase
         .from('orders')
         .insert(chunk)
@@ -2049,6 +2053,7 @@ export default function VentesPage() {
       if (error) throw error
 
       if (linkImportedProducts) {
+        setImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Liaison des produits...' })
         const insertedByKey = new Map<string, string>()
         ;(insertedOrders || []).forEach((inserted: any) => {
           const key = buildDedupeKey(
@@ -2674,23 +2679,25 @@ export default function VentesPage() {
       )}
 
       {isImportOpen && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b flex items-center justify-between shrink-0 bg-white">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Importer des ventes (CSV)</h3>
-                <p className="text-sm text-gray-500">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col border border-gray-100">
+            <div className="relative p-6 border-b flex items-center justify-between shrink-0 bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 overflow-hidden">
+              <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-30" />
+              <div className="relative z-10">
+                <h3 className="text-lg font-semibold text-white">Importer des ventes (CSV)</h3>
+                <p className="text-sm text-blue-100">
                   Étape {importStep} / 3 {importFileName ? `• ${importFileName}` : ''}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={closeImportModal}
-                className="text-gray-500 hover:text-gray-700"
+                className="relative z-10 text-white/80 hover:text-white transition-colors"
               >
-                Fermer
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
+
 
             <div className="p-6 overflow-y-auto space-y-5">
               {importStep === 1 ? (
@@ -2730,7 +2737,40 @@ export default function VentesPage() {
 
               {importStep === 2 ? (
                 <div className="space-y-5">
+                  {importOrdersMutation.isPending && importProgress ? (
+                    <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
+                          <span className="text-sm font-medium text-blue-800">{importProgress.phase}</span>
+                        </div>
+                        <span className="text-sm font-semibold text-blue-700">
+                          {importProgress.processed} / {importProgress.total} commandes
+                        </span>
+                      </div>
+                      <div className="relative h-3 bg-blue-100 rounded-full overflow-hidden">
+                        <div
+                          className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-500 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
+                        />
+                        <div
+                          className="absolute inset-y-0 left-0 w-12 bg-white/30 rounded-full animate-pulse"
+                          style={{
+                            width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%`,
+                            maskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
+                            WebkitMaskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-blue-600">
+                        <span>{Math.round((importProgress.processed / importProgress.total) * 100)}% terminé</span>
+                        <span>{importProgress.total - importProgress.processed} restantes</span>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
                     <div>
                       <label className="block text-sm text-gray-700 mb-1">Format de date</label>
                       <select
