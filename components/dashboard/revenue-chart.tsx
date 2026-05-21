@@ -27,6 +27,13 @@ function formatAxisValue(value: number) {
   return Math.round(value).toString()
 }
 
+function formatShortCurrency(value: number) {
+  const abs = Math.abs(value)
+  if (abs >= 1000000) return `${(value / 1000000).toFixed(1)}M`
+  if (abs >= 1000) return `${(value / 1000).toFixed(1)}k`
+  return Math.round(value).toString()
+}
+
 export default function RevenueChart() {
   const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
   const supabase = createClient()
@@ -351,6 +358,126 @@ export default function RevenueChart() {
     })
   }
 
+  // ── Premium chart extras ──
+
+  // Find max revenue and max profit points
+  const maxRevenuePoint = useMemo(() => {
+    if (!points || points.length < 2) return null
+    let maxIdx = 0
+    let maxVal = -Infinity
+    points.forEach((p, i) => {
+      if (p.revenue > maxVal) {
+        maxVal = p.revenue
+        maxIdx = i
+      }
+    })
+    if (maxVal <= 0 || !isFinite(maxVal)) return null
+    return { index: maxIdx, value: maxVal }
+  }, [points])
+
+  const maxProfitPoint = useMemo(() => {
+    if (!points || points.length < 2) return null
+    let maxIdx = 0
+    let maxVal = -Infinity
+    points.forEach((p, i) => {
+      if (p.profit > maxVal) {
+        maxVal = p.profit
+        maxIdx = i
+      }
+    })
+    if (maxVal <= 0 || !isFinite(maxVal)) return null
+    return { index: maxIdx, value: maxVal }
+  }, [points])
+
+  // Compute x positions for badges/labels
+  const pointToX = (index: number) => {
+    if (points.length <= 1) return 50
+    return (index / (points.length - 1)) * 100
+  }
+
+  // Check if two x positions are too close (collision detection)
+  const isCollision = (x1: number, x2: number, threshold = 18) => {
+    return Math.abs(x1 - x2) < threshold
+  }
+
+  // Determine badge positions with collision avoidance
+  const badgePositions = useMemo(() => {
+    const positions: { key: string; x: number; y: number; value: number; label: string; color: string; offsetY: number }[] = []
+
+    if (maxRevenuePoint && visibleSeries.revenue) {
+      const x = pointToX(maxRevenuePoint.index)
+      const y = valueToY(maxRevenuePoint.value)
+      positions.push({
+        key: 'revenue',
+        x,
+        y,
+        value: maxRevenuePoint.value,
+        label: 'Max CA',
+        color: seriesConfig.revenue.color,
+        offsetY: 0,
+      })
+    }
+
+    if (maxProfitPoint && visibleSeries.profit) {
+      const x = pointToX(maxProfitPoint.index)
+      const y = valueToY(maxProfitPoint.value)
+      // Check collision with revenue badge
+      let offsetY = 0
+      if (positions.length > 0 && isCollision(x, positions[0].x, 20)) {
+        offsetY = positions[0].y < y ? -8 : 8
+      }
+      positions.push({
+        key: 'profit',
+        x,
+        y,
+        value: maxProfitPoint.value,
+        label: 'Max Profit',
+        color: seriesConfig.profit.color,
+        offsetY,
+      })
+    }
+
+    return positions
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxRevenuePoint, maxProfitPoint, visibleSeries, points])
+
+  // Determine value label positions (on the peaks)
+  const valueLabels = useMemo(() => {
+    const labels: { key: string; x: number; y: number; text: string; color: string }[] = []
+
+    if (maxRevenuePoint && visibleSeries.revenue) {
+      const x = pointToX(maxRevenuePoint.index)
+      const y = valueToY(maxRevenuePoint.value)
+      labels.push({
+        key: 'revenue',
+        x,
+        y: y - 5,
+        text: `${formatShortCurrency(maxRevenuePoint.value)} MAD`,
+        color: seriesConfig.revenue.color,
+      })
+    }
+
+    if (maxProfitPoint && visibleSeries.profit) {
+      const x = pointToX(maxProfitPoint.index)
+      const y = valueToY(maxProfitPoint.value)
+      // Avoid overlap with revenue label
+      let labelY = y - 5
+      if (labels.length > 0 && isCollision(x, labels[0].x, 22)) {
+        labelY = labels[0].y < y ? y - 12 : y + 2
+      }
+      labels.push({
+        key: 'profit',
+        x,
+        y: labelY,
+        text: `${formatShortCurrency(maxProfitPoint.value)} MAD`,
+        color: seriesConfig.profit.color,
+      })
+    }
+
+    return labels
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxRevenuePoint, maxProfitPoint, visibleSeries, points])
+
   return (
     <div className="bg-card rounded-xl shadow p-6 overflow-hidden">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -420,46 +547,164 @@ export default function RevenueChart() {
                   ) : null
                 )}
 
-                {hoveredIndex !== null && points[hoveredIndex] && (
+                {/* ── Max point dots ── */}
+                {maxRevenuePoint && visibleSeries.revenue && (
+                  <circle
+                    cx={pointToX(maxRevenuePoint.index)}
+                    cy={valueToY(maxRevenuePoint.value)}
+                    r="1"
+                    fill={seriesConfig.revenue.color}
+                    opacity="0.7"
+                  />
+                )}
+                {maxProfitPoint && visibleSeries.profit && (
+                  <circle
+                    cx={pointToX(maxProfitPoint.index)}
+                    cy={valueToY(maxProfitPoint.value)}
+                    r="1"
+                    fill={seriesConfig.profit.color}
+                    opacity="0.7"
+                  />
+                )}
+
+                {/* ── Value labels on peaks ── */}
+                {valueLabels.map((vl) => (
+                  <text
+                    key={vl.key}
+                    x={vl.x}
+                    y={vl.y}
+                    fill={vl.color}
+                    opacity="0.45"
+                    fontSize="2.4"
+                    fontWeight="400"
+                    textAnchor="middle"
+                    fontFamily="inherit"
+                    letterSpacing="0.3"
+                  >
+                    {vl.text}
+                  </text>
+                ))}
+
+                {/* ── Badges (Max CA / Max Profit) ── */}
+                {badgePositions.map((bp) => (
+                  <g key={bp.key}>
+                    <rect
+                      x={bp.x - 6}
+                      y={bp.y - 3 + bp.offsetY}
+                      width="12"
+                      height="3.5"
+                      rx="0.8"
+                      fill={bp.color}
+                      opacity="0.06"
+                    />
+                    <rect
+                      x={bp.x - 6}
+                      y={bp.y - 3 + bp.offsetY}
+                      width="12"
+                      height="3.5"
+                      rx="0.8"
+                      fill="none"
+                      stroke={bp.color}
+                      strokeWidth="0.2"
+                      opacity="0.15"
+                    />
+                    <text
+                      x={bp.x}
+                      y={bp.y - 0.4 + bp.offsetY}
+                      fill={bp.color}
+                      opacity="0.55"
+                      fontSize="1.9"
+                      fontWeight="400"
+                      textAnchor="middle"
+                      fontFamily="inherit"
+                      letterSpacing="0.2"
+                    >
+                      {bp.label} • {formatShortCurrency(bp.value)} MAD
+                    </text>
+                  </g>
+                ))}
+
+                {/* ── Vertical line (default last point, hover override) ── */}
+                {(hoveredIndex !== null ? hoveredIndex : points.length - 1) >= 0 && (
                   <line
-                    x1={points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100}
-                    x2={points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100}
-                    y1="0"
-                    y2="100"
-                    stroke="var(--muted-foreground)"
-                    strokeDasharray="2 2"
-                    strokeWidth="0.5"
+                    x1={points.length === 1 ? 0 : (((hoveredIndex !== null ? hoveredIndex : points.length - 1)) / (points.length - 1)) * 100}
+                    x2={points.length === 1 ? 0 : (((hoveredIndex !== null ? hoveredIndex : points.length - 1)) / (points.length - 1)) * 100}
+                    y1="4"
+                    y2="96"
+                    stroke="currentColor"
+                    className="text-foreground/40 dark:text-white/30"
+                    strokeDasharray="2 4"
+                    strokeWidth="0.8"
+                    opacity={hoveredIndex !== null ? "0.25" : "0.18"}
                   />
                 )}
               </svg>
 
-              {points.length > 1 && (
-                <div className="absolute inset-0 flex">
-                  {points.map((_, index) => (
-                    <div
-                      key={index}
-                      className="flex-1 h-full"
-                      onMouseEnter={() => setHoveredIndex(index)}
-                      onMouseLeave={() => setHoveredIndex(null)}
-                    />
-                  ))}
-                </div>
-              )}
+              <div
+                className="absolute inset-0 z-10"
+                onPointerMove={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const x = e.clientX - rect.left
+                  const pct = x / rect.width
+                  const idx = Math.round(pct * (points.length - 1))
+                  setHoveredIndex(Math.max(0, Math.min(points.length - 1, idx)))
+                }}
+                onPointerLeave={() => setHoveredIndex(null)}
+              />
 
               {hoveredIndex !== null && points[hoveredIndex] && (
                 <div
-                  className="absolute top-2 z-20 bg-popover text-popover-foreground text-xs rounded px-3 py-2 shadow-lg pointer-events-none border border-border"
+                  className="absolute z-20 pointer-events-none backdrop-blur-sm"
                   style={{
-                    left: `${points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100}%`,
-                    transform: 'translateX(-50%)',
+                    top: '8px',
+                    ...(hoveredIndex / (points.length - 1) < 0.5
+                      ? { right: `${100 - (points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100)}%`, transform: 'translateX(-8px)' }
+                      : { left: `${(points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100)}%`, transform: 'translateX(8px)' }
+                    ),
                   }}
                 >
-                  <div className="font-semibold mb-1">{points[hoveredIndex].label}</div>
-                  <div>CA: {formatCurrency(points[hoveredIndex].revenue)}</div>
-                  <div>Profit: {formatCurrency(points[hoveredIndex].profit)}</div>
-                  <div>Pub: {formatCurrency(points[hoveredIndex].ads)}</div>
-                  <div>Livraison: {formatCurrency(points[hoveredIndex].delivery || 0)}</div>
-                  <div>Achat: {formatCurrency(points[hoveredIndex].purchase)}</div>
+                  <div className="bg-background/80 dark:bg-background/70 border border-border/60 rounded-lg px-3.5 py-2.5 shadow-xl min-w-[140px]">
+                    <div className="text-[11px] font-semibold text-foreground/80 mb-2 tracking-wide uppercase">
+                      {points[hoveredIndex].label}
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.revenue.color }} />
+                          <span className="text-[11px] text-muted-foreground">CA</span>
+                        </div>
+                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].revenue)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.profit.color }} />
+                          <span className="text-[11px] text-muted-foreground">Profit</span>
+                        </div>
+                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].profit)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.ads.color }} />
+                          <span className="text-[11px] text-muted-foreground">Pub</span>
+                        </div>
+                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].ads)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
+                          <span className="text-[11px] text-muted-foreground">Livraison</span>
+                        </div>
+                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].delivery || 0)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.purchase.color }} />
+                          <span className="text-[11px] text-muted-foreground">Achat</span>
+                        </div>
+                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].purchase)}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
