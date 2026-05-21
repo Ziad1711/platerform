@@ -1766,6 +1766,9 @@ export default function VentesPage() {
         throw new Error('Veuillez renseigner le nom des sociétés marquées “Autre”.')
       }
 
+      // Initialiser la progression immédiatement pour que l'UI affiche la barre dès le clic
+      setImportProgress({ processed: 0, total: importRows.length, phase: 'Préparation des lignes...' })
+
       const confirmationAgentsById = new Map<string, any>(
         (importConfirmationAgents || []).map((agent: any) => [String(agent.id || ''), agent])
       )
@@ -1800,6 +1803,10 @@ export default function VentesPage() {
       let invalid = 0
 
       for (let rowIndex = 0; rowIndex < importRows.length; rowIndex += 1) {
+        // Mettre à jour la progression pendant la préparation
+        if (rowIndex % 10 === 0 || rowIndex === importRows.length - 1) {
+          setImportProgress({ processed: rowIndex + 1, total: importRows.length, phase: 'Préparation des lignes...' })
+        }
         const row = importRows[rowIndex]
         const rowNumber = rowIndex + 2
         const dateRaw = row[fieldToColumnMap.order_date] || ''
@@ -2755,36 +2762,45 @@ export default function VentesPage() {
 
               {importStep === 2 ? (
                 <div className="space-y-5">
-                  {importOrdersMutation.isPending && importProgress ? (
-                    <div className="rounded-xl border border-jisra-green/20 bg-gradient-to-br from-jisra-green/5 via-white to-jisra-green-dark/5 p-5 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-jisra-green border-t-transparent" />
-                          <span className="text-sm font-medium text-jisra-green-dark">{importProgress.phase}</span>
+                  {importOrdersMutation.isPending ? (
+                    importProgress ? (
+                      <div className="rounded-xl border border-jisra-green/20 bg-gradient-to-br from-jisra-green/5 via-white to-jisra-green-dark/5 p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-jisra-green border-t-transparent" />
+                            <span className="text-sm font-medium text-jisra-green-dark">{importProgress.phase}</span>
+                          </div>
+                          <span className="text-sm font-semibold text-jisra-green">
+                            {importProgress.processed} / {importProgress.total} commandes
+                          </span>
                         </div>
-                        <span className="text-sm font-semibold text-jisra-green">
-                          {importProgress.processed} / {importProgress.total} commandes
-                        </span>
+                        <div className="relative h-3 bg-jisra-green/15 rounded-full overflow-hidden">
+                          <div
+                            className="absolute inset-y-0 left-0 bg-gradient-to-r from-jisra-green via-jisra-green to-jisra-green-dark rounded-full transition-all duration-300 ease-out"
+                            style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
+                          />
+                          <div
+                            className="absolute inset-y-0 left-0 w-12 bg-white/30 rounded-full animate-pulse"
+                            style={{
+                              width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%`,
+                              maskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
+                              WebkitMaskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-jisra-green">
+                          <span>{Math.round((importProgress.processed / importProgress.total) * 100)}% terminé</span>
+                          <span>{importProgress.total - importProgress.processed} restantes</span>
+                        </div>
                       </div>
-                      <div className="relative h-3 bg-jisra-green/15 rounded-full overflow-hidden">
-                        <div
-                          className="absolute inset-y-0 left-0 bg-gradient-to-r from-jisra-green via-jisra-green to-jisra-green-dark rounded-full transition-all duration-300 ease-out"
-                          style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
-                        />
-                        <div
-                          className="absolute inset-y-0 left-0 w-12 bg-white/30 rounded-full animate-pulse"
-                          style={{
-                            width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%`,
-                            maskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
-                            WebkitMaskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
-                          }}
-                        />
+                    ) : (
+                      <div className="rounded-xl border border-jisra-green/20 bg-gradient-to-br from-jisra-green/5 via-white to-jisra-green-dark/5 p-5">
+                        <div className="flex items-center justify-center gap-3">
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-jisra-green border-t-transparent" />
+                          <span className="text-sm font-medium text-jisra-green-dark">Initialisation de l'import...</span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between text-xs text-jisra-green">
-                        <span>{Math.round((importProgress.processed / importProgress.total) * 100)}% terminé</span>
-                        <span>{importProgress.total - importProgress.processed} restantes</span>
-                      </div>
-                    </div>
+                    )
                   ) : null}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3268,19 +3284,26 @@ export default function VentesPage() {
               </button>
 
               <div className="flex items-center gap-3">
-                {importOrdersMutation.isPending && importProgress ? (
-                  <div className="flex items-center gap-3 text-sm">
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
-                    <span className="font-medium text-jisra-green-dark whitespace-nowrap">
-                      {importProgress.processed} / {importProgress.total}
-                    </span>
-                    <div className="w-24 h-2 bg-jisra-green/15 rounded-full overflow-hidden hidden sm:block">
-                      <div
-                        className="h-full bg-gradient-to-r from-jisra-green to-jisra-green-dark rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
-                      />
+                {importOrdersMutation.isPending ? (
+                  importProgress ? (
+                    <div className="flex items-center gap-3 text-sm">
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
+                      <span className="font-medium text-jisra-green-dark whitespace-nowrap">
+                        {importProgress.processed} / {importProgress.total}
+                      </span>
+                      <div className="w-24 h-2 bg-jisra-green/15 rounded-full overflow-hidden hidden sm:block">
+                        <div
+                          className="h-full bg-gradient-to-r from-jisra-green to-jisra-green-dark rounded-full transition-all duration-300"
+                          style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
+                        />
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm">
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
+                      <span className="text-jisra-green-dark">Initialisation...</span>
+                    </div>
+                  )
                 ) : null}
 
                 {importStep === 2 ? (
