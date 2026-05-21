@@ -1590,6 +1590,9 @@ export default function VentesPage() {
   const closeImportModal = () => {
     setIsImportOpen(false)
     setImportError('')
+    setImportProgress(null)
+    setImportStep(1)
+    setImportSummary(null)
   }
 
   const handleCsvUpload = async (file: File) => {
@@ -3247,6 +3250,7 @@ export default function VentesPage() {
             <div className="p-6 border-t flex items-center justify-between gap-3 shrink-0 bg-white">
               <button
                 type="button"
+                disabled={importOrdersMutation.isPending}
                 onClick={() => {
                   if (importStep === 1) {
                     closeImportModal()
@@ -3258,31 +3262,48 @@ export default function VentesPage() {
                   }
                   closeImportModal()
                 }}
-                className="px-4 py-2 rounded-lg border text-gray-700"
+                className="px-4 py-2 rounded-lg border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {importStep === 1 ? 'Annuler' : importStep === 2 ? 'Retour' : 'Fermer'}
               </button>
 
-              {importStep === 2 ? (
-                <button
-                  type="button"
-                  onClick={() => importOrdersMutation.mutate()}
-                  disabled={
-                    importOrdersMutation.isPending ||
-                    missingRequiredFields.length > 0 ||
-                    hasMissingMandatoryImportStatuses ||
-                    (linkImportedProducts && (!fieldToColumnMap.product_name || hasUnmappedImportProducts)) ||
-                    (linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents) ||
-                    (linkImportedDeliveryCompanies && fieldToColumnMap.delivery_company && hasUnmappedImportDeliveryCompanies) ||
-                    hasMissingOtherDeliveryNames ||
-                    hasInvalidDefaultDeliveryOtherName ||
-                    !currentStoreId
-                  }
-                  className="px-4 py-2 rounded-lg bg-jisra-green hover:bg-jisra-green-dark text-white disabled:opacity-50"
-                >
-                  {importOrdersMutation.isPending ? 'Import en cours...' : 'Lancer import'}
-                </button>
-              ) : null}
+              <div className="flex items-center gap-3">
+                {importOrdersMutation.isPending && importProgress ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
+                    <span className="font-medium text-jisra-green-dark whitespace-nowrap">
+                      {importProgress.processed} / {importProgress.total}
+                    </span>
+                    <div className="w-24 h-2 bg-jisra-green/15 rounded-full overflow-hidden hidden sm:block">
+                      <div
+                        className="h-full bg-gradient-to-r from-jisra-green to-jisra-green-dark rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {importStep === 2 ? (
+                  <button
+                    type="button"
+                    onClick={() => importOrdersMutation.mutate()}
+                    disabled={
+                      importOrdersMutation.isPending ||
+                      missingRequiredFields.length > 0 ||
+                      hasMissingMandatoryImportStatuses ||
+                      (linkImportedProducts && (!fieldToColumnMap.product_name || hasUnmappedImportProducts)) ||
+                      (linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents) ||
+                      (linkImportedDeliveryCompanies && fieldToColumnMap.delivery_company && hasUnmappedImportDeliveryCompanies) ||
+                      hasMissingOtherDeliveryNames ||
+                      hasInvalidDefaultDeliveryOtherName ||
+                      !currentStoreId
+                    }
+                    className="px-4 py-2 rounded-lg bg-jisra-green hover:bg-jisra-green-dark text-white disabled:opacity-50"
+                  >
+                    {importOrdersMutation.isPending ? 'Import en cours...' : 'Lancer import'}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
