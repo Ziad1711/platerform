@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
-import { getRapidDeliveryStateName, mapRapidDeliveryStateToOrderStatus, trackRapidDeliveryParcel } from '@/lib/integrations/rapid-delivery'
+import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { rapidDeliveryAdapter } from '@/lib/integrations/delivery/rapid-delivery-adapter'
+import { trackAndUpdateOrder } from '@/lib/integrations/delivery/tracking-service'
 import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
 
 export async function GET(request: Request) {
@@ -27,28 +29,32 @@ export async function GET(request: Request) {
     }
 
     const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integration.id)
-    const payload = await trackRapidDeliveryParcel(token, trackingNumber, baseUrl)
-    const stateName = getRapidDeliveryStateName(payload)
-    const mapped = mapRapidDeliveryStateToOrderStatus(stateName)
 
-    if (orderId) {
-      const now = new Date().toISOString()
-      const updatePayload: Record<string, unknown> = {
-        delivery_status: mapped.deliveryStatus,
-        delivery_status_source: mapped.orderStatus ? 'delivery_company' : null,
-        delivery_company_status_raw: mapped.rawStatus || null,
-        last_delivery_sync_at: now,
-        updated_at: now,
-      }
-      if (mapped.orderStatus) updatePayload.status = mapped.orderStatus
-      if (mapped.orderStatus) updatePayload.last_status_update_at = now
-      if (mapped.statusDateField) updatePayload[mapped.statusDateField] = now
+    const logger = createDeliveryLogger({
+      admin,
+      integrationId: integration.id,
+      storeId: '',
+      userId: user.id,
+    })
 
-      const { error } = await supabase.from('orders').update(updatePayload).eq('id', orderId)
-      if (error) throw error
+    const config = {
+      integrationId: integration.id,
+      token,
+      baseUrl,
+      userId: user.id,
+      storeId: '',
     }
 
-    return NextResponse.json({ ok: true, tracking: payload, mapped })
+    const result = await trackAndUpdateOrder({
+      admin,
+      provider: rapidDeliveryAdapter,
+      config,
+      trackingNumber,
+      orderId: orderId || undefined,
+      logger,
+    })
+
+    return NextResponse.json({ ok: true, tracking: result.raw, mapped: { rawStatus: result.rawStatus, orderStatus: result.orderStatus, deliveryStatus: result.deliveryStatus } })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'RAPID_DELIVERY_TRACK_FAILED'
     return NextResponse.json({ error: message }, { status: 500 })

@@ -1,73 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
-import { createRapidDeliveryVoucher, getRapidDeliveryVoucher, tryTrackRapidDeliveryParcel, extractRapidDeliveryPayloadItem, downloadRapidDeliveryHtml } from '@/lib/integrations/rapid-delivery'
-import type { RapidDeliveryTrackingPayload } from '@/lib/integrations/rapid-delivery'
-
-import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
-import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
+import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { rapidDeliveryAdapter } from '@/lib/integrations/delivery/rapid-delivery-adapter'
+import { createParcelForOrder } from '@/lib/integrations/delivery/parcel-service'
+import { createVoucherForParcels } from '@/lib/integrations/delivery/voucher-service'
 import { getRapidDeliveryIntegrationCredentials, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
-
-function extractShortKeyFromHtml(html: string): string | null {
-  const matches = html.match(/[A-Za-z0-9]{10}/g) || []
-  return matches.find(m => !['Imprimer', 'etiquetes', 'DOCTYPE'].includes(m)) || null
-}
-
-function toRapidDeliveryVoucherErrorMessage(error: unknown) {
-  console.error('Rapid Delivery voucher create error:', error)
-
-  const fallbackMessage = 'RAPID_DELIVERY_CREATE_VOUCHER_FAILED'
-  const message = error instanceof Error
-    ? error.message
-    : typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
-      ? error.message
-      : fallbackMessage
-  const details = typeof error === 'object' && error !== null && 'details' in error && typeof error.details === 'string'
-    ? error.details.trim()
-    : ''
-  const hint = typeof error === 'object' && error !== null && 'hint' in error && typeof error.hint === 'string'
-    ? error.hint.trim()
-    : ''
-
-  return [message, details, hint].filter(Boolean).join(' | ') || fallbackMessage
-}
-
-async function isValidRapidDeliveryParcel(params: {
-  admin: ReturnType<typeof createAdminClient>
-  integrationId: string
-  storeId: string
-  parcelKey: string
-}) {
-  const { data, error } = await params.admin
-    .from('rapid_delivery_entity_mappings')
-    .select('rapid_delivery_id')
-    .eq('integration_id', params.integrationId)
-    .eq('store_id', params.storeId)
-    .eq('entity_type', 'parcel')
-    .eq('rapid_delivery_id', params.parcelKey)
-    .maybeSingle()
-
-  if (error) throw error
-  return Boolean(data?.rapid_delivery_id)
-}
-
-function getRemoteParcelShopKey(parcel: unknown) {
-  const item = extractRapidDeliveryPayloadItem(parcel) as RapidDeliveryTrackingPayload | undefined
-  if (!item) return 0
-  
-  return Number(
-    item.shop?.key || item.shop?.id ||
-    item.shop_id ||
-    0
-  ) || 0
-}
-
-function getRapidDeliveryVoucherTotalParcels(voucher: unknown) {
-  const item = extractRapidDeliveryPayloadItem(voucher) as Record<string, any> | undefined
-  if (!item) return 0
-  
-  return Number(item.total_parcels || item.parcels_count || 0) || 0
-}
 
 export async function POST(request: Request) {
   try {
@@ -106,6 +44,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'NO_RAPID_DELIVERY_SHOP_FOR_STORE' }, { status: 400 })
     }
 
+    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, config.integration_id)
+
+    const logger = createDeliveryLogger({
+      admin,
+      integrationId: config.integration_id,
+      storeId,
+      userId: user.id,
+    })
+
+    const deliveryConfig = {
+      integrationId: config.integration_id,
+      token,
+      baseUrl,
+      userId: user.id,
+      storeId,
+    }
+
+    // Récupérer les commandes
     const { data: orders, error: ordersError } = await admin
       .from('orders')
       .select('id, status, rapid_delivery_parcel_key, rapid_delivery_voucher_key, store_id, city, address, phone, customer_name, total_selling_price, tracking_number, rapid_delivery_city_key, order_items(quantity, products(name))')
@@ -120,219 +76,98 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVALID_ORDERS_FOR_VOUCHER' }, { status: 400 })
     }
 
-    const parcelReadyOrders = []
+    // Étape 1 : S'assurer que chaque commande a un colis valide
+    const parcelKeys: Array<string | number> = []
+    const orderIdsWithParcels: string[] = []
+
     for (const order of confirmedOrders) {
-      const parcelKey = String(order.rapid_delivery_parcel_key || '').trim()
-      const hasValidParcel = parcelKey
-        ? await isValidRapidDeliveryParcel({
-          admin,
-          integrationId: config.integration_id,
-          storeId,
-          parcelKey,
+      const existingParcelKey = String(order.rapid_delivery_parcel_key || '').trim()
+
+      // Vérifier si le colis existe déjà dans les mappings
+      const { data: mapping } = existingParcelKey
+        ? await admin
+            .from('rapid_delivery_entity_mappings')
+            .select('rapid_delivery_id')
+            .eq('integration_id', config.integration_id)
+            .eq('store_id', storeId)
+            .eq('entity_type', 'parcel')
+            .eq('rapid_delivery_id', existingParcelKey)
+            .maybeSingle()
+        : { data: null }
+
+      if (mapping?.rapid_delivery_id) {
+        // Colis valide existant
+        const key = existingParcelKey
+        parcelKeys.push(/^\d+$/.test(key) ? Number(key) : key)
+        orderIdsWithParcels.push(order.id)
+        continue
+      }
+
+      // Pas de colis valide → en créer un
+      if (existingParcelKey) {
+        logger.warn('voucher-invalid-parcel', 'Clé colis invalide, recréation', {
+          orderId: order.id,
+          oldParcelKey: existingParcelKey,
         })
-        : false
-
-      if (!hasValidParcel) {
-        if (parcelKey) {
-          console.warn('Rapid Delivery voucher ignored invalid parcel key', {
-            orderId: order.id,
-            parcelKey,
-            storeId,
-            integrationId: config.integration_id,
-          })
-        }
-
         await admin
           .from('orders')
           .update({ rapid_delivery_parcel_key: null, updated_at: new Date().toISOString() })
           .eq('id', order.id)
-
-        await normalizeOrderCityById(order.id, admin)
-        const result = await autoCreateRapidDeliveryParcelForOrder({
-          admin,
-          userId: user.id,
-          integrationId: config.integration_id,
-          order: {
-            ...order,
-            tracking_number: null,
-            rapid_delivery_parcel_key: null,
-            order_items: (order.order_items || []).map((oi: any) => ({
-              ...oi,
-              products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
-            })),
-          },
-          defaultShopKey: resolvedShopKey,
-          defaultArticleName: 'Commande',
-        })
-
-        if (!result.trackingNumber) {
-          return NextResponse.json({ error: result.warning || 'RAPID_DELIVERY_PARCEL_NOT_CREATED' }, { status: 400 })
-        }
-
-        parcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: result.trackingNumber })
-      } else {
-        parcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: parcelKey })
-      }
-    }
-
-    const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, config.integration_id)
-    const finalParcelReadyOrders = []
-
-    for (const order of parcelReadyOrders) {
-      let parcelKey = String(order.rapid_delivery_parcel_key || '').trim()
-      let remoteParcel = parcelKey ? await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl) : null
-      
-      // Si la clé est un UUID, on tente de récupérer le numéro de suivi court
-      if (parcelKey.includes('-')) {
-        const item = extractRapidDeliveryPayloadItem(remoteParcel) as RapidDeliveryTrackingPayload | undefined
-        if (!item?.key || String(item.key).includes('-')) {
-          try {
-            const labelHtml = await downloadRapidDeliveryHtml(token, `/parcels/${encodeURIComponent(parcelKey)}/label`, baseUrl)
-            const shortKey = extractShortKeyFromHtml(labelHtml)
-            if (shortKey) {
-              parcelKey = shortKey
-              remoteParcel = await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl)
-              console.log('Resolved short key during voucher creation', { oldKey: order.rapid_delivery_parcel_key, newKey: parcelKey })
-            }
-          } catch (e) {
-            console.warn('Failed to resolve short key during voucher creation', e)
-          }
-        } else {
-          parcelKey = String(item.key).trim()
-          remoteParcel = await tryTrackRapidDeliveryParcel(token, parcelKey, baseUrl)
-        }
       }
 
-      const remoteShopKey = getRemoteParcelShopKey(remoteParcel)
+      const result = await createParcelForOrder({
+        admin,
+        provider: rapidDeliveryAdapter,
+        config: deliveryConfig,
+        order: {
+          id: order.id,
+          storeId: order.store_id,
+          city: order.city,
+          address: order.address,
+          phone: order.phone,
+          customerName: order.customer_name,
+          totalSellingPrice: order.total_selling_price,
+          trackingNumber: null,
+          rapidDeliveryCityKey: order.rapid_delivery_city_key,
+          orderItems: (order.order_items || []).map((oi: any) => ({
+            productName: Array.isArray(oi.products) ? (oi.products[0]?.name ?? null) : oi.products?.name ?? null,
+          })),
+        },
+        defaultShopKey: resolvedShopKey,
+        defaultArticleName: 'Commande',
+        logger,
+      })
 
-      if (!remoteParcel || remoteShopKey !== resolvedShopKey) {
-        console.warn('Rapid Delivery voucher recreating parcel before voucher', {
-          orderId: order.id,
-          oldParcelKey: parcelKey,
-          remoteShopKey,
-          expectedShopKey: resolvedShopKey,
-          reason: !remoteParcel ? 'REMOTE_PARCEL_NOT_FOUND' : 'REMOTE_SHOP_MISMATCH',
-        })
-
-        await admin
-          .from('orders')
-          .update({ tracking_number: null, rapid_delivery_parcel_key: null, external_delivery_id: null, updated_at: new Date().toISOString() })
-          .eq('id', order.id)
-
-        await normalizeOrderCityById(order.id, admin)
-        const result = await autoCreateRapidDeliveryParcelForOrder({
-          admin,
-          userId: user.id,
-          integrationId: config.integration_id,
-          order: {
-            ...order,
-            tracking_number: null,
-            rapid_delivery_parcel_key: null,
-            order_items: (order.order_items || []).map((oi: any) => ({
-              ...oi,
-              products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
-            })),
-          },
-          defaultShopKey: resolvedShopKey,
-          defaultArticleName: 'Commande',
-        })
-
-        if (!result.trackingNumber) {
-          return NextResponse.json({ error: result.warning || 'RAPID_DELIVERY_PARCEL_NOT_CREATED' }, { status: 400 })
-        }
-
-        finalParcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: result.trackingNumber })
-      } else {
-        finalParcelReadyOrders.push({ ...order, rapid_delivery_parcel_key: parcelKey })
+      if (!result.trackingNumber) {
+        return NextResponse.json({ error: result.warning || 'RAPID_DELIVERY_PARCEL_NOT_CREATED' }, { status: 400 })
       }
+
+      const key = result.trackingNumber
+      parcelKeys.push(/^\d+$/.test(key) ? Number(key) : key)
+      orderIdsWithParcels.push(order.id)
     }
 
-    const finalParcelKeys = finalParcelReadyOrders.map((order) => {
-      const key = String(order.rapid_delivery_parcel_key || '').trim()
-      return /^\d+$/.test(key) ? Number(key) : key
+    // Étape 2 : Créer le voucher
+    const voucherResult = await createVoucherForParcels({
+      admin,
+      provider: rapidDeliveryAdapter,
+      config: deliveryConfig,
+      storeId,
+      orderIds: orderIdsWithParcels,
+      parcelKeys,
+      shopKey: resolvedShopKey,
+      logger,
     })
 
-    console.log('Rapid Delivery voucher request details', {
-      shop: resolvedShopKey,
-      parcels: finalParcelKeys,
-      parcelTypes: finalParcelKeys.map(k => typeof k)
+    return NextResponse.json({
+      ok: true,
+      voucherKey: voucherResult.voucherKey,
+      count: orderIdsWithParcels.length,
+      remoteVerified: voucherResult.remoteVerified,
     })
-
-    const created = await createRapidDeliveryVoucher(token, {
-      shop: resolvedShopKey,
-      parcels: finalParcelKeys,
-    }, baseUrl)
-
-    console.log('Rapid Delivery voucher creation response', {
-      createdRaw: JSON.stringify(created)
-    })
-
-    const voucherKey = String(created?.data?.key || '').trim()
-    if (!voucherKey) {
-      return NextResponse.json({ error: 'INVALID_VOUCHER_KEY' }, { status: 502 })
-    }
-
-    // Vérifier via GET /vouchers/{key} après création (propagation asynchrone)
-    let remoteVoucher: unknown = null
-    let remoteTotalParcels = 0
-
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      remoteVoucher = await getRapidDeliveryVoucher(token, voucherKey, baseUrl)
-      remoteTotalParcels = getRapidDeliveryVoucherTotalParcels(remoteVoucher)
-      console.log('Rapid Delivery voucher GET check', {
-        voucherKey,
-        attempt: attempt + 1,
-        remoteTotalParcels,
-        remoteVoucherRaw: JSON.stringify(remoteVoucher).slice(0, 500),
-      })
-      if (remoteTotalParcels > 0) break
-    }
-
-    if (remoteTotalParcels <= 0) {
-      console.error('Rapid Delivery voucher created empty remotely', {
-        voucherKey,
-        shop: resolvedShopKey,
-        parcels: finalParcelKeys,
-        created,
-        remoteVoucher,
-      })
-      // Fallback: on accepte le bon quand même, la propagation peut prendre du temps
-      console.warn('RAPID_DELIVERY_VOUCHER_CREATED_EMPTY_REMOTE - fallback accepted')
-    }
-
-
-    const now = new Date().toISOString()
-    const { error: updateOrdersError } = await admin
-      .from('orders')
-      .update({
-        rapid_delivery_voucher_key: voucherKey,
-        last_status_update_at: now,
-        delivery_status: 'pickup_pending',
-        updated_at: now,
-      })
-      .in('id', finalParcelReadyOrders.map((order) => order.id))
-
-    if (updateOrdersError) throw updateOrdersError
-
-    const { error: mappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
-      {
-        user_id: user.id,
-        integration_id: config.integration_id,
-        store_id: storeId,
-        entity_type: 'voucher',
-        rapid_delivery_id: voucherKey,
-        internal_id: finalParcelReadyOrders[0].id,
-        payload: { ...created, remote_voucher: remoteVoucher, order_ids: finalParcelReadyOrders.map((order) => order.id), parcels: finalParcelKeys },
-        updated_at: now,
-      },
-      { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
-    )
-
-    if (mappingError) throw mappingError
-    return NextResponse.json({ ok: true, voucherKey, count: finalParcelReadyOrders.length, message: created.message })
   } catch (error) {
-    const message = toRapidDeliveryVoucherErrorMessage(error)
+    const message = error instanceof Error ? error.message : 'RAPID_DELIVERY_CREATE_VOUCHER_FAILED'
+    console.error('Rapid Delivery voucher create error:', error)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

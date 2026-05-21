@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
-import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
-import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
+import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { rapidDeliveryAdapter } from '@/lib/integrations/delivery/rapid-delivery-adapter'
+import { createParcelForOrder } from '@/lib/integrations/delivery/parcel-service'
+import { getRapidDeliveryIntegrationCredentials } from '@/lib/integrations/rapid-delivery-connect'
 
 const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   confirmation_rejected: 'confirmation_rejected_at',
@@ -115,22 +117,46 @@ export async function POST(request: Request) {
 
       if (canAutoCreate && config) {
         try {
-          await normalizeOrderCityById(orderId, admin)
-          const normalizedOrder = {
-            ...order,
-            order_items: (order.order_items || []).map((oi: any) => ({
-              ...oi,
-              products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
-            })),
-          }
-          const result = await autoCreateRapidDeliveryParcelForOrder({
+          const { token, baseUrl } = await getRapidDeliveryIntegrationCredentials(admin, integration.id)
+
+          const logger = createDeliveryLogger({
             admin,
-            userId: user.id,
             integrationId: integration.id,
-            order: normalizedOrder,
+            storeId: order.store_id,
+            userId: user.id,
+          })
+
+          const deliveryConfig = {
+            integrationId: integration.id,
+            token,
+            baseUrl,
+            userId: user.id,
+            storeId: order.store_id,
+          }
+
+          const result = await createParcelForOrder({
+            admin,
+            provider: rapidDeliveryAdapter,
+            config: deliveryConfig,
+            order: {
+              id: order.id,
+              storeId: order.store_id,
+              city: order.city,
+              address: order.address,
+              phone: order.phone,
+              customerName: order.customer_name,
+              totalSellingPrice: order.total_selling_price,
+              trackingNumber: order.tracking_number,
+              rapidDeliveryCityKey: order.rapid_delivery_city_key,
+              orderItems: (order.order_items || []).map((oi: any) => ({
+                productName: Array.isArray(oi.products) ? (oi.products[0]?.name ?? null) : oi.products?.name ?? null,
+              })),
+            },
             defaultShopKey: Number(config.default_shop_key),
             defaultArticleName: config.default_article_name,
+            logger,
           })
+
           warning = result.warning
           trackingNumber = result.trackingNumber
         } catch (error) {
