@@ -2681,11 +2681,11 @@ export default function VentesPage() {
       {isImportOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col border border-gray-100">
-            <div className="relative p-6 border-b flex items-center justify-between shrink-0 bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 overflow-hidden">
+            <div className="relative p-6 border-b flex items-center justify-between shrink-0 bg-gradient-to-r from-jisra-green via-jisra-green to-jisra-green-dark overflow-hidden">
               <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-30" />
               <div className="relative z-10">
                 <h3 className="text-lg font-semibold text-white">Importer des ventes (CSV)</h3>
-                <p className="text-sm text-blue-100">
+                <p className="text-sm text-green-100">
                   Étape {importStep} / 3 {importFileName ? `• ${importFileName}` : ''}
                 </p>
               </div>
@@ -2708,13 +2708,28 @@ export default function VentesPage() {
                     </div>
                   ) : null}
 
-                  <div className="rounded-lg border border-dashed p-6 text-center space-y-3">
-                    <p className="text-sm text-gray-600">Import CSV uniquement</p>
+                  <div
+                    className="rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors"
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.className = 'rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors border-jisra-green bg-jisra-green/5' }}
+                    onDragLeave={(e) => { e.preventDefault(); e.currentTarget.className = 'rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors' }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      e.currentTarget.className = 'rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors'
+                      const file = e.dataTransfer.files?.[0]
+                      if (!file) return
+                      void handleCsvUpload(file)
+                    }}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <Upload className="w-10 h-10 text-gray-400" />
+                      <p className="text-sm text-gray-600">Glissez-déposez votre fichier CSV ici</p>
+                      <p className="text-xs text-gray-400">ou</p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={!currentStoreId}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-jisra-green hover:bg-jisra-green-dark text-white disabled:opacity-50"
                     >
                       <Upload className="w-4 h-4" />
                       Choisir un fichier CSV
@@ -2738,19 +2753,19 @@ export default function VentesPage() {
               {importStep === 2 ? (
                 <div className="space-y-5">
                   {importOrdersMutation.isPending && importProgress ? (
-                    <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-5 space-y-3">
+                    <div className="rounded-xl border border-jisra-green/20 bg-gradient-to-br from-jisra-green/5 via-white to-jisra-green-dark/5 p-5 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
-                          <span className="text-sm font-medium text-blue-800">{importProgress.phase}</span>
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-jisra-green border-t-transparent" />
+                          <span className="text-sm font-medium text-jisra-green-dark">{importProgress.phase}</span>
                         </div>
-                        <span className="text-sm font-semibold text-blue-700">
+                        <span className="text-sm font-semibold text-jisra-green">
                           {importProgress.processed} / {importProgress.total} commandes
                         </span>
                       </div>
-                      <div className="relative h-3 bg-blue-100 rounded-full overflow-hidden">
+                      <div className="relative h-3 bg-jisra-green/15 rounded-full overflow-hidden">
                         <div
-                          className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-500 rounded-full transition-all duration-300 ease-out"
+                          className="absolute inset-y-0 left-0 bg-gradient-to-r from-jisra-green via-jisra-green to-jisra-green-dark rounded-full transition-all duration-300 ease-out"
                           style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
                         />
                         <div
@@ -2762,7 +2777,7 @@ export default function VentesPage() {
                           }}
                         />
                       </div>
-                      <div className="flex items-center justify-between text-xs text-blue-600">
+                      <div className="flex items-center justify-between text-xs text-jisra-green">
                         <span>{Math.round((importProgress.processed / importProgress.total) * 100)}% terminé</span>
                         <span>{importProgress.total - importProgress.processed} restantes</span>
                       </div>
@@ -3263,7 +3278,7 @@ export default function VentesPage() {
                     hasInvalidDefaultDeliveryOtherName ||
                     !currentStoreId
                   }
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg bg-jisra-green hover:bg-jisra-green-dark text-white disabled:opacity-50"
                 >
                   {importOrdersMutation.isPending ? 'Import en cours...' : 'Lancer import'}
                 </button>
