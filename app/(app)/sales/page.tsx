@@ -1787,6 +1787,49 @@ export default function VentesPage() {
       )
       const createdDeliveryCompanyByNormalizedName = new Map<string, string>()
 
+      // Cache pour normalisation des villes (évite N appels API)
+      const cityNormalizationCache = new Map<string, { cityName: string; cityKey: number | null }>()
+      // Cache pour lookup produits (évite .find() répétés)
+      const importStoreProductsById = new Map<string, any>(
+        (importStoreProducts || []).map((p: any) => [String(p.id || ''), p])
+      )
+      // Collecter les noms "Autre" uniques pour batch upsert avant la boucle
+      const otherDeliveryNamesToCreate = new Set<string>()
+      for (const row of importRows) {
+        const raw = fieldToColumnMap.delivery_company ? String(row[fieldToColumnMap.delivery_company] || '').trim() : ''
+        if (!raw) continue
+        const mapped = deliveryCompanyValueMap[raw]
+        if (mapped !== IMPORT_OTHER_DELIVERY) continue
+        const otherName = fieldToColumnMap.delivery_company
+          ? String(deliveryCompanyOtherNameMap[raw] || '').trim()
+          : String(defaultDeliveryCompanyOtherName || '').trim()
+        const normalizedOtherName = normalizeHeader(otherName)
+        if (normalizedOtherName && !deliveryCompanyByNormalizedName.has(normalizedOtherName)) {
+          otherDeliveryNamesToCreate.add(otherName)
+        }
+      }
+      // Batch upsert des sociétés "Autre" avant la boucle
+      if (otherDeliveryNamesToCreate.size > 0) {
+        const batchInsert = Array.from(otherDeliveryNamesToCreate).map((name) => ({
+          store_id: currentStoreId,
+          name,
+          is_active: true,
+        }))
+        const { data: insertedCompanies, error: batchError } = await supabase
+          .from('delivery_companies')
+          .insert(batchInsert)
+          .select('id, name')
+        if (!batchError && insertedCompanies) {
+          for (const company of insertedCompanies) {
+            const normalizedName = normalizeHeader(company.name)
+            if (normalizedName) {
+              createdDeliveryCompanyByNormalizedName.set(normalizedName, String(company.id))
+            }
+          }
+        }
+      }
+
+
       const effectiveDateFormat = importDateFormat === 'auto' ? suggestedDateFormat : importDateFormat
       const validRows: Array<{
         rowNumber: number
@@ -1957,12 +2000,28 @@ export default function VentesPage() {
         if (!parsedDate) {
           continue
         }
-        const orderDateIso = parsedDate.toISOString()
+        // Fix timezone: construire une date ISO locale sans conversion UTC
+        const tzOffset = parsedDate.getTimezoneOffset() * 60000
+        const orderDateIso = new Date(parsedDate.getTime() - tzOffset).toISOString().replace('Z', '+00:00')
         const shouldNormalizeImportCity = importRapidDeliveryConfig?.enable_city_normalization !== false
-        const normalizedCityPayload = shouldNormalizeImportCity
-          ? await normalizeOrderCityRequest(cityValue)
-          : { cityName: cityValue }
+        // Cache pour normalisation des villes
+        let normalizedCityPayload: { cityName?: string; cityKey?: number | null }
+        if (shouldNormalizeImportCity) {
+          const cached = cityNormalizationCache.get(cityValue)
+          if (cached) {
+            normalizedCityPayload = cached
+          } else {
+            normalizedCityPayload = await normalizeOrderCityRequest(cityValue)
+            cityNormalizationCache.set(cityValue, { cityName: normalizedCityPayload.cityName || cityValue, cityKey: normalizedCityPayload.cityKey ?? null })
+          }
+        } else {
+          normalizedCityPayload = { cityName: cityValue }
+        }
+
         const normalizedCityKey = Number(normalizedCityPayload.cityKey || 0) || null
+        // Détection source: si ads_cost_allocated > 0 => source = 'ads'
+        const adsCostRaw = fieldToColumnMap.ads_cost_allocated ? parseNumberValue(row[fieldToColumnMap.ads_cost_allocated]) : null
+        const detectedSource = adsCostRaw !== null && adsCostRaw > 0 ? 'ads' : 'organic'
         const payload: Record<string, any> = {
           store_id: currentStoreId,
           order_date: orderDateIso,
@@ -1973,16 +2032,17 @@ export default function VentesPage() {
           rapid_delivery_city_key: normalizedCityKey,
           total_selling_price: totalSellingPrice,
           status: mappedStatus,
-          source: 'organic',
+          source: detectedSource,
           subtotal_amount: totalSellingPrice,
           delivery_fee: normalizedCityKey
             ? Number(rapidDeliveryCityCostByKey.get(normalizedCityKey) ?? 0)
             : 0,
-          ads_cost_allocated: 0,
+          ads_cost_allocated: adsCostRaw !== null ? adsCostRaw : 0,
           delivery_charge_to_customer: 0,
           confirmation_agent_id: resolvedConfirmationAgentId,
           delivery_company_id: resolvedDeliveryCompanyId,
         }
+
 
         const statusDateField = statusDateFieldMap[mappedStatus]
         if (statusDateField && statusDateField !== 'created_at') {
@@ -2769,48 +2829,8 @@ export default function VentesPage() {
 
               {importStep === 2 ? (
                 <div className="space-y-5">
-                  {importOrdersMutation.isPending ? (
-                    importProgress ? (
-                      <div className="rounded-xl border border-jisra-green/20 bg-gradient-to-br from-jisra-green/5 via-white to-jisra-green-dark/5 p-5 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-jisra-green border-t-transparent" />
-                            <span className="text-sm font-medium text-jisra-green-dark">{importProgress.phase}</span>
-                          </div>
-                          <span className="text-sm font-semibold text-jisra-green">
-                            {importProgress.processed} / {importProgress.total} commandes
-                          </span>
-                        </div>
-                        <div className="relative h-3 bg-jisra-green/15 rounded-full overflow-hidden">
-                          <div
-                            className="absolute inset-y-0 left-0 bg-gradient-to-r from-jisra-green via-jisra-green to-jisra-green-dark rounded-full transition-all duration-300 ease-out"
-                            style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
-                          />
-                          <div
-                            className="absolute inset-y-0 left-0 w-12 bg-white/30 rounded-full animate-pulse"
-                            style={{
-                              width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%`,
-                              maskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
-                              WebkitMaskImage: 'linear-gradient(90deg, transparent, white 30%, white 70%, transparent)',
-                            }}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between text-xs text-jisra-green">
-                          <span>{Math.round((importProgress.processed / importProgress.total) * 100)}% terminé</span>
-                          <span>{importProgress.total - importProgress.processed} restantes</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border border-jisra-green/20 bg-gradient-to-br from-jisra-green/5 via-white to-jisra-green-dark/5 p-5">
-                        <div className="flex items-center justify-center gap-3">
-                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-jisra-green border-t-transparent" />
-                          <span className="text-sm font-medium text-jisra-green-dark">Initialisation de l'import...</span>
-                        </div>
-                      </div>
-                    )
-                  ) : null}
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
 
                     <div>
                       <label className="block text-sm text-gray-700 mb-1">Format de date</label>
@@ -3295,15 +3315,19 @@ export default function VentesPage() {
                   importProgress ? (
                     <div className="flex items-center gap-3 text-sm">
                       <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
+                      <span className="text-xs text-jisra-green-dark/70 hidden sm:inline">{importProgress.phase}</span>
                       <span className="font-medium text-jisra-green-dark whitespace-nowrap">
                         {importProgress.processed} / {importProgress.total}
                       </span>
-                      <div className="w-24 h-2 bg-jisra-green/15 rounded-full overflow-hidden hidden sm:block">
+                      <div className="w-28 h-2.5 bg-jisra-green/15 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-gradient-to-r from-jisra-green to-jisra-green-dark rounded-full transition-all duration-300"
                           style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
                         />
                       </div>
+                      <span className="text-xs text-jisra-green font-medium hidden sm:inline">
+                        {Math.round((importProgress.processed / importProgress.total) * 100)}%
+                      </span>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-sm">
@@ -3312,6 +3336,7 @@ export default function VentesPage() {
                     </div>
                   )
                 ) : null}
+
 
                 {importStep === 2 ? (
                   <button
