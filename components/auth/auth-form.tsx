@@ -97,22 +97,10 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       }
 
       if (mode === 'login') {
-        // Chercher le rôle de l'utilisateur pour rediriger vers la bonne page
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const { data: member } = await supabase
-            .from('store_members')
-            .select('role')
-            .eq('user_id', user.id)
-            .eq('status', 'active')
-            .maybeSingle()
-          const role = member?.role as Role | null | undefined
-          const defaultRoute = getFirstAllowedRoute(role ?? null)
-          router.replace(safeInternalPath(next) === '/dashboard' ? defaultRoute : safeInternalPath(next))
-        } else {
-          router.replace(safeInternalPath(next))
-        }
-        router.refresh()
+        // Navigation serveur forcée pour que le middleware lise les cookies
+        // correctement après signInWithPassword (évite le flash login)
+        const target = safeInternalPath(next)
+        window.location.href = target === '/dashboard' ? '/dashboard' : target
       } else if (mode === 'signup') {
         router.refresh()
       }

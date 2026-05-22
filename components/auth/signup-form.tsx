@@ -98,8 +98,7 @@ export default function SignupForm() {
           })
           if (loginError) throw loginError
 
-          router.push(nextPath)
-          router.refresh()
+          window.location.href = nextPath
           return
         }
         throw error
@@ -108,8 +107,7 @@ export default function SignupForm() {
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
 
-        router.push(next ? nextPath : '/dashboard?onboarding=1')
-        router.refresh()
+        window.location.href = next ? nextPath : '/dashboard?onboarding=1'
         return
       }
 

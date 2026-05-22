@@ -95,7 +95,10 @@ export default function OnboardingModal() {
           timezone: profile?.timezone || geo?.timezone || prev.timezone,
           currency: profile?.preferred_currency || profile?.main_currency || geo?.currency || prev.currency,
         }))
-        setOpen(canDecideOnStores ? !hasStores : false)
+
+        // Ne pas ouvrir si l'utilisateur a déjà cliqué sur "Je le ferai après"
+        const skipped = typeof window !== 'undefined' && window.localStorage.getItem('onboarding_skipped') === 'true'
+        setOpen(canDecideOnStores && !skipped ? !hasStores : false)
       } finally {
         if (active) setChecking(false)
       }
@@ -236,9 +239,17 @@ export default function OnboardingModal() {
             {error ? <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">{error}</div> : null}
 
             <div className="mt-6 flex items-center justify-between gap-4 border-t border-white/10 pt-5">
-              <p className="text-xs leading-5 text-jisra-cream/45">
-                Cette étape est requise pour accéder aux fonctionnalités business du dashboard.
-              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false)
+                  try { localStorage.setItem('onboarding_skipped', 'true') } catch {}
+                  window.location.href = '/dashboard'
+                }}
+                className="rounded-xl border border-white/15 px-4 py-2.5 text-sm text-jisra-cream/60 transition hover:border-white/30 hover:text-jisra-cream/90"
+              >
+                Je le ferai après
+              </button>
               <button
                 type="submit"
                 disabled={loading || uploadingLogo}
