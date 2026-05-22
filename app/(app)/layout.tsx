@@ -1,8 +1,38 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Sidebar from '@/components/dashboard/sidebar'
 import OnboardingModal from '@/components/dashboard/onboarding-modal'
 import { usePathname } from 'next/navigation'
+import { ChevronUp } from 'lucide-react'
+
+function BackToTop() {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    const onScroll = () => setVisible(main.scrollTop > 400)
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => main.removeEventListener('scroll', onScroll)
+  }, [])
+
+  const scrollToTop = () => {
+    document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  return (
+    <button
+      onClick={scrollToTop}
+      className={`fixed bottom-8 right-6 z-50 w-11 h-11 rounded-full bg-background border border-border shadow-lg shadow-[#1fa971]/30 text-[#1fa971] hover:bg-gradient-to-br hover:from-[#1fa971] hover:to-[#178a5a] hover:text-white hover:shadow-xl hover:shadow-[#1fa971]/50 hover:scale-105 active:scale-95 transition-all duration-200 flex items-center justify-center ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+      }`}
+      aria-label="Retour en haut"
+    >
+      <ChevronUp className="w-4 h-4" />
+    </button>
+  )
+}
 
 export default function AppLayout({
   children,
@@ -30,6 +60,7 @@ export default function AppLayout({
           {children}
         </main>
       </div>
+      <BackToTop />
     </div>
   )
 }

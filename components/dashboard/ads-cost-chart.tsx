@@ -279,7 +279,7 @@ export default function AdsCostChart() {
 
   return (
     <div className="bg-card rounded-xl shadow p-6 overflow-hidden">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
         <h3 className="text-base font-semibold text-foreground">Coûts Ads moyens (CPL / CPA)</h3>
         <div className="flex gap-2">
           <button

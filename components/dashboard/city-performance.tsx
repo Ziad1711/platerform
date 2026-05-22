@@ -98,7 +98,7 @@ export default function CityPerformance() {
 
   return (
     <div className="bg-card rounded-xl shadow">
-      <div className="p-6 border-b border-border flex items-center justify-between gap-3">
+      <div className="p-6 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
           <h3 className="text-lg font-semibold text-foreground">Performance par ville</h3>
           <p className="text-xs text-muted-foreground mt-1">Tri par chiffre d'affaires par défaut</p>

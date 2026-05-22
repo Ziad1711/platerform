@@ -25,7 +25,7 @@ interface LogoProps {
 // ─── JisraMark — SVG bracket-J ──────────────────────────────────
 export const JisraMark = ({
   size = 96,
-  ink = INK,
+  ink = "currentColor",
   accent = GREEN,
 }: MarkProps) => (
   <svg width={size} height={size} viewBox="0 0 96 96" fill="none">

@@ -413,7 +413,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
               return (
                 <div
                   key={kpi.title}
-                  className="bg-card rounded-xl shadow p-5 hover:shadow-md transition-shadow"
+              className="bg-card rounded-xl shadow border border-border p-5 hover:shadow-md transition-shadow"
                 >
                   <div className="flex items-center justify-between">
                     <div className={`${kpi.color} p-2 rounded-lg`}>
@@ -430,7 +430,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
             })}
           </div>
         ) : (
-          <div className="bg-card dark:bg-gray-800 rounded-xl shadow p-4">
+      <div className="bg-card rounded-xl shadow p-4">
             <div className="mb-3">
               <h3 className="text-lg font-semibold text-foreground dark:text-gray-100">Performance marketing</h3>
             </div>
@@ -464,7 +464,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
   if (variant === 'marketing') {
     return (
-      <div className="bg-card dark:bg-gray-800 rounded-xl shadow p-4">
+      <div className="bg-card rounded-xl shadow p-4">
         <div className="mb-3">
           <h3 className="text-lg font-semibold text-foreground dark:text-gray-100">Performance marketing</h3>
         </div>
@@ -487,7 +487,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
                   )}
                 </div>
                 <div className="mt-3">
-                  <div className="text-xl font-bold text-foreground dark:text-gray-100">{kpi.value}</div>
+                  <div className="text-base sm:text-xl font-bold text-foreground dark:text-gray-100">{kpi.value}</div>
                   <div className="text-xs text-muted-foreground dark:text-muted-foreground mt-1">{kpi.title}</div>
                 </div>
               </div>
@@ -509,14 +509,14 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
           return (
             <div
               key={kpi.title}
-              className="bg-card rounded-xl shadow p-5 hover:shadow-md transition-shadow"
+              className="bg-card rounded-xl shadow border border-border p-5 hover:shadow-md transition-shadow"
             >
               <div className="flex items-center justify-between">
                 <div className={`${kpi.color} p-2 rounded-lg`}>
                   <Icon className="w-5 h-5 text-white" />
                 </div>
                 {shouldShowChange(kpi.rawChange) ? (
-                  <div className={`flex items-center text-sm ${kpi.trend === 'up' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  <div className={`flex items-center text-xs opacity-60 ${kpi.trend === 'up' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                     {kpi.trend === 'up' ? (
                       <TrendingUp className="w-4 h-4 mr-1" />
                     ) : (
@@ -529,7 +529,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
                 )}
               </div>
               <div className="mt-4">
-                <div className="text-2xl font-bold text-foreground dark:text-gray-100">{kpi.value}</div>
+                <div className="text-lg sm:text-2xl font-bold text-foreground dark:text-gray-100">{kpi.value}</div>
                 <div className="text-sm text-muted-foreground dark:text-muted-foreground mt-1 flex items-center gap-1">
                   <span>{kpi.title}</span>
                   {kpi.infoText && (
@@ -537,7 +537,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
                       <button type="button" className="text-muted-foreground hover:text-foreground dark:text-gray-300 dark:hover:text-muted-foreground" aria-label="Info charges">
                         <Info className="w-3.5 h-3.5" />
                       </button>
-                      <div className="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 rounded-md bg-gray-800 text-white text-[11px] leading-4 p-2 shadow-lg z-20">
+                      <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 sm:w-64 rounded-md bg-gray-800 text-white text-[11px] leading-4 p-2 shadow-lg z-20">
                         {kpi.infoText}
                       </div>
                     </div>

@@ -90,7 +90,7 @@ export default function TopProducts() {
   return (
     <div className="bg-card rounded-xl shadow">
       <div className="p-6 border-b border-border">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <h3 className="text-lg font-semibold text-foreground">
             Produits les plus performants
           </h3>

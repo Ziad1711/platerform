@@ -2114,7 +2114,7 @@ export default function VentesPage() {
   })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col items-center sm:items-start gap-1">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />
@@ -3363,9 +3363,10 @@ export default function VentesPage() {
       {/* Filters */}
       <div className="bg-card rounded-xl shadow p-4">
         <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-          <StoreSelector />
+          <div className="flex flex-row items-center justify-center gap-3">
+            <StoreSelector />
 
-          <div className="relative">
+            <div className="relative">
             <button
               onClick={() => setFiltersOpen(!filtersOpen)}
               className={`flex items-center gap-2 px-3 py-2 border rounded-lg transition-colors ${
@@ -3386,7 +3387,7 @@ export default function VentesPage() {
             {filtersOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setFiltersOpen(false)} />
-                <div className="absolute left-0 top-full mt-2 z-50 w-72 bg-card border border-border rounded-xl shadow-xl p-4 space-y-4">
+                <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-64 sm:w-72 bg-card border border-border rounded-xl shadow-xl p-4 space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                       Statut
@@ -3447,36 +3448,37 @@ export default function VentesPage() {
               </>
             )}
           </div>
-
-          <div className="flex-1 relative min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Rechercher par client, téléphone ou numéro de suivi..."
-              className="w-full pl-10 pr-4 py-2 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary bg-card text-foreground"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
           </div>
 
-          <button
-            type="button"
-            onClick={() => syncAllRapidDeliveryMutation.mutate()}
-            disabled={syncAllRapidDeliveryMutation.isPending || rapidDeliveryIntegration?.status !== 'connected'}
-            className="inline-flex items-center justify-center gap-2 border border-border hover:bg-secondary text-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${syncAllRapidDeliveryMutation.isPending ? 'animate-spin' : ''}`} />
-            Resynchroniser
-          </button>
-
-          <button
-            type="button"
-            onClick={openImportModal}
-            className="inline-flex items-center justify-center gap-2 border border-border hover:bg-secondary text-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
-          >
-            <Upload className="w-4 h-4" />
-            Importer
-          </button>
+          <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Rechercher par client, téléphone ou numéro de suivi..."
+                className="w-full pl-10 pr-4 py-2 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary bg-card text-foreground"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => syncAllRapidDeliveryMutation.mutate()}
+              disabled={syncAllRapidDeliveryMutation.isPending || rapidDeliveryIntegration?.status !== 'connected'}
+              className="inline-flex items-center justify-center border border-border hover:bg-secondary text-foreground text-sm font-medium p-2 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${syncAllRapidDeliveryMutation.isPending ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline ml-1">Resynchroniser</span>
+            </button>
+            <button
+              type="button"
+              onClick={openImportModal}
+              className="inline-flex items-center justify-center border border-border hover:bg-secondary text-foreground text-sm font-medium p-2 rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Upload className="w-4 h-4" />
+              <span className="hidden sm:inline ml-1">Importer</span>
+            </button>
+          </div>
 
           <button
             onClick={openCreateModal}
@@ -3497,50 +3499,50 @@ export default function VentesPage() {
               <p className="text-muted-foreground mt-2">Chargement des commandes...</p>
             </div>
           ) : orders && filteredOrders.length > 0 ? (
-            <table className="min-w-full divide-y divide-border">
+              <table className="min-w-full divide-y divide-border text-xs sm:text-sm">
               <thead className="bg-secondary">
                 <tr>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Commande</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Date</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Client</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Statut</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Produit</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Ville</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Adresse</div>
                   </th>
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Vente</div>
                   </th>
                   {!isConfirmationRole && (
-                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Achat
                     </th>
                   )}
                   {!isConfirmationRole && (
-                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Ads
                     </th>
                   )}
                   {!isConfirmationRole && (
-                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Confirmation
                     </th>
                   )}
                   {!isConfirmationRole && (
-                    <th colSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <th colSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       <div className="group relative inline-flex items-center gap-1">
                         <span>Livraison</span>
                         <span className="inline-flex cursor-help rounded-full">
@@ -3555,18 +3557,18 @@ export default function VentesPage() {
                     </th>
                   )}
                   {!isConfirmationRole && (
-                    <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Profit
                     </th>
                   )}
-                  <th rowSpan={2} className="px-6 py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
                 {!isConfirmationRole && (
                   <tr>
-                    <th className="px-6 pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Coût</th>
-                    <th className="px-6 pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Facturé</th>
+                    <th className="px-1.5 sm:px-4 pb-1.5 sm:pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Coût</th>
+                    <th className="px-1.5 sm:px-4 pb-1.5 sm:pb-3 text-center align-middle text-[11px] font-medium text-muted-foreground tracking-wider">Facturé</th>
                   </tr>
                 )}
               </thead>
@@ -3589,25 +3591,25 @@ export default function VentesPage() {
                     .filter(Boolean)
                   return (
                     <tr key={order.id} className="hover:bg-secondary/50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-foreground">#{order.id.slice(0, 8)}</div>
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
+                        <div className="text-xs sm:text-sm font-medium text-foreground">#{order.id.slice(0, 8)}</div>
                         {order.tracking_number && (
-                          <div className="text-sm text-muted-foreground">Suivi: {order.tracking_number}</div>
+                          <div className="text-xs sm:text-sm text-muted-foreground">Suivi: {order.tracking_number}</div>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-muted-foreground">
                         {formatDateTime(order.order_date)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-foreground">{order.customer_name}</div>
-                        <div className="text-sm text-muted-foreground">{order.phone}</div>
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
+                        <div className="text-xs sm:text-sm font-medium text-foreground">{order.customer_name}</div>
+                        <div className="text-xs sm:text-sm text-muted-foreground">{order.phone}</div>
                         {isBlacklisted ? (
                           <div className="mt-1 inline-flex items-center rounded-full bg-red-100 text-red-700 text-[11px] px-2 py-0.5 font-medium">
                             Blacklist
                           </div>
                         ) : null}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <StatusIcon className="w-3.5 h-3.5 text-muted-foreground" />
                           {isDeliveryLocked ? (
@@ -3656,53 +3658,53 @@ export default function VentesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-foreground max-w-[260px] truncate" title={productNames.join(', ')}>
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3">
+                        <div className="text-xs sm:text-sm text-foreground max-w-[200px] sm:max-w-[260px] truncate" title={productNames.join(', ')}>
                           {productNames.length > 0 ? productNames.join(', ') : '-'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                         {order.city || '-'}
                       </td>
-                      <td className="px-6 py-4 text-sm text-foreground">
-                        <div className="max-w-[260px] truncate" title={order.address || ''}>
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-xs sm:text-sm text-foreground">
+                        <div className="max-w-[200px] sm:max-w-[260px] truncate" title={order.address || ''}>
                           {order.address || '-'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-foreground">
                         {formatCurrency(order.total_selling_price || 0)}
                       </td>
                       {!isConfirmationRole && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                           {formatCurrency(order.buy_price || 0)}
                         </td>
                       )}
                       {!isConfirmationRole && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                           {formatCurrency(order.ads_cost_allocated || 0)}
                         </td>
                       )}
                       {!isConfirmationRole && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                           {formatCurrency(order.confirmation_cost_allocated || 0)}
                         </td>
                       )}
                       {!isConfirmationRole && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                           {formatCurrency(order.delivery_fee || 0)}
                         </td>
                       )}
                       {!isConfirmationRole && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
+                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                           {formatCurrency(order.delivery_charge_to_customer || 0)}
                         </td>
                       )}
                       {!isConfirmationRole && (
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-foreground">
+                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-foreground">
                           {formatCurrency(order.profit || 0)}
                         </td>
                       )}
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium">
                         <button
                           onClick={() => setSelectedOrderForDetails(order)}
                           className="text-primary hover:text-primary/80 mr-3"
@@ -3729,26 +3731,26 @@ export default function VentesPage() {
         </div>
 
         {orders && orders.count > 0 ? (
-          <div className="border-t border-border px-6 py-4 flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">
+          <div className="border-t border-border px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="text-xs sm:text-sm text-muted-foreground order-2 sm:order-1">
               Page {currentPage} / {totalPages} • {orders.count} commandes
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 order-1 sm:order-2">
               <button
                 type="button"
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-2.5 sm:px-3 py-1.5 rounded-md border border-border text-xs sm:text-sm text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Précédent
+                ← Préc.
               </button>
               <button
                 type="button"
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
-                className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-2.5 sm:px-3 py-1.5 rounded-md border border-border text-xs sm:text-sm text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Suivant
+                Suiv. →
               </button>
             </div>
           </div>
