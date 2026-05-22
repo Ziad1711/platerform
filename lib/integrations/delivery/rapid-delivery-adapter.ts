@@ -10,12 +10,10 @@ import {
   createRapidDeliveryVoucher,
   trackRapidDeliveryParcel,
   getRapidDeliveryVoucher,
-  downloadRapidDeliveryFile,
+  downloadRapidDeliveryHtml,
   normalizeRapidDeliveryPhone,
-  extractRapidDeliveryPayloadItem,
   getRapidDeliveryStateName,
   mapRapidDeliveryStateToOrderStatus,
-  getRapidDeliveryShortTrackingKey,
 } from '@/lib/integrations/rapid-delivery'
 import type { RapidDeliveryTrackingPayload } from '@/lib/integrations/rapid-delivery'
 
@@ -25,6 +23,20 @@ import type { RapidDeliveryTrackingPayload } from '@/lib/integrations/rapid-deli
 function extractShortKeyFromHtml(html: string): string | null {
   const matches = html.match(/[A-Za-z0-9]{10}/g) || []
   return matches.find(m => !['Imprimer', 'etiquetes', 'DOCTYPE'].includes(m)) || null
+}
+
+/**
+ * Extrait le premier item du payload de tracking RapidDelivery
+ */
+function extractPayloadItem(payload: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(payload)) return payload[0] as Record<string, unknown> | undefined
+  if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>
+    if (Array.isArray(record.data)) return (record.data[0] || null) as Record<string, unknown> | undefined
+    if (Array.isArray(record.Data)) return (record.Data[0] || null) as Record<string, unknown> | undefined
+    return record
+  }
+  return undefined
 }
 
 export const rapidDeliveryAdapter: DeliveryProvider = {
@@ -40,7 +52,7 @@ export const rapidDeliveryAdapter: DeliveryProvider = {
       address: input.address || undefined,
       recipient: input.recipient || undefined,
       remark: input.remark || undefined,
-    }, config.baseUrl)
+    })
 
     const providerId = String((raw as any)?.data?.key || '').trim()
     if (!providerId) throw new Error('INVALID_TRACKING_NUMBER_UUID')
@@ -52,7 +64,7 @@ export const rapidDeliveryAdapter: DeliveryProvider = {
     const raw = await createRapidDeliveryVoucher(config.token, {
       shop: input.shopKey,
       parcels: input.parcelKeys,
-    }, config.baseUrl)
+    })
 
     const providerVoucherKey = String((raw as any)?.data?.key || '').trim()
     if (!providerVoucherKey) throw new Error('INVALID_VOUCHER_KEY')
@@ -61,7 +73,7 @@ export const rapidDeliveryAdapter: DeliveryProvider = {
   },
 
   async trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string): Promise<TrackParcelResult> {
-    const raw = await trackRapidDeliveryParcel(config.token, trackingNumber, config.baseUrl)
+    const raw = await trackRapidDeliveryParcel(config.token, trackingNumber)
     const stateName = getRapidDeliveryStateName(raw)
     const mapped = mapRapidDeliveryStateToOrderStatus(stateName)
 
@@ -75,18 +87,26 @@ export const rapidDeliveryAdapter: DeliveryProvider = {
   },
 
   async getVoucher(config: DeliveryIntegrationConfig, voucherKey: string): Promise<unknown> {
-    return getRapidDeliveryVoucher(config.token, voucherKey, config.baseUrl)
+    return getRapidDeliveryVoucher(config.token, voucherKey)
   },
 
   async downloadLabel(config: DeliveryIntegrationConfig, path: string) {
-    return downloadRapidDeliveryFile(config.token, path, config.baseUrl)
+    const html = await downloadRapidDeliveryHtml(config.token, path)
+    const encoder = new TextEncoder()
+    const body = encoder.encode(html).buffer as ArrayBuffer
+    return {
+      body,
+      contentType: 'text/html; charset=utf-8',
+      contentDisposition: 'inline',
+      byteLength: body.byteLength,
+    }
   },
 
   async resolveShortTrackingKey(config: DeliveryIntegrationConfig, uuid: string): Promise<string | null> {
     try {
       // Essayer d'abord via le tracking JSON
-      const remoteParcel = await trackRapidDeliveryParcel(config.token, uuid, config.baseUrl)
-      const item = extractRapidDeliveryPayloadItem(remoteParcel) as RapidDeliveryTrackingPayload | undefined
+      const remoteParcel = await trackRapidDeliveryParcel(config.token, uuid)
+      const item = extractPayloadItem(remoteParcel) as RapidDeliveryTrackingPayload | undefined
 
       // Vérifier si le key n'est pas un UUID
       if (item?.key && !String(item.key).includes('-')) {
@@ -94,8 +114,7 @@ export const rapidDeliveryAdapter: DeliveryProvider = {
       }
 
       // Fallback: extraire du label HTML
-      const labelHtml = await downloadRapidDeliveryFile(config.token, `/parcels/${encodeURIComponent(uuid)}/label`, config.baseUrl)
-      const html = new TextDecoder().decode(labelHtml.body)
+      const html = await downloadRapidDeliveryHtml(config.token, `/parcels/${encodeURIComponent(uuid)}/label`)
       return extractShortKeyFromHtml(html)
     } catch (e) {
       console.warn('resolveShortTrackingKey failed', { uuid, error: e instanceof Error ? e.message : String(e) })
