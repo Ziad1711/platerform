@@ -2,21 +2,22 @@
 const supabaseHostname = (() => {
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    return url ? new URL(url).hostname : null
+    if (!url || typeof url !== 'string') return undefined
+    return new URL(url).hostname
   } catch {
-    return null
+    return undefined
   }
 })()
 
 const nextConfig = {
   images: {
     remotePatterns: [
-      supabaseHostname
-        ? {
+      ...(supabaseHostname
+        ? [{
             protocol: 'https',
             hostname: supabaseHostname,
-          }
-        : null,
+          }]
+        : []),
       {
         protocol: 'https',
         hostname: '*.youcan.shop',
@@ -25,7 +26,7 @@ const nextConfig = {
         protocol: 'https',
         hostname: 'platerform.vercel.app',
       },
-    ].filter(Boolean),
+    ],
   },
   async headers() {
     return [
