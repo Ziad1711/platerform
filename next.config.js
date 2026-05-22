@@ -1,23 +1,7 @@
 /** @type {import('next').NextConfig} */
-const supabaseHostname = (() => {
-  try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    if (!url || typeof url !== 'string') return undefined
-    return new URL(url).hostname
-  } catch {
-    return undefined
-  }
-})()
-
 const nextConfig = {
   images: {
     remotePatterns: [
-      ...(supabaseHostname
-        ? [{
-            protocol: 'https',
-            hostname: supabaseHostname,
-          }]
-        : []),
       {
         protocol: 'https',
         hostname: '*.youcan.shop',
