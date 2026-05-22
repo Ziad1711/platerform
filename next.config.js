@@ -10,8 +10,6 @@ const supabaseHostname = (() => {
 })()
 
 const nextConfig = {
-  // Explicit output standalone for Vercel compatibility with Next.js 16
-  output: 'standalone',
   images: {
     remotePatterns: [
       ...(supabaseHostname
