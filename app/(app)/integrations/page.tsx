@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, X, Zap } from 'lucide-react'
+import { JisraMark } from '@/components/logo'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
 import IntegrationCard from '@/components/dashboard/integrations/integration-card'
 import DeliveryConnectWizard from '@/components/dashboard/integrations/delivery-connect-wizard'
@@ -314,26 +315,38 @@ export default function IntegrationsPage() {
   return (
     <div className="mx-auto w-full max-w-[1400px] space-y-10 px-4 py-8">
       {/* Header Section */}
-      <div className="space-y-6 text-center">
-        <div className="space-y-3">
-          <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight text-foreground">
-            Integrations
-          </h1>
-          <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-            Connect your tools and automate your business
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex flex-col items-center sm:items-start gap-1">
+          <div className="flex items-center gap-2">
+            <JisraMark size={28} />
+            <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+              Intégrations
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground text-center sm:text-left">
+            Connectez vos outils et automatisez votre business
           </p>
         </div>
 
         {/* Search Bar */}
-        <div className="relative max-w-2xl mx-auto">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search integrations (Shopify, Stripe, DHL, WooCommerce...)"
-            className="w-full rounded-2xl border border-border bg-card py-4 pl-14 pr-6 text-base text-foreground shadow-lg transition-all duration-300 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/20"
-          />
+        <div className="flex items-center gap-2 w-full sm:w-auto sm:min-w-[360px]">
+          <div className="relative flex-1">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search integrations (Shopify, Stripe, DHL, WooCommerce...)"
+              className="w-full rounded-2xl border border-border bg-card py-4 pl-14 pr-6 text-base text-foreground shadow-lg transition-all duration-300 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/20"
+            />
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded-2xl border border-[#1fa971] bg-[#1fa971] p-4 text-white shadow-lg hover:bg-[#1a8e5e] transition-colors"
+            aria-label="Search"
+          >
+            <Search className="w-5 h-5" />
+          </button>
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 import { useSearchParams } from 'next/navigation'
 import { Search, Plus, MoreVertical } from 'lucide-react'
 import { Suspense, useEffect, useMemo, useState } from 'react'
@@ -184,6 +185,17 @@ function FournisseursPageContent() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Fournisseurs
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Gestion des fournisseurs
+        </p>
+      </div>
       {isCreateOpen ? (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-card rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">

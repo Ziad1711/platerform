@@ -5,9 +5,10 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 
 async function normalizeOrderCityRequest(city: string, orderId?: string) {
   const response = await fetch('/api/orders/normalize-city', {
@@ -459,14 +460,6 @@ export default function VentesPage() {
   const [defaultDeliveryCompanySelection, setDefaultDeliveryCompanySelection] = useState(IMPORT_INTERNAL_DELIVERY)
   const [defaultDeliveryCompanyOtherName, setDefaultDeliveryCompanyOtherName] = useState('')
   const [importError, setImportError] = useState('')
-  const [importProgress, setImportProgress] = useState<{ processed: number; total: number; phase: string } | null>(null)
-  const importProgressRef = useRef<{ processed: number; total: number; phase: string } | null>(null)
-  const [, forceRender] = useReducer((x: number) => x + 1, 0)
-  const updateImportProgress = useCallback((progress: { processed: number; total: number; phase: string } | null) => {
-    importProgressRef.current = progress
-    setImportProgress(progress)
-    forceRender()
-  }, [])
   const [importSummary, setImportSummary] = useState<{
     inserted: number
     duplicates: number
@@ -1597,9 +1590,6 @@ export default function VentesPage() {
   const closeImportModal = () => {
     setIsImportOpen(false)
     setImportError('')
-    setImportProgress(null)
-    setImportStep(1)
-    setImportSummary(null)
   }
 
   const handleCsvUpload = async (file: File) => {
@@ -1773,9 +1763,6 @@ export default function VentesPage() {
         throw new Error('Veuillez renseigner le nom des sociétés marquées “Autre”.')
       }
 
-      // Initialiser la progression immédiatement pour que l'UI affiche la barre dès le clic
-      updateImportProgress({ processed: 0, total: importRows.length, phase: 'Préparation des lignes...' })
-
       const confirmationAgentsById = new Map<string, any>(
         (importConfirmationAgents || []).map((agent: any) => [String(agent.id || ''), agent])
       )
@@ -1786,49 +1773,6 @@ export default function VentesPage() {
         (importDeliveryCompanies || []).map((company: any) => [normalizeHeader(company.name), String(company.id)])
       )
       const createdDeliveryCompanyByNormalizedName = new Map<string, string>()
-
-      // Cache pour normalisation des villes (évite N appels API)
-      const cityNormalizationCache = new Map<string, { cityName: string; cityKey: number | null }>()
-      // Cache pour lookup produits (évite .find() répétés)
-      const importStoreProductsById = new Map<string, any>(
-        (importStoreProducts || []).map((p: any) => [String(p.id || ''), p])
-      )
-      // Collecter les noms "Autre" uniques pour batch upsert avant la boucle
-      const otherDeliveryNamesToCreate = new Set<string>()
-      for (const row of importRows) {
-        const raw = fieldToColumnMap.delivery_company ? String(row[fieldToColumnMap.delivery_company] || '').trim() : ''
-        if (!raw) continue
-        const mapped = deliveryCompanyValueMap[raw]
-        if (mapped !== IMPORT_OTHER_DELIVERY) continue
-        const otherName = fieldToColumnMap.delivery_company
-          ? String(deliveryCompanyOtherNameMap[raw] || '').trim()
-          : String(defaultDeliveryCompanyOtherName || '').trim()
-        const normalizedOtherName = normalizeHeader(otherName)
-        if (normalizedOtherName && !deliveryCompanyByNormalizedName.has(normalizedOtherName)) {
-          otherDeliveryNamesToCreate.add(otherName)
-        }
-      }
-      // Batch upsert des sociétés "Autre" avant la boucle
-      if (otherDeliveryNamesToCreate.size > 0) {
-        const batchInsert = Array.from(otherDeliveryNamesToCreate).map((name) => ({
-          store_id: currentStoreId,
-          name,
-          is_active: true,
-        }))
-        const { data: insertedCompanies, error: batchError } = await supabase
-          .from('delivery_companies')
-          .insert(batchInsert)
-          .select('id, name')
-        if (!batchError && insertedCompanies) {
-          for (const company of insertedCompanies) {
-            const normalizedName = normalizeHeader(company.name)
-            if (normalizedName) {
-              createdDeliveryCompanyByNormalizedName.set(normalizedName, String(company.id))
-            }
-          }
-        }
-      }
-
 
       const effectiveDateFormat = importDateFormat === 'auto' ? suggestedDateFormat : importDateFormat
       const validRows: Array<{
@@ -1853,10 +1797,6 @@ export default function VentesPage() {
       let invalid = 0
 
       for (let rowIndex = 0; rowIndex < importRows.length; rowIndex += 1) {
-        // Mettre à jour la progression pendant la préparation
-        if (rowIndex % 10 === 0 || rowIndex === importRows.length - 1) {
-          updateImportProgress({ processed: rowIndex + 1, total: importRows.length, phase: 'Préparation des lignes...' })
-        }
         const row = importRows[rowIndex]
         const rowNumber = rowIndex + 2
         const dateRaw = row[fieldToColumnMap.order_date] || ''
@@ -2000,28 +1940,12 @@ export default function VentesPage() {
         if (!parsedDate) {
           continue
         }
-        // Fix timezone: construire une date ISO locale sans conversion UTC
-        const tzOffset = parsedDate.getTimezoneOffset() * 60000
-        const orderDateIso = new Date(parsedDate.getTime() - tzOffset).toISOString().replace('Z', '+00:00')
+        const orderDateIso = parsedDate.toISOString()
         const shouldNormalizeImportCity = importRapidDeliveryConfig?.enable_city_normalization !== false
-        // Cache pour normalisation des villes
-        let normalizedCityPayload: { cityName?: string; cityKey?: number | null }
-        if (shouldNormalizeImportCity) {
-          const cached = cityNormalizationCache.get(cityValue)
-          if (cached) {
-            normalizedCityPayload = cached
-          } else {
-            normalizedCityPayload = await normalizeOrderCityRequest(cityValue)
-            cityNormalizationCache.set(cityValue, { cityName: normalizedCityPayload.cityName || cityValue, cityKey: normalizedCityPayload.cityKey ?? null })
-          }
-        } else {
-          normalizedCityPayload = { cityName: cityValue }
-        }
-
+        const normalizedCityPayload = shouldNormalizeImportCity
+          ? await normalizeOrderCityRequest(cityValue)
+          : { cityName: cityValue }
         const normalizedCityKey = Number(normalizedCityPayload.cityKey || 0) || null
-        // Détection source: si ads_cost_allocated > 0 => source = 'ads'
-        const adsCostRaw = fieldToColumnMap.ads_cost_allocated ? parseNumberValue(row[fieldToColumnMap.ads_cost_allocated]) : null
-        const detectedSource = adsCostRaw !== null && adsCostRaw > 0 ? 'ads' : 'organic'
         const payload: Record<string, any> = {
           store_id: currentStoreId,
           order_date: orderDateIso,
@@ -2032,17 +1956,16 @@ export default function VentesPage() {
           rapid_delivery_city_key: normalizedCityKey,
           total_selling_price: totalSellingPrice,
           status: mappedStatus,
-          source: detectedSource,
+          source: 'organic',
           subtotal_amount: totalSellingPrice,
           delivery_fee: normalizedCityKey
             ? Number(rapidDeliveryCityCostByKey.get(normalizedCityKey) ?? 0)
             : 0,
-          ads_cost_allocated: adsCostRaw !== null ? adsCostRaw : 0,
+          ads_cost_allocated: 0,
           delivery_charge_to_customer: 0,
           confirmation_agent_id: resolvedConfirmationAgentId,
           delivery_company_id: resolvedDeliveryCompanyId,
         }
-
 
         const statusDateField = statusDateFieldMap[mappedStatus]
         if (statusDateField && statusDateField !== 'created_at') {
@@ -2107,70 +2030,66 @@ export default function VentesPage() {
         throw new Error('Aucune ligne valide à importer.')
       }
 
-      const dedupedRows: Array<{
-        rowNumber: number
-        payload: Record<string, any>
-        linkedProductId: string | null
-        linkedUnitPurchaseCost: number
-      }> = validRows
-      const duplicates = 0
+  const dedupedRows: Array<{
+    rowNumber: number
+    payload: Record<string, any>
+    linkedProductId: string | null
+    linkedUnitPurchaseCost: number
+  }> = validRows
+  const duplicates = 0
 
-      if (dedupedRows.length > 0) {
-        const CHUNK_SIZE = 200
-        const totalToInsert = dedupedRows.length
-        updateImportProgress({ processed: 0, total: totalToInsert, phase: 'Insertion des commandes...' })
-        for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
-          const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
-          const chunk = chunkRows.map((row) => row.payload)
-          updateImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Insertion des commandes...' })
-          const { data: insertedOrders, error } = await supabase
-            .from('orders')
-            .insert(chunk)
-            .select('id, phone, order_date, total_selling_price')
-          if (error) throw error
+  if (dedupedRows.length > 0) {
+    const CHUNK_SIZE = 200
+    for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
+      const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
+      const chunk = chunkRows.map((row) => row.payload)
+      const { data: insertedOrders, error } = await supabase
+        .from('orders')
+        .insert(chunk)
+        .select('id, phone, order_date, total_selling_price')
+      if (error) throw error
 
-          if (linkImportedProducts) {
-            updateImportProgress({ processed: Math.min(i + CHUNK_SIZE, totalToInsert), total: totalToInsert, phase: 'Liaison des produits...' })
-            const insertedByKey = new Map<string, string>()
-            ;(insertedOrders || []).forEach((inserted: any) => {
-              const key = buildDedupeKey(
-                String(inserted.phone || ''),
-                String(inserted.order_date || ''),
-                Number(inserted.total_selling_price || 0)
-              )
-              insertedByKey.set(key, String(inserted.id || ''))
-            })
+      if (linkImportedProducts) {
+        const insertedByKey = new Map<string, string>()
+        ;(insertedOrders || []).forEach((inserted: any) => {
+          const key = buildDedupeKey(
+            String(inserted.phone || ''),
+            String(inserted.order_date || ''),
+            Number(inserted.total_selling_price || 0)
+          )
+          insertedByKey.set(key, String(inserted.id || ''))
+        })
 
-            const orderItemsPayload = chunkRows
-              .filter((row) => !!row.linkedProductId)
-              .map((row) => {
-                const orderKey = buildDedupeKey(
-                  String(row.payload.phone || ''),
-                  String(row.payload.order_date || ''),
-                  Number(row.payload.total_selling_price || 0)
-                )
-                const orderId = insertedByKey.get(orderKey) || ''
-                if (!orderId) return null
+        const orderItemsPayload = chunkRows
+          .filter((row) => !!row.linkedProductId)
+          .map((row) => {
+            const orderKey = buildDedupeKey(
+              String(row.payload.phone || ''),
+              String(row.payload.order_date || ''),
+              Number(row.payload.total_selling_price || 0)
+            )
+            const orderId = insertedByKey.get(orderKey) || ''
+            if (!orderId) return null
 
-                return {
-                  store_id: currentStoreId,
-                  order_id: orderId,
-                  product_id: row.linkedProductId,
-                  product_variant_id: null,
-                  quantity: 1,
-                  unit_selling_price: Number(row.payload.total_selling_price || 0),
-                  unit_purchase_cost_snapshot: Number(row.linkedUnitPurchaseCost || 0),
-                }
-              })
-              .filter(Boolean)
-
-            if (orderItemsPayload.length > 0) {
-              const { error: orderItemsError } = await supabase.from('order_items').insert(orderItemsPayload as any[])
-              if (orderItemsError) throw orderItemsError
+            return {
+              store_id: currentStoreId,
+              order_id: orderId,
+              product_id: row.linkedProductId,
+              product_variant_id: null,
+              quantity: 1,
+              unit_selling_price: Number(row.payload.total_selling_price || 0),
+              unit_purchase_cost_snapshot: Number(row.linkedUnitPurchaseCost || 0),
             }
-          }
+          })
+          .filter(Boolean)
+
+        if (orderItemsPayload.length > 0) {
+          const { error: orderItemsError } = await supabase.from('order_items').insert(orderItemsPayload as any[])
+          if (orderItemsError) throw orderItemsError
         }
       }
+    }
+  }
 
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
@@ -2196,6 +2115,17 @@ export default function VentesPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Ventes
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Suivi des commandes et des revenus
+        </p>
+      </div>
       {isCreateOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
@@ -2756,25 +2686,23 @@ export default function VentesPage() {
       )}
 
       {isImportOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col border border-gray-100">
-            <div className="relative p-6 border-b flex items-center justify-between shrink-0 bg-gradient-to-r from-jisra-green via-jisra-green to-jisra-green-dark overflow-hidden">
-              <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAyNHYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-30" />
-              <div className="relative z-10">
-                <h3 className="text-lg font-semibold text-white">Importer des ventes (CSV)</h3>
-                <p className="text-sm text-green-100">
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b flex items-center justify-between shrink-0 bg-white">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Importer des ventes (CSV)</h3>
+                <p className="text-sm text-gray-500">
                   Étape {importStep} / 3 {importFileName ? `• ${importFileName}` : ''}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={closeImportModal}
-                className="relative z-10 text-white/80 hover:text-white transition-colors"
+                className="text-gray-500 hover:text-gray-700"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                Fermer
               </button>
             </div>
-
 
             <div className="p-6 overflow-y-auto space-y-5">
               {importStep === 1 ? (
@@ -2785,28 +2713,13 @@ export default function VentesPage() {
                     </div>
                   ) : null}
 
-                  <div
-                    className="rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors"
-                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.className = 'rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors border-jisra-green bg-jisra-green/5' }}
-                    onDragLeave={(e) => { e.preventDefault(); e.currentTarget.className = 'rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors' }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      e.currentTarget.className = 'rounded-lg border-2 border-dashed p-8 text-center space-y-4 transition-colors'
-                      const file = e.dataTransfer.files?.[0]
-                      if (!file) return
-                      void handleCsvUpload(file)
-                    }}
-                  >
-                    <div className="flex flex-col items-center gap-2">
-                      <Upload className="w-10 h-10 text-gray-400" />
-                      <p className="text-sm text-gray-600">Glissez-déposez votre fichier CSV ici</p>
-                      <p className="text-xs text-gray-400">ou</p>
-                    </div>
+                  <div className="rounded-lg border border-dashed p-6 text-center space-y-3">
+                    <p className="text-sm text-gray-600">Import CSV uniquement</p>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={!currentStoreId}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-jisra-green hover:bg-jisra-green-dark text-white disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
                     >
                       <Upload className="w-4 h-4" />
                       Choisir un fichier CSV
@@ -2830,8 +2743,6 @@ export default function VentesPage() {
               {importStep === 2 ? (
                 <div className="space-y-5">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-
                     <div>
                       <label className="block text-sm text-gray-700 mb-1">Format de date</label>
                       <select
@@ -3293,7 +3204,6 @@ export default function VentesPage() {
             <div className="p-6 border-t flex items-center justify-between gap-3 shrink-0 bg-white">
               <button
                 type="button"
-                disabled={importOrdersMutation.isPending}
                 onClick={() => {
                   if (importStep === 1) {
                     closeImportModal()
@@ -3305,60 +3215,31 @@ export default function VentesPage() {
                   }
                   closeImportModal()
                 }}
-                className="px-4 py-2 rounded-lg border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded-lg border text-gray-700"
               >
                 {importStep === 1 ? 'Annuler' : importStep === 2 ? 'Retour' : 'Fermer'}
               </button>
 
-              <div className="flex items-center gap-3">
-                {importOrdersMutation.isPending ? (
-                  importProgress ? (
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
-                      <span className="text-xs text-jisra-green-dark/70 hidden sm:inline">{importProgress.phase}</span>
-                      <span className="font-medium text-jisra-green-dark whitespace-nowrap">
-                        {importProgress.processed} / {importProgress.total}
-                      </span>
-                      <div className="w-28 h-2.5 bg-jisra-green/15 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-jisra-green to-jisra-green-dark rounded-full transition-all duration-300"
-                          style={{ width: `${Math.min(100, (importProgress.processed / importProgress.total) * 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-jisra-green font-medium hidden sm:inline">
-                        {Math.round((importProgress.processed / importProgress.total) * 100)}%
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-jisra-green border-t-transparent" />
-                      <span className="text-jisra-green-dark">Initialisation...</span>
-                    </div>
-                  )
-                ) : null}
-
-
-                {importStep === 2 ? (
-                  <button
-                    type="button"
-                    onClick={() => importOrdersMutation.mutate()}
-                    disabled={
-                      importOrdersMutation.isPending ||
-                      missingRequiredFields.length > 0 ||
-                      hasMissingMandatoryImportStatuses ||
-                      (linkImportedProducts && (!fieldToColumnMap.product_name || hasUnmappedImportProducts)) ||
-                      (linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents) ||
-                      (linkImportedDeliveryCompanies && fieldToColumnMap.delivery_company && hasUnmappedImportDeliveryCompanies) ||
-                      hasMissingOtherDeliveryNames ||
-                      hasInvalidDefaultDeliveryOtherName ||
-                      !currentStoreId
-                    }
-                    className="px-4 py-2 rounded-lg bg-jisra-green hover:bg-jisra-green-dark text-white disabled:opacity-50"
-                  >
-                    {importOrdersMutation.isPending ? 'Import en cours...' : 'Lancer import'}
-                  </button>
-                ) : null}
-              </div>
+              {importStep === 2 ? (
+                <button
+                  type="button"
+                  onClick={() => importOrdersMutation.mutate()}
+                  disabled={
+                    importOrdersMutation.isPending ||
+                    missingRequiredFields.length > 0 ||
+                    hasMissingMandatoryImportStatuses ||
+                    (linkImportedProducts && (!fieldToColumnMap.product_name || hasUnmappedImportProducts)) ||
+                    (linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents) ||
+                    (linkImportedDeliveryCompanies && fieldToColumnMap.delivery_company && hasUnmappedImportDeliveryCompanies) ||
+                    hasMissingOtherDeliveryNames ||
+                    hasInvalidDefaultDeliveryOtherName ||
+                    !currentStoreId
+                  }
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                >
+                  {importOrdersMutation.isPending ? 'Import en cours...' : 'Lancer import'}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

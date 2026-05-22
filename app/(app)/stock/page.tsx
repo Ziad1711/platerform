@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 import { Search, Filter, MoreVertical, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -393,6 +394,17 @@ export default function StocksPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Stock
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Gestion des stocks et mouvements
+        </p>
+      </div>
       {showAdjustmentInfo ? (
         <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
           <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 
@@ -739,6 +740,17 @@ export default function ProduitsPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Produits
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Catalogue et inventaire produits
+        </p>
+      </div>
       {openActionsProductId ? (
         <button
           type="button"

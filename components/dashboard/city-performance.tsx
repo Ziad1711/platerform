@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
 import { formatCurrency, getPeriodRange } from '@/lib/utils'
 
-type SortBy = 'revenue' | 'profit' | 'confirmationRate' | 'returnRate'
+type SortBy = 'revenue' | 'confirmationRate' | 'returnRate'
 
 export default function CityPerformance() {
   const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
@@ -26,25 +26,19 @@ export default function CityPerformance() {
       const results = await Promise.all(
         storeIds.map(async (storeId) => {
           const { data, error } = await supabase.rpc('rpc_dashboard_city_performance', {
-            p_store_id: storeId,
+            p_store_ids: [storeId],
             p_start_date: periodRange.start ? periodRange.start.toISOString() : null,
             p_end_date: periodRange.end ? periodRange.end.toISOString() : null,
           })
           if (error) throw error
           return (data || []) as Array<{
             city: string
-            orders: number
-            confirmed: number
-            returned: number
-            delivered: number
-            revenue: number
-            purchase_cost: number
-            ad_cost: number
-            delivery_cost: number
-            confirmation_cost: number
-            confirmation_rate: number
-            return_rate: number
-            profit: number
+            total_orders: number
+            confirmed_orders: number
+            delivered_orders: number
+            returned_orders: number
+            cancelled_orders: number
+            total_revenue: number
           }>
         })
       )
@@ -57,11 +51,6 @@ export default function CityPerformance() {
         returned: number
         delivered: number
         revenue: number
-        purchaseCost: number
-        adCost: number
-        deliveryCost: number
-        confirmationCost: number
-        profit: number
       }>()
 
       for (const rows of results) {
@@ -74,22 +63,12 @@ export default function CityPerformance() {
             returned: 0,
             delivered: 0,
             revenue: 0,
-            purchaseCost: 0,
-            adCost: 0,
-            deliveryCost: 0,
-            confirmationCost: 0,
-            profit: 0,
           }
-          existing.orders += Number(row.orders || 0)
-          existing.confirmed += Number(row.confirmed || 0)
-          existing.returned += Number(row.returned || 0)
-          existing.delivered += Number(row.delivered || 0)
-          existing.revenue += Number(row.revenue || 0)
-          existing.purchaseCost += Number(row.purchase_cost || 0)
-          existing.adCost += Number(row.ad_cost || 0)
-          existing.deliveryCost += Number(row.delivery_cost || 0)
-          existing.confirmationCost += Number(row.confirmation_cost || 0)
-          existing.profit += Number(row.profit || 0)
+          existing.orders += Number(row.total_orders || 0)
+          existing.confirmed += Number(row.confirmed_orders || 0)
+          existing.returned += Number(row.returned_orders || 0)
+          existing.delivered += Number(row.delivered_orders || 0)
+          existing.revenue += Number(row.total_revenue || 0)
           cityMap.set(city, existing)
         }
       }
@@ -111,8 +90,6 @@ export default function CityPerformance() {
   const sortLabel =
     sortBy === 'revenue'
       ? "Chiffre d'affaires"
-      : sortBy === 'profit'
-      ? 'Profit'
       : sortBy === 'confirmationRate'
       ? 'Taux de confirmation'
       : 'Taux de retour'
@@ -132,7 +109,6 @@ export default function CityPerformance() {
           onChange={(e) => setSortBy(e.target.value as SortBy)}
         >
           <option value="revenue">Chiffre d'affaires</option>
-          <option value="profit">Profit</option>
           <option value="confirmationRate">Taux de confirmation</option>
           <option value="returnRate">Taux de retour</option>
         </select>
@@ -149,7 +125,7 @@ export default function CityPerformance() {
               <div key={row.city} className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
                 <div className="text-sm font-medium text-foreground">#{index + 1} {row.city}</div>
                 <div className="text-sm font-semibold text-foreground">
-                  {sortBy === 'revenue' || sortBy === 'profit'
+                  {sortBy === 'revenue'
                     ? formatCurrency(score)
                     : `${score.toFixed(1)}%`}
                 </div>

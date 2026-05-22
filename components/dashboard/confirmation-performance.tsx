@@ -34,7 +34,7 @@ export default function ConfirmationPerformance() {
       const results = await Promise.all(
         storeIds.map(async (storeId) => {
           const { data: rows, error } = await supabase.rpc('rpc_dashboard_confirmation_performance', {
-            p_store_id: storeId,
+            p_store_ids: [storeId],
             p_start_date: periodRange.start ? periodRange.start.toISOString() : null,
             p_end_date: periodRange.end ? periodRange.end.toISOString() : null,
           })
@@ -111,7 +111,7 @@ export default function ConfirmationPerformance() {
         <div className="p-8 text-center text-muted-foreground">Chargement...</div>
       ) : (
         <div className="p-6 space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="rounded-lg border border-border p-4">
               <div className="text-xs text-muted-foreground">Commandes traitées</div>
               <div className="text-2xl font-bold text-foreground mt-1">{data?.totals.totalOrders || 0}</div>

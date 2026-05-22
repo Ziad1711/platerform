@@ -1,19 +1,7 @@
-export const RAPID_DELIVERY_STANDARD_API_BASE_URL = 'https://www.rapiddelivery.ma/api/v1'
-export const RAPID_DELIVERY_SPECIAL_API_BASE_URL = 'https://www.marocgodelivery.com/api/v1'
-
-export type RapidDeliveryEndpointType = 'standard' | 'special'
-
-export function resolveRapidDeliveryApiBaseUrl(value?: string | null) {
-  const raw = String(value || '').trim()
-  if (raw === 'special' || raw.includes('marocgodelivery.com')) return RAPID_DELIVERY_SPECIAL_API_BASE_URL
-  if (raw === 'standard' || raw.includes('rapiddelivery.ma')) return RAPID_DELIVERY_STANDARD_API_BASE_URL
-  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, '')
-  return RAPID_DELIVERY_STANDARD_API_BASE_URL
-}
+const RAPID_DELIVERY_API_BASE_URL = 'https://www.rapiddelivery.ma/api/v1'
 
 type RapidDeliveryRequestInit = {
   token: string
-  baseUrl?: string | null
   method?: 'GET' | 'POST'
   path: string
   body?: Record<string, unknown>
@@ -22,9 +10,8 @@ type RapidDeliveryRequestInit = {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function rapidDeliveryFetch<T>(params: RapidDeliveryRequestInit): Promise<T> {
-  const baseUrl = resolveRapidDeliveryApiBaseUrl(params.baseUrl)
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await fetch(`${baseUrl}${params.path}`, {
+    const response = await fetch(`${RAPID_DELIVERY_API_BASE_URL}${params.path}`, {
       method: params.method || 'GET',
       headers: {
         Authorization: `Bearer ${params.token}`,
@@ -85,11 +72,6 @@ export type RapidDeliveryState = {
 
 export type RapidDeliveryTrackingPayload = {
   key?: string | number
-  shop?: {
-    id?: string | number | null
-    shop_name?: string | null
-    key?: string | number | null
-  } | null
   state?: {
     state_name?: string | null
     key?: string | number | null
@@ -104,7 +86,7 @@ export type RapidDeliveryMappedOrderStatus = {
   rawStatus: string
 }
 
-export function extractRapidDeliveryPayloadItem(payload: RapidDeliveryTrackingPayload | unknown) {
+function extractRapidDeliveryPayloadItem(payload: RapidDeliveryTrackingPayload | unknown) {
   if (Array.isArray(payload)) return payload[0] as Record<string, unknown> | undefined
   if (payload && typeof payload === 'object') {
     const record = payload as Record<string, unknown>
@@ -202,60 +184,46 @@ export function normalizeRapidDeliveryPhone(value: string) {
   return String(value || '').replace(/\s+/g, '').trim()
 }
 
-export async function listRapidDeliveryShops(token: string, baseUrl?: string | null) {
-  return rapidDeliveryFetch<RapidDeliveryShop[]>({ token, baseUrl, path: '/shops' })
+export async function listRapidDeliveryShops(token: string) {
+  return rapidDeliveryFetch<RapidDeliveryShop[]>({ token, path: '/shops' })
 }
 
-export async function listRapidDeliveryCities(token: string, baseUrl?: string | null) {
-  return rapidDeliveryFetch<RapidDeliveryCity[]>({ token, baseUrl, path: '/cities' })
+export async function listRapidDeliveryCities(token: string) {
+  return rapidDeliveryFetch<RapidDeliveryCity[]>({ token, path: '/cities' })
 }
 
-export async function listRapidDeliveryStates(token: string, baseUrl?: string | null) {
-  return rapidDeliveryFetch<RapidDeliveryState[]>({ token, baseUrl, path: '/states' })
+export async function listRapidDeliveryStates(token: string) {
+  return rapidDeliveryFetch<RapidDeliveryState[]>({ token, path: '/states' })
 }
 
-export async function createRapidDeliveryParcel(token: string, payload: RapidDeliveryParcelPayload, baseUrl?: string | null) {
+export async function createRapidDeliveryParcel(token: string, payload: RapidDeliveryParcelPayload) {
   return rapidDeliveryFetch<{ message: string; data: { key: string } }>({
     token,
-    baseUrl,
     path: '/parcels',
     method: 'POST',
     body: payload,
   })
 }
 
-export async function trackRapidDeliveryParcel(token: string, trackingNumber: string, baseUrl?: string | null) {
-  return rapidDeliveryFetch<RapidDeliveryTrackingPayload>({ token, baseUrl, path: `/parcels/${encodeURIComponent(trackingNumber)}` })
+export async function trackRapidDeliveryParcel(token: string, trackingNumber: string) {
+  return rapidDeliveryFetch<RapidDeliveryTrackingPayload>({ token, path: `/parcels/${encodeURIComponent(trackingNumber)}` })
 }
 
-export async function createRapidDeliveryVoucher(token: string, payload: { shop: number; parcels: Array<string | number> }, baseUrl?: string | null) {
+export async function createRapidDeliveryVoucher(token: string, payload: { shop: number; parcels: Array<string | number> }) {
   return rapidDeliveryFetch<{ message: string; data: { key: string } }>({
     token,
-    baseUrl,
     path: '/vouchers',
     method: 'POST',
     body: payload,
   })
 }
 
-export async function getRapidDeliveryVoucher(token: string, key: string, baseUrl?: string | null) {
-  return rapidDeliveryFetch<any>({ token, baseUrl, path: `/vouchers/${encodeURIComponent(key)}` })
+export async function getRapidDeliveryVoucher(token: string, key: string) {
+  return rapidDeliveryFetch<any>({ token, path: `/vouchers/${encodeURIComponent(key)}` })
 }
 
-export async function tryTrackRapidDeliveryParcel(token: string, trackingNumber: string, baseUrl?: string | null) {
-  try {
-    return await trackRapidDeliveryParcel(token, trackingNumber, baseUrl)
-  } catch (error) {
-    console.warn('Rapid Delivery parcel remote validation failed', {
-      trackingNumber,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    return null
-  }
-}
-
-export async function downloadRapidDeliveryHtml(token: string, path: string, baseUrl?: string | null) {
-  const response = await fetch(`${resolveRapidDeliveryApiBaseUrl(baseUrl)}${path}`, {
+export async function downloadRapidDeliveryHtml(token: string, path: string) {
+  const response = await fetch(`${RAPID_DELIVERY_API_BASE_URL}${path}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -269,52 +237,4 @@ export async function downloadRapidDeliveryHtml(token: string, path: string, bas
   }
 
   return response.text()
-}
-
-export function getRapidDeliveryShortTrackingKey(payload: RapidDeliveryTrackingPayload | unknown): string | null {
-  const item = extractRapidDeliveryPayloadItem(payload)
-  if (!item) return null
-  
-  // Si le champ key est un UUID, on cherche s'il y a un autre champ qui ressemble à un code court (ex: uC6qBO1oBq)
-  const key = String(item.key || '').trim()
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)
-  
-  if (!isUuid && key.length > 0) return key
-  
-  // Parcourir les propriétés pour trouver un code de 8-12 caractères alphanumériques qui n'est pas un UUID
-  for (const [vKey, value] of Object.entries(item)) {
-    if (typeof value === 'string' && value.length >= 8 && value.length <= 15) {
-      if (!/^[0-9a-f-]{36}$/i.test(value) && /^[A-Za-z0-9]+$/.test(value)) {
-        console.log('Found potential Rapid Delivery short key', { field: vKey, value })
-        return value
-      }
-    }
-  }
-
-  return null
-}
-export async function downloadRapidDeliveryFile(token: string, path: string, baseUrl?: string | null) {
-  const response = await fetch(`${resolveRapidDeliveryApiBaseUrl(baseUrl)}${path}`, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'text/html,application/pdf,application/octet-stream,*/*',
-    },
-  })
-
-  const contentType = response.headers.get('content-type') || 'text/html; charset=utf-8'
-  const contentDisposition = response.headers.get('content-disposition') || ''
-  const bytes = await response.arrayBuffer()
-
-  if (!response.ok) {
-    const message = new TextDecoder().decode(bytes).slice(0, 500)
-    throw new Error(`RAPID_DELIVERY_DOWNLOAD_ERROR:${response.status}:${message}`)
-  }
-
-  return {
-    body: bytes,
-    contentType,
-    contentDisposition,
-    byteLength: bytes.byteLength,
-  }
 }

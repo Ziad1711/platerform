@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import AdsKpiGrid from '@/components/advertising/ads-kpi-grid'
 import AdsTimeSeries from '@/components/advertising/ads-time-series'
+import { JisraMark } from '@/components/logo'
 import {
   BarChart3,
   Download,
@@ -167,9 +168,20 @@ export default function AdvertisingPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Publicité
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Analyse des performances des campagnes Facebook Ads
+        </p>
+      </div>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="hidden">
           <h1 className="text-2xl font-bold">Publicité</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Analyse des performances des campagnes Facebook Ads

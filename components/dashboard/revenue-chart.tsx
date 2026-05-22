@@ -480,14 +480,14 @@ export default function RevenueChart() {
 
   return (
     <div className="bg-card rounded-xl shadow p-6 overflow-hidden">
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4 mb-6">
         <div>
           <h3 className="text-lg font-semibold text-foreground">
             Performance du business
           </h3>
           <p className="text-sm text-muted-foreground mt-1">Selon la période sélectionnée</p>
         </div>
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
           {(Object.keys(seriesConfig) as SeriesKey[]).map((key) => (
             <button
               key={key}
@@ -727,7 +727,7 @@ export default function RevenueChart() {
           <p className="text-xs text-muted-foreground mt-1">Base: {baseOrders} commandes</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-6 gap-3">
           {conversionStages.map((stage) => (
             <div key={stage.key} className="rounded-lg border border-border p-3">
               <div className="flex items-center justify-between mb-2">

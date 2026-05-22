@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users } from 'lucide-react'
+import { JisraMark } from '@/components/logo'
 import StoresSection from '@/components/settings/stores-section'
 import TeamSection from '@/components/settings/team-section'
 import { useTheme } from '@/components/providers'
@@ -272,9 +273,20 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6 lg:pb-8">
+      <div className="flex flex-col items-center sm:items-start gap-1 px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Paramètres
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Gérez votre profil, sécurité, préférences, taux de change et blacklist globale
+        </p>
+      </div>
       <div className="sticky top-0 z-30 border-b bg-background/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
+          <div className="hidden">
             <h1 className="text-3xl font-bold text-foreground">Paramètres</h1>
             <p className="mt-1 text-sm text-muted-foreground">Gérez votre profil, sécurité, préférences, taux de change et blacklist globale appliquée à tous vos stores.</p>
           </div>

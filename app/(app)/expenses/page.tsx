@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 import { Plus, RefreshCw, Search } from 'lucide-react'
 
 type RecurrenceType = 'daily' | 'weekly' | 'monthly' | 'yearly'
@@ -305,6 +306,17 @@ export default function DepensesPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Dépenses
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Suivi des charges et dépenses
+        </p>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-card rounded-xl shadow p-5">
           <div className="text-sm text-muted-foreground">Total charges (page en cours)</div>

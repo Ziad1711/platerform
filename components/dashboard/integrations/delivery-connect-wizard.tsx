@@ -41,7 +41,6 @@ export default function DeliveryConnectWizard({
   const queryClient = useQueryClient()
   const [step, setStep] = useState<'connecting' | 'mapping' | 'syncing' | 'done'>('connecting')
   const [token, setToken] = useState('')
-  const [endpointType, setEndpointType] = useState<'standard' | 'special'>('standard')
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
   const [shops, setShops] = useState<ShopRow[]>([])
@@ -73,7 +72,7 @@ export default function DeliveryConnectWizard({
       const response = await fetch('/api/integrations/rapid-delivery/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiToken: sanitizedToken, endpointType }),
+        body: JSON.stringify({ apiToken: sanitizedToken }),
       })
       const payload = (await response.json().catch(() => null)) as { error?: string; shops?: ShopRow[]; stores?: StoreRow[] } | null
       if (!response.ok) throw new Error(payload?.error || 'RAPID_DELIVERY_VALIDATE_FAILED')
@@ -117,7 +116,6 @@ export default function DeliveryConnectWizard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           apiToken: sanitizedToken,
-          endpointType,
           mappings: mappings.map((item) => ({ externalShopId: item.externalShopId, storeId: item.storeId || null })),
         }),
       })
@@ -171,18 +169,6 @@ export default function DeliveryConnectWizard({
                   <p className="text-xs text-muted-foreground">
                     Collez uniquement le token. Le préfixe <span className="font-medium">Bearer</span> est ajouté automatiquement.
                   </p>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Type de compte</label>
-                  <select
-                    value={endpointType}
-                    onChange={(e) => setEndpointType(e.target.value === 'special' ? 'special' : 'standard')}
-                    disabled={isLoading}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="standard">Standard — rapiddelivery.ma</option>
-                    <option value="special">Prix spécial — marocgodelivery.com</option>
-                  </select>
                 </div>
                 <button type="button" onClick={() => void validateToken()} disabled={isLoading || !token.trim()} className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50">
                   {isLoading ? 'Validation...' : 'Valider le token'}

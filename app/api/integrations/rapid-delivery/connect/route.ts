@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser } from '@/lib/assistant/security'
-import { listRapidDeliveryCities, listRapidDeliveryShops, listRapidDeliveryStates, resolveRapidDeliveryApiBaseUrl } from '@/lib/integrations/rapid-delivery'
+import { listRapidDeliveryCities, listRapidDeliveryShops, listRapidDeliveryStates } from '@/lib/integrations/rapid-delivery'
 import { encryptSecret } from '@/lib/security/crypto'
 import {
   getRapidDeliveryProviderId,
@@ -49,18 +49,16 @@ export async function POST(request: Request) {
     const { user } = await requireAuthenticatedUser()
     const body = (await request.json().catch(() => ({}))) as {
       apiToken?: string
-      endpointType?: string
       mappings?: Array<{ externalShopId?: number; shopKey?: number; storeId?: string | null }>
     }
     const apiToken = String(body.apiToken || '').trim()
-    const baseUrl = resolveRapidDeliveryApiBaseUrl(body.endpointType)
 
     if (!apiToken) return NextResponse.json({ error: 'Token API Rapid Delivery manquant.' }, { status: 400 })
 
     const [cities, shops, states] = await Promise.all([
-      listRapidDeliveryCities(apiToken, baseUrl),
-      listRapidDeliveryShops(apiToken, baseUrl),
-      listRapidDeliveryStates(apiToken, baseUrl),
+      listRapidDeliveryCities(apiToken),
+      listRapidDeliveryShops(apiToken),
+      listRapidDeliveryStates(apiToken),
     ])
 
     const admin = createAdminClient()
@@ -84,7 +82,7 @@ export async function POST(request: Request) {
         .update({
           provider: 'rapid-delivery',
           provider_id: providerId,
-          store_domain: baseUrl,
+          store_domain: 'www.rapiddelivery.ma',
           access_token: encryptedToken,
           status: 'connected',
           updated_at: now,
@@ -100,7 +98,7 @@ export async function POST(request: Request) {
           user_id: user.id,
           provider: 'rapid-delivery',
           provider_id: providerId,
-          store_domain: baseUrl,
+          store_domain: 'www.rapiddelivery.ma',
           access_token: encryptedToken,
           status: 'connected',
           updated_at: now,

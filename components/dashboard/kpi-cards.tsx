@@ -232,8 +232,13 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
         const ordersCount = aggregated.orders_count
         const deliveredOrdersCount = aggregated.delivered_count
-        // RPC returns product-only revenue from order_items, same logic as TopProducts.
-        const revenue = aggregated.revenue
+        const totalSellingPrice = aggregated.revenue
+        const deliveryFeesCharged = aggregated.delivery_cost // Note: Assuming this is delivery_charge_to_customer based on RPC
+        
+        // Match TopProducts: Revenue should only be product items revenue, excluding delivery fees
+        // In the current database, total_selling_price includes delivery_charge_to_customer
+        // So we subtract it to get the product-only revenue
+        const revenue = totalSellingPrice - deliveryFeesCharged
         
         const purchaseCost = aggregated.purchase_cost
         const adSpendTotal = aggregated.ad_spend
@@ -429,25 +434,25 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
             <div className="mb-3">
               <h3 className="text-lg font-semibold text-foreground dark:text-gray-100">Performance marketing</h3>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {marketingKpis.map((kpi) => {
-                const Icon = kpi.icon
-                return (
-                  <div key={kpi.title} className="rounded-lg border p-4">
-                    <div className="flex items-center justify-between">
-                      <div className={`${kpi.color} p-2 rounded-lg`}>
-                        <Icon className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="animate-pulse h-3 w-10 bg-secondary dark:bg-gray-700 rounded"></div>
-                    </div>
-                    <div className="mt-3">
-                      <div className="animate-pulse h-6 w-20 bg-secondary dark:bg-gray-700 rounded mb-2"></div>
-                      <div className="text-xs text-muted-foreground dark:text-muted-foreground mt-1">{kpi.title}</div>
-                    </div>
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {marketingKpis.map((kpi) => {
+            const Icon = kpi.icon
+            return (
+              <div key={kpi.title} className="rounded-lg border p-4">
+                <div className="flex items-center justify-between">
+                  <div className={`${kpi.color} p-2 rounded-lg`}>
+                    <Icon className="w-4 h-4 text-white" />
                   </div>
-                )
-              })}
-            </div>
+                  <div className="animate-pulse h-3 w-10 bg-secondary dark:bg-gray-700 rounded"></div>
+                </div>
+                <div className="mt-3">
+                  <div className="animate-pulse h-6 w-20 bg-secondary dark:bg-gray-700 rounded mb-2"></div>
+                  <div className="text-xs text-muted-foreground dark:text-muted-foreground mt-1">{kpi.title}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
             <div className="mt-4">
               <AdsCostChart />
             </div>
@@ -463,7 +468,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
         <div className="mb-3">
           <h3 className="text-lg font-semibold text-foreground dark:text-gray-100">Performance marketing</h3>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {marketingKpis.map((kpi) => {
             const Icon = kpi.icon
             return (
@@ -498,7 +503,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {primaryKpis.map((kpi) => {
           const Icon = kpi.icon
           return (

@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptSecret, encryptSecret, isEncryptedSecret } from '@/lib/security/crypto'
 import type { RapidDeliveryCity, RapidDeliveryShop, RapidDeliveryState } from '@/lib/integrations/rapid-delivery'
-import { resolveRapidDeliveryApiBaseUrl } from '@/lib/integrations/rapid-delivery'
 
 type AdminClient = SupabaseClient<any, 'public', any>
 
@@ -338,15 +337,4 @@ export async function getDecryptedIntegrationToken(client: AdminClient, integrat
   }
 
   return decrypted
-}
-
-export async function getRapidDeliveryIntegrationCredentials(client: AdminClient, integrationId: string) {
-  const token = await getDecryptedIntegrationToken(client, integrationId)
-  const { data, error } = await client.from('integrations').select('store_domain').eq('id', integrationId).single()
-  if (error) throw error
-
-  return {
-    token,
-    baseUrl: resolveRapidDeliveryApiBaseUrl(data?.store_domain),
-  }
 }

@@ -8,6 +8,7 @@ import CityPerformance from '@/components/dashboard/city-performance'
 import ConfirmationPerformance from '@/components/dashboard/confirmation-performance'
 import PeriodFilter from '@/components/dashboard/period-filter'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 
 export default async function DashboardPage() {
   const user = await getServerUser()
@@ -20,16 +21,19 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">
-            Tableau de bord
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Vue d&apos;ensemble de votre activité
+      <div className="flex flex-col sm:flex-row items-center sm:items-center justify-between gap-4">
+        <div className="text-center sm:text-left flex flex-col items-center sm:items-start gap-1">
+          <div className="flex items-center gap-2">
+            <JisraMark size={28} />
+            <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+              Dashboard
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Vue d'ensemble de votre activité
           </p>
         </div>
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex items-center justify-center sm:justify-start gap-3 w-full sm:w-auto">
           <StoreSelector />
           <PeriodFilter />
         </div>

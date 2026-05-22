@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
+import { JisraMark } from '@/components/logo'
 
 export default function LivraisonPage() {
   const supabase = createClient()
@@ -47,32 +48,6 @@ export default function LivraisonPage() {
     },
   })
 
-  const { data: rapidDeliveryShops = [] } = useQuery({
-    queryKey: ['delivery-page-rapid-shops', currentStoreId, rapidDeliveryConfig?.integration_id],
-    enabled: !!currentStoreId && !!rapidDeliveryConfig?.integration_id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('delivery_shops')
-        .select('id, external_name, external_shop_id')
-        .eq('store_id', currentStoreId!)
-        .eq('integration_id', rapidDeliveryConfig!.integration_id)
-        .order('external_name', { ascending: true })
-
-      if (error) throw error
-      return data || []
-    },
-  })
-
-  const activeDeliveryCompanies = [
-    ...deliveryCompanies,
-    ...rapidDeliveryShops.map((shop: any) => ({
-      id: `rapid-${shop.id}`,
-      name: shop.external_name || `Shop #${shop.external_shop_id}`,
-      api_provider: 'rapid-delivery',
-      is_active: true,
-    })),
-  ]
-
   const { data: customCities = [] } = useQuery({
     queryKey: ['delivery-page-custom-cities', rapidDeliveryConfig?.integration_id],
     enabled: !!rapidDeliveryConfig?.integration_id,
@@ -96,6 +71,7 @@ export default function LivraisonPage() {
         .select('id, customer_name, phone, city, total_selling_price, rapid_delivery_parcel_key, confirmed_at, rapid_delivery_voucher_key, status')
         .eq('store_id', currentStoreId!)
         .eq('status', 'confirmed')
+        .not('rapid_delivery_parcel_key', 'is', null)
         .is('rapid_delivery_voucher_key', null)
         .order('confirmed_at', { ascending: false })
 
@@ -164,6 +140,17 @@ export default function LivraisonPage() {
 
   return (
     <div className="space-y-6 p-6">
+      <div className="flex flex-col items-center sm:items-start gap-1">
+        <div className="flex items-center gap-2">
+          <JisraMark size={28} />
+          <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+            Livraison
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Gestion des expéditions et bons de ramassage
+        </p>
+      </div>
       <div className="bg-card rounded-xl shadow p-4">
         <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
           <StoreSelector />
@@ -191,7 +178,7 @@ export default function LivraisonPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="rounded-xl border bg-card p-4">
               <div className="text-sm text-muted-foreground">Sociétés actives</div>
-              <div className="mt-2 text-2xl font-semibold text-foreground">{activeDeliveryCompanies.length}</div>
+              <div className="mt-2 text-2xl font-semibold text-foreground">{deliveryCompanies.length}</div>
             </div>
             <div className="rounded-xl border bg-card p-4">
               <div className="text-sm text-muted-foreground">Mode Rapid Delivery</div>
@@ -203,7 +190,7 @@ export default function LivraisonPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Colis confirmés à ramasser</h2>
-                <p className="text-xs text-muted-foreground">Les commandes confirmées apparaissent ici. Si le colis n'existe pas encore, il sera créé automatiquement avant le bon.</p>
+                <p className="text-xs text-muted-foreground">Seuls les colis avec statut confirmé apparaissent ici pour créer un bon de ramassage.</p>
               </div>
               <button
                 type="button"
@@ -232,7 +219,7 @@ export default function LivraisonPage() {
                           onChange={(e) => setSelectedOrderIds(e.target.checked ? confirmedParcels.map((row: any) => row.id) : [])}
                         />
                       </th>
-                      <th className="px-2 py-2">Colis</th>
+                      <th className="px-2 py-2">Tracking</th>
                       <th className="px-2 py-2">Client</th>
                       <th className="px-2 py-2">Téléphone</th>
                       <th className="px-2 py-2">Ville</th>
@@ -251,7 +238,7 @@ export default function LivraisonPage() {
                               onChange={(e) => setSelectedOrderIds((current) => e.target.checked ? [...current, order.id] : current.filter((id) => id !== order.id))}
                             />
                           </td>
-                          <td className="px-2 py-2 text-foreground">{order.rapid_delivery_parcel_key || 'À créer'}</td>
+                          <td className="px-2 py-2 text-foreground">{order.rapid_delivery_parcel_key}</td>
                           <td className="px-2 py-2 text-foreground">{order.customer_name || '-'}</td>
                           <td className="px-2 py-2">{order.phone || '-'}</td>
                           <td className="px-2 py-2">{order.city || '-'}</td>
@@ -286,7 +273,7 @@ export default function LivraisonPage() {
                         Télécharger étiquettes
                       </Link>
                       <Link
-                        href={`/delivery/vouchers/${encodeURIComponent(voucher.rapid_delivery_id)}`}
+                        href={`/dashboard/livraison/vouchers/${encodeURIComponent(voucher.rapid_delivery_id)}`}
                         target="_blank"
                         className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                       >
@@ -302,11 +289,11 @@ export default function LivraisonPage() {
 
           <div className="rounded-xl border bg-card p-4 space-y-3">
             <h2 className="text-lg font-semibold text-foreground">Sociétés de livraison</h2>
-            {activeDeliveryCompanies.length === 0 ? (
+            {deliveryCompanies.length === 0 ? (
               <p className="text-sm text-muted-foreground">Aucune société active.</p>
             ) : (
               <div className="space-y-2">
-                {activeDeliveryCompanies.map((company: any) => (
+                {deliveryCompanies.map((company: any) => (
                   <div key={company.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
                     <div>
                       <div className="font-medium text-foreground">{company.name}</div>
