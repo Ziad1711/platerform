@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, X, Zap } from 'lucide-react'
+import { Search, X, Zap, Globe, ExternalLink } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
 import IntegrationCard from '@/components/dashboard/integrations/integration-card'
 import DeliveryConnectWizard from '@/components/dashboard/integrations/delivery-connect-wizard'
 import FacebookAdsConnectWizard from '@/components/dashboard/integrations/facebook-ads-connect-wizard'
+import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store-context'
@@ -53,6 +54,8 @@ export default function IntegrationsPage() {
   const [sinceDate, setSinceDate] = useState('2026-01-01')
   const [isStartingImport, setIsStartingImport] = useState(false)
   const [importError, setImportError] = useState('')
+  const [isCustomSiteModalOpen, setIsCustomSiteModalOpen] = useState(false)
+  const [storeWebsite, setStoreWebsite] = useState<string | null>(null)
   const popupMonitorRef = useRef<number | null>(null)
   const popupWindowRef = useRef<Window | null>(null)
   const hasHandledConnectRef = useRef(false)
@@ -124,6 +127,19 @@ export default function IntegrationsPage() {
   const handleAction = (providerSlug: string, isConnected: boolean) => {
     if (isConnected) {
       router.push(`/integrations/${providerSlug}/settings`)
+    } else if (providerSlug === 'custom-site') {
+      setIsCustomSiteModalOpen(true)
+      // Récupérer le website du store courant
+      if (currentStoreId) {
+        supabase
+          .from('stores')
+          .select('website')
+          .eq('id', currentStoreId)
+          .single()
+          .then(({ data }) => {
+            setStoreWebsite(data?.website || null)
+          })
+      }
     } else {
       setConnectProviderSlug(providerSlug)
       if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery') {
@@ -526,6 +542,65 @@ export default function IntegrationsPage() {
                 </button>
               ) : null}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Site Modal */}
+      {isCustomSiteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-12">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => {
+              setIsCustomSiteModalOpen(false)
+              setStoreWebsite(null)
+            }}
+          />
+
+          <div className="relative z-10 w-full max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Globe className="h-6 w-6 text-primary" />
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">
+                    Site web personnalisé
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Gérez l'intégration de votre site web vers Jisra
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCustomSiteModalOpen(false)
+                  setStoreWebsite(null)
+                }}
+                className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {storeWebsite && (
+              <div className="mb-6 rounded-lg border border-border bg-muted/50 p-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Site enregistré :</span>
+                  <a
+                    href={storeWebsite.startsWith('http') ? storeWebsite : `https://${storeWebsite}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 font-medium text-primary hover:underline"
+                  >
+                    {storeWebsite}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </div>
+            )}
+
+            <CustomSiteKeys />
           </div>
         </div>
       )}
