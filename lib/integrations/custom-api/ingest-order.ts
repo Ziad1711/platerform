@@ -9,8 +9,8 @@ export type IngestOrderPayload = {
   city?: string
   address?: string
   total_selling_price: number
-  delivery_fee?: number
   delivery_charge_to_customer?: number
+  delivery_note?: string
   discount_type?: 'fixed' | 'amount' | 'percentage'
   discount_value?: number
   discount_amount?: number
@@ -18,7 +18,8 @@ export type IngestOrderPayload = {
   source?: 'organic' | 'ads' | 'recommendation'
   order_date?: string
   items: Array<{
-    product_name: string
+    product_id: string
+    product_name?: string
     product_sku?: string
     quantity: number
     unit_selling_price: number
@@ -87,8 +88,9 @@ export async function ingestOrder(
       city: payload.city || null,
       address: payload.address || null,
       total_selling_price: payload.total_selling_price,
-      delivery_fee: payload.delivery_fee ?? 0,
       delivery_charge_to_customer: payload.delivery_charge_to_customer ?? 0,
+      delivery_note: payload.delivery_note || null,
+
       discount_type: payload.discount_type || null,
       discount_value: payload.discount_value ?? 0,
       discount_amount: payload.discount_amount ?? 0,
@@ -113,12 +115,13 @@ export async function ingestOrder(
   const orderItems = payload.items.map((item) => ({
     store_id: storeId,
     order_id: order.id,
-    product_id: null, // On ne peut pas mapper sans SKU → produit existant
+    product_id: item.product_id,
     quantity: item.quantity,
     unit_selling_price: item.unit_selling_price,
     unit_purchase_cost_snapshot: 0,
     item_type: 'product',
   }))
+
 
   const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
 
