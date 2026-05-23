@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { computePayloadHash, checkIdempotency, recordIdempotency } from './idempotency'
 
 export type IngestOrderPayload = {
@@ -39,7 +39,7 @@ export async function ingestOrder(
   apiKeyId: string | null,
   payload: IngestOrderPayload
 ): Promise<IngestResult> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const payloadHash = computePayloadHash(payload)
 
   // 1. Vérifier idempotence
@@ -109,7 +109,7 @@ export async function ingestOrder(
       errorMessage: orderError?.message || 'Erreur lors de la création de la commande',
       payload,
     })
-    return { status: 'rejected', orderId: null, errorCode: 'ORDER_INSERT_FAILED', errorMessage: orderError?.message }
+    return { status: 'rejected', orderId: null, errorCode: 'ORDER_INSERT_FAILED', errorMessage: 'Erreur lors de l\'envoi de la commande' }
   }
 
   // 4. Créer les items
@@ -160,7 +160,7 @@ async function logIngestion(
   status: 'accepted' | 'rejected' | 'duplicate' | 'error',
   extra: { errorCode?: string; errorMessage?: string; payload?: unknown }
 ) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   await supabase.from('public_order_ingestion_logs').insert({
     store_id: storeId,

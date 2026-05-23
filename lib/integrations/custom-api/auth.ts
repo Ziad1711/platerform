@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const API_KEY_PREFIX = 'jsk_'
 
@@ -29,7 +29,7 @@ export async function validateApiKey(rawKey: string): Promise<{
   }
 
   const hash = hashApiKey(rawKey)
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: key, error } = await supabase
     .from('public_api_keys')

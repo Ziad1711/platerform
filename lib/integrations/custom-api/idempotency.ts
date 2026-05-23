@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export function computePayloadHash(payload: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex')
@@ -15,7 +15,7 @@ export async function checkIdempotency(params: {
   idempotencyKey: string
   payloadHash: string
 }): Promise<{ isDuplicate: boolean; existingOrderId: string | null }> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: existing } = await supabase
     .from('public_order_idempotency')
@@ -38,7 +38,7 @@ export async function recordIdempotency(params: {
   payloadHash: string
   orderId: string
 }): Promise<void> {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   await supabase.from('public_order_idempotency').insert({
     store_id: params.storeId,
