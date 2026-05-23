@@ -122,7 +122,6 @@ export async function ingestOrder(
     item_type: 'product',
   }))
 
-
   const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
 
   if (itemsError) {
