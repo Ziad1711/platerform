@@ -174,26 +174,44 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
           }
         }
 
-        const results = await Promise.all(
-          storeIds.map(async (storeId) => {
-            const { data, error } = await supabase.rpc('rpc_dashboard_kpi_metrics', {
-              p_store_id: storeId,
-              p_start_date: range.start ? range.start.toISOString() : null,
-              p_end_date: range.end ? range.end.toISOString() : null,
+        const [results, topProductsResults] = await Promise.all([
+          Promise.all(
+            storeIds.map(async (storeId) => {
+              const { data, error } = await supabase.rpc('rpc_dashboard_kpi_metrics', {
+                p_store_id: storeId,
+                p_start_date: range.start ? range.start.toISOString() : null,
+                p_end_date: range.end ? range.end.toISOString() : null,
+              })
+
+              if (error) throw error
+
+              return (data?.[0] || {}) as {
+                orders_count?: number
+                delivered_count?: number
+                revenue?: number
+                purchase_cost?: number
+                ad_spend?: number
+                ad_cost_allocated?: number
+                delivery_cost?: number
+                confirmation_cost?: number
+              }
             })
-            if (error) throw error
-            return (data?.[0] || {}) as {
-              orders_count?: number
-              delivered_count?: number
-              revenue?: number
-              purchase_cost?: number
-              ad_spend?: number
-              ad_cost_allocated?: number
-              delivery_cost?: number
-              confirmation_cost?: number
-            }
-          })
-        )
+          ),
+
+          Promise.all(
+            storeIds.map(async (storeId) => {
+              const { data, error } = await supabase.rpc('rpc_dashboard_top_products', {
+                p_store_id: storeId,
+                p_start_date: range.start ? range.start.toISOString() : null,
+                p_end_date: range.end ? range.end.toISOString() : null,
+              })
+
+              if (error) throw error
+
+              return (data || []) as Array<{ revenue?: number }>
+            })
+          ),
+        ])
 
         type AggregatedRow = {
           orders_count: number
@@ -232,13 +250,9 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
         const ordersCount = aggregated.orders_count
         const deliveredOrdersCount = aggregated.delivered_count
-        const totalSellingPrice = aggregated.revenue
-        const deliveryFeesCharged = aggregated.delivery_cost // Note: Assuming this is delivery_charge_to_customer based on RPC
-        
-        // Match TopProducts: Revenue should only be product items revenue, excluding delivery fees
-        // In the current database, total_selling_price includes delivery_charge_to_customer
-        // So we subtract it to get the product-only revenue
-        const revenue = totalSellingPrice - deliveryFeesCharged
+        const revenue = topProductsResults
+          .flat()
+          .reduce((sum, row) => sum + Number(row.revenue || 0), 0)
         
         const purchaseCost = aggregated.purchase_cost
         const adSpendTotal = aggregated.ad_spend
