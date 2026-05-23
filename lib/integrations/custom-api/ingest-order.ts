@@ -21,6 +21,7 @@ export type IngestOrderPayload = {
     product_id: string
     product_name?: string
     product_sku?: string
+    product_variant_id?: string
     quantity: number
     unit_selling_price: number
   }>
@@ -116,6 +117,7 @@ export async function ingestOrder(
     store_id: storeId,
     order_id: order.id,
     product_id: item.product_id,
+    product_variant_id: item.product_variant_id || null,
     quantity: item.quantity,
     unit_selling_price: item.unit_selling_price,
     unit_purchase_cost_snapshot: 0,

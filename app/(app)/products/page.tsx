@@ -1582,6 +1582,9 @@ export default function ProduitsPage() {
                       }}
                     />
                   </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    ID
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Produit
                   </th>
@@ -1644,6 +1647,11 @@ export default function ProduitsPage() {
                             })
                           }}
                         />
+                      </td>
+                      <td className="px-4 py-4 align-top">
+                        <code className="text-xs text-muted-foreground font-mono select-all">
+                          {String(product.id).slice(0, 8)}...
+                        </code>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
@@ -1822,7 +1830,7 @@ export default function ProduitsPage() {
                     </tr>
                     {hasVariants && isExpanded ? (
                       <tr className="bg-secondary/30">
-                        <td colSpan={9} className="px-6 py-3">
+                        <td colSpan={10} className="px-6 py-3">
                           <div className="rounded-lg border border-border/70 bg-card overflow-hidden">
                             <table className="min-w-full">
                               <thead className="bg-secondary/60">

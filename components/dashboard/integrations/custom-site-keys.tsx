@@ -247,12 +247,37 @@ Content-Type: application/json`}
     {
       "product_id": "uuid-du-produit",
       "product_name": "T-shirt Noir",
+      "product_variant_id": "uuid-de-la-variante",
       "quantity": 2,
       "unit_selling_price": 125.00
     }
   ]
 }`}
             </pre>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+            <h4 className="font-medium text-sm text-amber-800 dark:text-amber-200">📖 Explications des champs</h4>
+            <div className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
+              <p>
+                <strong>delivery_charge_to_customer</strong> : Montant des frais de livraison facturés au client. 
+                Si la livraison est gratuite pour le client, mettez <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">0</code>.
+              </p>
+              <p>
+                <strong>product_id</strong> (obligatoire) : L'identifiant unique du produit dans Jisra. 
+                C'est le critère principal pour rattacher l'article à un produit. 
+                Vous trouverez cet ID dans la page <strong>Produits</strong> (colonne "ID").
+              </p>
+              <p>
+                <strong>product_name</strong> (optionnel) : Le nom du produit. Ce champ est décoratif uniquement, 
+                le vrai rattachement se fait via <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">product_id</code>.
+              </p>
+              <p>
+                <strong>product_variant_id</strong> (optionnel) : L'identifiant unique de la variante (taille, couleur, etc.). 
+                Si votre produit a des variantes, vous pouvez préciser laquelle a été commandée. 
+                Laissez vide ou omettez le champ si le produit n'a pas de variantes.
+              </p>
+            </div>
           </div>
 
           <div>
