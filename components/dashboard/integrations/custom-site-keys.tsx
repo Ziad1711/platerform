@@ -242,7 +242,7 @@ Content-Type: application/json`}
   "address": "12 Rue de la Liberté",
   "total_selling_price": 250.00,
   "delivery_charge_to_customer": 25.00,
-  "delivery_note": "Frais de livraison",
+  "delivery_note": "je serai dispo à demain 18h",
   "items": [
     {
       "product_id": "uuid-du-produit",
