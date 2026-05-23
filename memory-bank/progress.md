@@ -80,6 +80,21 @@
 - [x] Store CRUD in Settings (`stores-section.tsx`)
 - [x] Team section in Settings (`team-section.tsx`) with members, pending invites, role change, remove, revoke
 
+### ✅ Custom Site API (Site Web Personnalisé)
+- [x] Tables Supabase : `public_api_keys`, `public_order_ingestion_logs`, `public_order_idempotency`
+- [x] Colonne `external_order_id` sur `orders`
+- [x] RLS configurée pour toutes les nouvelles tables
+- [x] Seed provider "custom-site" dans `integration_providers`
+- [x] `lib/integrations/custom-api/auth.ts` : génération/validation clé API (format `jsk_<random hex>`)
+- [x] `lib/integrations/custom-api/idempotency.ts` : idempotence via hash du payload
+- [x] `lib/integrations/custom-api/ingest-order.ts` : mapping payload → orders + order_items avec rollback
+- [x] `app/api/public/v1/orders/route.ts` : endpoint public POST avec auth Bearer
+- [x] `app/api/integrations/custom-site/keys/route.ts` : GET (lister) + POST (générer clé)
+- [x] `app/api/integrations/custom-site/keys/[keyId]/route.ts` : DELETE (révoquer clé)
+- [x] Composant UI `custom-site-keys.tsx` avec génération, copie, révélation, révocation + documentation
+- [x] Composants shadcn/ui installés (button, card, badge, alert-dialog)
+- [x] Migrations sauvegardées localement
+
 ## What's Left to Build
 
 ### 🔄 Phase 2 (In Progress)

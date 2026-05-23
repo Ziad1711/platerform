@@ -4,7 +4,17 @@
 Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 
 ## Recently Completed
+- ✅ Custom Site API v1 : API publique POST /api/public/v1/orders pour importer les commandes depuis un site e-commerce propriétaire
+- ✅ Tables Supabase : public_api_keys, public_order_ingestion_logs, public_order_idempotency + colonne external_order_id sur orders
+- ✅ RLS configurée pour toutes les nouvelles tables (store_members)
+- ✅ Seed provider "custom-site" dans integration_providers
+- ✅ lib/integrations/custom-api/ : auth.ts (génération/validation clé API), idempotency.ts, ingest-order.ts (mapping payload → orders + order_items)
+- ✅ Routes API : POST /api/public/v1/orders (endpoint public), GET/POST /api/integrations/custom-site/keys, DELETE /api/integrations/custom-site/keys/[keyId]
+- ✅ Composant UI custom-site-keys.tsx avec génération, copie, révélation, révocation de clés + documentation rapide intégrée
+- ✅ Composants shadcn/ui installés (button, card, badge, alert-dialog)
+- ✅ Migrations sauvegardées localement (20260523_custom_site_api_v1.sql, 20260523_seed_custom_site_provider.sql)
 - ✅ Project initialization with Next.js 15
+
 - ✅ Supabase configuration and connection
 - ✅ Authentication system (login/register)
 - ✅ Base layout with sidebar navigation
@@ -50,7 +60,8 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Migration SQL `20260430_rpc_dashboard_auth_guard.sql` pour renforcer les RPC avec `auth.uid()` guard
 
 ## Current Focus
-Multi-tenant complet : tous les composants dashboard et pages métier filtrent par `accessibleStoreIds` en mode "Tous les stores", et les RPC sont renforcés avec `auth.uid()` guard via `store_members`.
+Intégration "Site web personnalisé" (Custom Site API) : API publique POST /api/public/v1/orders pour importer les commandes depuis un site e-commerce propriétaire via clé API Bearer.
+
 
 ## Next Immediate Steps
 
