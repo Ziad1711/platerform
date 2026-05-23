@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { computePayloadHash, checkIdempotency, recordIdempotency } from './idempotency'
+import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 
 export type IngestOrderPayload = {
   idempotency_key: string
@@ -78,7 +79,52 @@ export async function ingestOrder(
     return { status: 'rejected', orderId: null, errorCode: 'MISSING_ITEMS', errorMessage: 'Au moins un article est requis' }
   }
 
-  // 3. Créer la commande
+  // 3. Normaliser la ville (non-bloquant)
+  let resolvedCity = payload.city || null
+  let resolvedCityKey: number | null = null
+  let resolvedDeliveryFee: number | null = null
+  let normalizationSource: string | null = null
+
+  if (payload.city) {
+    try {
+      // Vérifier si la normalisation est activée pour ce store
+      const { data: rapidConfig } = await supabase
+        .from('rapid_delivery_configs')
+        .select('enable_city_normalization')
+        .eq('store_id', storeId)
+        .maybeSingle()
+
+      const shouldNormalize = rapidConfig?.enable_city_normalization !== false
+
+      if (shouldNormalize) {
+        const normalizedCity = await normalizeCityName({
+          rawCity: payload.city,
+          supabase,
+        }).catch(() => null)
+
+        if (normalizedCity?.cityName && normalizedCity.cityKey) {
+          resolvedCity = normalizedCity.cityName
+          resolvedCityKey = Number(normalizedCity.cityKey) || null
+          normalizationSource = normalizedCity.source
+
+          // Calculer le delivery_fee depuis rapid_delivery_cities
+          const { data: rapidCity } = await supabase
+            .from('rapid_delivery_cities')
+            .select('cost_delivery')
+            .eq('city_key', resolvedCityKey)
+            .limit(1)
+            .maybeSingle()
+
+          resolvedDeliveryFee = Number(rapidCity?.cost_delivery || 0) || null
+        }
+      }
+    } catch {
+      // Non-bloquant : si la normalisation échoue, on garde la ville brute
+      console.warn('[ingest-order] city-normalization-failed', { city: payload.city })
+    }
+  }
+
+  // 4. Créer la commande
   const { data: order, error: orderError } = await supabase
     .from('orders')
     .insert({
@@ -86,10 +132,12 @@ export async function ingestOrder(
       external_order_id: payload.external_order_id,
       customer_name: payload.customer_name.trim(),
       phone: payload.phone || null,
-      city: payload.city || null,
+      city: resolvedCity,
+      rapid_delivery_city_key: resolvedCityKey,
       address: payload.address || null,
       total_selling_price: payload.total_selling_price,
       delivery_charge_to_customer: payload.delivery_charge_to_customer ?? 0,
+      delivery_fee: resolvedDeliveryFee,
       delivery_note: payload.delivery_note || null,
 
       discount_type: payload.discount_type || null,
@@ -108,6 +156,12 @@ export async function ingestOrder(
       errorCode: 'ORDER_INSERT_FAILED',
       errorMessage: orderError?.message || 'Erreur lors de la création de la commande',
       payload,
+      normalizationContext: {
+        rawCity: payload.city,
+        resolvedCity,
+        resolvedCityKey,
+        normalizationSource,
+      },
     })
     return { status: 'rejected', orderId: null, errorCode: 'ORDER_INSERT_FAILED', errorMessage: 'Erreur lors de l\'envoi de la commande' }
   }
@@ -158,7 +212,7 @@ async function logIngestion(
   apiKeyId: string | null,
   externalOrderId: string | undefined,
   status: 'accepted' | 'rejected' | 'duplicate' | 'error',
-  extra: { errorCode?: string; errorMessage?: string; payload?: unknown }
+  extra: { errorCode?: string; errorMessage?: string; payload?: unknown; normalizationContext?: unknown }
 ) {
   const supabase = createAdminClient()
 
