@@ -39,7 +39,7 @@ function IntegrationSkeletonCard() {
 
 export default function IntegrationsPage() {
   const router = useRouter()
-  const { currentStoreId } = useStore()
+  const { currentStoreId, accessibleStores } = useStore()
   const supabase = createClient()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
@@ -55,7 +55,8 @@ export default function IntegrationsPage() {
   const [isStartingImport, setIsStartingImport] = useState(false)
   const [importError, setImportError] = useState('')
   const [isCustomSiteModalOpen, setIsCustomSiteModalOpen] = useState(false)
-  const [storeWebsite, setStoreWebsite] = useState<string | null>(null)
+  const [selectedCustomSiteStoreId, setSelectedCustomSiteStoreId] = useState<string | null>(null)
+  const [selectedCustomSiteStoreWebsite, setSelectedCustomSiteStoreWebsite] = useState<string | null>(null)
   const popupMonitorRef = useRef<number | null>(null)
   const popupWindowRef = useRef<Window | null>(null)
   const hasHandledConnectRef = useRef(false)
@@ -129,17 +130,8 @@ export default function IntegrationsPage() {
       router.push(`/integrations/${providerSlug}/settings`)
     } else if (providerSlug === 'custom-site') {
       setIsCustomSiteModalOpen(true)
-      // Récupérer le website du store courant
-      if (currentStoreId) {
-        supabase
-          .from('stores')
-          .select('website')
-          .eq('id', currentStoreId)
-          .single()
-          .then(({ data }) => {
-            setStoreWebsite(data?.website || null)
-          })
-      }
+      setSelectedCustomSiteStoreId(null)
+      setSelectedCustomSiteStoreWebsite(null)
     } else {
       setConnectProviderSlug(providerSlug)
       if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery') {
@@ -553,7 +545,8 @@ export default function IntegrationsPage() {
             className="absolute inset-0 bg-black/40"
             onClick={() => {
               setIsCustomSiteModalOpen(false)
-              setStoreWebsite(null)
+              setSelectedCustomSiteStoreId(null)
+              setSelectedCustomSiteStoreWebsite(null)
             }}
           />
 
@@ -574,7 +567,8 @@ export default function IntegrationsPage() {
                 type="button"
                 onClick={() => {
                   setIsCustomSiteModalOpen(false)
-                  setStoreWebsite(null)
+                  setSelectedCustomSiteStoreId(null)
+                  setSelectedCustomSiteStoreWebsite(null)
                 }}
                 className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
               >
@@ -582,25 +576,62 @@ export default function IntegrationsPage() {
               </button>
             </div>
 
-            {storeWebsite && (
-              <div className="mb-6 rounded-lg border border-border bg-muted/50 p-4">
-                <div className="flex items-center gap-2 text-sm">
-                  <Globe className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">Site enregistré :</span>
-                  <a
-                    href={storeWebsite.startsWith('http') ? storeWebsite : `https://${storeWebsite}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 font-medium text-primary hover:underline"
-                  >
-                    {storeWebsite}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
+            {/* Sélecteur de store */}
+            <div className="mb-6 space-y-3">
+              <label className="text-sm font-medium text-foreground">
+                Store concerné
+              </label>
+              <div className="grid gap-2">
+                {accessibleStores.map((store) => {
+                  const isSelected = selectedCustomSiteStoreId === store.id
+                  return (
+                    <button
+                      key={store.id}
+                      type="button"
+                      onClick={async () => {
+                        setSelectedCustomSiteStoreId(store.id)
+                        const { data } = await supabase
+                          .from('stores')
+                          .select('website')
+                          .eq('id', store.id)
+                          .single()
+                        setSelectedCustomSiteStoreWebsite(data?.website || null)
+                      }}
+                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-all ${
+                        isSelected
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+                        isSelected ? 'border-primary bg-primary' : 'border-muted-foreground'
+                      }`}>
+                        {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{store.name}</p>
+                        {store.id === selectedCustomSiteStoreId && selectedCustomSiteStoreWebsite && (
+                          <a
+                            href={selectedCustomSiteStoreWebsite.startsWith('http') ? selectedCustomSiteStoreWebsite : `https://${selectedCustomSiteStoreWebsite}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-0.5 flex items-center gap-1 text-xs text-primary hover:underline"
+                          >
+                            <Globe className="h-3 w-3" />
+                            {selectedCustomSiteStoreWebsite}
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
-            )}
+            </div>
 
-            <CustomSiteKeys />
+            {selectedCustomSiteStoreId && (
+              <CustomSiteKeys />
+            )}
           </div>
         </div>
       )}
