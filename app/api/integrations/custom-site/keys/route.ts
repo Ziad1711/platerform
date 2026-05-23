@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateApiKey } from '@/lib/integrations/custom-api/auth'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient()
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -10,19 +10,24 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Récupérer le store_id depuis store_members
-    const { data: members } = await supabase
-      .from('store_members')
-      .select('store_id')
-      .eq('user_id', user.id)
-      .eq('role', 'owner')
-      .limit(1)
+    // Lire le store_id depuis le cookie
+    let storeId = request.cookies.get('current-store-id')?.value || null
 
-    if (!members?.length) {
-      return NextResponse.json({ error: 'No store found' }, { status: 404 })
+    if (!storeId) {
+      // Fallback : premier store où l'utilisateur est owner
+      const { data: members } = await supabase
+        .from('store_members')
+        .select('store_id')
+        .eq('user_id', user.id)
+        .eq('role', 'owner')
+        .limit(1)
+
+      if (!members?.length) {
+        return NextResponse.json({ error: 'No store found' }, { status: 404 })
+      }
+
+      storeId = members[0].store_id
     }
-
-    const storeId = members[0].store_id
 
     const { data: keys, error } = await supabase
       .from('public_api_keys')
@@ -47,19 +52,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: members } = await supabase
+    // Lire le store_id depuis le cookie ou le body
+    const body = await request.json().catch(() => ({}))
+    let storeId = body.store_id || request.cookies.get('current-store-id')?.value || null
+
+    if (!storeId) {
+      // Fallback : premier store où l'utilisateur est owner
+      const { data: members } = await supabase
+        .from('store_members')
+        .select('store_id')
+        .eq('user_id', user.id)
+        .eq('role', 'owner')
+        .limit(1)
+
+      if (!members?.length) {
+        return NextResponse.json({ error: 'No store found' }, { status: 404 })
+      }
+
+      storeId = members[0].store_id
+    }
+
+    // Vérifier que l'utilisateur a accès à ce store
+    const { data: membership } = await supabase
       .from('store_members')
       .select('store_id')
       .eq('user_id', user.id)
-      .eq('role', 'owner')
-      .limit(1)
+      .eq('store_id', storeId)
+      .eq('status', 'active')
+      .maybeSingle()
 
-    if (!members?.length) {
-      return NextResponse.json({ error: 'No store found' }, { status: 404 })
+    if (!membership) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const storeId = members[0].store_id
-    const body = await request.json().catch(() => ({}))
     const keyName = body.name || 'Clé API site web'
 
     const { raw, prefix, hash } = generateApiKey()
