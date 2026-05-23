@@ -630,7 +630,7 @@ export default function IntegrationsPage() {
             </div>
 
             {selectedCustomSiteStoreId && (
-              <CustomSiteKeys />
+              <CustomSiteKeys storeId={selectedCustomSiteStoreId} />
             )}
           </div>
         </div>

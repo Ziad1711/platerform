@@ -25,7 +25,7 @@ type ApiKey = {
   revoked_at: string | null
 }
 
-export function CustomSiteKeys() {
+export function CustomSiteKeys({ storeId }: { storeId: string }) {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -36,7 +36,7 @@ export function CustomSiteKeys() {
 
   const fetchKeys = async () => {
     try {
-      const res = await fetch('/api/integrations/custom-site/keys')
+      const res = await fetch(`/api/integrations/custom-site/keys?store_id=${storeId}`)
       if (!res.ok) throw new Error('Failed to fetch')
       const data = await res.json()
       setKeys(data.keys || [])
@@ -49,14 +49,18 @@ export function CustomSiteKeys() {
 
   useEffect(() => {
     fetchKeys()
-  }, [])
+  }, [storeId])
 
   const generateKey = async () => {
     setGenerating(true)
     setNewKey(null)
     setShowNewKey(false)
     try {
-      const res = await fetch('/api/integrations/custom-site/keys', { method: 'POST' })
+      const res = await fetch('/api/integrations/custom-site/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_id: storeId }),
+      })
       if (!res.ok) throw new Error('Failed to generate')
       const data = await res.json()
       setNewKey(data.key)
@@ -71,7 +75,7 @@ export function CustomSiteKeys() {
 
   const revokeKey = async (keyId: string) => {
     try {
-      const res = await fetch(`/api/integrations/custom-site/keys/${keyId}`, { method: 'DELETE' })
+      const res = await fetch(`/api/integrations/custom-site/keys/${keyId}?store_id=${storeId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to revoke')
       await fetchKeys()
     } catch (err) {

@@ -10,8 +10,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Lire le store_id depuis le cookie
-    let storeId = request.cookies.get('current-store-id')?.value || null
+    // Lire le store_id depuis le query param ou le cookie
+    const { searchParams } = new URL(request.url)
+    let storeId = searchParams.get('store_id') || request.cookies.get('current-store-id')?.value || null
 
     if (!storeId) {
       // Fallback : premier store où l'utilisateur est owner

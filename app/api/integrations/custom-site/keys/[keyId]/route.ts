@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ keyId: string }> }
 ) {
   try {
@@ -13,18 +13,25 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: members } = await supabase
-      .from('store_members')
-      .select('store_id')
-      .eq('user_id', user.id)
-      .eq('role', 'owner')
-      .limit(1)
+    // Lire le store_id depuis le query param ou le cookie
+    const { searchParams } = new URL(request.url)
+    let storeId = searchParams.get('store_id') || request.cookies.get('current-store-id')?.value || null
 
-    if (!members?.length) {
-      return NextResponse.json({ error: 'No store found' }, { status: 404 })
+    if (!storeId) {
+      // Fallback : premier store où l'utilisateur est owner
+      const { data: members } = await supabase
+        .from('store_members')
+        .select('store_id')
+        .eq('user_id', user.id)
+        .eq('role', 'owner')
+        .limit(1)
+
+      if (!members?.length) {
+        return NextResponse.json({ error: 'No store found' }, { status: 404 })
+      }
+
+      storeId = members[0].store_id
     }
-
-    const storeId = members[0].store_id
 
     const { error } = await supabase
       .from('public_api_keys')
