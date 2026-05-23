@@ -241,9 +241,11 @@ Content-Type: application/json`}
   "city": "Casablanca",
   "address": "12 Rue de la Liberté",
   "total_selling_price": 250.00,
-  "delivery_fee": 25.00,
+  "delivery_charge_to_customer": 25.00,
+  "delivery_note": "Frais de livraison",
   "items": [
     {
+      "product_id": "uuid-du-produit",
       "product_name": "T-shirt Noir",
       "quantity": 2,
       "unit_selling_price": 125.00
