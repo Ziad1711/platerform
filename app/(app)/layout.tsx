@@ -5,6 +5,7 @@ import Sidebar from '@/components/dashboard/sidebar'
 import OnboardingModal from '@/components/dashboard/onboarding-modal'
 import { usePathname } from 'next/navigation'
 import { ChevronUp } from 'lucide-react'
+import { Toaster } from 'sonner'
 
 function BackToTop() {
   const [visible, setVisible] = useState(false)
@@ -60,6 +61,7 @@ export default function AppLayout({
           {children}
         </main>
       </div>
+      <Toaster position="bottom-right" richColors closeButton />
       <BackToTop />
     </div>
   )

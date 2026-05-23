@@ -6,8 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
-import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown } from 'lucide-react'
+import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown, Copy } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 
 type ProductVariantForm = {
   id?: string
@@ -187,6 +188,7 @@ export default function ProduitsPage() {
   const [editSku, setEditSku] = useState('')
   const [editSellingPrice, setEditSellingPrice] = useState('0')
   const [editError, setEditError] = useState('')
+  const [editImageFile, setEditImageFile] = useState<File | null>(null)
   const [editingAttributes, setEditingAttributes] = useState<VariantAttributeForm[]>([])
   const [editingAttributeDrafts, setEditingAttributeDrafts] = useState<Record<number, string>>({})
   const [editingVariants, setEditingVariants] = useState<ProductVariantForm[]>([])
@@ -434,33 +436,106 @@ export default function ProduitsPage() {
     },
   })
 
-  const updateProductMutation = useMutation({
+  const updateProductWithVariantsMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProductForEdit?.id) throw new Error('Produit invalide.')
       if (!editName.trim()) throw new Error('Le nom du produit est obligatoire.')
 
-      const productVariants = variantsByProduct?.[selectedProductForEdit.id] || []
-      const hasVariants = productVariants.length > 0
+      const hasVariants = (editingVariants || []).length > 0
+
+      let imagePath: string | null | undefined = undefined
+
+      if (editImageFile) {
+        if (editImageFile.size > 0) {
+          const extension = (editImageFile.name.split('.').pop() || 'jpg').toLowerCase()
+          const filePath = `${selectedProductForEdit.store_id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
+
+          const { error: uploadError } = await supabase.storage
+            .from('products')
+            .upload(filePath, editImageFile, { cacheControl: '3600', upsert: false })
+
+          if (uploadError) throw uploadError
+          imagePath = filePath
+        } else {
+          imagePath = null
+        }
+      }
+
+      const updateData: Record<string, any> = {
+        name: editName.trim(),
+        sku: editSku.trim() || null,
+        default_selling_price: hasVariants ? 0 : Number(editSellingPrice || 0),
+      }
+
+      if (imagePath !== undefined) {
+        updateData.image_url = imagePath
+      }
 
       const { error } = await supabase
         .from('products')
-        .update({
-          name: editName.trim(),
-          sku: editSku.trim() || null,
-          default_selling_price: hasVariants ? selectedProductForEdit.default_selling_price : Number(editSellingPrice || 0),
-        })
+        .update(updateData)
         .eq('id', selectedProductForEdit.id)
 
       if (error) throw error
+
+      if (hasVariants) {
+        const normalizedVariants = (editingVariants || [])
+          .map((variant) => ({
+            name: variant.name.trim() || buildVariantName(variant.option_values || {}),
+            sku: variant.sku.trim(),
+            selling_price: Number(variant.selling_price || 0),
+            purchase_cost: Number(variant.purchase_cost || 0),
+            option_values: variant.option_values || {},
+          }))
+          .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
+
+        for (const variant of normalizedVariants) {
+          if (!variant.name) throw new Error('Chaque variante doit avoir un nom.')
+          if (!variant.sku) throw new Error('Chaque variante doit avoir un SKU.')
+        }
+
+        const { error: deleteError } = await supabase
+          .from('product_variants')
+          .delete()
+          .eq('product_id', selectedProductForEdit.id)
+
+        if (deleteError) throw deleteError
+
+        if (normalizedVariants.length > 0) {
+          const { error: insertError } = await supabase
+            .from('product_variants')
+            .insert(
+              normalizedVariants.map((variant) => ({
+                store_id: selectedProductForEdit.store_id,
+                product_id: selectedProductForEdit.id,
+                name: variant.name,
+                sku: variant.sku,
+                selling_price: variant.selling_price,
+                purchase_cost: variant.purchase_cost,
+                option_values: variant.option_values,
+              }))
+            )
+
+          if (insertError) throw insertError
+        }
+      }
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['products'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['products'] }),
+        queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-movements'] }),
+      ])
       setIsEditOpen(false)
       setSelectedProductForEdit(null)
       setEditName('')
       setEditSku('')
       setEditSellingPrice('0')
       setEditError('')
+      setEditImageFile(null)
+      setEditingAttributes([])
+      setEditingAttributeDrafts({})
+      setEditingVariants([])
     },
     onError: (error: any) => {
       setEditError(error?.message || 'Erreur lors de la modification du produit.')
@@ -762,15 +837,18 @@ export default function ProduitsPage() {
 
       {isEditOpen ? (
         <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-xl w-full max-w-xl">
-            <div className="p-6 border-b flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-foreground">Modifier produit</h3>
+          <div className="bg-card rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b flex items-center justify-between shrink-0 bg-card">
+              <h3 className="text-lg font-semibold text-foreground">
+                Modifier — {selectedProductForEdit?.name || 'Produit'}
+              </h3>
               <button
                 type="button"
                 onClick={() => {
                   setIsEditOpen(false)
                   setSelectedProductForEdit(null)
                   setEditError('')
+                  setEditImageFile(null)
                 }}
                 className="text-muted-foreground hover:text-foreground"
               >
@@ -778,7 +856,7 @@ export default function ProduitsPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-sm text-foreground mb-1">Nom du produit</label>
                 <input
@@ -797,7 +875,7 @@ export default function ProduitsPage() {
                 />
               </div>
 
-              {(variantsByProduct?.[selectedProductForEdit?.id || ''] || []).length === 0 ? (
+              {(editingVariants || []).length === 0 ? (
                 <div>
                   <label className="block text-sm text-foreground mb-1">Prix de vente</label>
                   <input
@@ -809,22 +887,302 @@ export default function ProduitsPage() {
                     className="w-full border rounded-lg px-3 py-2"
                   />
                 </div>
-              ) : (
-                <div className="text-xs text-muted-foreground bg-muted/20 border rounded-lg p-3">
-                  Ce produit a des variantes: modifiez les prix depuis “Variantes”.
+              ) : null}
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Photo produit</label>
+                <div className="flex items-center gap-4">
+                  <div className="relative flex-shrink-0">
+                    {editImageFile && editImageFile.size > 0 ? (
+                      <img
+                        src={URL.createObjectURL(editImageFile)}
+                        alt="Aperçu"
+                        className="h-20 w-20 rounded-xl object-cover border-2 border-border shadow-sm"
+                      />
+                    ) : selectedProductForEdit?.image_url && !editImageFile ? (
+                      <img
+                        src={getProductImageUrl(selectedProductForEdit.image_url) || ''}
+                        alt="Produit"
+                        className="h-20 w-20 rounded-xl object-cover border-2 border-border shadow-sm"
+                      />
+                    ) : (
+                      <div className="h-20 w-20 rounded-xl border-2 border-dashed border-border bg-muted/30 flex items-center justify-center text-muted-foreground">
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-secondary text-sm font-medium text-foreground transition-colors">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                      {editImageFile && editImageFile.size > 0 ? 'Changer' : 'Télécharger'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        key={editImageFile ? 'has-file' : 'no-file'}
+                        onChange={(e) => setEditImageFile(e.target.files?.[0] || null)}
+                        className="hidden"
+                      />
+                    </label>
+                    {editImageFile && editImageFile.size > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditImageFile(null)}
+                        className="ml-2 text-sm text-red-600 hover:text-red-700"
+                      >
+                        Supprimer
+                      </button>
+                    ) : selectedProductForEdit?.image_url && !editImageFile ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditImageFile(new File([], ''))}
+                        className="ml-2 text-sm text-red-600 hover:text-red-700"
+                      >
+                        Supprimer
+                      </button>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground mt-1.5">PNG, JPG ou WebP. La photo sera stockée dans le bucket `products`.</p>
+                  </div>
                 </div>
-              )}
+              </div>
+
+              {/* Attributs et variantes dans l'édition */}
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm text-foreground">Attributs principaux</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAttributes((prev) => [...prev, { ...EMPTY_ATTRIBUTE }])
+                      setEditingAttributeDrafts({})
+                    }}
+                    className="text-sm text-primary hover:text-primary/80"
+                  >
+                    + Ajouter attribut
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {SUGGESTED_MAIN_VARIANTS.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => {
+                        const exists = (editingAttributes || []).some((attr) => String(attr.name || '').trim().toLowerCase() === suggestion.toLowerCase())
+                        if (exists) return
+                        setEditingAttributes((prev) => [...prev, { name: suggestion, values: '' }])
+                        setEditingAttributeDrafts({})
+                      }}
+                      className="px-2.5 py-1 rounded-md border text-xs text-foreground hover:bg-secondary"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+
+                {(editingAttributes || []).length > 0 ? (
+                  <div className="hidden md:grid md:grid-cols-[180px_1fr_120px] gap-3 px-1">
+                    <p className="text-xs font-medium text-muted-foreground">Attribut</p>
+                    <p className="text-xs font-medium text-muted-foreground">Sous-variantes (séparées par virgule)</p>
+                    <p className="text-xs font-medium text-muted-foreground text-center">Action</p>
+                  </div>
+                ) : null}
+
+                {(editingAttributes || []).map((attribute, index) => (
+                  <div key={`edit-attribute-${index}`} className="grid grid-cols-1 md:grid-cols-[180px_1fr_120px] gap-3 items-end p-3 rounded-lg border border-border/60 bg-muted/20">
+                    <div>
+                      <label className="md:hidden block text-xs text-muted-foreground mb-1">Attribut</label>
+                      <input
+                        value={attribute.name}
+                        onChange={(e) =>
+                          setEditingAttributes((prev) => prev.map((a, i) => (i === index ? { ...a, name: e.target.value } : a)))
+                        }
+                        className="w-full border rounded-lg px-3 py-2"
+                        placeholder="Ex: Couleur"
+                      />
+                    </div>
+                    <div>
+                      <label className="md:hidden block text-xs text-muted-foreground mb-1">Sous-variantes</label>
+                      <div className="w-full border rounded-lg px-2 py-1 min-h-[42px] flex flex-wrap items-center gap-1.5">
+                        {splitAttributeValues(attribute.values).map((value, valueIndex) => (
+                          <span key={`${value}-${valueIndex}`} className="px-2 py-0.5 text-xs rounded border bg-secondary text-foreground">
+                            {value}
+                          </span>
+                        ))}
+                        <input
+                          value={editingAttributeDrafts[index] || ''}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            if (!raw.includes(',')) {
+                              setEditingAttributeDrafts((prev) => ({ ...prev, [index]: raw }))
+                              return
+                            }
+                            const parts = raw.split(',')
+                            const committed = parts.slice(0, -1).map((p) => p.trim()).filter(Boolean)
+                            const lastDraft = parts[parts.length - 1] || ''
+                            if (committed.length > 0) {
+                              setEditingAttributes((prev) =>
+                                prev.map((a, i) => i === index ? { ...a, values: appendAttributeValues(a.values, committed) } : a)
+                              )
+                            }
+                            setEditingAttributeDrafts((prev) => ({ ...prev, [index]: lastDraft }))
+                          }}
+                          onKeyDown={(e) => {
+                            if ((e.key === ',' || e.key === 'Enter') && String(editingAttributeDrafts[index] || '').trim()) {
+                              e.preventDefault()
+                              const token = String(editingAttributeDrafts[index] || '').trim()
+                              setEditingAttributes((prev) =>
+                                prev.map((a, i) => i === index ? { ...a, values: appendAttributeValues(a.values, [token]) } : a)
+                              )
+                              setEditingAttributeDrafts((prev) => ({ ...prev, [index]: '' }))
+                              return
+                            }
+                            if (e.key === 'Backspace' && !String(editingAttributeDrafts[index] || '').trim()) {
+                              const values = splitAttributeValues(attribute.values)
+                              if (values.length === 0) return
+                              e.preventDefault()
+                              setEditingAttributes((prev) =>
+                                prev.map((a, i) => i === index ? { ...a, values: values.slice(0, -1).join(', ') } : a)
+                              )
+                            }
+                          }}
+                          className="flex-1 min-w-[140px] bg-transparent outline-none px-1 py-1 text-sm"
+                          placeholder={splitAttributeValues(attribute.values).length > 0 ? 'Ajouter...' : 'Ex: Noir, Blanc, Vert'}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingAttributes((prev) => prev.filter((_, i) => i !== index))
+                        setEditingAttributeDrafts({})
+                      }}
+                      className="h-10 w-full px-3 py-2 rounded-lg border text-red-600 flex items-center justify-center md:self-end"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                ))}
+
+                {(editingAttributes || []).length > 0 ? (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingAttributes((prev) => [...prev, { ...EMPTY_ATTRIBUTE }])
+                        setEditingAttributeDrafts({})
+                      }}
+                      className="text-sm text-primary hover:text-primary/80"
+                    >
+                      + Ajouter attribut
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const generated = generateVariantsFromAttributes({
+                      attributes: editingAttributes,
+                      currentVariants: editingVariants,
+                      baseSku: String(selectedProductForEdit?.sku || ''),
+                      defaultSellingPrice: String(selectedProductForEdit?.default_selling_price ?? 0),
+                    })
+                    if (generated.length === 0) {
+                      setEditError('Ajoutez des attributs et des sous-variantes avant génération.')
+                      return
+                    }
+                    setEditError('')
+                    setEditingVariants(generated)
+                  }}
+                  className="px-4 py-2 rounded-lg border bg-white text-black text-sm hover:bg-gray-50"
+                >
+                  ✨ Générer les variantes automatiquement
+                </button>
+              </div>
+
+              {(editingVariants || []).map((variant, index) => (
+                <div key={`edit-variant-${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_auto] gap-3 items-end border rounded-lg p-3">
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Nom variante</label>
+                    <input
+                      value={variant.name}
+                      onChange={(e) =>
+                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, name: e.target.value } : v)))
+                      }
+                      className="w-full border rounded-lg px-3 py-2"
+                      placeholder="Ex: 1kg, Noir"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">SKU variante</label>
+                    <input
+                      value={variant.sku}
+                      onChange={(e) =>
+                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, sku: e.target.value } : v)))
+                      }
+                      className="w-full border rounded-lg px-3 py-2"
+                      placeholder="Ex: TSH-001-1KG"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Prix vente</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={variant.selling_price}
+                      onChange={(e) =>
+                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, selling_price: e.target.value } : v)))
+                      }
+                      className="w-full border rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Coût achat</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={variant.purchase_cost}
+                      onChange={(e) =>
+                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, purchase_cost: e.target.value } : v)))
+                      }
+                      className="w-full border rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingVariants((prev) => prev.filter((_, i) => i !== index))}
+                      className="px-3 py-2 rounded-lg border text-red-600"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setEditingVariants((prev) => [...prev, { ...EMPTY_VARIANT }])}
+                className="text-sm text-primary hover:text-primary/80"
+              >
+                + Ajouter une variante
+              </button>
 
               {editError ? <div className="text-sm text-red-600">{editError}</div> : null}
             </div>
 
-            <div className="p-6 border-t flex items-center justify-end gap-3">
+            <div className="p-6 border-t flex items-center justify-end gap-3 shrink-0 bg-card">
               <button
                 type="button"
                 onClick={() => {
                   setIsEditOpen(false)
                   setSelectedProductForEdit(null)
                   setEditError('')
+                  setEditImageFile(null)
                 }}
                 className="px-4 py-2 rounded-lg border text-foreground"
               >
@@ -832,16 +1190,17 @@ export default function ProduitsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => updateProductMutation.mutate()}
-                disabled={updateProductMutation.isPending}
+                onClick={() => updateProductWithVariantsMutation.mutate()}
+                disabled={updateProductWithVariantsMutation.isPending}
                 className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white disabled:opacity-50"
               >
-                {updateProductMutation.isPending ? 'Enregistrement...' : 'Enregistrer'}
+                {updateProductWithVariantsMutation.isPending ? 'Enregistrement...' : 'Enregistrer'}
               </button>
             </div>
           </div>
         </div>
       ) : null}
+
 
       {isVariantsOpen ? (
         <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
@@ -1649,9 +2008,20 @@ export default function ProduitsPage() {
                         />
                       </td>
                       <td className="px-4 py-4 align-top">
-                        <code className="text-xs text-muted-foreground font-mono select-all">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(product.id))
+                            toast('ID copié', {
+                              description: String(product.id),
+                              icon: <Copy className="w-4 h-4 text-[#1fa971]" />,
+                            })
+                          }}
+                          className="text-xs text-muted-foreground font-mono hover:text-foreground hover:bg-secondary/50 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                          title="Cliquer pour copier l'ID"
+                        >
                           {String(product.id).slice(0, 8)}...
-                        </code>
+                        </button>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
@@ -1774,6 +2144,16 @@ export default function ProduitsPage() {
                                   setEditName(String(product.name || ''))
                                   setEditSku(String(product.sku || ''))
                                   setEditSellingPrice(String(product.default_selling_price || 0))
+                                  const variants = (variantsByProduct?.[product.id] || []).map((variant: any) => ({
+                                    id: variant.id,
+                                    name: String(variant.name || ''),
+                                    sku: String(variant.sku || ''),
+                                    selling_price: String(variant.selling_price ?? 0),
+                                    purchase_cost: String(variant.purchase_cost ?? 0),
+                                    option_values: variant.option_values || {},
+                                  }))
+                                  setEditingAttributes(deriveAttributesFromVariants(variants))
+                                  setEditingVariants(variants)
                                   setIsEditOpen(true)
                                 }}
                               >
@@ -1789,28 +2169,7 @@ export default function ProduitsPage() {
                               >
                                 Dupliquer
                               </button>
-                              <button
-                                type="button"
-                                className="w-full text-left px-3 py-2 text-xs text-muted-foreground hover:bg-secondary"
-                                onClick={() => {
-                                  setOpenActionsProductId(null)
-                                  setVariantsError('')
-                                  setSelectedProductForVariants(product)
-                                  const variants = (variantsByProduct?.[product.id] || []).map((variant: any) => ({
-                                    id: variant.id,
-                                    name: String(variant.name || ''),
-                                    sku: String(variant.sku || ''),
-                                    selling_price: String(variant.selling_price ?? 0),
-                                    purchase_cost: String(variant.purchase_cost ?? 0),
-                                    option_values: variant.option_values || {},
-                                  }))
-                                  setEditingAttributes(deriveAttributesFromVariants(variants))
-                                  setEditingVariants(variants)
-                                  setIsVariantsOpen(true)
-                                }}
-                              >
-                                Gérer variantes
-                              </button>
+
                               <button
                                 type="button"
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-secondary text-red-600"
