@@ -6,16 +6,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Copy, Eye, EyeOff, RotateCcw, Trash2, Key, ExternalLink } from 'lucide-react'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 
 type ApiKey = {
   id: string
@@ -34,6 +32,7 @@ export function CustomSiteKeys() {
   const [newKey, setNewKey] = useState<string | null>(null)
   const [showNewKey, setShowNewKey] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [revokeDialogOpen, setRevokeDialogOpen] = useState<string | null>(null)
 
   const fetchKeys = async () => {
     try {
@@ -105,7 +104,7 @@ export function CustomSiteKeys() {
                 🎉 Clé générée avec succès !
               </p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 rounded bg-white px-3 py-2 text-sm font-mono dark:bg-green-900">
+                <code className="flex-1 rounded bg-white px-3 py-2 text-sm font-mono break-all dark:bg-green-900">
                   {showNewKey ? newKey : '••••••••••••••••'}
                 </code>
                 <Button
@@ -177,28 +176,30 @@ export function CustomSiteKeys() {
                     </div>
                   </div>
                   {key.is_active && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
+                    <Dialog open={revokeDialogOpen === key.id} onOpenChange={(open) => setRevokeDialogOpen(open ? key.id : null)}>
+                      <DialogTrigger asChild>
                         <Button variant="ghost" size="icon" className="text-destructive">
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Révoquer la clé API</AlertDialogTitle>
-                          <AlertDialogDescription>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Révoquer la clé API</DialogTitle>
+                          <DialogDescription>
                             Cette action est irréversible. Les appels API utilisant cette clé seront
                             immédiatement rejetés.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Annuler</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => revokeKey(key.id)}>
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setRevokeDialogOpen(null)}>
+                            Annuler
+                          </Button>
+                          <Button variant="destructive" onClick={() => revokeKey(key.id)}>
                             Révoquer
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   )}
                 </div>
               ))}
