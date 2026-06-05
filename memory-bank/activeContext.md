@@ -60,7 +60,7 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Migration SQL `20260430_rpc_dashboard_auth_guard.sql` pour renforcer les RPC avec `auth.uid()` guard
 
 ## Current Focus
-Intégration "Site web personnalisé" (Custom Site API) : API publique POST /api/public/v1/orders pour importer les commandes depuis un site e-commerce propriétaire via clé API Bearer.
+Édition complète des produits (produit + variantes) dans un seul modal "Modifier".
 
 
 ## Next Immediate Steps

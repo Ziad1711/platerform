@@ -24,6 +24,7 @@ import { createClient } from '@/lib/supabase/client'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { MENU_PERMISSIONS } from '@/lib/auth/permissions'
+import { useStore } from '@/lib/store-context'
 
 const menuItems = [
   { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
@@ -46,7 +47,7 @@ export default function Sidebar() {
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null)
   const supabase = createClient()
 
-  const currentStoreId = typeof window !== 'undefined' ? localStorage.getItem('current-store-id') : null
+  const { currentStoreId } = useStore()
   const { can } = usePermissions(currentStoreId)
 
   const visibleMenuItems = menuItems.filter((item) => {

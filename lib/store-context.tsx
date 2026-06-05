@@ -13,6 +13,8 @@ type AccessibleStore = {
 
 interface StoreContextType {
   currentStoreId: string | null
+  /** undefined = pas encore initialisé, null = "Tous les stores" */
+  _rawStoreId: string | null | undefined
   setCurrentStoreId: (storeId: string | null) => void
   accessibleStores: AccessibleStore[]
   accessibleStoreIds: string[]
@@ -32,12 +34,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [authReady, setAuthReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
-  const [currentStoreId, setCurrentStoreIdState] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('current-store-id')
-    }
-    return null
-  })
+  // undefined = pas encore initialisé, null = "Tous les stores" (choix explicite)
+  const [currentStoreId, setCurrentStoreIdState] = useState<string | null | undefined>(undefined)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('current-store-id')
+    setCurrentStoreIdState(stored ?? null)
+  }, [])
+
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>('month')
   const [customStartDate, setCustomStartDate] = useState<string | null>(null)
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
@@ -136,20 +140,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    const hasCurrentStore = currentStoreId
-      ? accessibleStores.some((store) => store.id === currentStoreId)
-      : false
+    // Ne pas réinitialiser si l'utilisateur a explicitement choisi "Tous les stores" (null)
+    if (currentStoreId === null) return
+
+    const hasCurrentStore = accessibleStores.some((store) => store.id === currentStoreId)
 
     if (!hasCurrentStore) {
       setCurrentStoreId(accessibleStores[0].id)
     }
   }, [accessibleStores, currentStoreId, isStoresLoading])
 
-  // Bloquer le rendu des enfants tant que les stores chargent et qu'aucun store n'est sélectionné
-  // Cela évite le flash "veuillez sélectionner un store" pour les invités
-  // On retourne un spinner sans rendre les enfants pour éviter que les composants dashboard
-  // recoivent currentStoreId: null et accessibleStores: []
-  if (isStoresLoading && !currentStoreId) {
+  // Bloquer le rendu des enfants tant que les stores chargent et que l'état n'est pas initialisé
+  // On utilise currentStoreId === undefined pour détecter le "pas encore initialisé"
+  // null = "Tous les stores" (choix explicite) → on laisse passer
+  if (isStoresLoading && currentStoreId === undefined) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -159,10 +163,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const accessibleStoreIds = accessibleStores.map((store) => store.id)
 
+  // Exposer currentStoreId comme string | null (jamais undefined) pour les consommateurs
+  const exposedStoreId: string | null = currentStoreId ?? null
+
   return (
     <StoreContext.Provider
       value={{
-        currentStoreId,
+        currentStoreId: exposedStoreId,
+        _rawStoreId: currentStoreId,
         setCurrentStoreId,
         accessibleStores,
         accessibleStoreIds,

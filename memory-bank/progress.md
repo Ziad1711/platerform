@@ -141,6 +141,11 @@
 - [x] Implement product search
 - [x] Add product image upload
 - [x] Basic inventory display
+- [x] Édition complète produit + variantes dans un seul modal "Modifier"
+- [x] Mutation unifiée updateProductWithVariantsMutation (update produit + delete/insert variantes)
+- [x] Préchargement des variantes dans le modal d'édition
+- [x] Suppression du bouton "Gérer variantes" redondant du menu actions
+- [x] Invalidations cache complètes (products, product-variants-by-product, inventory-movements)
 
 ### 📋 Phase 3 (Planned)
 

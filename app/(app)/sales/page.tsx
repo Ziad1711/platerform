@@ -4,7 +4,11 @@ import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
-import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info } from 'lucide-react'
+import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil } from 'lucide-react'
+import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
+import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
+import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
+import InlineEditProducts from '@/components/dashboard/sales/inline-edit-products'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
@@ -547,7 +551,9 @@ export default function VentesPage() {
           *,
           order_items(
             quantity,
+            product_id,
             product_variant_id,
+            unit_selling_price,
             products(name)
           ),
           delivery_companies(name),
@@ -579,11 +585,15 @@ export default function VentesPage() {
             *,
             order_items(
               quantity,
+              product_id,
+              product_variant_id,
+              unit_selling_price,
               products(name)
             ),
             delivery_companies(name),
             confirmation_agents(name)
           `, { count: 'exact' })
+
           .order('order_date', { ascending: false })
           .range((currentPage - 1) * PAGE_SIZE, (currentPage * PAGE_SIZE) - 1)
 
@@ -795,6 +805,63 @@ export default function VentesPage() {
     },
   })
 
+  // Products for editing existing orders
+  // Uses currentStoreId when a specific store is selected, all accessible stores when "Tous les stores"
+  const editProductsStoreIds = useMemo(() => {
+    return currentStoreId ? [currentStoreId] : accessibleStoreIds
+  }, [currentStoreId, accessibleStoreIds])
+
+  const { data: editProducts } = useQuery({
+    queryKey: ['sales-edit-products', editProductsStoreIds],
+    enabled: editProductsStoreIds.length > 0,
+    queryFn: async () => {
+      if (editProductsStoreIds.length === 0) return []
+
+      let query = supabase
+        .from('products')
+        .select('id, name, default_selling_price, default_purchase_cost')
+        .order('created_at', { ascending: false })
+
+      query = query.in('store_id', editProductsStoreIds)
+
+      const { data, error } = await query
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  // Variants for editing existing orders
+  // Uses currentStoreId when a specific store is selected, all accessible stores when "Tous les stores"
+  const editVariantsStoreIds = useMemo(() => {
+    return currentStoreId ? [currentStoreId] : accessibleStoreIds
+  }, [currentStoreId, accessibleStoreIds])
+
+  const { data: editVariantsByProductId } = useQuery({
+    queryKey: ['sales-edit-variants-by-product', editVariantsStoreIds],
+    enabled: editVariantsStoreIds.length > 0,
+    queryFn: async () => {
+      if (editVariantsStoreIds.length === 0) return {} as Record<string, any[]>
+
+      const { data, error } = await supabase
+        .from('product_variants')
+        .select('id, product_id, name, sku, selling_price, purchase_cost')
+        .in('store_id', editVariantsStoreIds)
+        .order('created_at', { ascending: true })
+
+      if (error) throw error
+
+      const grouped: Record<string, any[]> = {}
+      ;(data || []).forEach((variant: any) => {
+        const productId = String(variant.product_id || '')
+        if (!productId) return
+        if (!grouped[productId]) grouped[productId] = []
+        grouped[productId].push(variant)
+      })
+
+      return grouped
+    },
+  })
+
   const { data: importStoreProducts = [] } = useQuery({
     queryKey: ['sales-import-products-by-store', currentStoreId],
     enabled: !!currentStoreId,
@@ -836,6 +903,7 @@ export default function VentesPage() {
       return grouped
     },
   })
+
 
   const { data: productStockById } = useQuery({
     queryKey: ['sales-product-stock-by-id', selectedCreateStoreId],
@@ -946,17 +1014,38 @@ export default function VentesPage() {
   })
 
   const { data: rapidDeliveryCities = [] } = useQuery({
-    queryKey: ['rapid-delivery-cities', rapidDeliveryIntegration?.id],
-    enabled: !!rapidDeliveryIntegration?.id,
+    queryKey: ['rapid-delivery-cities', currentStoreId],
+    enabled: !!currentStoreId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('rapid_delivery_cities')
+      // 1. Récupérer l'intégration Rapid Delivery liée au store courant
+      const { data: config, error: configError } = await supabase
+        .from('rapid_delivery_configs')
+        .select('integration_id')
+        .eq('store_id', currentStoreId!)
+        .maybeSingle()
+
+      if (configError) throw configError
+
+      if (config?.integration_id) {
+        // 2. Charger les villes depuis rapid_delivery_cities (liées à l'intégration)
+        const { data: cities, error: citiesError } = await supabase
+          .from('rapid_delivery_cities')
+          .select('city_key, city_name, cost_delivery')
+          .eq('integration_id', config.integration_id)
+          .order('city_name', { ascending: true })
+
+        if (citiesError) throw citiesError
+        if (cities && cities.length > 0) return cities
+      }
+
+      // 3. Fallback : charger depuis rapid_delivery_cities_standard (villes génériques)
+      const { data: fallbackCities, error: fallbackError } = await supabase
+        .from('rapid_delivery_cities_standard')
         .select('city_key, city_name, cost_delivery')
-        .eq('integration_id', rapidDeliveryIntegration!.id)
         .order('city_name', { ascending: true })
 
-      if (error) throw error
-      return data || []
+      if (fallbackError) throw fallbackError
+      return fallbackCities || []
     },
   })
 
@@ -1321,6 +1410,107 @@ export default function VentesPage() {
     },
     onError: (error: any) => {
       setFormError(error?.message || 'Erreur synchronisation Rapid Delivery')
+    },
+  })
+
+  const updateOrderFieldMutation = useMutation({
+    mutationFn: async ({ orderId, field, value }: { orderId: string; field: string; value: any }) => {
+      const { error } = await supabase
+        .from('orders')
+        .update({ [field]: value })
+        .eq('id', orderId)
+
+      if (error) throw error
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur de mise à jour')
+    },
+  })
+
+  const updateOrderCityMutation = useMutation({
+    mutationFn: async ({ orderId, cityName, cityKey }: { orderId: string; cityName: string; cityKey?: number | null }) => {
+      // Normaliser la ville via l'API (comme à la création)
+      const normalized = await normalizeOrderCityRequest(cityName)
+      const resolvedCityName = String(normalized.cityName || cityName).trim()
+      const resolvedCityKey = Number(normalized.cityKey || 0) || cityKey || null
+
+      // Calculer les frais de livraison si on a un cityKey
+      let resolvedDeliveryFee: number | undefined
+      if (resolvedCityKey) {
+        const cost = rapidDeliveryCityCostByKey.get(resolvedCityKey)
+        if (cost !== undefined) {
+          resolvedDeliveryFee = cost
+        }
+      }
+
+      const updatePayload: Record<string, any> = {
+        city: resolvedCityName,
+        rapid_delivery_city_key: resolvedCityKey,
+      }
+      if (resolvedDeliveryFee !== undefined) {
+        updatePayload.delivery_fee = resolvedDeliveryFee
+      }
+
+      const { error } = await supabase
+        .from('orders')
+        .update(updatePayload)
+        .eq('id', orderId)
+
+      if (error) throw error
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur de mise à jour de la ville')
+    },
+  })
+
+  const updateOrderItemsMutation = useMutation({
+    mutationFn: async ({ orderId, storeId, items }: { orderId: string; storeId: string; items: any[] }) => {
+      // Reconstruct each item with required fields before insert
+      const payload = items.map((item) => ({
+        order_id: orderId,
+        store_id: storeId,
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || null,
+        quantity: Number(item.quantity) || 1,
+        unit_selling_price: Number(item.unit_selling_price) || 0,
+        unit_purchase_cost_snapshot: Number(item.unit_purchase_cost_snapshot) || 0,
+        item_type: item.item_type || 'product',
+      }))
+
+      // Validate payload before delete
+      const invalidItem = payload.find(
+        (p) => !p.product_id || p.quantity <= 0
+      )
+      if (invalidItem) {
+        throw new Error('Chaque produit doit avoir un ID et une quantité valide')
+      }
+
+      const { error: deleteError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', orderId)
+
+      if (deleteError) throw deleteError
+
+      if (payload.length > 0) {
+        const { error: insertError } = await supabase
+          .from('order_items')
+          .insert(payload)
+
+        if (insertError) throw insertError
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur de mise à jour des produits')
     },
   })
 
@@ -2127,13 +2317,13 @@ export default function VentesPage() {
         </p>
       </div>
       {isCreateOpen && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b flex items-center justify-between shrink-0 bg-white">
-              <h3 className="text-lg font-semibold text-gray-900">Nouvelle commande</h3>
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setIsCreateOpen(false)}>
+          <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-border flex items-center justify-between shrink-0">
+              <h3 className="text-lg font-semibold text-foreground">Nouvelle commande</h3>
               <button
                 onClick={() => setIsCreateOpen(false)}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-muted-foreground hover:text-foreground"
                 type="button"
               >
                 Fermer
@@ -2143,16 +2333,16 @@ export default function VentesPage() {
             <div className="p-6 space-y-5 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Date de commande</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Date de commande</label>
                   <input
                     type="datetime-local"
                     value={orderDate}
                     onChange={(e) => setOrderDate(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Store</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Store</label>
                   <select
                     value={selectedCreateStoreId}
                     onChange={(e) => {
@@ -2169,7 +2359,7 @@ export default function VentesPage() {
                       setProductSearchTerms([''])
                       setOpenProductDropdownIndex(null)
                     }}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                   >
                     <option value="">Choisir un store</option>
                     {(stores || []).map((store: any) => (
@@ -2180,11 +2370,11 @@ export default function VentesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Agent de confirmation</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Agent de confirmation</label>
                   <select
                     value={selectedAgentId}
                     onChange={(e) => setSelectedAgentId(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                   >
                     <option value="">Choisir un agent</option>
                     <option value="__owner__">Owner a confirmé lui-même</option>
@@ -2196,47 +2386,47 @@ export default function VentesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Client</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Client</label>
                   <input
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                     placeholder="Nom du client"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Téléphone</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Téléphone</label>
                   <input
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                     placeholder="Téléphone"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Adresse client</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Adresse client</label>
                   <input
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                     placeholder="Adresse complète"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Ville</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Ville</label>
                   <input
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                     placeholder="Ville"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Source de commande</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Source de commande</label>
                   <select
                     value={orderSource}
                     onChange={(e) => setOrderSource(e.target.value as 'organic' | 'ads' | 'recommendation')}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                   >
                     <option value="organic">Organique</option>
                     <option value="ads">ADS</option>
@@ -2244,7 +2434,7 @@ export default function VentesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Société de livraison</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Société de livraison</label>
                   <select
                     value={selectedDeliveryCompanyId}
                     onChange={(e) => {
@@ -2263,7 +2453,7 @@ export default function VentesPage() {
                       setShowDeliveryApiKeyInput(false)
                       setShowApiAutomationInfoModal(false)
                     }}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                   >
                     <option value="">Choisir une société</option>
                     <option value="__owner__">Livraison interne (sans transporteur)</option>
@@ -2275,15 +2465,15 @@ export default function VentesPage() {
                   </select>
                   {selectedCreateStoreId && (deliveryCompanies || []).length === 0 ? (
                     <p className="text-xs text-amber-600 mt-1">
-                      Aucune société active pour ce store. Choisissez “Livraison interne (sans transporteur)” ou ajoutez une société.
+                      Aucune société active pour ce store. Choisissez "Livraison interne (sans transporteur)" ou ajoutez une société.
                     </p>
                   ) : null}
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block text-sm text-gray-700">Coût livraison</label>
+                    <label className="block text-sm text-muted-foreground">Coût livraison</label>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">API</span>
+                      <span className="text-xs text-muted-foreground">API</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -2309,12 +2499,12 @@ export default function VentesPage() {
                         }}
                         disabled={!selectedDeliveryCompanyId || selectedDeliveryCompanyId === '__owner__'}
                         className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${
-                          deliveryCostAutomationEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                          deliveryCostAutomationEnabled ? 'bg-primary' : 'bg-muted'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                         aria-label="Activer automation coût livraison"
                       >
                         <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform ${
                             deliveryCostAutomationEnabled ? 'translate-x-5' : 'translate-x-1'
                           }`}
                         />
@@ -2328,7 +2518,7 @@ export default function VentesPage() {
                     value={deliveryFee}
                     onChange={(e) => setDeliveryFee(e.target.value)}
                     disabled={isDeliveryCostManagedByApi}
-                    className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground disabled:opacity-50"
                   />
                   {isDeliveryCostManagedByApi ? (
                     <p className="text-xs text-blue-600 mt-1">
@@ -2337,7 +2527,7 @@ export default function VentesPage() {
                   ) : null}
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Facturation livraison</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Facturation livraison</label>
                   <select
                     value={deliveryBillingMode}
                     onChange={(e) => {
@@ -2347,14 +2537,14 @@ export default function VentesPage() {
                         setDeliveryChargeToCustomer('0')
                       }
                     }}
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                   >
                     <option value="free">Livraison gratuite (supportée par le store)</option>
                     <option value="paid_by_customer">Livraison payée par le client</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Montant livraison facturé client</label>
+                  <label className="block text-sm text-muted-foreground mb-1">Montant livraison facturé client</label>
                   <input
                     type="number"
                     min={0}
@@ -2362,25 +2552,25 @@ export default function VentesPage() {
                     value={deliveryChargeToCustomer}
                     onChange={(e) => setDeliveryChargeToCustomer(e.target.value)}
                     disabled={deliveryBillingMode === 'free'}
-                    className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground disabled:opacity-50"
                   />
                 </div>
                 <div></div>
                 {showApiAutomationInfoModal ? (
                   <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-                    <div className="w-full max-w-md rounded-xl bg-white shadow-xl border p-4 space-y-3">
-                      <h5 className="text-sm font-semibold text-gray-900">Activation API - information</h5>
-                      <p className="text-sm text-gray-600">
+                    <div className="w-full max-w-md bg-card rounded-2xl shadow-2xl border border-border p-4 space-y-3">
+                      <h5 className="text-sm font-semibold text-foreground">Activation API - information</h5>
+                      <p className="text-sm text-muted-foreground">
                         Cette société de livraison n'a pas de <span className="font-medium">api_provider</span> configuré.
                         Pour activer l'automation des coûts, veuillez renseigner une clé API transporteur.
                       </p>
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">Clé API transporteur</label>
+                        <label className="block text-sm text-muted-foreground mb-1">Clé API transporteur</label>
                         <input
                           type="password"
                           value={deliveryApiKey}
                           onChange={(e) => setDeliveryApiKey(e.target.value)}
-                          className="w-full border rounded-lg px-3 py-2"
+                          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                           placeholder="Renseignez la clé API"
                         />
                       </div>
@@ -2388,7 +2578,7 @@ export default function VentesPage() {
                         <button
                           type="button"
                           onClick={() => setShowApiAutomationInfoModal(false)}
-                          className="px-3 py-1.5 rounded-md border text-sm text-gray-700"
+                          className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
                         >
                           Fermer
                         </button>
@@ -2406,7 +2596,7 @@ export default function VentesPage() {
                               .eq('id', selectedDeliveryCompanyId)
 
                             if (error) {
-                              setFormError(error.message || 'Erreur lors de l’enregistrement de la clé API.')
+                              setFormError(error.message || "Erreur lors de l'enregistrement de la clé API.")
                               return
                             }
 
@@ -2415,7 +2605,7 @@ export default function VentesPage() {
                             setShowApiAutomationInfoModal(false)
                             setFormError('')
                           }}
-                          className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-sm"
+                          className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
                         >
                           Activer
                         </button>
@@ -2428,13 +2618,13 @@ export default function VentesPage() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-gray-900">Produits de la commande</h4>
+                  <h4 className="text-sm font-semibold text-foreground">Produits de la commande</h4>
                 </div>
 
                 {items.map((item, index) => (
                   <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_180px_110px_150px_auto] gap-3 items-end">
                     <div className="relative">
-                      <label className="block text-xs text-gray-500 mb-1">Produit</label>
+                      <label className="block text-xs text-muted-foreground mb-1">Produit</label>
                       <input
                         value={productSearchTerms[index] || ''}
                         onFocus={() => setOpenProductDropdownIndex(index)}
@@ -2456,15 +2646,15 @@ export default function VentesPage() {
                             )
                           )
                         }}
-                        className="w-full border rounded-lg px-3 py-2"
-                        placeholder={selectedCreateStoreId ? 'Rechercher un produit...' : 'Sélectionnez d’abord un store'}
+                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
+                        placeholder={selectedCreateStoreId ? 'Rechercher un produit...' : "Sélectionnez d'abord un store"}
                       />
 
                       {openProductDropdownIndex === index ? (
-                        <div className="absolute z-30 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border bg-white shadow-lg">
+                        <div className="absolute z-30 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border border-border bg-card shadow-lg">
                           {!selectedCreateStoreId ? (
-                            <div className="px-3 py-2 text-sm text-amber-700 bg-amber-50 border-b">
-                              Veuillez sélectionner un store d’abord pour charger les produits.
+                            <div className="px-3 py-2 text-sm text-amber-700 bg-amber-50 border-b border-border">
+                              Veuillez sélectionner un store d'abord pour charger les produits.
                             </div>
                           ) : null}
 
@@ -2495,12 +2685,12 @@ export default function VentesPage() {
                                   setOpenProductDropdownIndex(null)
                                 }}
                                 className={`w-full text-left px-3 py-2 text-sm ${
-                                  isOutOfStock ? 'text-red-600 bg-red-50 cursor-not-allowed' : 'hover:bg-gray-50'
+                                  isOutOfStock ? 'text-red-600 bg-red-50 cursor-not-allowed' : 'hover:bg-secondary'
                                 }`}
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <span>{product.name}</span>
-                                  <span className={`text-xs ${isOutOfStock ? 'text-red-600' : 'text-gray-500'}`}>
+                                  <span className={`text-xs ${isOutOfStock ? 'text-red-600' : 'text-muted-foreground'}`}>
                                     {isOutOfStock ? 'Rupture' : `Stock: ${availableStock}`}
                                   </span>
                                 </div>
@@ -2513,17 +2703,17 @@ export default function VentesPage() {
                               .toLowerCase()
                               .includes(String(productSearchTerms[index] || '').toLowerCase())
                           ).length === 0 && selectedCreateStoreId ? (
-                            <div className="px-3 py-2 text-sm text-gray-500">Aucun produit trouvé</div>
+                            <div className="px-3 py-2 text-sm text-muted-foreground">Aucun produit trouvé</div>
                           ) : null}
 
-                          <div className="border-t px-3 py-2">
+                          <div className="border-t border-border px-3 py-2">
                             <button
                               type="button"
                               onMouseDown={(e) => {
                                 e.preventDefault()
                                 setOpenProductDropdownIndex(null)
                               }}
-                              className="text-xs text-gray-500 hover:text-gray-700"
+                              className="text-xs text-muted-foreground hover:text-foreground"
                             >
                               Fermer la liste
                             </button>
@@ -2532,11 +2722,11 @@ export default function VentesPage() {
                       ) : null}
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Variante</label>
+                      <label className="block text-xs text-muted-foreground mb-1">Variante</label>
                       <select
                         value={item.product_variant_id || ''}
                         onChange={(e) => onChangeVariant(index, e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2"
+                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                         disabled={!item.product_id || !(variantsByProductId?.[item.product_id] || []).length}
                       >
                         <option value="">
@@ -2552,24 +2742,24 @@ export default function VentesPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Qté</label>
+                      <label className="block text-xs text-muted-foreground mb-1">Qté</label>
                       <input
                         type="number"
                         min={1}
                         value={item.quantity}
                         onChange={(e) => onChangeItemField(index, 'quantity', Number(e.target.value || 1))}
-                        className="w-full border rounded-lg px-3 py-2"
+                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Prix vente unitaire</label>
+                      <label className="block text-xs text-muted-foreground mb-1">Prix vente unitaire</label>
                       <input
                         type="number"
                         min={0}
                         step="0.01"
                         value={item.unit_selling_price}
                         onChange={(e) => onChangeItemField(index, 'unit_selling_price', Number(e.target.value || 0))}
-                        className="w-full border rounded-lg px-3 py-2"
+                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                       />
                     </div>
                     <div>
@@ -2588,19 +2778,19 @@ export default function VentesPage() {
                   <button
                     type="button"
                     onClick={addItemRow}
-                    className="text-sm text-blue-600 hover:text-blue-700"
+                    className="text-sm text-primary hover:text-primary/80"
                   >
                     + Ajouter produit
                   </button>
                 </div>
               </div>
 
-              <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-                <h4 className="text-sm font-semibold text-gray-900">Résumé financier</h4>
+              <div className="border border-border rounded-lg p-4 bg-secondary/50 space-y-3">
+                <h4 className="text-sm font-semibold text-foreground">Résumé financier</h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Type remise</label>
+                    <label className="block text-xs text-muted-foreground mb-1">Type remise</label>
                     <select
                       value={discountType}
                       onChange={(e) => {
@@ -2608,7 +2798,7 @@ export default function VentesPage() {
                         setDiscountType(nextType)
                         if (nextType === 'fixed') setDiscountValue('0')
                       }}
-                      className="w-full border rounded-lg px-3 py-2"
+                      className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                     >
                       <option value="fixed">Aucune remise</option>
                       <option value="amount">Montant (MAD)</option>
@@ -2616,7 +2806,7 @@ export default function VentesPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Valeur remise</label>
+                    <label className="block text-xs text-muted-foreground mb-1">Valeur remise</label>
                     <input
                       type="number"
                       min={0}
@@ -2624,7 +2814,7 @@ export default function VentesPage() {
                       value={discountValue}
                       onChange={(e) => setDiscountValue(e.target.value)}
                       disabled={discountType === 'fixed'}
-                      className="w-full border rounded-lg px-3 py-2"
+                      className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground disabled:opacity-50"
                     />
                   </div>
                   <div></div>
@@ -2632,20 +2822,20 @@ export default function VentesPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Sous-total produits</span>
-                    <span className="font-medium text-gray-900">{formatCurrency(subtotal)}</span>
+                    <span className="text-muted-foreground">Sous-total produits</span>
+                    <span className="font-medium text-foreground">{formatCurrency(subtotal)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Remise appliquée</span>
-                    <span className="font-medium text-gray-900">-{formatCurrency(discountAmount)}</span>
+                    <span className="text-muted-foreground">Remise appliquée</span>
+                    <span className="font-medium text-foreground">-{formatCurrency(discountAmount)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Coût livraison (store)</span>
-                    <span className="font-medium text-gray-900">{formatCurrency(Number.isFinite(parsedDeliveryFee) ? parsedDeliveryFee : 0)}</span>
+                    <span className="text-muted-foreground">Coût livraison (store)</span>
+                    <span className="font-medium text-foreground">{formatCurrency(Number.isFinite(parsedDeliveryFee) ? parsedDeliveryFee : 0)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Livraison facturée client</span>
-                    <span className="font-medium text-gray-900">
+                    <span className="text-muted-foreground">Livraison facturée client</span>
+                    <span className="font-medium text-foreground">
                       {formatCurrency(
                         deliveryBillingMode === 'paid_by_customer' && Number.isFinite(parsedDeliveryChargeToCustomer)
                           ? parsedDeliveryChargeToCustomer
@@ -2655,20 +2845,20 @@ export default function VentesPage() {
                   </div>
                 </div>
 
-                <div className="pt-2 border-t flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-700">Total final</span>
-                  <span className="text-lg font-bold text-gray-900">{formatCurrency(totalSellingPrice)}</span>
+                <div className="pt-2 border-t border-border flex items-center justify-between">
+                  <span className="text-sm font-semibold text-foreground">Total final</span>
+                  <span className="text-lg font-bold text-foreground">{formatCurrency(totalSellingPrice)}</span>
                 </div>
               </div>
 
               {formError ? <div className="text-sm text-red-600">{formError}</div> : null}
             </div>
 
-            <div className="p-6 border-t flex items-center justify-end gap-3 shrink-0 bg-white">
+            <div className="p-6 border-t border-border flex items-center justify-end gap-3 shrink-0">
               <button
                 type="button"
                 onClick={() => setIsCreateOpen(false)}
-                className="px-4 py-2 rounded-lg border text-gray-700"
+                className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary"
               >
                 Annuler
               </button>
@@ -2676,7 +2866,7 @@ export default function VentesPage() {
                 type="button"
                 onClick={() => createOrderMutation.mutate()}
                 disabled={createOrderMutation.isPending}
-                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
               >
                 {createOrderMutation.isPending ? 'Création...' : 'Créer la commande'}
               </button>
@@ -2687,18 +2877,18 @@ export default function VentesPage() {
 
       {isImportOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b flex items-center justify-between shrink-0 bg-white">
+          <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-5xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-border flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Importer des ventes (CSV)</h3>
-                <p className="text-sm text-gray-500">
+                <h3 className="text-lg font-semibold text-foreground">Importer des ventes (CSV)</h3>
+                <p className="text-sm text-muted-foreground">
                   Étape {importStep} / 3 {importFileName ? `• ${importFileName}` : ''}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={closeImportModal}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-muted-foreground hover:text-foreground"
               >
                 Fermer
               </button>
@@ -2709,17 +2899,17 @@ export default function VentesPage() {
                 <div className="space-y-4">
                   {!currentStoreId ? (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-700 px-3 py-2 text-sm">
-                      Sélectionnez un store en haut avant l’import.
+                      Sélectionnez un store en haut avant l'import.
                     </div>
                   ) : null}
 
                   <div className="rounded-lg border border-dashed p-6 text-center space-y-3">
-                    <p className="text-sm text-gray-600">Import CSV uniquement</p>
+                    <p className="text-sm text-muted-foreground">Import CSV uniquement</p>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={!currentStoreId}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
                     >
                       <Upload className="w-4 h-4" />
                       Choisir un fichier CSV
@@ -2744,11 +2934,11 @@ export default function VentesPage() {
                 <div className="space-y-5">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm text-gray-700 mb-1">Format de date</label>
+                      <label className="block text-sm text-foreground mb-1">Format de date</label>
                       <select
                         value={importDateFormat}
                         onChange={(e) => setImportDateFormat(e.target.value as CsvDateFormat)}
-                        className="w-full border rounded-lg px-3 py-2"
+                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
                       >
                         {csvDateFormatOptions.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -2756,24 +2946,24 @@ export default function VentesPage() {
                           </option>
                         ))}
                       </select>
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         Suggestion auto: {csvDateFormatOptions.find((o) => o.value === suggestedDateFormat)?.label}
                       </p>
                     </div>
-                    <div className="text-sm text-gray-700 flex items-end">
+                    <div className="text-sm text-foreground flex items-end">
                       Lignes détectées: <span className="font-semibold ml-1">{importRows.length}</span>
                     </div>
                   </div>
 
-                  <div className="rounded-lg border">
-                    <div className="grid grid-cols-12 gap-3 px-4 py-2 border-b text-xs font-medium text-gray-500 bg-gray-50">
+                  <div className="rounded-lg border border-border">
+                    <div className="grid grid-cols-12 gap-3 px-4 py-2 border-b border-border text-xs font-medium text-muted-foreground bg-secondary/50">
                       <div className="col-span-5">Nos champs</div>
                       <div className="col-span-7">Colonne du fichier</div>
                     </div>
                     <div className="max-h-72 overflow-y-auto">
                       {importFieldDefinitions.map((field) => (
-                        <div key={field.key} className="grid grid-cols-12 gap-3 px-4 py-2 border-b last:border-b-0 items-center">
-                          <div className="col-span-5 text-sm text-gray-800">
+                        <div key={field.key} className="grid grid-cols-12 gap-3 px-4 py-2 border-b border-border last:border-b-0 items-center">
+                          <div className="col-span-5 text-sm text-foreground">
                             {field.label}
                             {field.required ? <span className="text-red-600 ml-1">*</span> : null}
                           </div>
@@ -2786,7 +2976,7 @@ export default function VentesPage() {
                                   [field.key]: e.target.value,
                                 }))
                               }
-                              className="w-full border rounded-lg px-3 py-2 text-sm"
+                              className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                             >
                               <option value="">-- Non mappé --</option>
                               {importColumns.map((column, columnIndex) => (
@@ -2802,12 +2992,12 @@ export default function VentesPage() {
                   </div>
 
                   {fieldToColumnMap.status ? (
-                    <div className="rounded-lg border p-4 space-y-3">
-                      <h4 className="text-sm font-semibold text-gray-900">Correspondance des statuts</h4>
+                    <div className="rounded-lg border border-border p-4 space-y-3">
+                      <h4 className="text-sm font-semibold text-foreground">Correspondance des statuts</h4>
                       <div className="max-h-64 overflow-y-auto space-y-2">
                         {statusRawValues.map((rawStatus) => (
                           <div key={rawStatus} className="grid grid-cols-12 gap-3 items-center">
-                            <div className="col-span-5 text-sm text-gray-700 truncate" title={rawStatus}>
+                            <div className="col-span-5 text-sm text-foreground truncate" title={rawStatus}>
                               {rawStatus}
                             </div>
                             <div className="col-span-7">
@@ -2819,7 +3009,7 @@ export default function VentesPage() {
                                     [rawStatus]: e.target.value,
                                   }))
                                 }
-                                className="w-full border rounded-lg px-3 py-2 text-sm"
+                                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                               >
                                 <option value="">-- Choisir un statut --</option>
                                 {statusOptions.map((option) => (
@@ -2836,22 +3026,22 @@ export default function VentesPage() {
                   ) : null}
 
                   {fieldToColumnMap.product_name ? (
-                    <div className="rounded-lg border p-4 space-y-3">
+                    <div className="rounded-lg border border-border p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h4 className="text-sm font-semibold text-gray-900">Correspondance des produits</h4>
-                          <p className="text-xs text-gray-500">Lier les lignes CSV aux produits existants</p>
+                          <h4 className="text-sm font-semibold text-foreground">Correspondance des produits</h4>
+                          <p className="text-xs text-muted-foreground">Lier les lignes CSV aux produits existants</p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setLinkImportedProducts((prev) => !prev)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            linkImportedProducts ? 'bg-blue-600' : 'bg-gray-300'
+                            linkImportedProducts ? 'bg-primary' : 'bg-muted'
                           }`}
                           aria-label="Activer la liaison produits"
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
                               linkImportedProducts ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
@@ -2862,7 +3052,7 @@ export default function VentesPage() {
                         <div className="max-h-64 overflow-y-auto space-y-2">
                           {productRawValues.map((rawProduct) => (
                             <div key={rawProduct} className="grid grid-cols-12 gap-3 items-center">
-                              <div className="col-span-5 text-sm text-gray-700 truncate" title={rawProduct}>
+                              <div className="col-span-5 text-sm text-foreground truncate" title={rawProduct}>
                                 {rawProduct}
                               </div>
                               <div className="col-span-7">
@@ -2874,7 +3064,7 @@ export default function VentesPage() {
                                       [rawProduct]: e.target.value,
                                     }))
                                   }
-                                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                                  className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                                 >
                                   <option value="">-- Choisir un produit --</option>
                                   {importStoreProducts.map((product: any) => (
@@ -2888,28 +3078,28 @@ export default function VentesPage() {
                           ))}
                         </div>
                       ) : (
-                        <div className="text-xs text-gray-500">Liaison produits désactivée.</div>
+                        <div className="text-xs text-muted-foreground">Liaison produits désactivée.</div>
                       )}
                     </div>
                   ) : null}
 
                   {fieldToColumnMap.confirmation_agent ? (
-                    <div className="rounded-lg border p-4 space-y-3">
+                    <div className="rounded-lg border border-border p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h4 className="text-sm font-semibold text-gray-900">Correspondance des agents</h4>
-                          <p className="text-xs text-gray-500">Lier les lignes CSV aux agents existants</p>
+                          <h4 className="text-sm font-semibold text-foreground">Correspondance des agents</h4>
+                          <p className="text-xs text-muted-foreground">Lier les lignes CSV aux agents existants</p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setLinkImportedAgents((prev) => !prev)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            linkImportedAgents ? 'bg-blue-600' : 'bg-gray-300'
+                            linkImportedAgents ? 'bg-primary' : 'bg-muted'
                           }`}
                           aria-label="Activer la liaison agents"
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
                               linkImportedAgents ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
@@ -2920,7 +3110,7 @@ export default function VentesPage() {
                         <div className="max-h-64 overflow-y-auto space-y-2">
                           {agentRawValues.map((rawAgent) => (
                             <div key={rawAgent} className="grid grid-cols-12 gap-3 items-center">
-                              <div className="col-span-5 text-sm text-gray-700 truncate" title={rawAgent}>
+                              <div className="col-span-5 text-sm text-foreground truncate" title={rawAgent}>
                                 {rawAgent}
                               </div>
                               <div className="col-span-7">
@@ -2932,10 +3122,10 @@ export default function VentesPage() {
                                       [rawAgent]: e.target.value,
                                     }))
                                   }
-                                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                                  className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                                 >
                                   <option value="">-- Choisir un agent --</option>
-                                  <option value={IMPORT_SELF_CONFIRMATION}>J’ai confirmé moi-même</option>
+                                  <option value={IMPORT_SELF_CONFIRMATION}>J'ai confirmé moi-même</option>
                                   {importConfirmationAgents.map((agent: any) => (
                                     <option key={agent.id} value={agent.id}>
                                       {agent.name}
@@ -2947,19 +3137,19 @@ export default function VentesPage() {
                           ))}
                         </div>
                       ) : (
-                        <div className="text-xs text-gray-500">Liaison agents désactivée.</div>
+                        <div className="text-xs text-muted-foreground">Liaison agents désactivée.</div>
                       )}
                     </div>
                   ) : (
-                    <div className="rounded-lg border p-4 space-y-2">
-                      <div className="text-sm font-semibold text-gray-900">Agent de confirmation par défaut</div>
-                      <p className="text-xs text-gray-500">Pas de colonne “agent” dans le CSV ? choisissez une valeur par défaut ou ajoutez une colonne dans votre sheet.</p>
+                    <div className="rounded-lg border border-border p-4 space-y-2">
+                      <div className="text-sm font-semibold text-foreground">Agent de confirmation par défaut</div>
+                      <p className="text-xs text-muted-foreground">Pas de colonne "agent" dans le CSV ? choisissez une valeur par défaut ou ajoutez une colonne dans votre sheet.</p>
                       <select
                         value={defaultConfirmationAgentSelection}
                         onChange={(e) => setDefaultConfirmationAgentSelection(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2 text-sm"
+                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                       >
-                        <option value={IMPORT_SELF_CONFIRMATION}>J’ai confirmé moi-même</option>
+                        <option value={IMPORT_SELF_CONFIRMATION}>J'ai confirmé moi-même</option>
                         {importConfirmationAgents.map((agent: any) => (
                           <option key={agent.id} value={agent.id}>{agent.name}</option>
                         ))}
@@ -2968,22 +3158,22 @@ export default function VentesPage() {
                   )}
 
                   {fieldToColumnMap.delivery_company ? (
-                    <div className="rounded-lg border p-4 space-y-3">
+                    <div className="rounded-lg border border-border p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h4 className="text-sm font-semibold text-gray-900">Correspondance des sociétés de livraison</h4>
-                          <p className="text-xs text-gray-500">Lier les lignes CSV aux sociétés existantes</p>
+                          <h4 className="text-sm font-semibold text-foreground">Correspondance des sociétés de livraison</h4>
+                          <p className="text-xs text-muted-foreground">Lier les lignes CSV aux sociétés existantes</p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setLinkImportedDeliveryCompanies((prev) => !prev)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            linkImportedDeliveryCompanies ? 'bg-blue-600' : 'bg-gray-300'
+                            linkImportedDeliveryCompanies ? 'bg-primary' : 'bg-muted'
                           }`}
                           aria-label="Activer la liaison sociétés"
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
                               linkImportedDeliveryCompanies ? 'translate-x-6' : 'translate-x-1'
                             }`}
                           />
@@ -2994,7 +3184,7 @@ export default function VentesPage() {
                         <div className="max-h-64 overflow-y-auto space-y-2">
                           {deliveryCompanyRawValues.map((rawCompany) => (
                             <div key={rawCompany} className="grid grid-cols-12 gap-3 items-start">
-                              <div className="col-span-5 text-sm text-gray-700 truncate pt-2" title={rawCompany}>{rawCompany}</div>
+                              <div className="col-span-5 text-sm text-foreground truncate pt-2" title={rawCompany}>{rawCompany}</div>
                               <div className="col-span-7 space-y-2">
                                 <select
                                   value={deliveryCompanyValueMap[rawCompany] || ''}
@@ -3004,242 +3194,76 @@ export default function VentesPage() {
                                       [rawCompany]: e.target.value,
                                     }))
                                   }
-                                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                                  className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                                 >
                                   <option value="">-- Choisir une société --</option>
-                                  <option value={IMPORT_INTERNAL_DELIVERY}>Livraison interne (sans transporteur)</option>
-                                  <option value={IMPORT_OTHER_DELIVERY}>Autre (saisir le nom)</option>
-                                  {importDeliveryCompanies.map((company: any) => (
-                                    <option key={company.id} value={company.id}>{company.name}</option>
+                                  {(deliveryCompanies || []).map((company: any) => (
+                                    <option key={company.id} value={company.id}>
+                                      {company.name}
+                                    </option>
                                   ))}
                                 </select>
-                                {deliveryCompanyValueMap[rawCompany] === IMPORT_OTHER_DELIVERY ? (
-                                  <input
-                                    type="text"
-                                    value={deliveryCompanyOtherNameMap[rawCompany] || ''}
-                                    onChange={(e) =>
-                                      setDeliveryCompanyOtherNameMap((prev) => ({
-                                        ...prev,
-                                        [rawCompany]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder="Nom de la société"
-                                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                                  />
-                                ) : null}
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <div className="text-xs text-gray-500">Liaison sociétés désactivée.</div>
+                        <div className="text-xs text-muted-foreground">Liaison sociétés désactivée.</div>
                       )}
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border p-4 space-y-2">
-                      <div className="text-sm font-semibold text-gray-900">Société de livraison par défaut</div>
-                      <p className="text-xs text-gray-500">Pas de colonne “société de livraison” ? choisissez une valeur par défaut ou ajoutez une colonne dans votre sheet.</p>
-                      <select
-                        value={defaultDeliveryCompanySelection}
-                        onChange={(e) => setDefaultDeliveryCompanySelection(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2 text-sm"
-                      >
-                        <option value={IMPORT_INTERNAL_DELIVERY}>Livraison interne (sans transporteur)</option>
-                        <option value={IMPORT_OTHER_DELIVERY}>Autre (saisir le nom)</option>
-                        {importDeliveryCompanies.map((company: any) => (
-                          <option key={company.id} value={company.id}>{company.name}</option>
-                        ))}
-                      </select>
-                      {defaultDeliveryCompanySelection === IMPORT_OTHER_DELIVERY ? (
-                        <input
-                          type="text"
-                          value={defaultDeliveryCompanyOtherName}
-                          onChange={(e) => setDefaultDeliveryCompanyOtherName(e.target.value)}
-                          placeholder="Nom de la société"
-                          className="w-full border rounded-lg px-3 py-2 text-sm"
-                        />
-                      ) : null}
-                    </div>
-                  )}
-
-                  <div className="rounded-lg border p-4">
-                    <h4 className="text-sm font-semibold text-gray-900 mb-2">Aperçu (5 lignes)</h4>
-                    <div className="overflow-auto">
-                      <table className="min-w-full text-xs">
-                        <thead>
-                          <tr className="text-left text-gray-500 border-b">
-                            {importColumns.slice(0, 8).map((column, columnIndex) => (
-                              <th key={`${column || 'empty'}-${columnIndex}`} className="px-2 py-1 whitespace-nowrap">{column}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {importRows.slice(0, 5).map((row, idx) => (
-                            <tr key={`preview-${idx}`} className="border-b last:border-b-0">
-                              {importColumns.slice(0, 8).map((column, columnIndex) => (
-                                <td key={`${idx}-${column || 'empty'}-${columnIndex}`} className="px-2 py-1 whitespace-nowrap">
-                                  {String(row[column] || '').slice(0, 60)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {importStep === 3 ? (
-                <div className="space-y-3">
-                  <h4 className="text-lg font-semibold text-gray-900">Import terminé</h4>
-                  <div className="rounded-lg border p-4 text-sm text-gray-700 space-y-1">
-                    <div>Total lignes: {importSummary?.total || 0}</div>
-                    <div>Insérées: {importSummary?.inserted || 0}</div>
-                    <div>Doublons ignorés: {importSummary?.duplicates || 0}</div>
-                    <div>Lignes invalides ignorées: {importSummary?.invalid || 0}</div>
-                  </div>
-
-                  {(importSummary?.ignoredRows || []).length > 0 ? (
-                    <div className="rounded-lg border p-4 space-y-3">
-                      <div className="text-sm font-semibold text-gray-900">Lignes ignorées & causes</div>
-                      <div className="max-h-64 overflow-auto">
-                        <table className="min-w-full text-xs">
-                          <thead>
-                            <tr className="text-left text-gray-500 border-b">
-                              <th className="px-2 py-1 whitespace-nowrap">Ligne CSV</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Client</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Téléphone</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Statut brut</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Produit brut</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Agent brut</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Société brute</th>
-                              <th className="px-2 py-1 whitespace-nowrap">Cause</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {importSummary?.ignoredRows.map((row) => (
-                              <tr key={`ignored-${row.rowNumber}-${row.reason}`} className="border-b last:border-b-0">
-                                <td className="px-2 py-1 whitespace-nowrap">{row.rowNumber}</td>
-                                <td className="px-2 py-1 whitespace-nowrap">{row.customerName || '-'}</td>
-                                <td className="px-2 py-1 whitespace-nowrap">{row.phone || '-'}</td>
-                                <td className="px-2 py-1 whitespace-nowrap">{row.statusRaw || '-'}</td>
-                                <td className="px-2 py-1 whitespace-nowrap">{row.productRaw || '-'}</td>
-                                <td className="px-2 py-1 whitespace-nowrap">{row.agentRaw || '-'}</td>
-                                <td className="px-2 py-1 whitespace-nowrap">{row.deliveryCompanyRaw || '-'}</td>
-                                <td className="px-2 py-1">{row.reason}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setImportStep(1)
-                            setImportError('')
-                          }}
-                          className="px-3 py-1.5 rounded-md border text-sm text-gray-700"
-                        >
-                          Corriger CSV & reuploader
-                        </button>
-                        <button
-                          type="button"
-                          onClick={closeImportModal}
-                          className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-sm"
-                        >
-                          Ignorer et fermer
-                        </button>
-                      </div>
                     </div>
                   ) : null}
                 </div>
               ) : null}
 
-              {importError ? <div className="text-sm text-red-600">{importError}</div> : null}
-              {missingRequiredFields.length > 0 && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Champs obligatoires non mappés: {missingRequiredFields.map((f) => f.label).join(', ')}
-                </div>
-              ) : null}
-              {hasMissingMandatoryImportStatuses && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Statuts obligatoires manquants: {missingMandatoryImportStatuses.join(', ')}.
-                </div>
-              ) : null}
-              {!hasMissingMandatoryImportStatuses && hasUnmappedStatuses && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Certaines valeurs de statut ne sont pas mappées: elles seront ignorées.
-                </div>
-              ) : null}
-              {linkImportedProducts && !fieldToColumnMap.product_name && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Veuillez mapper la colonne produit pour activer la liaison produits.
-                </div>
-              ) : null}
-              {linkImportedProducts && fieldToColumnMap.product_name && hasUnmappedImportProducts && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Veuillez mapper tous les produits dans “Correspondance des produits”.
-                </div>
-              ) : null}
-              {linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Veuillez mapper tous les agents dans “Correspondance des agents”.
-                </div>
-              ) : null}
-              {linkImportedDeliveryCompanies && fieldToColumnMap.delivery_company && hasUnmappedImportDeliveryCompanies && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Veuillez mapper toutes les sociétés dans “Correspondance des sociétés de livraison”.
-                </div>
-              ) : null}
-              {(hasMissingOtherDeliveryNames || hasInvalidDefaultDeliveryOtherName) && importStep === 2 ? (
-                <div className="text-xs text-amber-700">
-                  Veuillez renseigner le nom pour les sociétés marquées “Autre”.
+              {importStep === 3 ? (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border p-4">
+                    <h4 className="text-sm font-semibold text-foreground mb-2">Récapitulatif</h4>
+                    <p className="text-sm text-muted-foreground">
+                      {importRows.length} lignes à importer • {Object.keys(fieldToColumnMap).filter((k) => fieldToColumnMap[k as ImportFieldKey]).length} champs mappés
+                    </p>
+                  </div>
                 </div>
               ) : null}
             </div>
 
-            <div className="p-6 border-t flex items-center justify-between gap-3 shrink-0 bg-white">
+            <div className="p-6 border-t border-border flex items-center justify-between shrink-0">
               <button
                 type="button"
-                onClick={() => {
-                  if (importStep === 1) {
-                    closeImportModal()
-                    return
-                  }
-                  if (importStep === 2) {
-                    setImportStep(1)
-                    return
-                  }
-                  closeImportModal()
-                }}
-                className="px-4 py-2 rounded-lg border text-gray-700"
+                onClick={closeImportModal}
+                className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary"
               >
-                {importStep === 1 ? 'Annuler' : importStep === 2 ? 'Retour' : 'Fermer'}
+                Annuler
               </button>
-
-              {importStep === 2 ? (
-                <button
-                  type="button"
-                  onClick={() => importOrdersMutation.mutate()}
-                  disabled={
-                    importOrdersMutation.isPending ||
-                    missingRequiredFields.length > 0 ||
-                    hasMissingMandatoryImportStatuses ||
-                    (linkImportedProducts && (!fieldToColumnMap.product_name || hasUnmappedImportProducts)) ||
-                    (linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents) ||
-                    (linkImportedDeliveryCompanies && fieldToColumnMap.delivery_company && hasUnmappedImportDeliveryCompanies) ||
-                    hasMissingOtherDeliveryNames ||
-                    hasInvalidDefaultDeliveryOtherName ||
-                    !currentStoreId
-                  }
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
-                >
-                  {importOrdersMutation.isPending ? 'Import en cours...' : 'Lancer import'}
-                </button>
-              ) : null}
+              <div className="flex items-center gap-3">
+                {importStep > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setImportStep((s) => (s - 1) as 1 | 2 | 3)}
+                    className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary"
+                  >
+                    Retour
+                  </button>
+                ) : null}
+                {importStep < 3 ? (
+                  <button
+                    type="button"
+                    onClick={() => setImportStep((s) => (s + 1) as 1 | 2 | 3)}
+                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+                  >
+                    Suivant
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => importOrdersMutation.mutate()}
+                    disabled={importOrdersMutation.isPending}
+                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
+                  >
+                    {importOrdersMutation.isPending ? 'Import...' : 'Lancer import'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -3251,24 +3275,24 @@ export default function VentesPage() {
           onClick={() => setSelectedOrderForDetails(null)}
         >
           <div
-            className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+            className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-2xl max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-5 border-b flex items-center justify-between shrink-0 bg-white">
-              <h3 className="text-lg font-semibold text-gray-900">Détails commande</h3>
+            <div className="p-5 border-b border-border flex items-center justify-between shrink-0">
+              <h3 className="text-lg font-semibold text-foreground">Détails commande</h3>
               <button
                 type="button"
                 onClick={() => setSelectedOrderForDetails(null)}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-muted-foreground hover:text-foreground"
               >
                 Fermer
               </button>
             </div>
 
             <div className="p-5 space-y-5 overflow-y-auto">
-              <div className="border rounded-lg p-4 space-y-2">
-                <div className="text-sm text-gray-500">Client</div>
-                <div className="font-semibold text-gray-900">{selectedOrderForDetails.customer_name || '-'}</div>
+              <div className="border border-border rounded-lg p-4 space-y-2">
+                <div className="text-sm text-muted-foreground">Client</div>
+                <div className="font-semibold text-foreground">{selectedOrderForDetails.customer_name || '-'}</div>
                 <div className="mt-1">
                   {selectedOrderIsBlacklisted ? (
                     <span className="inline-flex items-center rounded-full bg-red-100 text-red-700 text-[11px] px-2 py-0.5 font-medium">
@@ -3276,13 +3300,13 @@ export default function VentesPage() {
                     </span>
                   ) : null}
                 </div>
-                <div className="text-sm text-gray-700">Téléphone: {selectedOrderForDetails.phone || '-'}</div>
-                <div className="text-sm text-gray-700">Adresse: {selectedOrderForDetails.address || '-'}</div>
-                <div className="text-sm text-gray-700">Ville: {selectedOrderForDetails.city || '-'}</div>
+                <div className="text-sm text-foreground">Téléphone: {selectedOrderForDetails.phone || '-'}</div>
+                <div className="text-sm text-foreground">Adresse: {selectedOrderForDetails.address || '-'}</div>
+                <div className="text-sm text-foreground">Ville: {selectedOrderForDetails.city || '-'}</div>
                 <div className="pt-2 flex items-center gap-2">
                   <a
                     href={selectedOrderForDetails.phone ? `tel:${selectedOrderForDetails.phone}` : '#'}
-                    className={`px-3 py-1.5 rounded-md text-sm border ${selectedOrderForDetails.phone ? 'text-gray-800 hover:bg-gray-50' : 'text-gray-400 pointer-events-none'}`}
+                    className={`px-3 py-1.5 rounded-md text-sm border border-border ${selectedOrderForDetails.phone ? 'text-foreground hover:bg-secondary' : 'text-muted-foreground pointer-events-none opacity-50'}`}
                   >
                     Appeler
                   </a>
@@ -3290,21 +3314,21 @@ export default function VentesPage() {
                     href={whatsappPhone ? `https://wa.me/${whatsappPhone}` : '#'}
                     target="_blank"
                     rel="noreferrer"
-                    className={`px-3 py-1.5 rounded-md text-sm ${whatsappPhone ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-gray-200 text-gray-400 pointer-events-none'}`}
+                    className={`px-3 py-1.5 rounded-md text-sm ${whatsappPhone ? 'bg-primary hover:bg-primary/90 text-primary-foreground' : 'bg-muted text-muted-foreground pointer-events-none opacity-50'}`}
                   >
                     WhatsApp
                   </a>
                 </div>
               </div>
 
-              <div className="border rounded-lg p-4 space-y-2">
-                <div className="text-sm text-gray-500">Informations commande</div>
-                <div className="text-sm text-gray-700">ID: #{String(selectedOrderForDetails.id || '').slice(0, 8)}</div>
-                <div className="text-sm text-gray-700">Date commande: {formatDateTime(selectedOrderForDetails.order_date)}</div>
-                <div className="text-sm text-gray-700">
+              <div className="border border-border rounded-lg p-4 space-y-2">
+                <div className="text-sm text-muted-foreground">Informations commande</div>
+                <div className="text-sm text-foreground">ID: #{String(selectedOrderForDetails.id || '').slice(0, 8)}</div>
+                <div className="text-sm text-foreground">Date commande: {formatDateTime(selectedOrderForDetails.order_date)}</div>
+                <div className="text-sm text-foreground">
                   Source: {selectedOrderForDetails.source === 'ads' ? 'ADS' : selectedOrderForDetails.source === 'recommendation' ? 'Recommendation' : 'Organique'}
                 </div>
-                <div className="text-sm text-gray-700">
+                <div className="text-sm text-foreground">
                   Produits: {(selectedOrderForDetails.order_items || [])
                     .map((item: any) => {
                       const productName = item?.products?.name
@@ -3315,8 +3339,8 @@ export default function VentesPage() {
                     .filter(Boolean)
                     .join(', ') || '-'}
                 </div>
-                <div className="text-sm text-gray-700">Total: {formatCurrency(selectedOrderForDetails.total_selling_price || 0)}</div>
-                <div className="text-sm text-gray-700">Tracking: {selectedOrderForDetails.tracking_number || '-'}</div>
+                <div className="text-sm text-foreground">Total: {formatCurrency(selectedOrderForDetails.total_selling_price || 0)}</div>
+                <div className="text-sm text-foreground">Tracking: {selectedOrderForDetails.tracking_number || '-'}</div>
                 <div className="pt-3 flex flex-wrap gap-2">
                   {rapidDeliveryIntegration?.status === 'connected' && selectedOrderForDetails.tracking_number ? (
                     <button
@@ -3327,7 +3351,7 @@ export default function VentesPage() {
                           trackingNumber: selectedOrderForDetails.tracking_number,
                         })
                       }
-                      className="px-3 py-1.5 rounded-md border text-sm text-gray-700"
+                      className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
                     >
                       Synchroniser suivi
                     </button>
@@ -3335,8 +3359,8 @@ export default function VentesPage() {
                 </div>
               </div>
 
-              <div className="border rounded-lg p-4">
-                <div className="text-sm text-gray-500 mb-3">Historique statuts</div>
+              <div className="border border-border rounded-lg p-4">
+                <div className="text-sm text-muted-foreground mb-3">Historique statuts</div>
                 <div className="space-y-2">
                   {statusOptions.map((option) => {
                     const dateField = statusDateFieldMap[option.value]
@@ -3345,11 +3369,11 @@ export default function VentesPage() {
                     if (!dateValue && !isCurrent) return null
 
                     return (
-                      <div key={option.value} className="flex items-center justify-between text-sm border-b pb-2 last:border-b-0 last:pb-0">
-                        <span className={`font-medium ${isCurrent ? 'text-blue-700' : 'text-gray-700'}`}>
+                      <div key={option.value} className="flex items-center justify-between text-sm border-b border-border pb-2 last:border-b-0 last:pb-0">
+                        <span className={`font-medium ${isCurrent ? 'text-primary' : 'text-foreground'}`}>
                           {option.label}{isCurrent ? ' (actuel)' : ''}
                         </span>
-                        <span className="text-gray-500">{dateValue ? formatDateTime(dateValue) : '-'}</span>
+                        <span className="text-muted-foreground">{dateValue ? formatDateTime(dateValue) : '-'}</span>
                       </div>
                     )
                   })}
@@ -3601,8 +3625,20 @@ export default function VentesPage() {
                         {formatDateTime(order.order_date)}
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
-                        <div className="text-xs sm:text-sm font-medium text-foreground">{order.customer_name}</div>
-                        <div className="text-xs sm:text-sm text-muted-foreground">{order.phone}</div>
+                        <div className="text-xs sm:text-sm font-medium text-foreground">
+                          <InlineEditText
+                            value={order.customer_name || ''}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'customer_name', value: val })}
+                            placeholder="Nom client"
+                          />
+                        </div>
+                        <div className="text-xs sm:text-sm text-muted-foreground">
+                          <InlineEditText
+                            value={order.phone || ''}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'phone', value: val })}
+                            placeholder="Téléphone"
+                          />
+                        </div>
                         {isBlacklisted ? (
                           <div className="mt-1 inline-flex items-center rounded-full bg-red-100 text-red-700 text-[11px] px-2 py-0.5 font-medium">
                             Blacklist
@@ -3659,44 +3695,88 @@ export default function VentesPage() {
                         </div>
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3">
-                        <div className="text-xs sm:text-sm text-foreground max-w-[200px] sm:max-w-[260px] truncate" title={productNames.join(', ')}>
-                          {productNames.length > 0 ? productNames.join(', ') : '-'}
-                        </div>
+                        <InlineEditProducts
+                          items={order.order_items || []}
+                          products={(products && products.length > 0) ? products : (editProducts || [])}
+                          variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
+                          onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
+                          onClose={() => {}}
+                        />
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
-                        {order.city || '-'}
+                        <InlineEditCity
+                          value={order.city || ''}
+                          cities={rapidDeliveryCities || []}
+                          onSave={(cityName, cityKey) => {
+                            updateOrderCityMutation.mutate({ orderId: order.id, cityName, cityKey })
+                          }}
+                        />
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-xs sm:text-sm text-foreground">
-                        <div className="max-w-[200px] sm:max-w-[260px] truncate" title={order.address || ''}>
-                          {order.address || '-'}
-                        </div>
+                        <InlineEditAddressModal
+                          value={order.address || ''}
+                          onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'address', value: val })}
+                        />
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-foreground">
-                        {formatCurrency(order.total_selling_price || 0)}
+                        <InlineEditProducts
+                          items={order.order_items || []}
+                          products={(products && products.length > 0) ? products : (editProducts || [])}
+                          variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
+                          onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
+                          onClose={() => {}}
+                          triggerLabel={formatCurrency(order.total_selling_price || 0)}
+                        />
                       </td>
                       {!isConfirmationRole && (
                         <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
-                          {formatCurrency(order.buy_price || 0)}
+                          <InlineEditText
+                            value={formatCurrency(order.buy_price || 0)}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'buy_price', value: val })}
+                            placeholder="Achat"
+                            type="number"
+                          />
                         </td>
                       )}
                       {!isConfirmationRole && (
                         <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
-                          {formatCurrency(order.ads_cost_allocated || 0)}
+                          <InlineEditText
+                            value={formatCurrency(order.ads_cost_allocated || 0)}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'ads_cost_allocated', value: val })}
+                            placeholder="Ads"
+                            type="number"
+                          />
                         </td>
                       )}
                       {!isConfirmationRole && (
                         <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
-                          {formatCurrency(order.confirmation_cost_allocated || 0)}
+                          <InlineEditText
+                            value={formatCurrency(order.confirmation_cost_allocated || 0)}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'confirmation_cost_allocated', value: val })}
+                            placeholder="Confirmation"
+                            type="number"
+                          />
                         </td>
                       )}
                       {!isConfirmationRole && (
                         <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
-                          {formatCurrency(order.delivery_fee || 0)}
+                          <InlineEditText
+                            value={formatCurrency(order.delivery_fee || 0)}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'delivery_fee', value: val })}
+                            placeholder="Coût livraison"
+                            type="number"
+                          />
                         </td>
                       )}
                       {!isConfirmationRole && (
                         <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
-                          {formatCurrency(order.delivery_charge_to_customer || 0)}
+                          <InlineEditText
+                            value={formatCurrency(order.delivery_charge_to_customer || 0)}
+                            onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'delivery_charge_to_customer', value: val })}
+                            placeholder="Facturé"
+                            type="number"
+                          />
+
                         </td>
                       )}
                       {!isConfirmationRole && (
