@@ -180,19 +180,14 @@
   }
 }
 
-/* Mobile scale (zoom out 10%) - uniquement sur écrans <= 640px */
+/* Mobile scale (zoom out 10%) - appliqué au wrapper du dashboard uniquement */
 @media (max-width: 640px) {
-  html {
-    overflow: hidden;
-    height: 100%;
-  }
-  body {
+  .app-mobile-scale {
     transform: scale(0.9);
     transform-origin: top left;
     width: 111.111%;
-    height: 111.111vh;
-    overflow-y: auto;
-    overflow-x: hidden;
+    height: 111.111%;
+    overflow: visible;
   }
 }
 
