@@ -346,7 +346,7 @@ export async function processPendingFacebookSyncJobs(client: AdminClient, userId
   if (error) throw error
 
   const jobs = (data || []) as FacebookSyncJobRow[]
-  const results = []
+  const results: any[] = []
 
   for (const job of jobs) {
     results.push({ jobId: job.id, ...(await processFacebookSyncJob(client, job.id)) })

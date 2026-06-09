@@ -1143,7 +1143,7 @@ export default function VentesPage() {
       if (!selectedCreateStoreId) throw new Error('Choisissez un store dans le formulaire.')
 
       const validItems = items.filter((item) => item.product_id && Number(item.quantity) > 0)
-      const productsMap = new Map((products || []).map((p: any) => [p.id, p]))
+      const productsMap = new Map<string, any>((products || []).map((p: any) => [String(p.id), p]))
       const stockMap = productStockById || {}
 
       if (validItems.length === 0) throw new Error('Ajoutez au moins un produit avec quantité valide.')
