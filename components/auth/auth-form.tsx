@@ -5,17 +5,10 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react'
-import { getFirstAllowedRoute, type Role } from '@/lib/auth/permissions'
+import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 type AuthFormProps = {
   defaultMode?: 'login' | 'signup' | 'reset-request' | 'recovery'
-}
-
-function safeInternalPath(value: string | null) {
-  const next = String(value || '').trim()
-  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return '/dashboard'
-  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(next)) return '/dashboard'
-  return next
 }
 
 export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
@@ -99,7 +92,7 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       if (mode === 'login') {
         // Navigation serveur forcée pour que le middleware lise les cookies
         // correctement après signInWithPassword (évite le flash login)
-        const target = safeInternalPath(next)
+        const target = sanitizeRedirectPath(next)
         window.location.href = target === '/dashboard' ? '/dashboard' : target
       } else if (mode === 'signup') {
         router.refresh()

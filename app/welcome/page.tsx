@@ -24,6 +24,7 @@ export default function WelcomePage() {
       }
       if (user.user_metadata?.password_set === true) {
         router.replace('/dashboard')
+        router.refresh()
         return
       }
       setFirstName(String(user.user_metadata?.first_name || ''))

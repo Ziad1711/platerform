@@ -1,10 +1,9 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient, getServerUser } from '@/lib/supabase/server'
-import { getFirstAllowedRoute } from '@/lib/auth/permissions'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
-import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
+import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 type LoginPageProps = {
   searchParams?: Promise<{ signup?: string; recovery?: string; error?: string; next?: string }>
@@ -14,26 +13,24 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {}
   const user = await getServerUser()
 
-  // Si l'utilisateur est connecté, déterminer la page de redirection
-  // selon son rôle (pour éviter d'envoyer confirmation/delivery sur /dashboard)
-  let defaultRedirect = '/dashboard'
-  if (user) {
+  if (user && params.recovery !== '1') {
     const supabase = await createClient()
-    const storeId = (await supabase.auth.getSession()).data.session?.user?.id
-    // On cherche le store_member actif
     const { data: member } = await supabase
       .from('store_members')
       .select('role')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .maybeSingle()
-    defaultRedirect = getFirstAllowedRoute(member?.role as any)
-  }
+    const passwordSet = user.user_metadata?.password_set === true
+    const hasStore = !!member
 
-  const nextPath = sanitizeInternalRedirectPath(params.next, defaultRedirect)
-
-  if (user && params.recovery !== '1') {
-    redirect(nextPath)
+    const redirectTo = resolvePostLoginRedirect({
+      next: params.next,
+      role: member?.role as any ?? null,
+      hasStore,
+      passwordSet,
+    })
+    redirect(redirectTo)
   }
   const defaultMode = params.recovery === '1' ? 'recovery' : params.signup === '1' ? 'signup' : 'login'
   const isInvitationExpired = params.error === 'invitation_expired'

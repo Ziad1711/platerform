@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
-import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
 import { createClient } from '@/lib/supabase/server'
-import { getFirstAllowedRoute } from '@/lib/auth/permissions'
+import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
-  const nextParam = sanitizeInternalRedirectPath(url.searchParams.get('next'), '/dashboard')
+  const nextParam = sanitizeRedirectPath(url.searchParams.get('next'), '/dashboard')
   const origin = url.origin
 
   if (!code) {
@@ -28,34 +27,32 @@ export async function GET(request: Request) {
     cache: 'no-store',
   }).catch(() => null)
 
-  // Rediriger vers la bonne page selon le rôle
+  // Récupérer l'utilisateur et déterminer la redirection
   const { data: { user } } = await supabase.auth.getUser()
-  let redirectTo = nextParam
+  let redirectTo = '/dashboard'
   let storeId: string | null = null
+
   if (user) {
     const { data: member } = await supabase
       .from('store_members')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .maybeSingle()
-    const role = (member?.role as import('@/lib/auth/permissions').Role | null | undefined) ?? null
-    const defaultRoute = getFirstAllowedRoute(role)
-    if (nextParam === '/dashboard') {
-      redirectTo = defaultRoute
-    }
-
-    // Récupérer le premier store accessible pour set le cookie
-    // Évite le flash "sélectionnez un store" pour les nouveaux utilisateurs
-    const { data: membership } = await supabase
-      .from('store_members')
-      .select('store_id')
+      .select('role, store_id')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .limit(1)
       .maybeSingle()
-    if (membership?.store_id) {
-      storeId = String(membership.store_id)
+
+    const passwordSet = user.user_metadata?.password_set === true
+    const hasStore = !!member
+
+    redirectTo = resolvePostLoginRedirect({
+      next: nextParam,
+      role: member?.role as any ?? null,
+      hasStore,
+      passwordSet,
+    })
+
+    if (member?.store_id) {
+      storeId = String(member.store_id)
     }
   }
 

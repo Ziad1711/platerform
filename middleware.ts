@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getFirstAllowedRoute, hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
+import { isProtectedAppRoute } from '@/lib/auth/redirects'
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -23,24 +24,14 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Utiliser getUser() (vérification JWT via API) avec fallback getSession()
-  // pour être fiable sur Edge Runtime (Vercel) où les cookies SSR peuvent être
-  // inaccessibles localement
+  // Refresh session (getUser vérifie le JWT via API)
   const { data: { user } } = await supabase.auth.getUser()
   const sessionUser = user ?? (await supabase.auth.getSession()).data.session?.user ?? null
   const pathname = request.nextUrl.pathname
 
-  // Routes protégées
-  const protectedPaths = ['/dashboard', '/sales', '/products', '/stock', '/suppliers', '/advertising', '/expenses', '/integrations', '/delivery', '/ai-assistant', '/staff', '/subscription', '/settings']
-  const isProtected = protectedPaths.some(p => pathname === p || pathname.startsWith(p + '/'))
-
-  // NE PAS rediriger si l'utilisateur n'est pas trouvé - laisser les pages server
-  // gérer l'auth avec getServerUser() qui a un fallback getSession() fiable.
-  // Ceci évite la boucle de redirections quand le middleware (Edge Runtime)
-  // ne trouve pas la session mais que la page server la trouve.
-
-  // Permission guards seulement si l'utilisateur est trouvé
-  if (sessionUser && isProtected) {
+  // Permission guards uniquement si l'utilisateur est connecté
+  // (le blocage des routes sans session est géré par app/(app)/layout.tsx côté serveur)
+  if (sessionUser && isProtectedAppRoute(pathname)) {
     const storeId = request.cookies.get('current-store-id')?.value
 
     if (storeId) {

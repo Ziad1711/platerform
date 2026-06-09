@@ -1,9 +1,9 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
+import { getServerUser } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
-import { sanitizeInternalRedirectPath } from '@/lib/assistant/security'
+import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 type SignupPageProps = {
   searchParams?: Promise<{ next?: string }>
@@ -11,13 +11,10 @@ type SignupPageProps = {
 
 export default async function SignupPage({ searchParams }: SignupPageProps) {
   const params = (await searchParams) ?? {}
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerUser()
 
   if (user) {
-    redirect(sanitizeInternalRedirectPath(params.next, '/dashboard'))
+    redirect(sanitizeRedirectPath(params.next, '/dashboard'))
   }
 
   return (
