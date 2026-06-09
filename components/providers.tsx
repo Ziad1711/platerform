@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, createContext, useContext, useEffect } from 'react'
-import { StoreProvider } from '@/lib/store-context'
+import { StoreProvider, useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -31,29 +31,17 @@ export function useTheme() {
   return useContext(ThemeContext)
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient())
-  const [theme, setTheme] = useState<Theme>('system')
+function ThemeLoader() {
+  const supabase = createClient()
+  const { setTheme } = useTheme()
+  const { userId, authReady } = useStore()
 
-  // Initial load from localStorage for speed
   useEffect(() => {
-    const storedTheme = localStorage.getItem('theme')
-    if (isThemeValue(storedTheme)) {
-      setTheme(storedTheme)
-    }
-  }, [])
+    if (!authReady || !userId) return
 
-  // Then fetch from DB to ensure consistency
-  useEffect(() => {
-    const supabase = createClient()
     let isActive = true
 
     const loadThemeFromProfile = async () => {
-      const { data: authData } = await supabase.auth.getUser()
-      const userId = authData?.user?.id
-
-      if (!userId || !isActive) return
-
       const { data: profile } = await supabase
         .from('profiles')
         .select('theme_preference')
@@ -69,6 +57,21 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     return () => {
       isActive = false
+    }
+  }, [authReady, userId, supabase, setTheme])
+
+  return null
+}
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient())
+  const [theme, setTheme] = useState<Theme>('system')
+
+  // Initial load from localStorage for speed
+  useEffect(() => {
+    const storedTheme = localStorage.getItem('theme')
+    if (isThemeValue(storedTheme)) {
+      setTheme(storedTheme)
     }
   }, [])
 
@@ -90,6 +93,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeContext.Provider value={{ theme, setTheme }}>
         <StoreProvider>
+          <ThemeLoader />
           {children}
         </StoreProvider>
       </ThemeContext.Provider>

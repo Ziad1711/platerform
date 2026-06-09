@@ -35,7 +35,7 @@ function formatShortCurrency(value: number) {
 }
 
 export default function RevenueChart() {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
   const strictPeriodStart = periodRange.start ? startOfDay(periodRange.start) : null
@@ -49,7 +49,8 @@ export default function RevenueChart() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const now = new Date()
       const todayStart = startOfDay(now)

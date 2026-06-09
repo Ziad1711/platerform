@@ -659,23 +659,16 @@ export default function VentesPage() {
     },
   })
 
-  const { data: userContext } = useQuery({
-    queryKey: ['sales-user-context'],
-    queryFn: async () => {
-      const { data, error } = await supabase.auth.getUser()
-      if (error) throw error
-      return data.user || null
-    },
-  })
+  const { userId } = useStore()
 
   const { data: ownedStores = [] } = useQuery({
-    queryKey: ['sales-owned-stores', userContext?.id],
-    enabled: !!userContext?.id,
+    queryKey: ['sales-owned-stores', userId],
+    enabled: !!userId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stores')
         .select('id')
-        .eq('owner_user_id', userContext!.id)
+        .eq('owner_user_id', userId!)
 
       if (error) throw error
       return data || []

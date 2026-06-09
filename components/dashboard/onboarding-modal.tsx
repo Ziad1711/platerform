@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Store, Globe2, Building2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useStore } from '@/lib/store-context'
 
 const categories = [
   'Mode & vêtements',
@@ -31,6 +32,7 @@ const timezones = [
 export default function OnboardingModal() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
+  const { userId, authReady } = useStore()
   const [checking, setChecking] = useState(true)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -47,17 +49,17 @@ export default function OnboardingModal() {
   })
 
   useEffect(() => {
+    if (!authReady || !userId) return
+
     let active = true
 
     const load = async () => {
       try {
-        const [{ data: authData }, geoResponse] = await Promise.all([
-          supabase.auth.getUser(),
+        const [geoResponse] = await Promise.all([
           fetch('/api/geo', { cache: 'no-store' }).catch(() => null),
         ])
 
-        const user = authData.user
-        if (!user || !active) return
+        if (!active) return
 
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
 
@@ -66,7 +68,7 @@ export default function OnboardingModal() {
           supabase
             .from('profiles')
             .select('company, country, timezone, main_currency, preferred_currency')
-            .eq('id', user.id)
+            .eq('id', userId)
             .maybeSingle(),
         ])
 

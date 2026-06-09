@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Store, Trash2, Pencil, Plus, Building2, Loader2, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/lib/auth/use-permissions'
+import { useStore } from '@/lib/store-context'
 
 interface StoreItem {
   id: string
@@ -24,6 +25,7 @@ async function toJson(res: Response) {
 export default function StoresSection() {
   const queryClient = useQueryClient()
   const supabase = createClient()
+  const { userId } = useStore()
   const [showCreate, setShowCreate] = useState(false)
   const [showEdit, setShowEdit] = useState<StoreItem | null>(null)
   const [showDelete, setShowDelete] = useState<StoreItem | null>(null)
@@ -31,13 +33,6 @@ export default function StoresSection() {
   const [createForm, setCreateForm] = useState({ name: '', currency: 'MAD', country: '' })
   const [editForm, setEditForm] = useState({ name: '', currency: 'MAD', country: '' })
 
-  const { data: userData } = useQuery({
-    queryKey: ['sidebar-user-context'],
-    queryFn: async () => {
-      const { data } = await supabase.auth.getUser()
-      return data.user
-    },
-  })
 
   const currentStoreId = typeof window !== 'undefined'
     ? localStorage.getItem('current-store-id')

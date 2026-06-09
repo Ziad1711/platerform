@@ -10,13 +10,14 @@ import { formatCurrency, getPeriodRange } from '@/lib/utils'
 type SortBy = 'revenue' | 'profit'
 
 export default function TopProducts() {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
   const [sortBy, setSortBy] = useState<SortBy>('revenue')
 
   const { data: topProductsRaw, isLoading } = useQuery({
-    queryKey: ['dashboard-top-products', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-top-products', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 

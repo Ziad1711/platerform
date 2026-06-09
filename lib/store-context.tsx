@@ -25,6 +25,10 @@ interface StoreContextType {
   setCustomStartDate: (date: string | null) => void
   customEndDate: string | null
   setCustomEndDate: (date: string | null) => void
+  /** L'ID de l'utilisateur authentifié, null si pas connecté */
+  userId: string | null
+  /** true quand l'état auth a été initialisé */
+  authReady: boolean
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined)
@@ -36,10 +40,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null)
   // undefined = pas encore initialisé, null = "Tous les stores" (choix explicite)
   const [currentStoreId, setCurrentStoreIdState] = useState<string | null | undefined>(undefined)
+  const [localStorageLoaded, setLocalStorageLoaded] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem('current-store-id')
     setCurrentStoreIdState(stored ?? null)
+    setLocalStorageLoaded(true)
   }, [])
 
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>('month')
@@ -150,10 +156,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [accessibleStores, currentStoreId, isStoresLoading])
 
-  // Bloquer le rendu des enfants tant que les stores chargent et que l'état n'est pas initialisé
-  // On utilise currentStoreId === undefined pour détecter le "pas encore initialisé"
-  // null = "Tous les stores" (choix explicite) → on laisse passer
-  if (isStoresLoading && currentStoreId === undefined) {
+  // Bloquer le rendu des enfants tant que les stores chargent et que localStorage n'a pas été lu
+  // On utilise localStorageLoaded pour détecter le "pas encore initialisé"
+  // Une fois localStorageLoaded=true, currentStoreId a sa vraie valeur (string | null)
+  if (!localStorageLoaded || (isStoresLoading && currentStoreId === undefined)) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -181,6 +187,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setCustomStartDate,
         customEndDate,
         setCustomEndDate,
+        userId,
+        authReady,
       }}
     >
       {children}

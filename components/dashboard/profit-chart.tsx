@@ -7,12 +7,13 @@ import { useQuery } from '@tanstack/react-query'
 import { formatCurrency, getPeriodRange } from '@/lib/utils'
 
 export default function ProfitChart() {
-  const { currentStoreId, selectedPeriod, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-profit-chart', currentStoreId, selectedPeriod],
+    queryKey: ['dashboard-profit-chart', currentStoreId, selectedPeriod, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 

@@ -2,21 +2,20 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import { useStore } from '@/lib/store-context'
 import { Permission, hasPermission, Role } from './permissions'
 
 export function usePermissions(storeId: string | null) {
   const supabase = createClient()
+  const { userId } = useStore()
 
   const { data: role } = useQuery({
-    queryKey: ['member-role', storeId],
-    // Quand storeId est null ("Tous les stores"), on charge le rôle le plus élevé
-    // parmi tous les stores accessibles pour déterminer les permissions globales
-    enabled: true,
+    queryKey: ['member-role', storeId, userId],
+    enabled: !!userId,
     staleTime: 0,
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return null
+      if (!userId) return null
 
       if (storeId) {
         // Mode store spécifique
@@ -24,7 +23,7 @@ export function usePermissions(storeId: string | null) {
           .from('store_members')
           .select('role')
           .eq('store_id', storeId)
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .eq('status', 'active')
           .maybeSingle()
         return (data?.role as Role | null | undefined) ?? null
@@ -34,7 +33,7 @@ export function usePermissions(storeId: string | null) {
       const { data: memberships } = await supabase
         .from('store_members')
         .select('role')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('status', 'active')
 
       if (!memberships || memberships.length === 0) return null

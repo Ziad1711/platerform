@@ -2,18 +2,17 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import { useStore } from '@/lib/store-context'
 
 export default function AbonnementPage() {
   const supabase = createClient()
+  const { userId } = useStore()
 
   const { data: subscription, isLoading } = useQuery({
-    queryKey: ['settings-subscription-current'],
+    queryKey: ['settings-subscription-current', userId],
     queryFn: async () => {
-      const { data: userData, error: userError } = await supabase.auth.getUser()
-      if (userError) throw userError
-
-      const userId = userData.user?.id
       if (!userId) return null
+
 
       const { data, error } = await supabase
         .from('subscriptions')
@@ -29,13 +28,10 @@ export default function AbonnementPage() {
   })
 
   const { data: subscriptionsHistory = [] } = useQuery({
-    queryKey: ['settings-subscription-history-dashboard'],
+    queryKey: ['settings-subscription-history-dashboard', userId],
     queryFn: async () => {
-      const { data: userData, error: userError } = await supabase.auth.getUser()
-      if (userError) throw userError
-
-      const userId = userData.user?.id
       if (!userId) return []
+
 
       const { data, error } = await supabase
         .from('subscriptions')

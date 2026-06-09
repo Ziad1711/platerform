@@ -32,7 +32,7 @@ function formatShortCurrency(value: number) {
 }
 
 export default function AdsCostChart() {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
   const [showCpl, setShowCpl] = useState(true)
@@ -40,7 +40,8 @@ export default function AdsCostChart() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-ads-cost-chart', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-ads-cost-chart', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const now = new Date()
       const todayStart = startOfDay(now)

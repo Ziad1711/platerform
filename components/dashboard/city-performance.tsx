@@ -9,13 +9,14 @@ import { formatCurrency, getPeriodRange } from '@/lib/utils'
 type SortBy = 'revenue' | 'confirmationRate' | 'returnRate'
 
 export default function CityPerformance() {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
   const supabase = createClient()
   const [sortBy, setSortBy] = useState<SortBy>('revenue')
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-city-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-city-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 

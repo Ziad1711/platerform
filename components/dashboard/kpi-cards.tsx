@@ -142,12 +142,13 @@ interface KpiCardsProps {
 }
 
 export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
 
   const { data: kpiData, isLoading } = useQuery<KpiResult>({
-    queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const previousRange = getPreviousRange(selectedPeriod, periodRange)
 

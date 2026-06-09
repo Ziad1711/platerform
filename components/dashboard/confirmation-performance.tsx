@@ -18,12 +18,13 @@ type AgentRow = {
 }
 
 export default function ConfirmationPerformance() {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds } = useStore()
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-confirmation-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-confirmation-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 

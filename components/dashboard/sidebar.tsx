@@ -47,7 +47,7 @@ export default function Sidebar() {
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null)
   const supabase = createClient()
 
-  const { currentStoreId } = useStore()
+  const { currentStoreId, userId } = useStore()
   const { can } = usePermissions(currentStoreId)
 
   const visibleMenuItems = menuItems.filter((item) => {
@@ -72,23 +72,14 @@ export default function Sidebar() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  const { data: userContext } = useQuery({
-    queryKey: ['sidebar-user-context'],
-    queryFn: async () => {
-      const { data, error } = await supabase.auth.getUser()
-      if (error) throw error
-      return data.user || null
-    },
-  })
-
   const { data: profile } = useQuery({
-    queryKey: ['sidebar-profile', userContext?.id],
-    enabled: !!userContext?.id,
+    queryKey: ['sidebar-profile', userId],
+    enabled: !!userId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('profiles')
         .select('first_name, last_name, full_name, avatar_url')
-        .eq('id', userContext!.id)
+        .eq('id', userId!)
         .maybeSingle()
 
       if (error) throw error
@@ -97,13 +88,13 @@ export default function Sidebar() {
   })
 
   const { data: currentSubscription } = useQuery({
-    queryKey: ['sidebar-current-subscription', userContext?.id],
-    enabled: !!userContext?.id,
+    queryKey: ['sidebar-current-subscription', userId],
+    enabled: !!userId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('subscriptions')
         .select('status, plans(name)')
-        .eq('user_id', userContext!.id)
+        .eq('user_id', userId!)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -118,7 +109,7 @@ export default function Sidebar() {
     `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() ||
     'Utilisateur'
 
-  const displayEmail = userContext?.email || '-'
+  const displayEmail = '-'
   const displayPlan = (currentSubscription as any)?.plans?.name || 'Aucun plan'
   const avatarLetter = (displayName || 'U').charAt(0).toUpperCase()
 

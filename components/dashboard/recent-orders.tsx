@@ -106,12 +106,13 @@ function getStatusColor(status: string) {
 }
 
 export default function RecentOrders() {
-  const { currentStoreId, accessibleStoreIds, selectedPeriod, customStartDate, customEndDate } = useStore()
+  const { currentStoreId, accessibleStoreIds, selectedPeriod, customStartDate, customEndDate, isStoresLoading } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
 
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['dashboard-recent-orders', currentStoreId, selectedPeriod, customStartDate, customEndDate],
+    queryKey: ['dashboard-recent-orders', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
+    enabled: !isStoresLoading,
     queryFn: async () => {
       if (!currentStoreId && accessibleStoreIds.length === 0) {
         return []
