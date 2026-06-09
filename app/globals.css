@@ -184,10 +184,9 @@
 @media (max-width: 640px) {
   .app-mobile-scale {
     transform: scale(0.9);
-    transform-origin: top center;
+    transform-origin: top left;
     width: 111.111%;
-    height: 111.111vh;
-    overflow: visible;
+    min-height: 111.111vh;
   }
 }
 
