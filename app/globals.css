@@ -182,10 +182,16 @@
 
 /* Mobile scale (zoom out 10%) - uniquement sur écrans <= 640px */
 @media (max-width: 640px) {
+  html {
+    overflow: hidden;
+    height: 100%;
+  }
   body {
     transform: scale(0.9);
-    transform-origin: top center;
-    width: 111.111%; /* 1/0.9 = 1.11111 pour compenser le scale et éviter les bords blancs */
+    transform-origin: top left;
+    width: 111.111%;
+    height: 111.111vh;
+    overflow-y: auto;
     overflow-x: hidden;
   }
 }
