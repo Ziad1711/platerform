@@ -311,7 +311,8 @@ export default function StoreSelector() {
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 px-2 py-2 sm:px-4 sm:py-6 backdrop-blur-sm overflow-hidden">
           <div className="absolute inset-0" onClick={() => !createStoreMutation.isPending && setIsCreateOpen(false)} />
 
-          <div className="relative w-full max-w-3xl overflow-y-auto max-h-[95vh] rounded-[20px] sm:rounded-[28px] border border-white/10 bg-[#101613] shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
+          <div className="relative w-full max-w-3xl overflow-y-auto max-h-[90vh] rounded-[18px] sm:rounded-[24px] border border-white/10 bg-[#101613] shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
+
             <button
               type="button"
               onClick={() => setIsCreateOpen(false)}

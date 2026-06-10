@@ -33,10 +33,12 @@ export function MarketingHeader() {
               : '0 10px 40px rgba(0,0,0,0.18)',
           }}
           transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-          className="relative rounded-[24px] border backdrop-blur-2xl"
+          className="relative rounded-[22px] border backdrop-blur-2xl"
+
         >
           <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-jisra-green/50 to-transparent" />
-          <div className="flex h-[68px] items-center justify-between gap-6 px-4 sm:px-5 lg:px-6">
+          <div className="flex h-[60px] items-center justify-between gap-6 px-4 sm:px-5 lg:px-6">
+
             <Link href="/" className="group flex items-center gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-1.5 transition-transform duration-300 group-hover:scale-[1.03]">
                 <JisraMark size={28} ink="#f3efe6" accent="#1fa971" />
@@ -92,7 +94,8 @@ export function MarketingHeader() {
             className="lg:hidden"
           >
             <Container className="mt-3 px-0">
-              <div className="overflow-hidden rounded-[28px] border border-white/10 bg-jisra-ink-light/94 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-jisra-ink-light/94 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+
                 <div className="grid gap-2">
                   {marketingNav.map((item) => (
                     <Link

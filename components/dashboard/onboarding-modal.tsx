@@ -187,7 +187,8 @@ export default function OnboardingModal() {
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
       <div className="absolute inset-0" />
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-[28px] border border-white/10 bg-[#101613] shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-[24px] border border-white/10 bg-[#101613] shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
+
         <div className="grid lg:grid-cols-[0.92fr_1.08fr]">
           <div className="border-b border-white/10 bg-white/[0.03] p-6 lg:border-b-0 lg:border-r lg:p-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-jisra-green/20 bg-jisra-green/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-jisra-green-light">
