@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, X, Zap, Globe, ExternalLink } from 'lucide-react'
+import { Search, X, Zap, Globe, ExternalLink, Store } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
+import StoreSelector from '@/components/dashboard/store-selector'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
 import IntegrationCard from '@/components/dashboard/integrations/integration-card'
 import DeliveryConnectWizard from '@/components/dashboard/integrations/delivery-connect-wizard'
@@ -98,8 +99,8 @@ export default function IntegrationsPage() {
   }, [queryClient])
 
   const { data: marketplaceItems = [], isLoading } = useQuery({
-    queryKey: ['integration-marketplace'],
-    queryFn: getIntegrationMarketplaceData,
+    queryKey: ['integration-marketplace', currentStoreId],
+    queryFn: () => getIntegrationMarketplaceData(currentStoreId),
   })
 
   const filteredIntegrations = useMemo(() => {
@@ -325,16 +326,19 @@ export default function IntegrationsPage() {
 
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex flex-col items-center sm:items-start gap-1">
-          <div className="flex items-center gap-2">
-            <JisraMark size={28} />
-            <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
-              Intégrations
-            </span>
+        <div className="flex items-center gap-4">
+          <StoreSelector />
+          <div className="flex flex-col items-center sm:items-start gap-1">
+            <div className="flex items-center gap-2">
+              <JisraMark size={28} />
+              <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+                Intégrations
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground text-center sm:text-left">
+              Connectez vos outils et automatisez votre business
+            </p>
           </div>
-          <p className="text-sm text-muted-foreground text-center sm:text-left">
-            Connectez vos outils et automatisez votre business
-          </p>
         </div>
 
         {/* Search Bar */}

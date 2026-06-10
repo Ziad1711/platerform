@@ -16,7 +16,7 @@ export default function IntegrationSettingsPage() {
 
   const { data: marketplaceItems = [], isLoading } = useQuery({
     queryKey: ['integration-marketplace'],
-    queryFn: getIntegrationMarketplaceData,
+    queryFn: () => getIntegrationMarketplaceData(),
   })
 
   const integration = marketplaceItems.find((item) => item.slug === providerSlug)

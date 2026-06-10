@@ -36,9 +36,11 @@ const STATUS_DATE_FIELD_MAP: Record<string, string> = {
 export async function POST(request: Request) {
   try {
     const { supabase, user } = await requireAuthenticatedUser()
-    const body = (await request.json().catch(() => ({}))) as { orderId?: string; status?: string }
+    const body = (await request.json().catch(() => ({}))) as { orderId?: string; status?: string; deliveryNote?: string; deliveryCompanyId?: string }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
+    const deliveryNote = typeof body.deliveryNote === 'string' ? body.deliveryNote.trim() : ''
+    const deliveryCompanyId = typeof body.deliveryCompanyId === 'string' ? body.deliveryCompanyId.trim() : ''
 
     if (!orderId || !status) {
       return NextResponse.json({ error: 'MISSING_REQUIRED_FIELDS' }, { status: 400 })
@@ -76,6 +78,14 @@ export async function POST(request: Request) {
       last_status_update_at: now,
     }
 
+    if (deliveryNote) {
+      updatePayload.delivery_note = deliveryNote
+    }
+
+    if (deliveryCompanyId) {
+      updatePayload.delivery_company_id = deliveryCompanyId
+    }
+
     const statusDateField = STATUS_DATE_FIELD_MAP[status]
     if (statusDateField) {
       updatePayload[statusDateField] = now
@@ -87,13 +97,15 @@ export async function POST(request: Request) {
     let warning = ''
     let trackingNumber = String(order.tracking_number || '')
 
-    if (status === 'confirmed' && !trackingNumber && order.delivery_company_id) {
+    const resolvedDeliveryCompanyId = deliveryCompanyId || order.delivery_company_id
+
+    if (status === 'confirmed' && !trackingNumber && resolvedDeliveryCompanyId) {
       const admin = createAdminClient()
       const [{ data: deliveryCompany }, { data: integration }, { data: config }] = await Promise.all([
         supabase
           .from('delivery_companies')
           .select('id, name, api_provider')
-          .eq('id', order.delivery_company_id)
+          .eq('id', resolvedDeliveryCompanyId)
           .maybeSingle(),
         supabase
           .from('integrations')
@@ -130,6 +142,7 @@ export async function POST(request: Request) {
             order: normalizedOrder,
             defaultShopKey: Number(config.default_shop_key),
             defaultArticleName: config.default_article_name,
+            deliveryNote: deliveryNote || undefined,
           })
           warning = result.warning
           trackingNumber = result.trackingNumber

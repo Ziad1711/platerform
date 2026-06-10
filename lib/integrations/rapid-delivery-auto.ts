@@ -25,8 +25,9 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
   order: OrderLike
   defaultShopKey: number
   defaultArticleName?: string | null
+  deliveryNote?: string
 }) {
-  const { admin, userId, integrationId, order, defaultShopKey, defaultArticleName } = params
+  const { admin, userId, integrationId, order, defaultShopKey, defaultArticleName, deliveryNote } = params
   const now = new Date().toISOString()
   const existingTracking = String(order.tracking_number || '').trim()
 
@@ -77,6 +78,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     shop: resolvedShopKey,
     address: String(order.address || '').trim() || undefined,
     recipient: String(order.customer_name || '').trim() || undefined,
+    remark: deliveryNote || undefined,
   })
 
   const trackingNumber = String(created?.data?.key || '').trim()

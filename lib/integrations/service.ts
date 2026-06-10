@@ -38,7 +38,7 @@ export type IntegrationMarketplaceItem = {
   status: string
 }
 
-export async function getUserIntegrations() {
+export async function getUserIntegrations(storeId?: string | null) {
   const supabase = createClient()
 
   const {
@@ -49,16 +49,22 @@ export async function getUserIntegrations() {
   if (userError) throw userError
   if (!user) return []
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('integrations')
     .select('id, provider, provider_id, status, store_domain')
     .eq('user_id', user.id)
+
+  if (storeId) {
+    query = query.eq('store_id', storeId)
+  }
+
+  const { data, error } = await query
 
   if (error) throw error
   return (data || []) as IntegrationRecord[]
 }
 
-export async function getIntegrationMarketplaceData() {
+export async function getIntegrationMarketplaceData(storeId?: string | null) {
   const supabase = createClient()
 
   const {
@@ -69,16 +75,22 @@ export async function getIntegrationMarketplaceData() {
   if (userError) throw userError
   if (!user) return [] as IntegrationMarketplaceItem[]
 
+  let integrationsQuery = supabase
+    .from('integrations')
+    .select('id, provider, provider_id, status, store_domain')
+    .eq('user_id', user.id)
+
+  if (storeId) {
+    integrationsQuery = integrationsQuery.eq('store_id', storeId)
+  }
+
   const [{ data: providers, error: providersError }, { data: userIntegrations, error: userIntegrationsError }, { data: providerMetrics, error: providerMetricsError }] = await Promise.all([
     supabase
       .from('integration_providers')
       .select('id, name, slug, description, logo_url, rating_avg, total_reviews')
       .eq('is_active', true)
       .order('name', { ascending: true }),
-    supabase
-      .from('integrations')
-      .select('id, provider, provider_id, status, store_domain')
-      .eq('user_id', user.id),
+    integrationsQuery,
     supabase
       .from('integration_provider_metrics')
       .select('provider_id, connected_users_count'),
@@ -120,7 +132,7 @@ export async function getIntegrationMarketplaceData() {
   })
 }
 
-export async function getProviderIntegration(provider: IntegrationProvider) {
-  const integrations = await getUserIntegrations()
+export async function getProviderIntegration(provider: IntegrationProvider, storeId?: string | null) {
+  const integrations = await getUserIntegrations(storeId)
   return integrations.find((item) => item.provider === provider) || null
 }

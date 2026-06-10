@@ -444,6 +444,9 @@ export default function VentesPage() {
   const [rapidDeliveryCityKey, setRapidDeliveryCityKey] = useState('')
   const [rapidDeliveryShopKey, setRapidDeliveryShopKey] = useState('')
   const [rapidDeliveryRemark, setRapidDeliveryRemark] = useState('')
+  const [deliveryNoteModalOrder, setDeliveryNoteModalOrder] = useState<any | null>(null)
+  const [deliveryNoteText, setDeliveryNoteText] = useState('')
+  const [deliveryNoteSelectedCompanyId, setDeliveryNoteSelectedCompanyId] = useState('')
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
@@ -946,6 +949,7 @@ export default function VentesPage() {
 
   const { data: deliveryCompanies } = useQuery({
     queryKey: ['sales-delivery-companies-for-create-order', selectedCreateStoreId],
+    enabled: !!selectedCreateStoreId,
     queryFn: async () => {
       if (!selectedCreateStoreId) return []
 
@@ -960,6 +964,25 @@ export default function VentesPage() {
       if (error) throw error
       return (data || []).filter((company: any) => company.is_active !== false)
     },
+  })
+
+  const { data: deliveryCompaniesForOrder } = useQuery({
+    queryKey: ['sales-delivery-companies-for-order', deliveryNoteModalOrder?.store_id],
+    queryFn: async () => {
+      if (!deliveryNoteModalOrder?.store_id) return []
+
+      let query = supabase
+        .from('delivery_companies')
+        .select('id, name, api_provider, is_active')
+        .order('created_at', { ascending: false })
+
+      query = query.eq('store_id', deliveryNoteModalOrder.store_id)
+
+      const { data, error } = await query
+      if (error) throw error
+      return (data || []).filter((company: any) => company.is_active !== false)
+    },
+    enabled: !!deliveryNoteModalOrder?.store_id,
   })
 
   const { data: rapidDeliveryIntegration } = useQuery({
@@ -1304,11 +1327,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status }: { orderId: string; status: string }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -3653,6 +3676,13 @@ export default function VentesPage() {
                                 const nextStatus = e.target.value
                                 if (nextStatus === order.status) return
 
+                                if (nextStatus === 'confirmed') {
+                                  setDeliveryNoteText(order.delivery_note || '')
+                                  setDeliveryNoteSelectedCompanyId(order.delivery_company_id || '')
+                                  setDeliveryNoteModalOrder(order)
+                                  return
+                                }
+
                                 setUpdatingOrderId(order.id)
                                 updateOrderStatusMutation.mutate(
                                   { orderId: order.id, status: nextStatus },
@@ -3897,6 +3927,130 @@ export default function VentesPage() {
               >
                 {createRapidDeliveryParcelMutation.isPending ? 'Création...' : 'Créer le colis'}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deliveryNoteModalOrder ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDeliveryNoteModalOrder(null)} />
+          <div className="relative z-10 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+            <div className="rounded-2xl border border-border/50 bg-card p-0 shadow-2xl">
+              {/* Header */}
+              <div className="border-b border-border/50 px-6 py-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+                    <svg className="h-5 w-5 text-primary" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-lg font-semibold text-foreground">Note de livraison</h3>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      Commande <span className="font-medium text-foreground/80">#{String(deliveryNoteModalOrder.id || '').slice(0, 8)}</span> — Passage en <span className="font-medium text-emerald-600 dark:text-emerald-400">Confirmée</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-5">
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">
+                      Société de livraison <span className="text-muted-foreground font-normal">(obligatoire)</span>
+                    </label>
+                    <select
+                      value={deliveryNoteSelectedCompanyId}
+                      onChange={(e) => setDeliveryNoteSelectedCompanyId(e.target.value)}
+                      className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                    >
+                      <option value="">Choisir une société</option>
+                      <option value="internal">🚚 Livraison interne</option>
+                      {(deliveryCompaniesForOrder || []).map((company: any) => (
+                        <option key={company.id} value={company.id}>
+                          {company.name}
+                        </option>
+                      ))}
+                    </select>
+                    {(!deliveryCompaniesForOrder || deliveryCompaniesForOrder.length === 0) && deliveryNoteModalOrder?.store_id ? (
+                      <p className="text-xs text-amber-600 mt-1">
+                        Aucune société active pour ce store.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">
+                      Note de livraison <span className="text-muted-foreground font-normal">(optionnelle)</span>
+                    </label>
+                    <textarea
+                      value={deliveryNoteText}
+                      onChange={(e) => setDeliveryNoteText(e.target.value)}
+                      rows={4}
+                      className="w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                      placeholder="Instructions spéciales pour le livreur..."
+                    />
+                    <div className="mt-2 flex items-start gap-2">
+                      <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                      </svg>
+                      <p className="text-xs text-muted-foreground/70 leading-relaxed">
+                        Cette note sera envoyée à <span className="font-medium text-foreground/60">Rapid Delivery</span> comme remarque sur le colis.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="border-t border-border/50 px-6 py-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const order = deliveryNoteModalOrder
+                    if (!deliveryNoteSelectedCompanyId) {
+                      setFormError('Veuillez choisir une société de livraison.')
+                      return
+                    }
+                    setDeliveryNoteModalOrder(null)
+                    setUpdatingOrderId(order.id)
+                    const resolvedCompanyId = deliveryNoteSelectedCompanyId === 'internal' ? undefined : deliveryNoteSelectedCompanyId
+                    updateOrderStatusMutation.mutate(
+                      { orderId: order.id, status: 'confirmed', deliveryNote: deliveryNoteText.trim() || undefined, deliveryCompanyId: resolvedCompanyId },
+
+                      {
+                        onSettled: () => {
+                          setUpdatingOrderId(null)
+                          setDeliveryNoteText('')
+                          setDeliveryNoteSelectedCompanyId('')
+                        },
+                      }
+                    )
+                  }}
+                  disabled={updateOrderStatusMutation.isPending && updatingOrderId === deliveryNoteModalOrder.id}
+                  className="group relative w-full overflow-hidden rounded-xl bg-primary py-2.5 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 hover:shadow-xl hover:shadow-primary/30 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
+                >
+                  <span className="relative z-10 flex items-center justify-center gap-2">
+                    {updateOrderStatusMutation.isPending && updatingOrderId === deliveryNoteModalOrder.id ? (
+                      <>
+                        <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Confirmation...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                        </svg>
+                        Confirmer la commande
+                      </>
+                    )}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
