@@ -480,7 +480,8 @@ export default function RevenueChart() {
   }, [maxRevenuePoint, maxProfitPoint, visibleSeries, points])
 
   return (
-    <div className="bg-card rounded-xl shadow p-6 overflow-hidden">
+    <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
+
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4 mb-6">
         <div>
           <h3 className="text-lg font-semibold text-foreground">

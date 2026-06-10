@@ -321,7 +321,8 @@ export default function IntegrationsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-10 px-4 py-8">
+    <div className="mx-auto w-full max-w-[1400px] space-y-10 px-4 py-8 pt-2 sm:pt-8">
+
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex flex-col items-center sm:items-start gap-1">

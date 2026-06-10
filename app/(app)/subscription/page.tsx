@@ -59,7 +59,8 @@ export default function AbonnementPage() {
   })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pt-2 sm:pt-0">
+
       <div className="bg-card rounded-xl shadow p-6">
         <h2 className="text-lg font-semibold text-foreground mb-2">Abonnement</h2>
         <p className="text-sm text-muted-foreground">Détails du plan actuel.</p>

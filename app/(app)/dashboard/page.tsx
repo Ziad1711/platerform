@@ -19,7 +19,8 @@ export default async function DashboardPage() {
 
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 pt-2 sm:pt-0 animate-fade-in">
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-center sm:items-center justify-between gap-4">
         <div className="text-center sm:text-left flex flex-col items-center sm:items-start gap-1">

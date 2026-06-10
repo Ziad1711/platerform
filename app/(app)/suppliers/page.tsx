@@ -184,7 +184,8 @@ function FournisseursPageContent() {
   const totalPages = Math.max(1, Math.ceil(totalSuppliers / PAGE_SIZE))
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pt-2 sm:pt-0">
+
       <div className="flex flex-col items-center sm:items-start gap-1">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />

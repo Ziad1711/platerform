@@ -62,7 +62,8 @@ export default function ProfitChart() {
   const maxAbs = points.length > 0 ? Math.max(...points.map((p: { label: string; profit: number }) => Math.abs(p.profit)), 1) : 1
 
   return (
-    <div className="bg-card rounded-xl shadow p-6">
+    <div className="bg-card rounded-xl shadow p-4 sm:p-6">
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-lg font-semibold text-foreground">Évolution du profit</h3>
