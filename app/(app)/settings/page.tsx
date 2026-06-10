@@ -107,32 +107,6 @@ export default function SettingsPage() {
   const [savingKey, setSavingKey] = useState('')
   const [activeSection, setActiveSection] = useState('personal')
 
-  // Scrollspy logic
-  useEffect(() => {
-    const sections = ['personal', 'security', 'preferences', 'rates', 'blacklist', 'stores', 'team']
-    const observerOptions = {
-      root: null,
-      rootMargin: '-10% 0px -80% 0px',
-      threshold: 0
-    }
-
-    const observerCallback = (entries: IntersectionObserverEntry[]) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          setActiveSection(entry.target.id)
-        }
-      })
-    }
-
-    const observer = new IntersectionObserver(observerCallback, observerOptions)
-    sections.forEach(id => {
-      const element = document.getElementById(id)
-      if (element) observer.observe(element)
-    })
-
-    return () => observer.disconnect()
-  }, [])
-
   const { data: profilePayload } = useQuery({
     queryKey: ['settings-profile'],
     queryFn: async () => toJson(await fetch('/api/settings/profile')),
@@ -265,15 +239,15 @@ export default function SettingsPage() {
   }
 
   const navItemClass = (id: string) =>
-    `flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${
+    `flex items-center gap-2 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
       activeSection === id
-        ? 'bg-primary text-primary-foreground font-medium'
-        : 'hover:bg-secondary text-muted-foreground'
+        ? 'bg-secondary text-foreground font-medium border-l-2 border-[#1fa971] pl-[10px]'
+        : 'hover:bg-secondary/50 text-muted-foreground border-l-2 border-transparent pl-[10px]'
     }`
 
   return (
-    <div className="space-y-6 pb-4 sm:pb-6 lg:pb-8">
-      <div className="flex flex-col items-center sm:items-start gap-1 px-4 sm:px-6 lg:px-8">
+    <div className="space-y-6 pt-4 sm:pt-6 lg:pt-8 pb-4 sm:pb-6 lg:pb-8">
+      <div className="flex flex-col items-center sm:items-start gap-1 px-4 sm:px-6 lg:px-8 text-center sm:text-left">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />
           <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
@@ -281,7 +255,7 @@ export default function SettingsPage() {
           </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          Gérez votre profil, sécurité, préférences, taux de change et blacklist globale
+          Gérez votre profil
         </p>
       </div>
       <div className="sticky top-0 z-30 border-b bg-background/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
@@ -297,24 +271,37 @@ export default function SettingsPage() {
       </div>
 
       <div className="px-4 sm:px-6 lg:px-8">
-        {message ? <div className={`rounded-xl border px-4 py-3 text-sm ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-600'}`}>{message.text}</div> : null}
+        {message ? (
+          <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-sm ${
+            message.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-red-200 bg-red-50 text-red-800'
+          }`}>
+            {message.type === 'success' ? (
+              <svg className="h-4 w-4 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            ) : (
+              <svg className="h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            )}
+            <span>{message.text}</span>
+          </div>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-          <aside className="rounded-2xl border bg-card p-4 lg:sticky lg:top-[88px] lg:h-fit">
-          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Navigation</div>
+          <aside className="rounded-2xl border border-[#1fa971]/20 bg-[#1fa971]/5 p-4 lg:sticky lg:top-[88px] lg:h-fit">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#1fa971]/70">Navigation</div>
           <div className="space-y-2 text-sm">
-           <a href="#personal" className={navItemClass('personal')}><User2 className="h-4 w-4" /> Informations personnelles</a>
-             <a href="#security" className={navItemClass('security')}><Lock className="h-4 w-4" /> Sécurité</a>
-             <a href="#preferences" className={navItemClass('preferences')}><Settings2 className="h-4 w-4" /> Préférences</a>
-             <a href="#rates" className={navItemClass('rates')}><RefreshCcw className="h-4 w-4" /> Taux de change</a>
-             <a href="#blacklist" className={navItemClass('blacklist')}><ShieldAlert className="h-4 w-4" /> Blacklist</a>
-             <a href="#stores" className={navItemClass('stores')}><Building2 className="h-4 w-4" /> Stores</a>
-             <a href="#team" className={navItemClass('team')}><Users className="h-4 w-4" /> Équipe</a>
+           <button onClick={() => setActiveSection('personal')} className={navItemClass('personal')}><User2 className="h-4 w-4" />Informations personnelles</button>
+             <button onClick={() => setActiveSection('security')} className={navItemClass('security')}><Lock className="h-4 w-4" /> Sécurité</button>
+             <button onClick={() => setActiveSection('preferences')} className={navItemClass('preferences')}><Settings2 className="h-4 w-4" /> Préférences</button>
+             <button onClick={() => setActiveSection('rates')} className={navItemClass('rates')}><RefreshCcw className="h-4 w-4" /> Taux de change</button>
+             <button onClick={() => setActiveSection('blacklist')} className={navItemClass('blacklist')}><ShieldAlert className="h-4 w-4" /> Blacklist</button>
+             <button onClick={() => setActiveSection('stores')} className={navItemClass('stores')}><Building2 className="h-4 w-4" /> Stores</button>
+             <button onClick={() => setActiveSection('team')} className={navItemClass('team')}><Users className="h-4 w-4" /> Équipe</button>
           </div>
           </aside>
 
           <div className="space-y-6">
-            <section id="personal" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+            {activeSection === 'personal' && <section id="personal" className="rounded-2xl border bg-card p-6 scroll-mt-32">
             <h2 className="text-lg font-semibold">Informations personnelles</h2>
 
             {/* Avatar */}
@@ -367,15 +354,15 @@ export default function SettingsPage() {
               </div>
             </div>
             <button onClick={saveProfile} disabled={savingKey === 'profile'} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{savingKey === 'profile' ? 'Enregistrement...' : 'Enregistrer'}</button>
-            </section>
+            </section>}
 
-            <section id="security" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+            {activeSection === 'security' && <section id="security" className="rounded-2xl border bg-card p-6 scroll-mt-32">
             <h2 className="text-lg font-semibold">Sécurité</h2>
             <p className="mt-2 text-sm text-muted-foreground">Envoyer un email Supabase pour définir un nouveau mot de passe de manière sécurisée.</p>
             <button onClick={sendResetPassword} disabled={savingKey === 'security'} className="mt-4 rounded-xl border px-4 py-2 text-sm font-medium hover:bg-secondary">{savingKey === 'security' ? 'Envoi...' : 'Modifier le mot de passe'}</button>
-            </section>
+            </section>}
 
-            <section id="preferences" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+            {activeSection === 'preferences' && <section id="preferences" className="rounded-2xl border bg-card p-6 scroll-mt-32">
             <h2 className="text-lg font-semibold">Préférences</h2>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -396,9 +383,9 @@ export default function SettingsPage() {
               </div>
             </div>
             <button onClick={savePreferences} disabled={savingKey === 'preferences'} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{savingKey === 'preferences' ? 'Enregistrement...' : 'Sauvegarder les préférences'}</button>
-            </section>
+            </section>}
 
-            <section id="rates" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+            {activeSection === 'rates' && <section id="rates" className="rounded-2xl border bg-card p-6 scroll-mt-32">
             <h2 className="text-lg font-semibold">Taux de change</h2>
             <p className="mt-2 text-sm text-muted-foreground">Ajoutez vos conversions pour piloter les montants entre votre devise locale et les devises étrangères.</p>
             <div className="mt-4 grid gap-4 md:grid-cols-4">
@@ -429,9 +416,9 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
-            </section>
+            </section>}
 
-             <section id="blacklist" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+             {activeSection === 'blacklist' && <section id="blacklist" className="rounded-2xl border bg-card p-6 scroll-mt-32">
              <h2 className="text-lg font-semibold">Blacklist configuration</h2>
              <p className="mt-2 text-sm text-muted-foreground">Cette configuration est définie au niveau utilisateur et sera appliquée à tous vos stores.</p>
              <div className="mt-4 space-y-4">
@@ -466,10 +453,10 @@ export default function SettingsPage() {
                </div>
              </div>
              <button onClick={saveBlacklistRule} disabled={savingKey === 'blacklist'} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{savingKey === 'blacklist' ? 'Enregistrement...' : 'Sauvegarder la configuration'}</button>
-             </section>
+             </section>}
 
-             <StoresSection />
-             <TeamSection />
+             {activeSection === 'stores' && <StoresSection />}
+             {activeSection === 'team' && <TeamSection />}
            </div>
         </div>
       </div>
