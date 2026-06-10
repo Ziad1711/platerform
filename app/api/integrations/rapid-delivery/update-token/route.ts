@@ -39,9 +39,10 @@ export async function POST(request: Request) {
 
     const { error: integrationError } = await admin
       .from('integrations')
-      .update({ access_token: encryptedToken, status: 'connected', updated_at: now })
+      .update({ access_token: encryptedToken, status: 'connected', store_id: storeId, updated_at: now })
       .eq('id', integrationId)
       .eq('user_id', user.id)
+
 
     if (integrationError) throw integrationError
 
@@ -98,6 +99,19 @@ export async function POST(request: Request) {
 
       if (citiesError) throw citiesError
     }
+
+    // Créer delivery_companies si manquant pour ce store
+    const { error: dcError } = await admin.from('delivery_companies').upsert(
+      {
+        store_id: storeId,
+        name: 'Rapid Delivery',
+        api_provider: 'rapid-delivery',
+        is_active: true,
+        created_at: now,
+      },
+      { onConflict: 'store_id,name', ignoreDuplicates: false }
+    )
+    if (dcError) console.error('Failed to upsert delivery_company:', dcError)
 
     return NextResponse.json({ ok: true, shops: shops.length, cities: cities.length })
   } catch (error) {

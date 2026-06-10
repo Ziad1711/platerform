@@ -75,6 +75,16 @@ export async function POST(request: Request) {
 
     if (existingIntegrationError) throw existingIntegrationError
 
+    const mappings: RapidDeliveryShopMappingInput[] = Array.isArray(body.mappings) && body.mappings.length > 0
+      ? body.mappings.map((item) => ({
+          externalShopId: Number(item.externalShopId ?? item.shopKey ?? 0),
+          storeId: item.storeId ? String(item.storeId) : null,
+        })).filter((item) => item.externalShopId > 0)
+      : shops.map((shop) => ({ externalShopId: shop.key, storeId: null }))
+
+    const mappedStoreIds = Array.from(new Set(mappings.map((item) => String(item.storeId || '').trim()).filter(Boolean)))
+    const primaryStoreId = mappedStoreIds.length > 0 ? mappedStoreIds[0] : null
+
     let integrationId = String(existingIntegration?.id || '')
     if (integrationId) {
       const { error: updateIntegrationError } = await admin
@@ -85,6 +95,7 @@ export async function POST(request: Request) {
           store_domain: 'www.rapiddelivery.ma',
           access_token: encryptedToken,
           status: 'connected',
+          store_id: primaryStoreId,
           updated_at: now,
         })
         .eq('id', integrationId)
@@ -101,6 +112,7 @@ export async function POST(request: Request) {
           store_domain: 'www.rapiddelivery.ma',
           access_token: encryptedToken,
           status: 'connected',
+          store_id: primaryStoreId,
           updated_at: now,
         })
         .select('id')
@@ -109,15 +121,6 @@ export async function POST(request: Request) {
       if (createIntegrationError) throw createIntegrationError
       integrationId = String(createdIntegration.id)
     }
-
-    const mappings: RapidDeliveryShopMappingInput[] = Array.isArray(body.mappings) && body.mappings.length > 0
-      ? body.mappings.map((item) => ({
-          externalShopId: Number(item.externalShopId ?? item.shopKey ?? 0),
-          storeId: item.storeId ? String(item.storeId) : null,
-        })).filter((item) => item.externalShopId > 0)
-      : shops.map((shop) => ({ externalShopId: shop.key, storeId: null }))
-
-    const mappedStoreIds = Array.from(new Set(mappings.map((item) => String(item.storeId || '').trim()).filter(Boolean)))
 
     const pricingResult = await syncPricingGroups({
       client: admin,
@@ -146,6 +149,22 @@ export async function POST(request: Request) {
       shops,
       cities,
     })
+
+    // Créer les delivery_companies pour chaque store mappé
+    if (mappedStoreIds.length > 0) {
+      const now = new Date().toISOString()
+      const { error: dcError } = await admin.from('delivery_companies').upsert(
+        mappedStoreIds.map((storeId) => ({
+          store_id: storeId,
+          name: 'Rapid Delivery',
+          api_provider: 'rapid-delivery',
+          is_active: true,
+          created_at: now,
+        })),
+        { onConflict: 'store_id,name', ignoreDuplicates: false }
+      )
+      if (dcError) console.error('Failed to create delivery_companies:', dcError)
+    }
 
     return NextResponse.json({
       ok: true,
