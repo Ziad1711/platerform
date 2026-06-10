@@ -345,6 +345,9 @@ export default function IntegrationsPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              autoComplete="off"
+              name="integrations-search"
+              spellCheck={false}
               placeholder="Search integrations (Shopify, Stripe, DHL, WooCommerce...)"
               className="w-full rounded-2xl border border-border bg-card py-4 pl-14 pr-6 text-base text-foreground shadow-lg transition-all duration-300 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/20"
             />
@@ -397,7 +400,7 @@ export default function IntegrationsPage() {
             Array.from({ length: 6 }).map((_, index) => (
               <IntegrationSkeletonCard key={`skeleton-${index}`} />
             ))
-          ) : regularIntegrations.length > 0 ? (
+          ) : sortedIntegrations.length > 0 ? (
             regularIntegrations.map((integration) => (
               <IntegrationCard
                 key={integration.id}
@@ -414,7 +417,7 @@ export default function IntegrationsPage() {
           ) : (
             <div className="col-span-full text-center py-12">
               <div className="text-muted-foreground">
-                No integrations found matching &quot;{search}&quot;
+                No integrations found matching "{search}"
               </div>
             </div>
           )}

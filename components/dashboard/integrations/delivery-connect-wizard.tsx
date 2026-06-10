@@ -157,6 +157,10 @@ export default function DeliveryConnectWizard({
                   <label className="text-sm font-medium text-foreground">Token API Rapid Delivery</label>
                   <input
                     type="password"
+                    autoComplete="new-password"
+                    name="rapid-delivery-api-token"
+                    spellCheck={false}
+                    autoCapitalize="none"
                     value={token}
                     onChange={(e) => {
                       setToken(e.target.value)
