@@ -6,7 +6,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
-import { Search, Filter, MoreVertical, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info } from 'lucide-react'
+import { Search, Filter, MoreVertical, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info, DollarSign } from 'lucide-react'
+
 import { useEffect, useMemo, useState } from 'react'
 
 export default function StocksPage() {
@@ -406,7 +407,30 @@ export default function StocksPage() {
           Gestion des stocks et mouvements
         </p>
       </div>
+
+      {/* Filters - same row as sales */}
+      <div className="bg-card rounded-xl shadow p-4">
+        <div className="flex flex-row items-center gap-2 sm:gap-3">
+          <StoreSelector />
+          <div className="flex items-center gap-1.5">
+            <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
+            <select
+              className="border rounded-lg px-2.5 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary"
+              value={movementType}
+              onChange={(e) => setMovementType(e.target.value)}
+            >
+              <option value="all">Tous</option>
+              <option value="in">Entrées</option>
+              <option value="out">Sorties</option>
+              <option value="adjustment">Ajustements</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       {showAdjustmentInfo ? (
+
+
         <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
           <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center gap-3">
@@ -638,74 +662,64 @@ export default function StocksPage() {
       ) : null}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card rounded-xl shadow p-5">
-          <div className="text-sm text-muted-foreground">Valeur totale du stock</div>
-          <div className="text-2xl font-bold text-foreground mt-1">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+        <div className="col-span-2 md:col-span-1 bg-card rounded-xl shadow p-4 sm:p-5">
+          <div className="flex items-center justify-between">
+            <div className="text-xs sm:text-sm text-muted-foreground">Valeur totale du stock</div>
+            <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500" />
+
+          </div>
+          <div className="text-lg sm:text-2xl font-bold text-foreground mt-1">
             {formatCurrency(stockSummary?.totalValue || 0)}
           </div>
         </div>
-        <div className="bg-card rounded-xl shadow p-5">
-          <div className="text-sm text-muted-foreground">Mouvements total</div>
-          <div className="text-2xl font-bold text-foreground mt-1">{totalMovements}</div>
+
+        <div className="bg-card rounded-xl shadow p-4 sm:p-5">
+          <div className="text-xs sm:text-sm text-muted-foreground">Mouvements total</div>
+          <div className="text-lg sm:text-2xl font-bold text-foreground mt-1">{totalMovements}</div>
         </div>
-        <div className="bg-card rounded-xl shadow p-5">
-          <div className="text-sm text-muted-foreground">Produits en rupture</div>
-          <div className="text-2xl font-bold text-foreground mt-1">{stockSummary?.outOfStockCount || 0}</div>
+        <div className="bg-card rounded-xl shadow p-4 sm:p-5">
+          <div className="text-xs sm:text-sm text-muted-foreground">Produits en rupture</div>
+          <div className="text-lg sm:text-2xl font-bold text-red-600 mt-1">{stockSummary?.outOfStockCount || 0}</div>
         </div>
+
       </div>
 
       {/* Movement Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card rounded-xl shadow p-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+        <div className="bg-card rounded-xl shadow p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">Entrées de stock</div>
-            <ArrowDown className="w-5 h-5 text-green-500" />
+            <div className="text-xs sm:text-sm text-muted-foreground">Entrées de stock</div>
+            <ArrowDown className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
           </div>
-          <div className="text-2xl font-bold text-foreground mt-1">{totalIn} unités</div>
-          <div className="text-sm text-muted-foreground mt-2">
+          <div className="text-lg sm:text-2xl font-bold text-foreground mt-1">{totalIn} unités</div>
+          <div className="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2">
             {movements?.filter(m => m.movement_type === 'in' || (m.movement_type === 'adjustment' && m.adjustment_direction === 'in')).length || 0} mouvements
           </div>
         </div>
-        <div className="bg-card rounded-xl shadow p-5">
+        <div className="bg-card rounded-xl shadow p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">Sorties de stock</div>
-            <ArrowUp className="w-5 h-5 text-red-500" />
+            <div className="text-xs sm:text-sm text-muted-foreground">Sorties de stock</div>
+            <ArrowUp className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
           </div>
-          <div className="text-2xl font-bold text-foreground mt-1">{totalOut} unités</div>
-          <div className="text-sm text-muted-foreground mt-2">
+          <div className="text-lg sm:text-2xl font-bold text-foreground mt-1">{totalOut} unités</div>
+          <div className="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2">
             {movements?.filter(m => m.movement_type === 'out' || (m.movement_type === 'adjustment' && m.adjustment_direction === 'out')).length || 0} mouvements
           </div>
         </div>
-        <div className="bg-card rounded-xl shadow p-5">
+        <div className="col-span-2 md:col-span-1 bg-card rounded-xl shadow p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">Stock finale</div>
-            <Package className="w-5 h-5 text-blue-500" />
+            <div className="text-xs sm:text-sm text-muted-foreground">Stock finale</div>
+            <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
           </div>
-          <div className="text-2xl font-bold text-foreground mt-1">{stockSummary?.finalStockUnits || 0} unités</div>
-          <div className="text-sm text-muted-foreground mt-2">Entrées - sorties (stock net actuel)</div>
+          <div className="text-lg sm:text-2xl font-bold text-foreground mt-1">{stockSummary?.finalStockUnits || 0} unités</div>
+          <div className="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2">Entrées - sorties (stock net actuel)</div>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Search & Actions */}
       <div className="bg-card rounded-xl shadow p-4">
-        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-          <StoreSelector />
-
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-muted-foreground" />
-            <select
-              className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-primary"
-              value={movementType}
-              onChange={(e) => setMovementType(e.target.value)}
-            >
-              <option value="all">Tous les mouvements</option>
-              <option value="in">Entrées seulement</option>
-              <option value="out">Sorties seulement</option>
-              <option value="adjustment">Ajustements</option>
-            </select>
-          </div>
-
+        <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 relative min-w-[220px]">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -739,6 +753,7 @@ export default function StocksPage() {
 
       {/* Movements Table */}
       <div className="bg-card rounded-xl shadow overflow-hidden">
+
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="p-8 text-center">
