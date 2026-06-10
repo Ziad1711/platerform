@@ -59,11 +59,13 @@
   html {
     min-height: 100vh;
     scroll-behavior: smooth;
+    overflow-x: hidden;
   }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
     min-height: 100vh;
+    overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -177,20 +179,6 @@
 
   .will-change-transform {
     will-change: transform;
-  }
-}
-
-/* Mobile scale (zoom out 10%) - appliqué à la zone de contenu uniquement */
-@media (max-width: 640px) {
-  .app-mobile-scale {
-    transform: scale(0.9);
-    transform-origin: top left;
-    width: 111.111%;
-    min-height: 111.111vh;
-  }
-
-  .app-mobile-scale-wrapper {
-    overflow-x: hidden;
   }
 }
 

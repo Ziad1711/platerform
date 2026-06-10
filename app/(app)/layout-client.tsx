@@ -64,22 +64,18 @@ export default function AppLayoutClient({
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
       <OnboardingModal />
-      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
-        <div className="app-mobile-scale-wrapper flex flex-col flex-1">
-          <div className="app-mobile-scale flex flex-col flex-1">
-            <main
-              className={
-                isAssistantPage
-                  ? 'flex-1 overflow-hidden p-0'
-                  : isSettingsPage
-                    ? 'flex-1 overflow-y-auto p-0'
-                    : 'flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8'
-              }
-            >
-              {children}
-            </main>
-          </div>
-        </div>
+      <div className="flex-1 flex flex-col min-w-0">
+        <main
+          className={
+            isAssistantPage
+              ? 'flex-1 overflow-hidden p-0'
+              : isSettingsPage
+                ? 'flex-1 overflow-y-auto p-0'
+                : 'flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8'
+          }
+        >
+          {children}
+        </main>
       </div>
       <Toaster position="bottom-right" richColors closeButton />
       <BackToTop />

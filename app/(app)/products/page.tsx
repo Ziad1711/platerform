@@ -837,14 +837,9 @@ export default function ProduitsPage() {
 
       {/* Filters & Actions */}
       <div className="bg-card rounded-xl shadow p-4">
-        <div className="flex flex-col gap-3">
-          {/* Row 1: StoreSelector (centered on mobile) */}
-          <div className="flex items-center justify-center md:justify-start">
-            <StoreSelector />
-          </div>
-
-          {/* Row 2: Search + stock filter + add button */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <StoreSelector />
+          <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
@@ -854,7 +849,7 @@ export default function ProduitsPage() {
                 className="w-full border border-border rounded-lg pl-9 pr-3 py-2 text-sm bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <select
                 value={stockFilter}
                 onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
