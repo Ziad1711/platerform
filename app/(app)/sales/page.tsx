@@ -3531,13 +3531,13 @@ export default function VentesPage() {
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Statut</div>
                   </th>
-                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-8 sm:px-16 py-1 sm:py-2 text-center align-middle text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Produit</div>
                   </th>
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Ville</div>
                   </th>
-                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="px-4 sm:px-8 py-1 sm:py-2 text-center align-middle text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Adresse</div>
                   </th>
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -3687,7 +3687,7 @@ export default function VentesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3">
+                      <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] font-medium text-foreground">
                         <InlineEditProducts
                           items={order.order_items || []}
                           products={(products && products.length > 0) ? products : (editProducts || [])}
@@ -3705,7 +3705,7 @@ export default function VentesPage() {
                           }}
                         />
                       </td>
-                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-xs sm:text-sm text-foreground">
+                      <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] text-foreground">
                         <InlineEditAddressModal
                           value={order.address || ''}
                           onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'address', value: val })}

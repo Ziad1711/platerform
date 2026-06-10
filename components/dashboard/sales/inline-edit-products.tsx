@@ -194,7 +194,7 @@ export default function InlineEditProducts({
       <button
         type="button"
         onDoubleClick={open}
-        className="text-left text-xs sm:text-sm text-foreground hover:text-primary transition-colors cursor-default"
+        className="text-left text-[10px] sm:text-[11px] text-foreground hover:text-primary transition-colors cursor-default"
         title="Double-clic pour modifier"
       >
         {triggerLabel || summary || <span className="text-muted-foreground italic">Aucun produit</span>}

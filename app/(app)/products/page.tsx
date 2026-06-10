@@ -814,7 +814,7 @@ export default function ProduitsPage() {
   })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col items-center sm:items-start gap-1">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />
@@ -834,6 +834,47 @@ export default function ProduitsPage() {
           onClick={() => setOpenActionsProductId(null)}
         />
       ) : null}
+
+      {/* Filters & Actions */}
+      <div className="bg-card rounded-xl shadow p-4">
+        <div className="flex flex-col gap-3">
+          {/* Row 1: StoreSelector (centered on mobile) */}
+          <div className="flex items-center justify-center md:justify-start">
+            <StoreSelector />
+          </div>
+
+          {/* Row 2: Search + stock filter + add button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher un produit..."
+                className="w-full border border-border rounded-lg pl-9 pr-3 py-2 text-sm bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={stockFilter}
+                onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
+                className="border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+              >
+                <option value="all">Tout stock</option>
+                <option value="in_stock">En stock</option>
+                <option value="out_of_stock">Rupture</option>
+              </select>
+              <button
+                onClick={() => setIsCreateOpen(true)}
+                className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                Ajouter un produit
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {isEditOpen ? (
         <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
@@ -1856,73 +1897,6 @@ export default function ProduitsPage() {
           </div>
         </div>
       ) : null}
-      {/* Filters */}
-      <div className="bg-card rounded-xl shadow p-4">
-        <div className="flex flex-col gap-3">
-          {/* Row 1: StoreSelector + stock filter (same line on mobile) */}
-          <div className="flex flex-row items-center gap-3">
-            <StoreSelector />
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <select
-                value={stockFilter}
-                onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
-                className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-primary"
-              >
-                <option value="all">Tous les produits</option>
-                <option value="in_stock">En stock</option>
-                <option value="out_of_stock">Rupture de stock</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Row 2: Search */}
-          <div className="flex-1 relative min-w-[220px]">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Rechercher par nom ou SKU..."
-              className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-
-          {/* Row 3: Action buttons */}
-          <div className="flex flex-col sm:flex-row items-stretch justify-center gap-3">
-            {selectedProductIds.length > 0 && (
-              <button
-                onClick={() => {
-                  const confirmed = window.confirm(`Supprimer ${selectedProductIds.length} produit(s) sélectionné(s) ?`)
-                  if (!confirmed) return
-                  bulkDeleteProductsMutation.mutate()
-                }}
-                disabled={bulkDeleteProductsMutation.isPending}
-                className="inline-flex items-center justify-center gap-2 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Supprimer sélection ({selectedProductIds.length})
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setCreateError('')
-                if ((stores || []).length === 1) {
-                  setSelectedCreateStoreId(stores?.[0]?.id || '')
-                } else {
-                  setSelectedCreateStoreId(currentStoreId || '')
-                }
-                setIsCreateOpen(true)
-              }}
-              className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap flex-1"
-            >
-              <Plus className="w-4 h-4" />
-              Ajouter un produit
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Products Table */}
       <div className="bg-card rounded-xl shadow overflow-hidden">
         <div className="overflow-x-auto">
