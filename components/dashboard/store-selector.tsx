@@ -48,6 +48,18 @@ export default function StoreSelector() {
   const supabase = useMemo(() => createClient(), [])
   const queryClient = useQueryClient()
 
+  // Bloquer le scroll du body quand le modal est ouvert
+  useEffect(() => {
+    if (isCreateOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [isCreateOpen])
+
   useEffect(() => {
     let active = true
 
@@ -296,22 +308,22 @@ export default function StoreSelector() {
       </div>
 
       {isCreateOpen ? (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 px-2 py-2 sm:px-4 sm:py-6 backdrop-blur-sm overflow-hidden">
           <div className="absolute inset-0" onClick={() => !createStoreMutation.isPending && setIsCreateOpen(false)} />
 
-          <div className="relative w-full max-w-3xl overflow-hidden rounded-[28px] border border-white/10 bg-[#101613] shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
+          <div className="relative w-full max-w-3xl overflow-y-auto max-h-[95vh] rounded-[20px] sm:rounded-[28px] border border-white/10 bg-[#101613] shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
             <button
               type="button"
               onClick={() => setIsCreateOpen(false)}
               disabled={createStoreMutation.isPending}
-              className="absolute right-4 top-4 z-10 rounded-full border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
+              className="absolute right-3 top-3 sm:right-4 sm:top-4 z-10 rounded-full border border-white/10 bg-white/5 p-1.5 sm:p-2 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
               aria-label="Fermer"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </button>
 
             <div className="grid lg:grid-cols-[0.92fr_1.08fr]">
-              <div className="border-b border-white/10 bg-white/[0.03] p-6 lg:border-b-0 lg:border-r lg:p-8">
+              <div className="hidden sm:block border-b border-white/10 bg-white/[0.03] p-6 lg:border-b-0 lg:border-r lg:p-8">
                 <div className="inline-flex items-center gap-2 rounded-full border border-jisra-green/20 bg-jisra-green/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-jisra-green-light">
                   <Sparkles className="h-3.5 w-3.5" />
                   nouveau store
@@ -345,8 +357,19 @@ export default function StoreSelector() {
                 </div>
               </div>
 
-              <form onSubmit={handleCreateStore} className="p-6 sm:p-8">
-                <div className="grid gap-4 sm:grid-cols-2">
+              <form onSubmit={handleCreateStore} className="p-4 pt-10 sm:p-6 sm:pt-6 lg:p-8">
+                <div className="sm:hidden mb-4">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-jisra-green/20 bg-jisra-green/10 px-2.5 py-0.5 text-[10px] uppercase tracking-[0.24em] text-jisra-green-light">
+                    <Sparkles className="h-3 w-3" />
+                    nouveau store
+                  </div>
+                  <h2 className="mt-3 text-lg font-bold text-white">Ajoutez un nouveau store</h2>
+                  <p className="mt-1 text-xs leading-5 text-jisra-cream/85">
+                    Configurez rapidement un nouveau store avec les informations essentielles pour démarrer.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
                   <Field label="Nom du store" value={form.storeName} onChange={(v) => handleChange('storeName', v)} placeholder="Nouveau store" />
                   <SelectField label="Domaine d'activité" value={form.category} onChange={(v) => handleChange('category', v)} options={categories} />
                   <Field label="Website" value={form.website} onChange={(v) => handleChange('website', v)} placeholder="https://votresite.com" required={false} />
@@ -362,18 +385,28 @@ export default function StoreSelector() {
 
                 {createError ? <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">{createError}</div> : null}
 
-                <div className="mt-6 flex items-center justify-between gap-4 border-t border-white/10 pt-5">
-                  <p className="text-xs leading-5 text-jisra-cream/45">
+                <div className="mt-5 sm:mt-6 border-t border-white/10 pt-4 sm:pt-5 space-y-3">
+                  <p className="text-xs leading-5 text-jisra-cream/45 text-center sm:text-left">
                     Le store sera ajouté à votre espace et sélectionné automatiquement après création.
                   </p>
-                  <button
-                    type="submit"
-                    disabled={createStoreMutation.isPending || uploadingLogo}
-                    className="inline-flex min-w-[180px] items-center justify-center gap-2 rounded-xl bg-jisra-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-jisra-green-dark disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {createStoreMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    <span>{createStoreMutation.isPending ? 'Création...' : 'Créer le store'}</span>
-                  </button>
+                  <div className="flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateOpen(false)}
+                      disabled={createStoreMutation.isPending}
+                      className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 text-sm font-semibold text-jisra-cream/85 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={createStoreMutation.isPending || uploadingLogo}
+                      className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl bg-jisra-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-jisra-green-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {createStoreMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      <span>{createStoreMutation.isPending ? 'Création...' : 'Créer le store'}</span>
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
