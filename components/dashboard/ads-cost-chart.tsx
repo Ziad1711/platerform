@@ -442,6 +442,13 @@ export default function AdsCostChart() {
                   setHoveredIndex(Math.max(0, Math.min(points.length - 1, idx)))
                 }}
                 onPointerLeave={() => setHoveredIndex(null)}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const x = e.clientX - rect.left
+                  const pct = x / rect.width
+                  const idx = Math.round(pct * (points.length - 1))
+                  setHoveredIndex(Math.max(0, Math.min(points.length - 1, idx)))
+                }}
               />
 
               {hoveredIndex !== null && points[hoveredIndex] && (

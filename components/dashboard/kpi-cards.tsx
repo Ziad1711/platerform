@@ -395,6 +395,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
       rawChange: kpiData?.changes?.cpl || 0,
       change: formatChange(kpiData?.changes?.cpl || 0),
       trend: (kpiData?.changes?.cpl || 0) >= 0 ? 'up' as const : 'down' as const,
+      invertColor: true,
       icon: Target,
       color: 'bg-blue-500',
     },
@@ -404,6 +405,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
       rawChange: kpiData?.changes?.cpa || 0,
       change: formatChange(kpiData?.changes?.cpa || 0),
       trend: (kpiData?.changes?.cpa || 0) >= 0 ? 'up' as const : 'down' as const,
+      invertColor: true,
       icon: Target,
       color: 'bg-green-500',
     },
@@ -493,7 +495,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
                     <Icon className="w-4 h-4 text-white" />
                   </div>
                   {shouldShowChange(kpi.rawChange) ? (
-                    <div className={`flex items-center text-xs ${kpi.trend === 'up' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <div className={`flex items-center text-xs ${kpi.trend === 'up' ? (kpi.invertColor ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400') : (kpi.invertColor ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}`}>
                       {kpi.trend === 'up' ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
                       {kpi.change}
                     </div>
