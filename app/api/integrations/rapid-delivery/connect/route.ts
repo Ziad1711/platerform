@@ -153,17 +153,33 @@ export async function POST(request: Request) {
     // Créer les delivery_companies pour chaque store mappé
     if (mappedStoreIds.length > 0) {
       const now = new Date().toISOString()
-      const { error: dcError } = await admin.from('delivery_companies').upsert(
-        mappedStoreIds.map((storeId) => ({
-          store_id: storeId,
-          name: 'Rapid Delivery',
-          api_provider: 'rapid-delivery',
-          is_active: true,
-          created_at: now,
-        })),
-        { onConflict: 'store_id,name', ignoreDuplicates: false }
-      )
-      if (dcError) console.error('Failed to create delivery_companies:', dcError)
+      for (const storeId of mappedStoreIds) {
+        const { data: existing } = await admin
+          .from('delivery_companies')
+          .select('id')
+          .eq('store_id', storeId)
+          .eq('name', 'Rapid Delivery')
+          .maybeSingle()
+
+        if (existing) {
+          const { error: updateError } = await admin
+            .from('delivery_companies')
+            .update({ is_active: true, updated_at: now })
+            .eq('id', existing.id)
+          if (updateError) console.error('Failed to update delivery_company for store', storeId, updateError)
+        } else {
+          const { error: insertError } = await admin
+            .from('delivery_companies')
+            .insert({
+              store_id: storeId,
+              name: 'Rapid Delivery',
+              api_provider: 'rapid-delivery',
+              is_active: true,
+              created_at: now,
+            })
+          if (insertError) console.error('Failed to insert delivery_company for store', storeId, insertError)
+        }
+      }
     }
 
     return NextResponse.json({

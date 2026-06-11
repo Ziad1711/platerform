@@ -101,17 +101,31 @@ export async function POST(request: Request) {
     }
 
     // Créer delivery_companies si manquant pour ce store
-    const { error: dcError } = await admin.from('delivery_companies').upsert(
-      {
-        store_id: storeId,
-        name: 'Rapid Delivery',
-        api_provider: 'rapid-delivery',
-        is_active: true,
-        created_at: now,
-      },
-      { onConflict: 'store_id,name', ignoreDuplicates: false }
-    )
-    if (dcError) console.error('Failed to upsert delivery_company:', dcError)
+    const { data: existingDc } = await admin
+      .from('delivery_companies')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('name', 'Rapid Delivery')
+      .maybeSingle()
+
+    if (existingDc) {
+      const { error: updateError } = await admin
+        .from('delivery_companies')
+        .update({ is_active: true, updated_at: now })
+        .eq('id', existingDc.id)
+      if (updateError) console.error('Failed to update delivery_company:', updateError)
+    } else {
+      const { error: insertError } = await admin
+        .from('delivery_companies')
+        .insert({
+          store_id: storeId,
+          name: 'Rapid Delivery',
+          api_provider: 'rapid-delivery',
+          is_active: true,
+          created_at: now,
+        })
+      if (insertError) console.error('Failed to insert delivery_company:', insertError)
+    }
 
     return NextResponse.json({ ok: true, shops: shops.length, cities: cities.length })
   } catch (error) {

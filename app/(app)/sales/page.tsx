@@ -404,7 +404,7 @@ const areStringMapsEqual = (a: Record<string, string>, b: Record<string, string>
 
 export default function VentesPage() {
   const PAGE_SIZE = 10
-  const { currentStoreId, accessibleStoreIds } = useStore()
+  const { currentStoreId, accessibleStoreIds, accessibleStores } = useStore()
   const { role } = usePermissions(currentStoreId)
   const isConfirmationRole = role === 'confirmation'
   const [search, setSearch] = useState('')
@@ -419,7 +419,7 @@ export default function VentesPage() {
   const [address, setAddress] = useState('')
   const [city, setCity] = useState('')
   const [orderDate, setOrderDate] = useState(getNowLocalDateTimeValue)
-  const [orderSource, setOrderSource] = useState<'organic' | 'ads' | 'recommendation'>('organic')
+  const [orderSource, setOrderSource] = useState<'organic' | 'ads' | 'recommendation'>('ads')
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [selectedDeliveryCompanyId, setSelectedDeliveryCompanyId] = useState('')
   const [deliveryCostAutomationEnabled, setDeliveryCostAutomationEnabled] = useState(false)
@@ -770,19 +770,6 @@ export default function VentesPage() {
     return set
   }, [blacklistEntries, blacklistRule?.max_status_hits, orderStatusRowsForBlacklist])
 
-  const { data: stores } = useQuery({
-    queryKey: ['sales-stores-for-create-order'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('stores')
-        .select('id, name')
-        .order('created_at', { ascending: true })
-
-      if (error) throw error
-      return data || []
-    },
-  })
-
   const { data: products } = useQuery({
     queryKey: ['sales-products-for-create-order', selectedCreateStoreId],
     queryFn: async () => {
@@ -1030,14 +1017,14 @@ export default function VentesPage() {
   })
 
   const { data: rapidDeliveryCities = [] } = useQuery({
-    queryKey: ['rapid-delivery-cities', currentStoreId],
-    enabled: !!currentStoreId,
+    queryKey: ['rapid-delivery-cities', selectedCreateStoreId],
+    enabled: !!selectedCreateStoreId,
     queryFn: async () => {
-      // 1. Récupérer l'intégration Rapid Delivery liée au store courant
+      // 1. Récupérer l'intégration Rapid Delivery liée au store sélectionné
       const { data: config, error: configError } = await supabase
         .from('rapid_delivery_configs')
         .select('integration_id')
-        .eq('store_id', currentStoreId!)
+        .eq('store_id', selectedCreateStoreId!)
         .maybeSingle()
 
       if (configError) throw configError
@@ -1049,7 +1036,7 @@ export default function VentesPage() {
           .from('delivery_shops')
           .select('pricing_group_id')
           .eq('integration_id', config.integration_id)
-          .eq('store_id', currentStoreId!)
+          .eq('store_id', selectedCreateStoreId!)
           .not('pricing_group_id', 'is', null)
           .limit(1)
           .maybeSingle()
@@ -1154,7 +1141,7 @@ export default function VentesPage() {
     const latestCompany = (deliveryCompanies || [])[0]
     if (latestCompany?.id) {
       setSelectedDeliveryCompanyId(latestCompany.id)
-      setDeliveryCostAutomationEnabled(!!latestCompany.api_key)
+      setDeliveryCostAutomationEnabled(true)
       setDeliveryApiKey(latestCompany.api_key || '')
       setShowDeliveryApiKeyInput(false)
     }
@@ -1330,7 +1317,7 @@ export default function VentesPage() {
       setAddress('')
       setCity('')
       setOrderDate(getNowLocalDateTimeValue())
-      setOrderSource('organic')
+      setOrderSource('ads')
       setSelectedAgentId('')
       setSelectedDeliveryCompanyId('')
       setDeliveryCostAutomationEnabled(false)
@@ -2361,548 +2348,476 @@ export default function VentesPage() {
         </p>
       </div>
       {isCreateOpen && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setIsCreateOpen(false)}>
-          <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-border flex items-center justify-between shrink-0">
-              <h3 className="text-lg font-semibold text-foreground">Nouvelle commande</h3>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsCreateOpen(false)}>
+          <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-4xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-gradient-to-r from-primary/5 to-transparent">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">Nouvelle commande</h3>
+                  <p className="text-xs text-muted-foreground">Remplissez les informations ci-dessous</p>
+                </div>
+              </div>
               <button
                 onClick={() => setIsCreateOpen(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="w-8 h-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center justify-center transition-colors"
                 type="button"
+                aria-label="Fermer"
               >
-                Fermer
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
 
-            <div className="p-6 space-y-5 overflow-y-auto">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Date de commande</label>
-                  <input
-                    type="datetime-local"
-                    value={orderDate}
-                    onChange={(e) => setOrderDate(e.target.value)}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Store</label>
-                  <select
-                    value={selectedCreateStoreId}
-                    onChange={(e) => {
-                      setSelectedCreateStoreId(e.target.value)
-                      setSelectedAgentId('')
-                      setSelectedDeliveryCompanyId('')
-                      setDeliveryCostAutomationEnabled(false)
-                      setDeliveryApiKey('')
-                      setShowDeliveryApiKeyInput(false)
-                      setShowApiAutomationInfoModal(false)
-                      setDeliveryBillingMode('free')
-                      setDeliveryChargeToCustomer('0')
-                      setItems([{ product_id: '', product_variant_id: '', quantity: 1, unit_selling_price: 0 }])
-                      setProductSearchTerms([''])
-                      setOpenProductDropdownIndex(null)
-                    }}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                  >
-                    <option value="">Choisir un store</option>
-                    {(stores || []).map((store: any) => (
-                      <option key={store.id} value={store.id}>
-                        {store.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Agent de confirmation</label>
-                  <select
-                    value={selectedAgentId}
-                    onChange={(e) => setSelectedAgentId(e.target.value)}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                  >
-                    <option value="">Choisir un agent</option>
-                    <option value="__owner__">Owner a confirmé lui-même</option>
-                    {(confirmationAgents || []).map((agent: any) => (
-                      <option key={agent.id} value={agent.id}>
-                        {agent.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Client</label>
-                  <input
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                    placeholder="Nom du client"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Téléphone</label>
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                    placeholder="Téléphone"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Adresse client</label>
-                  <input
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                    placeholder="Adresse complète"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Ville</label>
-                  <input
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                    placeholder="Ville"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Source de commande</label>
-                  <select
-                    value={orderSource}
-                    onChange={(e) => setOrderSource(e.target.value as 'organic' | 'ads' | 'recommendation')}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                  >
-                    <option value="organic">Organique</option>
-                    <option value="ads">ADS</option>
-                    <option value="recommendation">Recommendation</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Société de livraison</label>
-                  <select
-                    value={selectedDeliveryCompanyId}
-                    onChange={(e) => {
-                      const nextDeliveryCompanyId = e.target.value
-                      const isOwnerDelivery = nextDeliveryCompanyId === '__owner__'
-                      const selectedCompany = (deliveryCompanies || []).find(
-                        (company: any) => company.id === nextDeliveryCompanyId
-                      )
-
-                      setSelectedDeliveryCompanyId(nextDeliveryCompanyId)
-                      setDeliveryCostAutomationEnabled(!isOwnerDelivery && !!selectedCompany?.api_key)
-                      setDeliveryApiKey(selectedCompany?.api_key || '')
-                      if (!isOwnerDelivery && !!selectedCompany?.api_key) {
-                        setDeliveryFee('0')
-                      }
-                      setShowDeliveryApiKeyInput(false)
-                      setShowApiAutomationInfoModal(false)
-                    }}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                  >
-                    <option value="">Choisir une société</option>
-                    <option value="__owner__">Livraison interne (sans transporteur)</option>
-                    {(deliveryCompanies || []).map((company: any) => (
-                      <option key={company.id} value={company.id}>
-                        {company.name}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedCreateStoreId && (deliveryCompanies || []).length === 0 ? (
-                    <p className="text-xs text-amber-600 mt-1">
-                      Aucune société active pour ce store. Choisissez "Livraison interne (sans transporteur)" ou ajoutez une société.
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-sm text-muted-foreground">Coût livraison</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">API</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const isOwnerDelivery = selectedDeliveryCompanyId === '__owner__'
-                          if (!selectedDeliveryCompanyId || isOwnerDelivery) return
-
-                          const selectedCompany = (deliveryCompanies || []).find(
-                            (company: any) => company.id === selectedDeliveryCompanyId
-                          )
-
-                          const nextValue = !deliveryCostAutomationEnabled
-
-                          if (nextValue && !selectedCompany?.api_provider && !deliveryApiKey.trim()) {
-                            setShowApiAutomationInfoModal(true)
-                            return
-                          }
-
-                          setFormError('')
-                          setDeliveryCostAutomationEnabled(nextValue)
-                          if (nextValue) {
-                            setDeliveryFee('0')
-                          }
-                        }}
-                        disabled={!selectedDeliveryCompanyId || selectedDeliveryCompanyId === '__owner__'}
-                        className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${
-                          deliveryCostAutomationEnabled ? 'bg-primary' : 'bg-muted'
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
-                        aria-label="Activer automation coût livraison"
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform ${
-                            deliveryCostAutomationEnabled ? 'translate-x-5' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={deliveryFee}
-                    onChange={(e) => setDeliveryFee(e.target.value)}
-                    disabled={isDeliveryCostManagedByApi}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground disabled:opacity-50"
-                  />
-                  {isDeliveryCostManagedByApi ? (
-                    <p className="text-xs text-blue-600 mt-1">
-                      Coût synchronisé automatiquement via API.
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Facturation livraison</label>
-                  <select
-                    value={deliveryBillingMode}
-                    onChange={(e) => {
-                      const mode = e.target.value as 'free' | 'paid_by_customer'
-                      setDeliveryBillingMode(mode)
-                      if (mode === 'free') {
-                        setDeliveryChargeToCustomer('0')
-                      }
-                    }}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                  >
-                    <option value="free">Livraison gratuite (supportée par le store)</option>
-                    <option value="paid_by_customer">Livraison payée par le client</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Montant livraison facturé client</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={deliveryChargeToCustomer}
-                    onChange={(e) => setDeliveryChargeToCustomer(e.target.value)}
-                    disabled={deliveryBillingMode === 'free'}
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground disabled:opacity-50"
-                  />
-                </div>
-                <div></div>
-                {showApiAutomationInfoModal ? (
-                  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-                    <div className="w-full max-w-md bg-card rounded-2xl shadow-2xl border border-border p-4 space-y-3">
-                      <h5 className="text-sm font-semibold text-foreground">Activation API - information</h5>
-                      <p className="text-sm text-muted-foreground">
-                        Cette société de livraison n'a pas de <span className="font-medium">api_provider</span> configuré.
-                        Pour activer l'automation des coûts, veuillez renseigner une clé API transporteur.
-                      </p>
-                      <div>
-                        <label className="block text-sm text-muted-foreground mb-1">Clé API transporteur</label>
-                        <input
-                          type="password"
-                          value={deliveryApiKey}
-                          onChange={(e) => setDeliveryApiKey(e.target.value)}
-                          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                          placeholder="Renseignez la clé API"
-                        />
-                      </div>
-                      <div className="flex items-center justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setShowApiAutomationInfoModal(false)}
-                          className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
-                        >
-                          Fermer
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!deliveryApiKey.trim()) {
-                              setFormError('Veuillez renseigner la clé API transporteur.')
-                              return
-                            }
-
-                            const { error } = await supabase
-                              .from('delivery_companies')
-                              .update({ api_key: deliveryApiKey.trim() })
-                              .eq('id', selectedDeliveryCompanyId)
-
-                            if (error) {
-                              setFormError(error.message || "Erreur lors de l'enregistrement de la clé API.")
-                              return
-                            }
-
-                            setDeliveryCostAutomationEnabled(true)
-                            setDeliveryFee('0')
-                            setShowApiAutomationInfoModal(false)
-                            setFormError('')
-                          }}
-                          className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
-                        >
-                          Activer
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-                <div></div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-foreground">Produits de la commande</h4>
+            <div className="p-6 space-y-6 overflow-y-auto">
+              {/* Section: Informations générales */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center gap-2">
+                  <svg className="w-4 h-4 text-[#1fa971]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  <span className="text-sm font-medium text-[#1fa971]">Informations générales</span>
                 </div>
 
-                {items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_180px_110px_150px_auto] gap-3 items-end">
-                    <div className="relative">
-                      <label className="block text-xs text-muted-foreground mb-1">Produit</label>
-                      <input
-                        value={productSearchTerms[index] || ''}
-                        onFocus={() => setOpenProductDropdownIndex(index)}
-                        onChange={(e) => {
-                          if (!selectedCreateStoreId) {
-                            setOpenProductDropdownIndex(index)
-                            return
-                          }
-
-                          const value = e.target.value
-                          setProductSearchTerms((prev) => prev.map((term, i) => (i === index ? value : term)))
-                          setOpenProductDropdownIndex(index)
-
-                          setItems((prev) =>
-                            prev.map((row, i) =>
-                              i === index
-                                ? { ...row, product_id: '', product_variant_id: '', unit_selling_price: 0 }
-                                : row
-                            )
-                          )
-                        }}
-                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                        placeholder={selectedCreateStoreId ? 'Rechercher un produit...' : "Sélectionnez d'abord un store"}
-                      />
-
-                      {openProductDropdownIndex === index ? (
-                        <div className="absolute z-30 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border border-border bg-card shadow-lg">
-                          {!selectedCreateStoreId ? (
-                            <div className="px-3 py-2 text-sm text-amber-700 bg-amber-50 border-b border-border">
-                              Veuillez sélectionner un store d'abord pour charger les produits.
-                            </div>
-                          ) : null}
-
-                          {(products || [])
-                            .filter((product: any) =>
-                              String(product.name || '')
-                                .toLowerCase()
-                                .includes(String(productSearchTerms[index] || '').toLowerCase())
-                            )
-                            .slice(0, 40)
-                            .map((product: any) => {
-                              const variants = variantsByProductId?.[product.id] || []
-                              const availableStock = variants.length > 0
-                                ? variants.reduce((sum: number, variant: any) => {
-                                    const key = `${product.id}::${variant.id}`
-                                    return sum + Number(productStockById?.[key] || 0)
-                                  }, 0)
-                                : Number(productStockById?.[`${product.id}::__no_variant__`] || 0)
-                              const isOutOfStock = availableStock <= 0
-                              return (
-                              <button
-                                key={product.id}
-                                type="button"
-                                onMouseDown={(e) => {
-                                  if (isOutOfStock) return
-                                  e.preventDefault()
-                                  onChangeProduct(index, product.id)
-                                  setOpenProductDropdownIndex(null)
-                                }}
-                                className={`w-full text-left px-3 py-2 text-sm ${
-                                  isOutOfStock ? 'text-red-600 bg-red-50 cursor-not-allowed' : 'hover:bg-secondary'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <span>{product.name}</span>
-                                  <span className={`text-xs ${isOutOfStock ? 'text-red-600' : 'text-muted-foreground'}`}>
-                                    {isOutOfStock ? 'Rupture' : `Stock: ${availableStock}`}
-                                  </span>
-                                </div>
-                              </button>
-                              )
-                            })}
-
-                          {(products || []).filter((product: any) =>
-                            String(product.name || '')
-                              .toLowerCase()
-                              .includes(String(productSearchTerms[index] || '').toLowerCase())
-                          ).length === 0 && selectedCreateStoreId ? (
-                            <div className="px-3 py-2 text-sm text-muted-foreground">Aucun produit trouvé</div>
-                          ) : null}
-
-                          <div className="border-t border-border px-3 py-2">
-                            <button
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault()
-                                setOpenProductDropdownIndex(null)
-                              }}
-                              className="text-xs text-muted-foreground hover:text-foreground"
-                            >
-                              Fermer la liste
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1">Variante</label>
-                      <select
-                        value={item.product_variant_id || ''}
-                        onChange={(e) => onChangeVariant(index, e.target.value)}
-                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                        disabled={!item.product_id || !(variantsByProductId?.[item.product_id] || []).length}
-                      >
-                        <option value="">
-                          {(variantsByProductId?.[item.product_id] || []).length > 0
-                            ? 'Choisir variante'
-                            : 'Produit sans variantes'}
-                        </option>
-                        {(variantsByProductId?.[item.product_id] || []).map((variant: any) => (
-                          <option key={variant.id} value={variant.id}>
-                            {variant.name} {variant.sku ? `(${variant.sku})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1">Qté</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={item.quantity}
-                        onChange={(e) => onChangeItemField(index, 'quantity', Number(e.target.value || 1))}
-                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1">Prix vente unitaire</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={item.unit_selling_price}
-                        onChange={(e) => onChangeItemField(index, 'unit_selling_price', Number(e.target.value || 0))}
-                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
-                      />
-                    </div>
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => removeItemRow(index)}
-                        className="text-sm text-red-600 hover:text-red-700"
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                <div>
-                  <button
-                    type="button"
-                    onClick={addItemRow}
-                    className="text-sm text-primary hover:text-primary/80"
-                  >
-                    + Ajouter produit
-                  </button>
-                </div>
-              </div>
-
-              <div className="border border-border rounded-lg p-4 bg-secondary/50 space-y-3">
-                <h4 className="text-sm font-semibold text-foreground">Résumé financier</h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Type remise</label>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Date de commande</label>
+                    <input
+                      type="datetime-local"
+                      value={orderDate}
+                      onChange={(e) => setOrderDate(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Store</label>
                     <select
-                      value={discountType}
+                      value={selectedCreateStoreId}
                       onChange={(e) => {
-                        const nextType = e.target.value as 'fixed' | 'amount' | 'percentage'
-                        setDiscountType(nextType)
-                        if (nextType === 'fixed') setDiscountValue('0')
+                        setSelectedCreateStoreId(e.target.value)
+                        setSelectedAgentId('')
+                        setSelectedDeliveryCompanyId('')
+                        setDeliveryCostAutomationEnabled(false)
+                        setDeliveryApiKey('')
+                        setShowDeliveryApiKeyInput(false)
+                        setShowApiAutomationInfoModal(false)
+                        setDeliveryBillingMode('free')
+                        setDeliveryChargeToCustomer('0')
+                        setItems([{ product_id: '', product_variant_id: '', quantity: 1, unit_selling_price: 0 }])
+                        setProductSearchTerms([''])
+                        setOpenProductDropdownIndex(null)
                       }}
-                      className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground"
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                     >
-                      <option value="fixed">Aucune remise</option>
-                      <option value="amount">Montant (MAD)</option>
-                      <option value="percentage">Pourcentage (%)</option>
+                      <option value="">Choisir un store</option>
+                      {(accessibleStores || []).map((store: any) => (
+                        <option key={store.id} value={store.id}>
+                          {store.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Valeur remise</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={discountValue}
-                      onChange={(e) => setDiscountValue(e.target.value)}
-                      disabled={discountType === 'fixed'}
-                      className="w-full bg-card border border-border rounded-lg px-3 py-2 text-foreground disabled:opacity-50"
-                    />
-                  </div>
-                  <div></div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Sous-total produits</span>
-                    <span className="font-medium text-foreground">{formatCurrency(subtotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Remise appliquée</span>
-                    <span className="font-medium text-foreground">-{formatCurrency(discountAmount)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Coût livraison (store)</span>
-                    <span className="font-medium text-foreground">{formatCurrency(Number.isFinite(parsedDeliveryFee) ? parsedDeliveryFee : 0)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Livraison facturée client</span>
-                    <span className="font-medium text-foreground">
-                      {formatCurrency(
-                        deliveryBillingMode === 'paid_by_customer' && Number.isFinite(parsedDeliveryChargeToCustomer)
-                          ? parsedDeliveryChargeToCustomer
-                          : 0
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Agent de confirmation</label>
+                    <select
+                      value={selectedAgentId}
+                      onChange={(e) => setSelectedAgentId(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    >
+                      {(confirmationAgents || []).length === 0 ? null : (
+                        <option value="">Choisir un agent</option>
                       )}
-                    </span>
+                      <option value="__owner__">Owner a confirmé lui-même</option>
+                      {(confirmationAgents || []).map((agent: any) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                </div>
 
-                <div className="pt-2 border-t border-border flex items-center justify-between">
-                  <span className="text-sm font-semibold text-foreground">Total final</span>
-                  <span className="text-lg font-bold text-foreground">{formatCurrency(totalSellingPrice)}</span>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Source de commande</label>
+                    <div className="flex gap-2">
+                      {(['organic', 'ads', 'recommendation'] as const).map((source) => (
+                        <button
+                          key={source}
+                          type="button"
+                          onClick={() => setOrderSource(source)}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            orderSource === source
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'bg-background border border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
+                          }`}
+                        >
+                          {source === 'organic' ? 'Organique' : source === 'ads' ? 'ADS' : 'Recommandation'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {formError ? <div className="text-sm text-red-600">{formError}</div> : null}
+              {/* Section: Client */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center gap-2">
+                  <svg className="w-4 h-4 text-[#1fa971]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span className="text-sm font-medium text-[#1fa971]">Client</span>
+                </div>
+
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Nom du client</label>
+                    <input
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      placeholder="Nom du client"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Téléphone</label>
+                    <input
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      placeholder="Téléphone"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Ville</label>
+                    <input
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      placeholder="Ville"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Adresse complète</label>
+                    <input
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      placeholder="Adresse complète"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section: Livraison */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center gap-2">
+                  <svg className="w-4 h-4 text-[#1fa971]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1.586A1 1 0 0113 16z" />
+                  </svg>
+                  <span className="text-sm font-medium text-[#1fa971]">Livraison</span>
+                </div>
+
+                <div className="p-4 space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Société de livraison</label>
+                    <select
+                      value={selectedDeliveryCompanyId}
+                      onChange={(e) => {
+                        setSelectedDeliveryCompanyId(e.target.value)
+                        setDeliveryCostAutomationEnabled(true)
+                        setDeliveryApiKey('')
+                        setShowDeliveryApiKeyInput(false)
+                      }}
+                      className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    >
+                      <option value="">Choisir une société</option>
+                      <option value="__owner__">🚚 Livraison interne</option>
+                      {(deliveryCompanies || []).map((company: any) => (
+                        <option key={company.id} value={company.id}>
+                          {company.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={deliveryCostAutomationEnabled}
+                        onChange={(e) => {
+                          setDeliveryCostAutomationEnabled(e.target.checked)
+                          if (!e.target.checked) setShowDeliveryApiKeyInput(false)
+                        }}
+                        className="rounded border-border text-primary focus:ring-primary/20"
+                      />
+                      <span className="text-sm text-foreground">Automatisation API</span>
+                    </label>
+                    {deliveryCostAutomationEnabled && selectedDeliveryCompanyId && selectedDeliveryCompanyId !== '__owner__' ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowApiAutomationInfoModal(true)}
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                      >
+                        Configurer
+                      </button>
+                    ) : null}
+                  </div>
+                  {isDeliveryCostManagedByApi ? (
+                    <div className="rounded-lg bg-muted/30 border border-border px-3 py-2 text-sm text-muted-foreground">
+                      Coût synchronisé automatiquement via API.
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Coût livraison (MAD)</label>
+                      <input
+                        type="number"
+                        value={deliveryFee}
+                        onChange={(e) => setDeliveryFee(e.target.value)}
+                        className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Facturation au client</label>
+                    <div className="flex gap-2">
+                      {(['free', 'paid_by_customer'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setDeliveryBillingMode(mode)}
+                          className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            deliveryBillingMode === mode
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'bg-background border border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
+                          }`}
+                        >
+                          {mode === 'free' ? 'Gratuite' : 'Payée par le client'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {deliveryBillingMode === 'paid_by_customer' && (
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Montant facturé au client (MAD)</label>
+                      <input
+                        type="number"
+                        value={deliveryChargeToCustomer}
+                        onChange={(e) => setDeliveryChargeToCustomer(e.target.value)}
+                        className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Section: Produits */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-[#1fa971]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    </svg>
+                    <span className="text-sm font-medium text-[#1fa971]">Produits</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={addItemRow}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Ajouter un produit
+                  </button>
+                </div>
+                <div className="p-4 space-y-3">
+                  {items.map((item, index) => (
+                    <div key={index} className="rounded-lg border border-border bg-background p-3">
+                      <div className="grid grid-cols-12 gap-3 items-start">
+                        <div className="col-span-5 relative">
+                          <label className="block text-xs text-muted-foreground mb-1">Produit</label>
+                          <input
+                            value={productSearchTerms[index] || ''}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setProductSearchTerms((prev) => prev.map((t, i) => (i === index ? val : t)))
+                              setOpenProductDropdownIndex(index)
+                            }}
+                            onFocus={() => setOpenProductDropdownIndex(index)}
+                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                            placeholder="Rechercher un produit..."
+                          />
+                          {openProductDropdownIndex === index && (
+                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                              {(products || [])
+                                .filter((p: any) =>
+                                  !productSearchTerms[index] ||
+                                  p.name.toLowerCase().includes(productSearchTerms[index].toLowerCase())
+                                )
+                                .map((product: any) => (
+                                  <button
+                                    key={product.id}
+                                    type="button"
+                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors ${
+                                      item.product_id === product.id ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
+                                    }`}
+                                    onClick={() => {
+                                      onChangeProduct(index, product.id)
+                                      setOpenProductDropdownIndex(null)
+                                    }}
+                                  >
+                                    {product.name}
+                                  </button>
+                                ))}
+                              {(products || []).filter((p: any) =>
+                                !productSearchTerms[index] ||
+                                p.name.toLowerCase().includes(productSearchTerms[index].toLowerCase())
+                              ).length === 0 && (
+                                <div className="px-3 py-2 text-sm text-muted-foreground">Aucun produit trouvé</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="col-span-3">
+                          <label className="block text-xs text-muted-foreground mb-1">Variante</label>
+                          <select
+                            value={item.product_variant_id}
+                            onChange={(e) => onChangeVariant(index, e.target.value)}
+                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          >
+                            <option value="">--</option>
+                            {(variantsByProductId?.[item.product_id] || []).map((variant: any) => (
+                              <option key={variant.id} value={variant.id}>
+                                {variant.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-xs text-muted-foreground mb-1">Qté</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={(e) => onChangeItemField(index, 'quantity', Number(e.target.value) || 0)}
+                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-xs text-muted-foreground mb-1">Prix unit.</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={item.unit_selling_price}
+                            onChange={(e) => onChangeItemField(index, 'unit_selling_price', Number(e.target.value) || 0)}
+                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          />
+                        </div>
+                      </div>
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItemRow(index)}
+                          className="mt-2 text-xs text-red-500 hover:text-red-600 transition-colors"
+                        >
+                          Supprimer
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section: Résumé financier */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center gap-2">
+                  <svg className="w-4 h-4 text-[#1fa971]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm font-medium text-[#1fa971]">Résumé financier</span>
+                </div>
+
+                <div className="p-4 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Type de remise</label>
+                      <select
+                        value={discountType}
+                        onChange={(e) => setDiscountType(e.target.value as 'fixed' | 'amount' | 'percentage')}
+                        className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      >
+                        <option value="fixed">Aucune remise</option>
+                        <option value="amount">Montant fixe (MAD)</option>
+                        <option value="percentage">Pourcentage (%)</option>
+                      </select>
+                    </div>
+                    {discountType !== 'fixed' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                          {discountType === 'amount' ? 'Montant remise (MAD)' : 'Pourcentage remise (%)'}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={discountValue}
+                          onChange={(e) => setDiscountValue(e.target.value)}
+                          className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          placeholder="0"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-lg bg-muted/20 border border-border p-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Sous-total</span>
+                      <span className="text-foreground font-medium">{formatCurrency(subtotal)}</span>
+                    </div>
+                    {discountType !== 'fixed' && parsedDiscountValue > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Remise</span>
+                        <span className="text-red-500 font-medium">-{formatCurrency(discountAmount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Livraison</span>
+                      <span className="text-foreground font-medium">
+                        {deliveryBillingMode === 'free' ? formatCurrency(0) : formatCurrency(parsedDeliveryChargeToCustomer)}
+                      </span>
+                    </div>
+
+                    {deliveryBillingMode === 'paid_by_customer' && parsedDeliveryChargeToCustomer > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Livraison facturée au client</span>
+                        <span className="text-foreground font-medium">{formatCurrency(parsedDeliveryChargeToCustomer)}</span>
+                      </div>
+                    )}
+                    <div className="border-t border-border pt-2 flex justify-between text-sm font-semibold">
+                      <span className="text-foreground">Total</span>
+                      <span className="text-primary">{formatCurrency(totalSellingPrice)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {formError && (
+                <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">
+                  {formError}
+                </div>
+              )}
             </div>
 
-            <div className="p-6 border-t border-border flex items-center justify-end gap-3 shrink-0">
+            <div className="px-6 py-4 border-t border-border flex items-center justify-between shrink-0 bg-muted/20">
               <button
                 type="button"
                 onClick={() => setIsCreateOpen(false)}
-                className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary"
+                className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary text-sm font-medium transition-colors"
               >
                 Annuler
               </button>
@@ -2910,9 +2825,24 @@ export default function VentesPage() {
                 type="button"
                 onClick={() => createOrderMutation.mutate()}
                 disabled={createOrderMutation.isPending}
-                className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-6 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium shadow-lg shadow-primary/25 transition-all disabled:opacity-50"
               >
-                {createOrderMutation.isPending ? 'Création...' : 'Créer la commande'}
+                {createOrderMutation.isPending ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Création...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Créer la commande
+                  </>
+                )}
               </button>
             </div>
           </div>
