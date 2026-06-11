@@ -839,34 +839,71 @@ export default function ProduitsPage() {
       {/* Filters & Actions */}
       <div className="bg-card rounded-xl shadow p-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          <StoreSelector />
-          <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Rechercher un produit..."
-                className="w-full border border-border rounded-lg pl-9 pr-3 py-2 text-sm bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
-              />
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <select
-                value={stockFilter}
-                onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
-                className="border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
-              >
-                <option value="all">Tout stock</option>
-                <option value="in_stock">En stock</option>
-                <option value="out_of_stock">Rupture</option>
-              </select>
-              <button
-                onClick={() => setIsCreateOpen(true)}
-                className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
-              >
-                <Plus className="w-4 h-4" />
-                Ajouter un produit
-              </button>
+          {/* Phone: StoreSelector + stock filter on same line */}
+          <div className="flex flex-row items-center justify-center gap-3 sm:hidden w-full">
+            <StoreSelector />
+            <select
+              value={stockFilter}
+              onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
+              className="border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+            >
+              <option value="all">Tout stock</option>
+              <option value="in_stock">En stock</option>
+              <option value="out_of_stock">Rupture</option>
+            </select>
+          </div>
+
+          {/* Phone: Search bar full width */}
+          <div className="relative flex-1 sm:hidden w-full">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un produit..."
+              className="w-full border border-border rounded-lg pl-9 pr-3 py-2 text-sm bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+            />
+          </div>
+
+          {/* Phone: Add product button full width */}
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="sm:hidden inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full"
+          >
+            <Plus className="w-4 h-4" />
+            Ajouter un produit
+          </button>
+
+          {/* Desktop layout (unchanged) */}
+          <div className="hidden sm:flex sm:flex-row items-stretch sm:items-center gap-3 w-full">
+            <StoreSelector />
+            <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Rechercher un produit..."
+                  className="w-full border border-border rounded-lg pl-9 pr-3 py-2 text-sm bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <select
+                  value={stockFilter}
+                  onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
+                  className="border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+                >
+                  <option value="all">Tout stock</option>
+                  <option value="in_stock">En stock</option>
+                  <option value="out_of_stock">Rupture</option>
+                </select>
+                <button
+                  onClick={() => setIsCreateOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  Ajouter un produit
+                </button>
+              </div>
             </div>
           </div>
         </div>
