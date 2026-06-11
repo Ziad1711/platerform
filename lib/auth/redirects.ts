@@ -81,10 +81,12 @@ export function resolvePostLoginRedirect(options: {
 }): string {
   const { next, role, hasStore, passwordSet } = options
 
-  // Si l'utilisateur n'a pas encore défini son mot de passe
-  if (!passwordSet) return '/welcome'
+  // Si l'utilisateur n'a pas de store ET n'a pas défini son mot de passe
+  // → nouveau utilisateur qui doit finaliser son compte
+  if (!hasStore && !passwordSet) return '/welcome'
 
-  // Si l'utilisateur n'a pas de store → page d'accueil ou création
+  // Si l'utilisateur n'a pas de store mais a un mot de passe
+  // → doit créer un store
   if (!hasStore) return '/welcome'
 
   // Si un `next` explicite est fourni et valide

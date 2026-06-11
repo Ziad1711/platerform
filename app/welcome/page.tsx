@@ -22,11 +22,28 @@ export default function WelcomePage() {
         router.replace('/login')
         return
       }
+
+      // Si l'utilisateur a déjà un store, pas besoin de finaliser
+      const { data: member } = await supabase
+        .from('store_members')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle()
+
+      if (member) {
+        router.replace('/dashboard')
+        router.refresh()
+        return
+      }
+
+      // Si password déjà défini → plus besoin de cette page
       if (user.user_metadata?.password_set === true) {
         router.replace('/dashboard')
         router.refresh()
         return
       }
+
       setFirstName(String(user.user_metadata?.first_name || ''))
       setLastName(String(user.user_metadata?.last_name || ''))
       setLoading(false)
