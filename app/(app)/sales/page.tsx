@@ -9,7 +9,7 @@ import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
 import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
 import InlineEditProducts from '@/components/dashboard/sales/inline-edit-products'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
@@ -437,6 +437,42 @@ export default function VentesPage() {
   ])
   const [productSearchTerms, setProductSearchTerms] = useState<string[]>([''])
   const [openProductDropdownIndex, setOpenProductDropdownIndex] = useState<number | null>(null)
+  const [productDropdownPos, setProductDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const productSearchInputRefs = useRef<(HTMLInputElement | null)[]>([])
+  const openProductDropdown = useCallback((index: number) => {
+    const el = productSearchInputRefs.current[index]
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      setProductDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+      setOpenProductDropdownIndex(index)
+    }
+  }, [])
+  const closeProductDropdown = useCallback(() => {
+    setOpenProductDropdownIndex(null)
+    setProductDropdownPos(null)
+  }, [])
+  // Reposition dropdown on scroll/resize using a ref to avoid infinite loops
+  const repositionRef = useRef<(() => void) | null>(null)
+  repositionRef.current = () => {
+    const idx = openProductDropdownIndex
+    if (idx !== null) {
+      const el = productSearchInputRefs.current[idx]
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        setProductDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+      }
+    }
+  }
+  useEffect(() => {
+    if (openProductDropdownIndex === null) return
+    const handle = () => repositionRef.current?.()
+    window.addEventListener('scroll', handle, true)
+    window.addEventListener('resize', handle)
+    return () => {
+      window.removeEventListener('scroll', handle, true)
+      window.removeEventListener('resize', handle)
+    }
+  }, [openProductDropdownIndex])
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null)
   const [isRapidDeliveryModalOpen, setIsRapidDeliveryModalOpen] = useState(false)
@@ -2617,7 +2653,7 @@ export default function VentesPage() {
               </div>
 
               {/* Section: Produits */}
-              <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="rounded-xl border border-border bg-card">
                 <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <svg className="w-4 h-4 text-[#1fa971]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2640,57 +2676,28 @@ export default function VentesPage() {
                 <div className="p-4 space-y-3">
                   {items.map((item, index) => (
                     <div key={index} className="rounded-lg border border-border bg-background p-3">
-                      <div className="grid grid-cols-12 gap-3 items-start">
-                        <div className="col-span-5 relative">
-                          <label className="block text-xs text-muted-foreground mb-1">Produit</label>
+                      <div className="grid grid-cols-12 gap-2 sm:gap-3 items-end">
+                        <div className="col-span-12 sm:col-span-5">
+                          <label className="block text-[11px] font-medium text-muted-foreground mb-1 leading-none">Produit</label>
                           <input
+                            ref={(el) => { productSearchInputRefs.current[index] = el }}
                             value={productSearchTerms[index] || ''}
                             onChange={(e) => {
                               const val = e.target.value
                               setProductSearchTerms((prev) => prev.map((t, i) => (i === index ? val : t)))
-                              setOpenProductDropdownIndex(index)
+                              openProductDropdown(index)
                             }}
-                            onFocus={() => setOpenProductDropdownIndex(index)}
-                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                            onFocus={() => openProductDropdown(index)}
+                            className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                             placeholder="Rechercher un produit..."
                           />
-                          {openProductDropdownIndex === index && (
-                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                              {(products || [])
-                                .filter((p: any) =>
-                                  !productSearchTerms[index] ||
-                                  p.name.toLowerCase().includes(productSearchTerms[index].toLowerCase())
-                                )
-                                .map((product: any) => (
-                                  <button
-                                    key={product.id}
-                                    type="button"
-                                    className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors ${
-                                      item.product_id === product.id ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
-                                    }`}
-                                    onClick={() => {
-                                      onChangeProduct(index, product.id)
-                                      setOpenProductDropdownIndex(null)
-                                    }}
-                                  >
-                                    {product.name}
-                                  </button>
-                                ))}
-                              {(products || []).filter((p: any) =>
-                                !productSearchTerms[index] ||
-                                p.name.toLowerCase().includes(productSearchTerms[index].toLowerCase())
-                              ).length === 0 && (
-                                <div className="px-3 py-2 text-sm text-muted-foreground">Aucun produit trouvé</div>
-                              )}
-                            </div>
-                          )}
                         </div>
-                        <div className="col-span-3">
-                          <label className="block text-xs text-muted-foreground mb-1">Variante</label>
+                        <div className="col-span-6 sm:col-span-3">
+                          <label className="block text-[11px] font-medium text-muted-foreground mb-1 leading-none">Variante</label>
                           <select
                             value={item.product_variant_id}
                             onChange={(e) => onChangeVariant(index, e.target.value)}
-                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                            className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                           >
                             <option value="">--</option>
                             {(variantsByProductId?.[item.product_id] || []).map((variant: any) => (
@@ -2700,27 +2707,63 @@ export default function VentesPage() {
                             ))}
                           </select>
                         </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs text-muted-foreground mb-1">Qté</label>
+                        <div className="col-span-3 sm:col-span-2">
+                          <label className="block text-[11px] font-medium text-muted-foreground mb-1 leading-none">Qté</label>
                           <input
                             type="number"
                             min={1}
                             value={item.quantity}
                             onChange={(e) => onChangeItemField(index, 'quantity', Number(e.target.value) || 0)}
-                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                            className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                           />
                         </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs text-muted-foreground mb-1">Prix unit.</label>
+                        <div className="col-span-3 sm:col-span-2">
+                          <label className="block text-[11px] font-medium text-muted-foreground mb-1 leading-none">Prix unit.</label>
                           <input
                             type="number"
                             min={0}
                             value={item.unit_selling_price}
                             onChange={(e) => onChangeItemField(index, 'unit_selling_price', Number(e.target.value) || 0)}
-                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                            className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                           />
                         </div>
                       </div>
+                      {openProductDropdownIndex === index && productDropdownPos && (
+                        <>
+                          <div className="fixed inset-0 z-[9998]" onClick={() => closeProductDropdown()} />
+                          <div
+                            className="fixed z-[9999] max-h-48 overflow-y-auto bg-popover border border-border rounded-lg shadow-xl"
+                            style={{ top: productDropdownPos.top, left: productDropdownPos.left, width: productDropdownPos.width }}
+                          >
+                            {(products || [])
+                              .filter((p: any) =>
+                                !productSearchTerms[index] ||
+                                p.name.toLowerCase().includes(productSearchTerms[index].toLowerCase())
+                              )
+                              .map((product: any) => (
+                                <button
+                                  key={product.id}
+                                  type="button"
+                                  className={`w-full text-left px-3 py-2.5 text-sm hover:bg-secondary transition-colors ${
+                                    item.product_id === product.id ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
+                                  }`}
+                                  onClick={() => {
+                                    onChangeProduct(index, product.id)
+                                    setOpenProductDropdownIndex(null)
+                                  }}
+                                >
+                                  {product.name}
+                                </button>
+                              ))}
+                            {(products || []).filter((p: any) =>
+                              !productSearchTerms[index] ||
+                              p.name.toLowerCase().includes(productSearchTerms[index].toLowerCase())
+                            ).length === 0 && (
+                              <div className="px-3 py-2.5 text-sm text-muted-foreground">Aucun produit trouvé</div>
+                            )}
+                          </div>
+                        </>
+                      )}
                       {items.length > 1 && (
                         <button
                           type="button"

@@ -49,9 +49,11 @@ export default function InlineEditProducts({
   const [productSearchTerms, setProductSearchTerms] = useState<string[]>([])
   const [addDropdownOpen, setAddDropdownOpen] = useState(false)
   const [addSearch, setAddSearch] = useState('')
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const addSearchRef = useRef<HTMLInputElement>(null)
   const searchInputRefs = useRef<(HTMLInputElement | null)[]>([])
+  const productRowRefs = useRef<(HTMLDivElement | null)[]>([])
 
   // Reset local state when modal opens
   const open = useCallback(() => {
@@ -100,6 +102,48 @@ export default function InlineEditProducts({
       addSearchRef.current.focus()
     }
   }, [addDropdownOpen])
+
+  // Calculate fixed position for product dropdown based on input element
+  const openProductDropdown = useCallback((index: number) => {
+    setOpenDropdownIndex(index)
+    const el = searchInputRefs.current[index]
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      setDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      })
+    }
+  }, [])
+
+  // Close dropdown and reset position
+  const closeProductDropdown = useCallback(() => {
+    setOpenDropdownIndex(null)
+    setDropdownPos(null)
+  }, [])
+
+  // Reposition dropdown on scroll/resize
+  useEffect(() => {
+    if (openDropdownIndex === null) return
+    const handleReposition = () => {
+      const el = searchInputRefs.current[openDropdownIndex]
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        setDropdownPos({
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+        })
+      }
+    }
+    window.addEventListener('scroll', handleReposition, true)
+    window.addEventListener('resize', handleReposition)
+    return () => {
+      window.removeEventListener('scroll', handleReposition, true)
+      window.removeEventListener('resize', handleReposition)
+    }
+  }, [openDropdownIndex])
 
   const filteredProducts = useCallback(
     (search: string) => {
@@ -255,17 +299,21 @@ export default function InlineEditProducts({
                     {/* Product selector: show name if selected, otherwise show search input */}
                     <div className="relative">
                       {item.product_id && product ? (
-                        <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2">
-                          <span className="text-sm font-medium text-foreground">{product.name}</span>
+                        <div className="flex items-center justify-between rounded-lg border border-border bg-card h-10 px-3">
+                          <span className="text-sm font-medium text-foreground truncate">{product.name}</span>
                           <button
                             type="button"
                             onClick={() => {
-                              setOpenDropdownIndex(openDropdownIndex === index ? null : index)
+                              if (openDropdownIndex === index) {
+                                closeProductDropdown()
+                              } else {
+                                openProductDropdown(index)
+                              }
                               setProductSearchTerms((prev) =>
                                 prev.map((term, i) => (i === index ? product.name : term))
                               )
                             }}
-                            className="text-xs text-primary hover:underline"
+                            className="text-xs text-primary hover:underline shrink-0 ml-2"
                           >
                             Changer
                           </button>
@@ -276,13 +324,13 @@ export default function InlineEditProducts({
                             searchInputRefs.current[index] = el
                           }}
                           value={productSearchTerms[index] || ''}
-                          onFocus={() => setOpenDropdownIndex(index)}
+                          onFocus={() => openProductDropdown(index)}
                           onChange={(e) => {
                             const value = e.target.value
                             setProductSearchTerms((prev) =>
                               prev.map((term, i) => (i === index ? value : term))
                             )
-                            setOpenDropdownIndex(index)
+                            openProductDropdown(index)
                             setLocalItems((prev) =>
                               prev.map((row, i) =>
                                 i === index
@@ -291,52 +339,63 @@ export default function InlineEditProducts({
                               )
                             )
                           }}
-                          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                          className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm"
                           placeholder="Rechercher un produit..."
                         />
                       )}
-                      {openDropdownIndex === index && (
-                        <div className="absolute z-20 mt-1 w-full max-h-40 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
-                          {products
-                            .filter((p) =>
-                              String(p.name || '')
-                                .toLowerCase()
-                                .includes(String(productSearchTerms[index] || '').toLowerCase())
-                            )
-                            .slice(0, 40)
-                            .length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-muted-foreground">
-                              Aucun produit trouvé
-                            </div>
-                          ) : (
-                            products
+                      {openDropdownIndex === index && dropdownPos && (
+                        <>
+                          <div className="fixed inset-0 z-[9998]" onClick={() => closeProductDropdown()} />
+                          <div
+                            className="fixed z-[9999] max-h-40 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg"
+                            style={{
+                              top: dropdownPos.top,
+                              left: dropdownPos.left,
+                              width: dropdownPos.width,
+                            }}
+                          >
+                            {products
                               .filter((p) =>
                                 String(p.name || '')
                                   .toLowerCase()
                                   .includes(String(productSearchTerms[index] || '').toLowerCase())
                               )
                               .slice(0, 40)
-                              .map((p) => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => {
-                                    handleSelectProduct(index, p.id)
-                                    setProductSearchTerms((prev) =>
-                                      prev.map((term, i) => (i === index ? p.name : term))
-                                    )
-                                  }}
-                                  className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors ${
-                                    item.product_id === p.id ? 'bg-secondary font-medium' : ''
-                                  }`}
-                                >
-                                  {p.name}
-                                </button>
-                              ))
-                          )}
-                        </div>
+                              .length === 0 ? (
+                              <div className="px-3 py-2.5 text-sm text-muted-foreground">
+                                Aucun produit trouvé
+                              </div>
+                            ) : (
+                              products
+                                .filter((p) =>
+                                  String(p.name || '')
+                                    .toLowerCase()
+                                    .includes(String(productSearchTerms[index] || '').toLowerCase())
+                                )
+                                .slice(0, 40)
+                                .map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => {
+                                      handleSelectProduct(index, p.id)
+                                      setProductSearchTerms((prev) =>
+                                        prev.map((term, i) => (i === index ? p.name : term))
+                                      )
+                                    }}
+                                    className={`w-full text-left px-3 py-2.5 text-sm hover:bg-secondary transition-colors ${
+                                      item.product_id === p.id ? 'bg-secondary font-medium' : ''
+                                    }`}
+                                  >
+                                    {p.name}
+                                  </button>
+                                ))
+                            )}
+                          </div>
+                        </>
                       )}
                     </div>
+REPLACE
 
                     {/* Variant selector */}
                     {variants.length > 0 && (
@@ -355,9 +414,9 @@ export default function InlineEditProducts({
                     )}
 
                     {/* Quantity & Price */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs text-muted-foreground mb-1">Quantité</label>
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-6">
+                        <label className="block text-[11px] font-medium text-muted-foreground leading-none mb-1.5">Quantité</label>
                         <input
                           type="number"
                           min={1}
@@ -370,11 +429,11 @@ export default function InlineEditProducts({
                               )
                             )
                           }}
-                          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                          className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm"
                         />
                       </div>
-                      <div>
-                        <label className="block text-xs text-muted-foreground mb-1">
+                      <div className="col-span-6">
+                        <label className="block text-[11px] font-medium text-muted-foreground leading-none mb-1.5">
                           Prix unitaire
                         </label>
                         <input
@@ -390,10 +449,11 @@ export default function InlineEditProducts({
                               )
                             )
                           }}
-                          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                          className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm"
                         />
                       </div>
                     </div>
+REPLACE
 
                     {product && (
                       <div className="text-xs text-muted-foreground">
