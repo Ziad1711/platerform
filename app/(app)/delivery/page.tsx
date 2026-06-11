@@ -8,6 +8,7 @@ import { useStore } from '@/lib/store-context'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
+import { Search, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export default function LivraisonPage() {
   const supabase = createClient()
@@ -17,6 +18,8 @@ export default function LivraisonPage() {
   const [voucherError, setVoucherError] = useState('')
   const [voucherSuccess, setVoucherSuccess] = useState('')
   const [isCreatingVoucher, setIsCreatingVoucher] = useState(false)
+  const [citySearch, setCitySearch] = useState('')
+  const [cityPage, setCityPage] = useState(1)
 
   const { data: deliveryCompanies = [] } = useQuery({
     queryKey: ['delivery-page-companies', currentStoreId],
@@ -381,52 +384,114 @@ export default function LivraisonPage() {
               <p className="text-sm text-muted-foreground">Aucune ville liée à votre intégration Rapid Delivery.</p>
             ) : (
               <>
-                {/* Desktop table */}
-                <div className="hidden sm:block overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="px-2 py-2">Ville</th>
-                        <th className="px-2 py-2">Livraison</th>
-                        <th className="px-2 py-2">Refus</th>
-                        <th className="px-2 py-2">Annulation</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {customCities.map((city: any) => (
-                        <tr key={city.city_key} className="border-b last:border-b-0">
-                          <td className="px-2 py-2 text-foreground">{city.city_name}</td>
-                          <td className="px-2 py-2">{formatCurrency(Number(city.cost_delivery || 0))}</td>
-                          <td className="px-2 py-2">{formatCurrency(Number(city.cost_refuse || 0))}</td>
-                          <td className="px-2 py-2">{formatCurrency(Number(city.cost_cancel || 0))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Rechercher une ville..."
+                    value={citySearch}
+                    onChange={(e) => { setCitySearch(e.target.value); setCityPage(1) }}
+                    className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
                 </div>
 
-                {/* Mobile cards */}
-                <div className="sm:hidden space-y-2">
-                  {customCities.map((city: any) => (
-                    <div key={city.city_key} className="rounded-lg border p-3 text-sm space-y-1.5">
-                      <div className="font-medium text-foreground">{city.city_name}</div>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div>
-                          <span className="text-muted-foreground">Livraison</span>
-                          <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_delivery || 0))}</div>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Refus</span>
-                          <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_refuse || 0))}</div>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Annulation</span>
-                          <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_cancel || 0))}</div>
-                        </div>
+                {(() => {
+                  const filtered = customCities.filter((city: any) =>
+                    city.city_name.toLowerCase().includes(citySearch.toLowerCase())
+                  )
+                  const totalPages = Math.max(1, Math.ceil(filtered.length / 10))
+                  const page = Math.min(cityPage, totalPages)
+                  const start = (page - 1) * 10
+                  const paged = filtered.slice(start, start + 10)
+
+                  return (
+                    <>
+                      {/* Desktop table */}
+                      <div className="hidden sm:block overflow-auto">
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="border-b text-left text-muted-foreground">
+                              <th className="px-2 py-2">Ville</th>
+                              <th className="px-2 py-2">Livraison</th>
+                              <th className="px-2 py-2">Refus</th>
+                              <th className="px-2 py-2">Annulation</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {paged.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="px-2 py-6 text-center text-sm text-muted-foreground">Aucune ville trouvée.</td>
+                              </tr>
+                            ) : (
+                              paged.map((city: any) => (
+                                <tr key={city.city_key} className="border-b last:border-b-0">
+                                  <td className="px-2 py-2 text-foreground">{city.city_name}</td>
+                                  <td className="px-2 py-2">{formatCurrency(Number(city.cost_delivery || 0))}</td>
+                                  <td className="px-2 py-2">{formatCurrency(Number(city.cost_refuse || 0))}</td>
+                                  <td className="px-2 py-2">{formatCurrency(Number(city.cost_cancel || 0))}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
                       </div>
-                    </div>
-                  ))}
-                </div>
+
+                      {/* Mobile cards */}
+                      <div className="sm:hidden space-y-2">
+                        {paged.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-4">Aucune ville trouvée.</p>
+                        ) : (
+                          paged.map((city: any) => (
+                            <div key={city.city_key} className="rounded-lg border p-3 text-sm space-y-1.5">
+                              <div className="font-medium text-foreground">{city.city_name}</div>
+                              <div className="grid grid-cols-3 gap-2 text-xs">
+                                <div>
+                                  <span className="text-muted-foreground">Livraison</span>
+                                  <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_delivery || 0))}</div>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Refus</span>
+                                  <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_refuse || 0))}</div>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Annulation</span>
+                                  <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_cancel || 0))}</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Pagination */}
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 pt-2">
+                          <button
+                            type="button"
+                            disabled={page <= 1}
+                            onClick={() => setCityPage(page - 1)}
+                            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
+                          >
+                            <ChevronLeft className="h-3.5 w-3.5" />
+                            Précédent
+                          </button>
+                          <span className="text-xs text-muted-foreground px-2">
+                            Page {page} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={page >= totalPages}
+                            onClick={() => setCityPage(page + 1)}
+                            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
+                          >
+                            Suivant
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </>
             )}
           </div>

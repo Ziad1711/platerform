@@ -57,11 +57,6 @@ export default function InvitePage() {
       const payload = await res.json().catch(() => null)
       if (!res.ok) throw new Error(payload?.error || 'ACCEPT_FAILED')
 
-      if (payload?.storeId) {
-        localStorage.setItem('current-store-id', payload.storeId)
-        document.cookie = `current-store-id=${payload.storeId}; path=/; max-age=31536000; SameSite=Lax`
-      }
-
       setStatus('success')
       const { data: { user } } = await supabase.auth.getUser()
       const needsPassword = user?.user_metadata?.password_set === false

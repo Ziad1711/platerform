@@ -30,7 +30,6 @@ export async function GET(request: Request) {
   // Récupérer l'utilisateur et déterminer la redirection
   const { data: { user } } = await supabase.auth.getUser()
   let redirectTo = '/dashboard'
-  let storeId: string | null = null
 
   if (user) {
     const { data: member } = await supabase
@@ -50,19 +49,8 @@ export async function GET(request: Request) {
       hasStore,
       passwordSet,
     })
-
-    if (member?.store_id) {
-      storeId = String(member.store_id)
-    }
   }
 
   const response = NextResponse.redirect(new URL(redirectTo, origin))
-  if (storeId) {
-    response.cookies.set('current-store-id', storeId, {
-      path: '/',
-      maxAge: 60 * 60 * 24 * 365,
-      sameSite: 'lax',
-    })
-  }
   return response
 }

@@ -60,13 +60,11 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Migration SQL `20260430_rpc_dashboard_auth_guard.sql` pour renforcer les RPC avec `auth.uid()` guard
 
 ## Current Focus
-Centralisation de l'utilisateur auth côté client pour éliminer les erreurs Supabase Auth lock.
-- ✅ Singleton Supabase client (lib/supabase/client.ts)
-- ✅ StoreContext expose userId + authReady
-- ✅ 8/8 getUser() remplacés par le contexte : providers, sidebar, onboarding-modal, use-permissions, subscription/page, stores-section, sales/page
-- ✅ Gardés (appels utilisateur, pas au bootstrap) : store-selector handleLogoUpload, hash-error-handler setTimeout fallback, onboarding-modal handleLogoUpload
-- Reste : vérification fonctionnelle login → dashboard sans refresh + plus d'erreur lock
-
+Correction du modal "Nouvelle commande" (Ventes) :
+- ✅ Source de commande par défaut changée de `organic` → `ads`
+- ✅ Correction des routes API Rapid Delivery (connect + update-token) : remplacement de l'upsert fragile par select + update/insert
+- ✅ Migration SQL : contrainte unique `(store_id, name)` sur `delivery_companies`
+- ✅ Script de réparation pour stores déjà impactés
 
 ## Next Immediate Steps
 

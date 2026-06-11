@@ -44,7 +44,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = localStorage.getItem('current-store-id')
-    setCurrentStoreIdState(stored ?? null)
+    // stored === null → pas encore de choix persisté (undefined pour le signaler)
+    // stored === "" → "Tous les stores" choisi explicitement (null)
+    setCurrentStoreIdState(stored ? stored : undefined)
     setLocalStorageLoaded(true)
   }, [])
 
@@ -146,13 +148,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    // Ne pas réinitialiser si l'utilisateur a explicitement choisi "Tous les stores" (null)
+    // Si le store courant existe encore dans la liste, le conserver
+    if (currentStoreId && accessibleStores.some((store) => store.id === currentStoreId)) {
+      return
+    }
+
+    // Si l'utilisateur a explicitement choisi "Tous les stores" (null), le conserver
     if (currentStoreId === null) return
 
-    const hasCurrentStore = accessibleStores.some((store) => store.id === currentStoreId)
-
-    if (!hasCurrentStore) {
+    // Le store courant n'existe plus (ou pas encore défini) → choisir un défaut intelligent
+    if (accessibleStores.length === 1) {
+      // Un seul store → le sélectionner automatiquement
       setCurrentStoreId(accessibleStores[0].id)
+    } else {
+      // Plusieurs stores → "Tous les stores" par défaut
+      setCurrentStoreId(null)
     }
   }, [accessibleStores, currentStoreId, isStoresLoading])
 
