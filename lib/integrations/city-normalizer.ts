@@ -76,6 +76,29 @@ function resolveCityKeyFromCandidates(
 }
 
 async function listStandardCities(supabase: SupabaseLike) {
+  // Priorité 1: delivery_rates du pricing group par défaut
+  const { data: defaultGroup, error: groupError } = await supabase
+    .from('pricing_groups')
+    .select('id')
+    .eq('is_default', true)
+    .maybeSingle()
+
+  if (!groupError && defaultGroup?.id) {
+    const { data: rates, error: ratesError } = await supabase
+      .from('delivery_rates')
+      .select('external_city_key, city_name')
+      .eq('pricing_group_id', defaultGroup.id)
+      .order('city_name', { ascending: true })
+
+    if (!ratesError && (rates || []).length > 0) {
+      return (rates || []).map((r) => ({
+        city_key: Number(r.external_city_key || 0),
+        city_name: r.city_name,
+      }))
+    }
+  }
+
+  // Priorité 2: rapid_delivery_cities_standard
   const { data, error } = await supabase
     .from('rapid_delivery_cities_standard')
     .select('city_key, city_name')
@@ -88,6 +111,7 @@ async function listStandardCities(supabase: SupabaseLike) {
 
   console.warn('[city-normalizer] standard-cities-empty-fallback-to-integration-cities')
 
+  // Priorité 3: rapid_delivery_cities (legacy)
   const { data: integrationCities, error: integrationCitiesError } = await supabase
     .from('rapid_delivery_cities')
     .select('city_key, city_name')

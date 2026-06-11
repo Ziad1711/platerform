@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { computePayloadHash, checkIdempotency, recordIdempotency } from './idempotency'
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
+import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 
 export type IngestOrderPayload = {
   idempotency_key: string
@@ -107,15 +108,12 @@ export async function ingestOrder(
           resolvedCityKey = Number(normalizedCity.cityKey) || null
           normalizationSource = normalizedCity.source
 
-          // Calculer le delivery_fee depuis rapid_delivery_cities
-          const { data: rapidCity } = await supabase
-            .from('rapid_delivery_cities')
-            .select('cost_delivery')
-            .eq('city_key', resolvedCityKey)
-            .limit(1)
-            .maybeSingle()
-
-          resolvedDeliveryFee = Number(rapidCity?.cost_delivery || 0) || null
+          // Calculer le delivery_fee via le resolver centralisé (delivery_rates)
+          resolvedDeliveryFee = await resolveDeliveryFee({
+            supabase,
+            storeId,
+            cityKey: resolvedCityKey!,
+          })
         }
       }
     } catch {

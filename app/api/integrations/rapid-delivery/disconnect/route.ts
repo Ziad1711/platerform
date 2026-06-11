@@ -48,7 +48,6 @@ export async function POST(request: Request) {
         const purgeTargets = [
           'rapid_delivery_shops',
           'rapid_delivery_cities',
-          'rapid_delivery_cities_custom',
           'rapid_delivery_entity_mappings',
           'delivery_shops',
         ]

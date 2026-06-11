@@ -410,7 +410,7 @@ export default function StocksPage() {
 
       {/* Filters - same row as sales */}
       <div className="bg-card rounded-xl shadow p-4">
-        <div className="flex flex-row items-center gap-2 sm:gap-3">
+        <div className="flex flex-row items-center gap-4 sm:gap-5">
           <StoreSelector />
           <div className="flex items-center gap-1.5">
             <Filter className="w-4 h-4 text-muted-foreground shrink-0" />

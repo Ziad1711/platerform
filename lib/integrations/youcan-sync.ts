@@ -1,5 +1,6 @@
 import { listYouCanOrders, listYouCanProducts } from '@/lib/integrations/youcan'
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
+import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 
 type SupabaseAdmin = any
 
@@ -501,14 +502,11 @@ export async function upsertYouCanOrderFromPayload(params: {
 
   let resolvedDeliveryFee = 0
   if (normalizedCityKey) {
-    const { data: rapidCity } = await supabase
-      .from('rapid_delivery_cities')
-      .select('cost_delivery')
-      .eq('city_key', normalizedCityKey)
-      .limit(1)
-      .maybeSingle()
-
-    resolvedDeliveryFee = Number(rapidCity?.cost_delivery || 0)
+    resolvedDeliveryFee = await resolveDeliveryFee({
+      supabase,
+      storeId,
+      cityKey: normalizedCityKey,
+    })
   }
 
   const { data: defaultDeliveryCompany } = await supabase

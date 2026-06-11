@@ -1043,7 +1043,34 @@ export default function VentesPage() {
       if (configError) throw configError
 
       if (config?.integration_id) {
-        // 2. Charger les villes depuis rapid_delivery_cities (liées à l'intégration)
+        // 2. Essayer de charger depuis delivery_rates (nouveau schéma générique)
+        //    via le pricing_group_id du shop
+        const { data: shop } = await supabase
+          .from('delivery_shops')
+          .select('pricing_group_id')
+          .eq('integration_id', config.integration_id)
+          .eq('store_id', currentStoreId!)
+          .not('pricing_group_id', 'is', null)
+          .limit(1)
+          .maybeSingle()
+
+        if (shop?.pricing_group_id) {
+          const { data: rates, error: ratesError } = await supabase
+            .from('delivery_rates')
+            .select('external_city_key, external_city_name, price')
+            .eq('pricing_group_id', shop.pricing_group_id)
+            .order('external_city_name', { ascending: true })
+
+          if (!ratesError && rates && rates.length > 0) {
+            return rates.map((r) => ({
+              city_key: r.external_city_key,
+              city_name: r.external_city_name,
+              cost_delivery: r.price,
+            }))
+          }
+        }
+
+        // 3. Fallback : charger depuis rapid_delivery_cities (liées à l'intégration)
         const { data: cities, error: citiesError } = await supabase
           .from('rapid_delivery_cities')
           .select('city_key, city_name, cost_delivery')
@@ -1054,7 +1081,7 @@ export default function VentesPage() {
         if (cities && cities.length > 0) return cities
       }
 
-      // 3. Fallback : charger depuis rapid_delivery_cities_standard (villes génériques)
+      // 4. Fallback ultime : charger depuis rapid_delivery_cities_standard (villes génériques)
       const { data: fallbackCities, error: fallbackError } = await supabase
         .from('rapid_delivery_cities_standard')
         .select('city_key, city_name, cost_delivery')

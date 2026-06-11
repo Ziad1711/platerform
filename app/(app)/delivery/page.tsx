@@ -49,16 +49,50 @@ export default function LivraisonPage() {
   })
 
   const { data: customCities = [] } = useQuery({
-    queryKey: ['delivery-page-custom-cities', rapidDeliveryConfig?.integration_id],
-    enabled: !!rapidDeliveryConfig?.integration_id,
+    queryKey: ['delivery-page-custom-cities', currentStoreId],
+    enabled: !!currentStoreId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('rapid_delivery_cities_custom')
-        .select('city_key, city_name, cost_delivery, cost_refuse, cost_cancel')
-        .eq('integration_id', rapidDeliveryConfig!.integration_id)
+      // Récupérer le pricing_group_id du shop via delivery_shops
+      const { data: shop, error: shopError } = await supabase
+        .from('delivery_shops')
+        .select('pricing_group_id')
+        .eq('store_id', currentStoreId!)
+        .maybeSingle()
 
-      if (error) throw error
-      return data || []
+      if (shopError) throw shopError
+
+      if (!shop?.pricing_group_id) {
+        // Fallback: lire depuis rapid_delivery_cities_standard
+        const { data: fallback, error: fallbackError } = await supabase
+          .from('rapid_delivery_cities_standard')
+          .select('city_key, city_name, cost_delivery, cost_refuse, cost_cancel')
+          .order('city_name', { ascending: true })
+
+        if (fallbackError) throw fallbackError
+        return (fallback || []).map((c: any) => ({
+          city_key: c.city_key,
+          city_name: c.city_name,
+          cost_delivery: c.cost_delivery,
+          cost_refuse: c.cost_refuse,
+          cost_cancel: c.cost_cancel,
+        }))
+      }
+
+      // Lire depuis delivery_rates via le pricing_group_id
+      const { data: rates, error: ratesError } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name, price, cost_refuse, cost_cancel')
+        .eq('pricing_group_id', shop.pricing_group_id)
+        .order('city_name', { ascending: true })
+
+      if (ratesError) throw ratesError
+      return (rates || []).map((r: any) => ({
+        city_key: r.external_city_key,
+        city_name: r.city_name,
+        cost_delivery: r.price,
+        cost_refuse: r.cost_refuse,
+        cost_cancel: r.cost_cancel,
+      }))
     },
   })
 
