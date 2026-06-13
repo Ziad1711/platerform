@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       rawCity: city,
       orderId,
       supabase: createAdminClient(),
+      providerSlug: 'rapid-delivery',
     })
 
     console.log('[api/orders/normalize-city] result', result)
