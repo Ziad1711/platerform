@@ -18,33 +18,39 @@ export async function resolveDeliveryFee(params: {
   supabase?: SupabaseLike
   storeId: string
   cityKey: number
+  integrationId?: string | null
+  providerSlug?: string
 }): Promise<number> {
   const supabase = params.supabase || createAdminClient()
   const { storeId, cityKey } = params
+  const providerSlug = params.providerSlug || 'rapid-delivery'
 
-  // 1. Récupérer l'intégration Rapid Delivery
-  const { data: integration } = await supabase
-    .from('integrations')
+  // 1. Récupérer le provider réel (source générique delivery_rates)
+  const { data: provider } = await supabase
+    .from('integration_providers')
     .select('id')
-    .eq('provider', 'rapid-delivery')
-    .eq('store_id', storeId)
-    .eq('status', 'connected')
+    .eq('slug', providerSlug)
     .maybeSingle()
 
-  if (!integration?.id) {
-    // Fallback direct sur rapid_delivery_cities_standard
+  if (!provider?.id) {
     return fallbackStandardRate(supabase, cityKey)
   }
 
-  // 2. Trouver le pricing_group_id via delivery_shops
-  const { data: shop } = await supabase
+  // 2. Trouver le pricing_group_id via delivery_shops du store
+  let shopQuery = supabase
     .from('delivery_shops')
     .select('pricing_group_id')
-    .eq('integration_id', integration.id)
+    .eq('provider_id', provider.id)
     .eq('store_id', storeId)
     .not('pricing_group_id', 'is', null)
     .order('external_shop_id', { ascending: true })
     .limit(1)
+
+  if (params.integrationId) {
+    shopQuery = shopQuery.eq('integration_id', params.integrationId)
+  }
+
+  const { data: shop } = await shopQuery
     .maybeSingle()
 
   if (shop?.pricing_group_id) {
@@ -61,7 +67,29 @@ export async function resolveDeliveryFee(params: {
     }
   }
 
-  // 4. Fallback : rapid_delivery_cities_standard
+  // 4. Fallback sur le pricing group par défaut du provider
+  const { data: defaultGroup } = await supabase
+    .from('pricing_groups')
+    .select('id')
+    .eq('provider_id', provider.id)
+    .eq('is_default', true)
+    .is('integration_id', null)
+    .maybeSingle()
+
+  if (defaultGroup?.id) {
+    const { data: defaultRate } = await supabase
+      .from('delivery_rates')
+      .select('price')
+      .eq('pricing_group_id', defaultGroup.id)
+      .eq('external_city_key', cityKey)
+      .maybeSingle()
+
+    if (defaultRate?.price !== undefined && defaultRate?.price !== null) {
+      return Number(defaultRate.price)
+    }
+  }
+
+  // 5. Fallback legacy Rapid Delivery
   return fallbackStandardRate(supabase, cityKey)
 }
 

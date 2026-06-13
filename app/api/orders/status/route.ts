@@ -4,6 +4,7 @@ import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/sec
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
+import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 
 const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   confirmation_rejected: 'confirmation_rejected_at',
@@ -155,6 +156,21 @@ export async function POST(request: Request) {
               ...oi,
               products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
             })),
+          }
+          const rapidCityKey = Number(normalizedOrder.delivery_city_external_id || 0) || 0
+          if (rapidCityKey) {
+            const rapidDeliveryFee = await resolveDeliveryFee({
+              supabase: admin,
+              storeId: order.store_id,
+              cityKey: rapidCityKey,
+              integrationId: integration.id,
+              providerSlug: 'rapid-delivery',
+            })
+
+            await admin
+              .from('orders')
+              .update({ delivery_fee: rapidDeliveryFee, updated_at: now })
+              .eq('id', orderId)
           }
           const result = await autoCreateRapidDeliveryParcelForOrder({
             admin,
