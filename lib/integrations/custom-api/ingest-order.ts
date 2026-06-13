@@ -92,7 +92,7 @@ export async function ingestOrder(
       address: payload.address || null,
       total_selling_price: payload.total_selling_price,
       delivery_charge_to_customer: payload.delivery_charge_to_customer ?? 0,
-      delivery_fee: null,
+      delivery_fee: 0,
       delivery_note: payload.delivery_note || null,
 
       discount_type: payload.discount_type || null,
