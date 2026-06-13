@@ -136,7 +136,7 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
     external_delivery_id: trackingNumber,
     delivery_status: 'pending',
     last_delivery_sync_at: now,
-    delivery_city_key: cityKey,
+    delivery_city_external_id: cityKey,
     updated_at: now,
   }
 

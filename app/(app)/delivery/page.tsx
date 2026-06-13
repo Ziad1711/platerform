@@ -117,6 +117,24 @@ export default function LivraisonPage() {
     },
   })
 
+  const { data: confirmedOzoneParcels = [] } = useQuery({
+    queryKey: ['delivery-page-confirmed-ozone-parcels', currentStoreId],
+    enabled: !!currentStoreId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, customer_name, phone, city, total_selling_price, ozone_parcel_key, confirmed_at, ozone_voucher_key, status')
+        .eq('store_id', currentStoreId!)
+        .eq('status', 'confirmed')
+        .not('ozone_parcel_key', 'is', null)
+        .is('ozone_voucher_key', null)
+        .order('confirmed_at', { ascending: false })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
   const { data: vouchers = [] } = useQuery({
     queryKey: ['delivery-page-vouchers', rapidDeliveryConfig?.integration_id],
     enabled: !!rapidDeliveryConfig?.integration_id,
@@ -126,6 +144,21 @@ export default function LivraisonPage() {
         .select('rapid_delivery_id, payload, updated_at')
         .eq('integration_id', rapidDeliveryConfig!.integration_id)
         .eq('entity_type', 'voucher')
+        .order('updated_at', { ascending: false })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const { data: ozoneVouchers = [] } = useQuery({
+    queryKey: ['delivery-page-ozone-vouchers', currentStoreId],
+    enabled: !!currentStoreId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ozone_vouchers')
+        .select('id, ozone_voucher_key, payload, updated_at')
+        .eq('store_id', currentStoreId!)
         .order('updated_at', { ascending: false })
 
       if (error) throw error
@@ -324,7 +357,7 @@ export default function LivraisonPage() {
           </div>
 
           <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage</h2>
+            <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage (Rapid Delivery)</h2>
             {vouchers.length === 0 ? (
               <p className="text-sm text-muted-foreground">Aucun bon créé pour le moment.</p>
             ) : (
@@ -351,6 +384,85 @@ export default function LivraisonPage() {
                         Bon
                       </Link>
                       <div className="text-xs text-muted-foreground sm:ml-2">{voucher.updated_at ? new Date(voucher.updated_at).toLocaleString('fr-MA') : '-'}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
+            <h2 className="text-base sm:text-lg font-semibold text-foreground">Colis OZONE confirmés à ramasser</h2>
+            <p className="text-xs text-muted-foreground">Colis OZONE prêts pour la création d'un bon de ramassage.</p>
+
+            {confirmedOzoneParcels.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucun colis OZONE confirmé prêt pour un bon.</p>
+            ) : (
+              <>
+                {/* Desktop table */}
+                <div className="hidden sm:block overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="px-2 py-2">Tracking</th>
+                        <th className="px-2 py-2">Client</th>
+                        <th className="px-2 py-2">Téléphone</th>
+                        <th className="px-2 py-2">Ville</th>
+                        <th className="px-2 py-2">Montant</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {confirmedOzoneParcels.map((order: any) => (
+                        <tr key={order.id} className="border-b last:border-b-0">
+                          <td className="px-2 py-2 text-foreground">{order.ozone_parcel_key}</td>
+                          <td className="px-2 py-2 text-foreground">{order.customer_name || '-'}</td>
+                          <td className="px-2 py-2">{order.phone || '-'}</td>
+                          <td className="px-2 py-2">{order.city || '-'}</td>
+                          <td className="px-2 py-2">{formatCurrency(Number(order.total_selling_price || 0))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile cards */}
+                <div className="sm:hidden space-y-2">
+                  {confirmedOzoneParcels.map((order: any) => (
+                    <div key={order.id} className="rounded-lg border p-3 text-sm space-y-1.5">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-foreground truncate">{order.customer_name || '-'}</div>
+                          <div className="text-xs text-muted-foreground">Tracking: {order.ozone_parcel_key}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-semibold text-foreground">{formatCurrency(Number(order.total_selling_price || 0))}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground pl-0">
+                        <span>{order.phone || '-'}</span>
+                        <span>{order.city || '-'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
+            <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage (OZONE)</h2>
+            {ozoneVouchers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucun bon OZONE créé pour le moment.</p>
+            ) : (
+              <div className="space-y-2">
+                {ozoneVouchers.map((voucher: any) => (
+                  <div key={voucher.id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border px-3 py-2 text-sm gap-2">
+                    <div>
+                      <div className="font-medium text-foreground">Bon #{voucher.ozone_voucher_key}</div>
+                      <div className="text-muted-foreground">{Array.isArray(voucher.payload?.parcels) ? voucher.payload.parcels.length : 0} colis</div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-xs text-muted-foreground">{voucher.updated_at ? new Date(voucher.updated_at).toLocaleString('fr-MA') : '-'}</div>
                     </div>
                   </div>
                 ))}

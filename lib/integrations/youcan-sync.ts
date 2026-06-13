@@ -1,7 +1,4 @@
 import { listYouCanOrders, listYouCanProducts } from '@/lib/integrations/youcan'
-import { normalizeCityName } from '@/lib/integrations/city-normalizer'
-import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
-
 type SupabaseAdmin = any
 
 function parseDate(value: string | null | undefined) {
@@ -494,32 +491,9 @@ export async function upsertYouCanOrderFromPayload(params: {
     customerAddress?.city,
     customer?.city
   )
-  const normalizedCity = city ? await normalizeCityName({ rawCity: city, supabase }).catch(() => null) : null
 
   const total = Number(order?.total || 0)
   const shippingPrice = Number(shipping?.price || 0)
-  const normalizedCityKey = Number(normalizedCity?.cityKey || 0) || null
-
-  let resolvedDeliveryFee = 0
-  if (normalizedCityKey) {
-    resolvedDeliveryFee = await resolveDeliveryFee({
-      supabase,
-      storeId,
-      cityKey: normalizedCityKey,
-    })
-  }
-
-  const { data: defaultDeliveryCompany } = await supabase
-    .from('delivery_companies')
-    .select('id, name, api_provider, is_active')
-    .eq('store_id', storeId)
-    .eq('is_active', true)
-    .or('api_provider.eq.rapid-delivery,name.ilike.%rapid%')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  const resolvedDeliveryCompanyId = defaultDeliveryCompany?.id || null
 
   let internalOrderId = existingOrderMap?.internal_id || null
   if (internalOrderId) {
@@ -542,14 +516,11 @@ export async function upsertYouCanOrderFromPayload(params: {
         customer_name: customerName,
         phone,
         address,
-        city: normalizedCity?.cityName || city,
-        rapid_delivery_city_key: normalizedCityKey,
+        city: city,
         status: 'new',
         order_date: orderCreatedAt ? orderCreatedAt.toISOString() : new Date().toISOString(),
         total_selling_price: Number.isFinite(total) ? total : 0,
-        delivery_fee: resolvedDeliveryFee,
         delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
-        delivery_company_id: resolvedDeliveryCompanyId,
         source: 'ads',
       })
       .select('id')
@@ -563,9 +534,7 @@ export async function upsertYouCanOrderFromPayload(params: {
       phone,
       source: 'ads',
       total_selling_price: Number.isFinite(total) ? total : 0,
-      delivery_fee: resolvedDeliveryFee,
       delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
-      delivery_company_id: resolvedDeliveryCompanyId,
       updated_at: new Date().toISOString(),
     }
 
@@ -574,8 +543,7 @@ export async function upsertYouCanOrderFromPayload(params: {
     }
 
     if (city) {
-      orderUpdatePayload.city = normalizedCity?.cityName || city
-      orderUpdatePayload.rapid_delivery_city_key = normalizedCityKey
+      orderUpdatePayload.city = city
     }
 
     await supabase

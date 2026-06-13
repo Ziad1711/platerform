@@ -9,6 +9,7 @@ import StoreSelector from '@/components/dashboard/store-selector'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
 import IntegrationCard from '@/components/dashboard/integrations/integration-card'
 import DeliveryConnectWizard from '@/components/dashboard/integrations/delivery-connect-wizard'
+import OzoneConnectWizard from '@/components/dashboard/integrations/ozone-connect-wizard'
 import FacebookAdsConnectWizard from '@/components/dashboard/integrations/facebook-ads-connect-wizard'
 import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
 import { createClient } from '@/lib/supabase/client'
@@ -135,7 +136,7 @@ export default function IntegrationsPage() {
       setSelectedCustomSiteStoreWebsite(null)
     } else {
       setConnectProviderSlug(providerSlug)
-      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery') {
+      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'ozone') {
         setYoucanStoreSlug('')
       }
       setConnectError('')
@@ -450,8 +451,18 @@ export default function IntegrationsPage() {
         />
       ) : null}
 
+      {isConnectModalOpen && connectProviderSlug === 'ozone' ? (
+        <OzoneConnectWizard
+          onClose={() => {
+            setIsConnectModalOpen(false)
+            setConnectProviderSlug(null)
+            setConnectError('')
+          }}
+        />
+      ) : null}
+
       {/* YouCan Connect Modal */}
-      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && (
+      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"

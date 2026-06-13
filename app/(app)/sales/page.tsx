@@ -14,6 +14,8 @@ import { usePermissions } from '@/lib/auth/use-permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 
+const OZONE_PROVIDER_ID = '5f806347-45f1-481a-901d-2eb98b20b3a8'
+
 async function normalizeOrderCityRequest(city: string, orderId?: string) {
   const response = await fetch('/api/orders/normalize-city', {
     method: 'POST',
@@ -420,7 +422,7 @@ export default function VentesPage() {
   const [city, setCity] = useState('')
   const [orderDate, setOrderDate] = useState(getNowLocalDateTimeValue)
   const [orderSource, setOrderSource] = useState<'organic' | 'ads' | 'recommendation'>('ads')
-  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [selectedAgentId, setSelectedAgentId] = useState('__owner__')
   const [selectedDeliveryCompanyId, setSelectedDeliveryCompanyId] = useState('')
   const [deliveryCostAutomationEnabled, setDeliveryCostAutomationEnabled] = useState(false)
   const [deliveryApiKey, setDeliveryApiKey] = useState('')
@@ -432,6 +434,12 @@ export default function VentesPage() {
   const [discountValue, setDiscountValue] = useState('0')
   const [deliveryFee, setDeliveryFee] = useState('0')
   const [formError, setFormError] = useState('')
+  const createFormScrollRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (formError && createFormScrollRef.current) {
+      createFormScrollRef.current.scrollTo({ top: createFormScrollRef.current.scrollHeight, behavior: 'smooth' })
+    }
+  }, [formError])
   const [items, setItems] = useState<Array<{ product_id: string; product_variant_id: string; quantity: number; unit_selling_price: number }>>([
     { product_id: '', product_variant_id: '', quantity: 1, unit_selling_price: 0 },
   ])
@@ -480,9 +488,17 @@ export default function VentesPage() {
   const [rapidDeliveryCityKey, setRapidDeliveryCityKey] = useState('')
   const [rapidDeliveryShopKey, setRapidDeliveryShopKey] = useState('')
   const [rapidDeliveryRemark, setRapidDeliveryRemark] = useState('')
+  const [isOzoneModalOpen, setIsOzoneModalOpen] = useState(false)
+  const [ozoneOrder, setOzoneOrder] = useState<any | null>(null)
+  const [ozoneCityKey, setOzoneCityKey] = useState('')
+  const [ozoneShopKey, setOzoneShopKey] = useState('')
+  const [ozoneRemark, setOzoneRemark] = useState('')
   const [deliveryNoteModalOrder, setDeliveryNoteModalOrder] = useState<any | null>(null)
   const [deliveryNoteText, setDeliveryNoteText] = useState('')
   const [deliveryNoteSelectedCompanyId, setDeliveryNoteSelectedCompanyId] = useState('')
+  const [deliveryNoteOzoneCityKey, setDeliveryNoteOzoneCityKey] = useState('')
+  const [deliveryNoteOzoneSearchTerm, setDeliveryNoteOzoneSearchTerm] = useState('')
+  const [deliveryNoteOzoneDropdownOpen, setDeliveryNoteOzoneDropdownOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
@@ -1008,6 +1024,12 @@ export default function VentesPage() {
     enabled: !!deliveryNoteModalOrder?.store_id,
   })
 
+  const deliveryNoteSelectedCompany = useMemo(
+    () => (deliveryCompaniesForOrder || []).find((company: any) => company.id === deliveryNoteSelectedCompanyId) || null,
+    [deliveryCompaniesForOrder, deliveryNoteSelectedCompanyId]
+  )
+  const isDeliveryNoteOzone = deliveryNoteSelectedCompany?.api_provider === 'ozone'
+
   const { data: rapidDeliveryIntegration } = useQuery({
     queryKey: ['rapid-delivery-integration-status'],
     queryFn: async () => {
@@ -1019,6 +1041,60 @@ export default function VentesPage() {
 
       if (error) throw error
       return data || null
+    },
+  })
+
+  const { data: ozoneIntegration } = useQuery({
+    queryKey: ['ozone-integration-status'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('integrations')
+        .select('id, status')
+        .eq('provider', 'ozone')
+        .maybeSingle()
+
+      if (error) throw error
+      return data || null
+    },
+  })
+
+  const { data: ozoneCities = [] } = useQuery({
+    queryKey: ['ozone-cities', OZONE_PROVIDER_ID],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name, price')
+        .eq('provider_id', OZONE_PROVIDER_ID)
+        .order('city_name', { ascending: true })
+
+      if (error) throw error
+      return Array.from(
+        new Map(
+          (data || []).map((r: any) => [
+            String(r.external_city_key),
+            {
+              city_key: r.external_city_key,
+              city_name: r.city_name,
+              cost_delivery: r.price,
+            },
+          ])
+        ).values()
+      )
+    },
+  })
+
+  const { data: ozoneShops = [] } = useQuery({
+    queryKey: ['ozone-shops', ozoneIntegration?.id],
+    enabled: !!ozoneIntegration?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_shops')
+        .select('shop_key, name')
+        .eq('integration_id', ozoneIntegration!.id)
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      return data || []
     },
   })
 
@@ -1286,15 +1362,21 @@ export default function VentesPage() {
             : 0
 
       const computedNetTotal = Math.max(0, computedSubtotal - computedDiscountAmount + safeDeliveryChargeToCustomer)
-      const shouldNormalizeCreateOrderCity = createOrderRapidDeliveryConfig?.enable_city_normalization !== false
-      const normalizedCityPayload = shouldNormalizeCreateOrderCity
-        ? await normalizeOrderCityRequest(city.trim())
-        : { cityName: city.trim() }
-      const normalizedCityValue = String(normalizedCityPayload.cityName || city.trim()).trim()
-      const normalizedCityKey = Number(normalizedCityPayload.cityKey || 0) || null
-      const resolvedDeliveryFee = normalizedCityKey
-        ? Number(rapidDeliveryCityCostByKey.get(normalizedCityKey) ?? manualDeliveryFee)
-        : manualDeliveryFee
+      // Normaliser la ville avant insertion
+      let normalizedCityValue = city.trim()
+      let normalizedCityKey: number | null = null
+      try {
+        const normalized = await normalizeOrderCityRequest(normalizedCityValue)
+        if (normalized.cityName) {
+          normalizedCityValue = normalized.cityName
+        }
+        normalizedCityKey = Number(normalized.cityKey || 0) || null
+      } catch {
+        // fallback: on garde la valeur brute
+      }
+      const resolvedDeliveryFee = manualDeliveryFee
+
+
 
       const { data: insertedOrder, error: insertOrderError } = await supabase
         .from('orders')
@@ -1304,7 +1386,7 @@ export default function VentesPage() {
           phone: phone.trim(),
           address: address.trim(),
           city: normalizedCityValue,
-          rapid_delivery_city_key: normalizedCityKey,
+          delivery_city_external_id: normalizedCityKey,
           source: orderSource,
           status: 'new',
           order_date: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
@@ -1354,8 +1436,8 @@ export default function VentesPage() {
       setCity('')
       setOrderDate(getNowLocalDateTimeValue())
       setOrderSource('ads')
-      setSelectedAgentId('')
-      setSelectedDeliveryCompanyId('')
+                        setSelectedAgentId('__owner__')
+                        setSelectedDeliveryCompanyId('')
       setDeliveryCostAutomationEnabled(false)
       setDeliveryApiKey('')
       setShowDeliveryApiKeyInput(false)
@@ -1377,11 +1459,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -1439,6 +1521,44 @@ export default function VentesPage() {
     },
     onError: (error: any) => {
       setFormError(error?.message || 'Erreur création colis Rapid Delivery')
+    },
+  })
+
+  const createOzoneParcelMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentStoreId || !ozoneOrder?.id) throw new Error('Commande introuvable.')
+      if (!ozoneCityKey || !ozoneShopKey) throw new Error('Choisissez la ville et le shop.')
+
+      const response = await fetch('/api/integrations/ozone/parcels/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: currentStoreId,
+          orderId: ozoneOrder.id,
+          cityKey: String(ozoneCityKey),
+          shopKey: String(ozoneShopKey),
+          remark: ozoneRemark,
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || 'OZONE_CREATE_FAILED')
+      }
+
+      return response.json()
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      setIsOzoneModalOpen(false)
+      setOzoneOrder(null)
+      setOzoneCityKey('')
+      setOzoneShopKey('')
+      setOzoneRemark('')
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur création colis OZONE')
     },
   })
 
@@ -1514,7 +1634,7 @@ export default function VentesPage() {
 
       const updatePayload: Record<string, any> = {
         city: resolvedCityName,
-        rapid_delivery_city_key: resolvedCityKey,
+        delivery_city_external_id: resolvedCityKey,
       }
       if (resolvedDeliveryFee !== undefined) {
         updatePayload.delivery_fee = resolvedDeliveryFee
@@ -2209,7 +2329,7 @@ export default function VentesPage() {
           phone: phoneValue,
           address: addressValue,
           city: String(normalizedCityPayload.cityName || cityValue).trim(),
-          rapid_delivery_city_key: normalizedCityKey,
+          delivery_city_external_id: normalizedCityKey,
           total_selling_price: totalSellingPrice,
           status: mappedStatus,
           source: 'organic',
@@ -2410,7 +2530,7 @@ export default function VentesPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-6 overflow-y-auto">
+            <div ref={createFormScrollRef} className="p-6 space-y-6 overflow-y-auto">
               {/* Section: Informations générales */}
               <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="px-4 py-3 bg-[#1fa971]/10 border-b border-border flex items-center gap-2">
@@ -2436,7 +2556,7 @@ export default function VentesPage() {
                       value={selectedCreateStoreId}
                       onChange={(e) => {
                         setSelectedCreateStoreId(e.target.value)
-                        setSelectedAgentId('')
+                        setSelectedAgentId('__owner__')
                         setSelectedDeliveryCompanyId('')
                         setDeliveryCostAutomationEnabled(false)
                         setDeliveryApiKey('')
@@ -3373,6 +3493,22 @@ export default function VentesPage() {
                       Synchroniser suivi
                     </button>
                   ) : null}
+                  {ozoneIntegration?.status === 'connected' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOzoneOrder(selectedOrderForDetails)
+                        setOzoneCityKey('')
+                        setOzoneShopKey('')
+                        setOzoneRemark('')
+                        setFormError('')
+                        setIsOzoneModalOpen(true)
+                      }}
+                      className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                    >
+                      Créer colis OZONE
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -3679,6 +3815,7 @@ export default function VentesPage() {
                                 if (nextStatus === 'confirmed') {
                                   setDeliveryNoteText(order.delivery_note || '')
                                   setDeliveryNoteSelectedCompanyId(order.delivery_company_id || '')
+                                  setDeliveryNoteOzoneCityKey('')
                                   setDeliveryNoteModalOrder(order)
                                   return
                                 }
@@ -3932,6 +4069,77 @@ export default function VentesPage() {
         </div>
       ) : null}
 
+      {isOzoneModalOpen && ozoneOrder ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setIsOzoneModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Créer colis OZONE</h3>
+                <p className="text-sm text-muted-foreground">Commande #{String(ozoneOrder.id || '').slice(0, 8)}</p>
+              </div>
+              <button type="button" onClick={() => setIsOzoneModalOpen(false)} className="text-sm text-muted-foreground">
+                Fermer
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">Ville OZONE</label>
+                <select
+                  value={ozoneCityKey}
+                  onChange={(e) => setOzoneCityKey(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Choisir une ville</option>
+                  {ozoneCities.map((city: any) => (
+                    <option key={city.city_key} value={city.city_key}>
+                      {city.city_name} — {formatCurrency(city.cost_delivery || 0)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">Shop de dépôt</label>
+                <select
+                  value={ozoneShopKey}
+                  onChange={(e) => setOzoneShopKey(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Choisir un shop</option>
+                  {ozoneShops.map((shop: any) => (
+                    <option key={shop.shop_key} value={shop.shop_key}>
+                      {shop.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">Remarque</label>
+                <textarea
+                  value={ozoneRemark}
+                  onChange={(e) => setOzoneRemark(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                  placeholder="Instruction de livraison"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => createOzoneParcelMutation.mutate()}
+                disabled={createOzoneParcelMutation.isPending}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {createOzoneParcelMutation.isPending ? 'Création...' : 'Créer le colis'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {deliveryNoteModalOrder ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDeliveryNoteModalOrder(null)} />
@@ -3963,7 +4171,10 @@ export default function VentesPage() {
                     </label>
                     <select
                       value={deliveryNoteSelectedCompanyId}
-                      onChange={(e) => setDeliveryNoteSelectedCompanyId(e.target.value)}
+                      onChange={(e) => {
+                        setDeliveryNoteSelectedCompanyId(e.target.value)
+                        setDeliveryNoteOzoneCityKey('')
+                      }}
                       className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                     >
                       <option value="">Choisir une société</option>
@@ -3980,6 +4191,64 @@ export default function VentesPage() {
                       </p>
                     ) : null}
                   </div>
+                  {isDeliveryNoteOzone ? (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        Ville OZONE <span className="text-muted-foreground font-normal">(obligatoire)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={deliveryNoteOzoneSearchTerm}
+                          onChange={(e) => {
+                            setDeliveryNoteOzoneSearchTerm(e.target.value)
+                            setDeliveryNoteOzoneCityKey('')
+                          }}
+                          onFocus={() => setDeliveryNoteOzoneDropdownOpen(true)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                          placeholder="Tapez pour rechercher une ville OZONE..."
+                        />
+                        {deliveryNoteOzoneDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setDeliveryNoteOzoneDropdownOpen(false)} />
+                            <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-48 overflow-y-auto rounded-xl border border-border bg-popover shadow-xl">
+                              {(ozoneCities || []).filter((city: any) =>
+                                !deliveryNoteOzoneSearchTerm ||
+                                String(city.city_name || '').toLowerCase().includes(deliveryNoteOzoneSearchTerm.toLowerCase())
+                              ).length === 0 ? (
+                                <div className="px-3.5 py-2.5 text-sm text-muted-foreground">Aucune ville trouvée</div>
+                              ) : (
+                                (ozoneCities || []).filter((city: any) =>
+                                  !deliveryNoteOzoneSearchTerm ||
+                                  String(city.city_name || '').toLowerCase().includes(deliveryNoteOzoneSearchTerm.toLowerCase())
+                                ).map((city: any) => (
+                                  <button
+                                    key={city.city_key}
+                                    type="button"
+                                    className={`w-full text-left px-3.5 py-2.5 text-sm hover:bg-secondary transition-colors ${
+                                      String(deliveryNoteOzoneCityKey) === String(city.city_key)
+                                        ? 'bg-primary/10 text-primary font-medium'
+                                        : 'text-foreground'
+                                    }`}
+                                    onClick={() => {
+                                      setDeliveryNoteOzoneCityKey(String(city.city_key))
+                                      setDeliveryNoteOzoneSearchTerm(String(city.city_name || ''))
+                                      setDeliveryNoteOzoneDropdownOpen(false)
+                                    }}
+                                  >
+                                    {city.city_name} — {formatCurrency(city.cost_delivery || 0)}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        OZONE nécessite un choix manuel ville + secteur.
+                      </p>
+                    </div>
+                  ) : null}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-foreground">
                       Note de livraison <span className="text-muted-foreground font-normal">(optionnelle)</span>
@@ -3996,7 +4265,7 @@ export default function VentesPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                       </svg>
                       <p className="text-xs text-muted-foreground/70 leading-relaxed">
-                        Cette note sera envoyée à <span className="font-medium text-foreground/60">Rapid Delivery</span> comme remarque sur le colis.
+                        Cette note sera envoyée au transporteur comme remarque sur le colis.
                       </p>
                     </div>
                   </div>
@@ -4013,17 +4282,32 @@ export default function VentesPage() {
                       setFormError('Veuillez choisir une société de livraison.')
                       return
                     }
+                    const selectedOzoneCity = isDeliveryNoteOzone
+                      ? (ozoneCities as any[]).find((city: any) => String((city as any).city_key) === String(deliveryNoteOzoneCityKey))
+                      : null
+                    if (isDeliveryNoteOzone && !selectedOzoneCity) {
+                      setFormError('Veuillez choisir une ville OZONE.')
+                      return
+                    }
                     setDeliveryNoteModalOrder(null)
                     setUpdatingOrderId(order.id)
                     const resolvedCompanyId = deliveryNoteSelectedCompanyId === 'internal' ? undefined : deliveryNoteSelectedCompanyId
                     updateOrderStatusMutation.mutate(
-                      { orderId: order.id, status: 'confirmed', deliveryNote: deliveryNoteText.trim() || undefined, deliveryCompanyId: resolvedCompanyId },
+                      {
+                        orderId: order.id,
+                        status: 'confirmed',
+                        deliveryNote: deliveryNoteText.trim() || undefined,
+                        deliveryCompanyId: resolvedCompanyId,
+                        ozoneCityKey: selectedOzoneCity ? Number(selectedOzoneCity.city_key) : undefined,
+                        ozoneCityName: selectedOzoneCity ? String(selectedOzoneCity.city_name || '') : undefined,
+                      },
 
                       {
                         onSettled: () => {
                           setUpdatingOrderId(null)
                           setDeliveryNoteText('')
                           setDeliveryNoteSelectedCompanyId('')
+                          setDeliveryNoteOzoneCityKey('')
                         },
                       }
                     )

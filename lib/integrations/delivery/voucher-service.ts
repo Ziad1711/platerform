@@ -85,14 +85,19 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
   }
 
   // 3. Mettre à jour les commandes
+  const updatePayload: Record<string, unknown> = {
+    delivery_voucher_key: voucherKey,
+    last_status_update_at: now,
+    delivery_status: 'pickup_pending',
+    updated_at: now,
+  }
+
+  // Compatibilité ascendante
+  updatePayload.rapid_delivery_voucher_key = voucherKey
+
   const { error: updateOrdersError } = await admin
     .from('orders')
-    .update({
-      rapid_delivery_voucher_key: voucherKey,
-      last_status_update_at: now,
-      delivery_status: 'pickup_pending',
-      updated_at: now,
-    })
+    .update(updatePayload)
     .in('id', orderIds)
 
   if (updateOrdersError) {
@@ -100,8 +105,35 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
     throw updateOrdersError
   }
 
-  // 4. Créer le mapping voucher
-  const { error: mappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
+  // 4. Créer le mapping voucher (provider-agnostic)
+  const { error: mappingError } = await admin.from('delivery_entity_mappings').upsert(
+    {
+      user_id: config.userId,
+      integration_id: config.integrationId,
+      store_id: storeId,
+      entity_type: 'voucher',
+      provider_slug: provider.slug,
+      external_id: voucherKey,
+      internal_id: orderIds[0],
+      payload: {
+        raw: result.raw,
+        order_ids: orderIds,
+        parcels: parcelKeys,
+        remote_verified: remoteVerified,
+        remote_total_parcels: remoteTotalParcels,
+      },
+      updated_at: now,
+    },
+    { onConflict: 'integration_id,entity_type,external_id' }
+  )
+
+  if (mappingError) {
+    logger.error('voucher-mapping-failed', 'Échec création mapping voucher', { error: mappingError.message })
+    throw mappingError
+  }
+
+  // 5. Compatibilité ascendante : aussi dans rapid_delivery_entity_mappings
+  const { error: legacyMappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
     {
       user_id: config.userId,
       integration_id: config.integrationId,
@@ -121,9 +153,9 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
     { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
   )
 
-  if (mappingError) {
-    logger.error('voucher-mapping-failed', 'Échec création mapping voucher', { error: mappingError.message })
-    throw mappingError
+  if (legacyMappingError) {
+    logger.error('voucher-legacy-mapping-failed', 'Échec création mapping voucher legacy', { error: legacyMappingError.message })
+    throw legacyMappingError
   }
 
   logger.info('voucher-complete', 'Création voucher terminée', {

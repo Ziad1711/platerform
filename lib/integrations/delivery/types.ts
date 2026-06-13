@@ -109,8 +109,17 @@ export type OrderDeliveryInfo = {
   customerName?: string | null
   totalSellingPrice?: number | string | null
   trackingNumber?: string | null
+  /** Clé de ville générique (provider-agnostic) */
+  deliveryCityKey?: number | string | null
+  /** Clé de colis générique (provider-agnostic) */
+  deliveryParcelKey?: string | null
+  /** Clé de voucher générique (provider-agnostic) */
+  deliveryVoucherKey?: string | null
+  /** @deprecated Utiliser deliveryCityKey */
   rapidDeliveryCityKey?: number | string | null
+  /** @deprecated Utiliser deliveryParcelKey */
   rapidDeliveryParcelKey?: string | null
+  /** @deprecated Utiliser deliveryVoucherKey */
   rapidDeliveryVoucherKey?: string | null
   orderItems?: Array<{ productName?: string | null }> | null
 }

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone } from '@/lib/integrations/rapid-delivery'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
+import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 
 export async function POST(request: Request) {
   try {
@@ -53,6 +54,16 @@ export async function POST(request: Request) {
 
     const token = await getDecryptedIntegrationToken(admin, config.integration_id)
 
+    // Normaliser la ville : persiste le nom canonique + l'alias Rapid Delivery
+    if (order.city) {
+      await normalizeCityName({
+        rawCity: order.city,
+        orderId: order.id,
+        supabase: admin,
+        providerSlug: 'rapid-delivery',
+      })
+    }
+
     const article = (order.order_items || [])
       .map((item: any) => String(item?.products?.name || '').trim())
       .filter(Boolean)
@@ -78,7 +89,7 @@ export async function POST(request: Request) {
       .update({
         tracking_number: trackingNumber,
         rapid_delivery_parcel_key: trackingNumber,
-        rapid_delivery_city_key: cityKey,
+        delivery_city_external_id: cityKey,
         external_delivery_id: trackingNumber,
         delivery_status: 'pending',
         last_delivery_sync_at: now,

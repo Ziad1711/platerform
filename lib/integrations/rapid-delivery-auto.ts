@@ -14,7 +14,7 @@ type OrderLike = {
   customer_name?: string | null
   total_selling_price?: number | string | null
   tracking_number?: string | null
-  rapid_delivery_city_key?: number | string | null
+  delivery_city_external_id?: number | string | null
   order_items?: Array<{ products?: { name?: string | null } | null }> | null
 }
 
@@ -35,9 +35,9 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     return { warning: '', trackingNumber: existingTracking }
   }
 
-  let cityKey = Number(order.rapid_delivery_city_key || 0) || 0
+  let cityKey = Number(order.delivery_city_external_id || 0) || 0
   if (!cityKey) {
-    const cityMatch = await normalizeOrderCityById(order.id, admin)
+    const cityMatch = await normalizeOrderCityById(order.id, admin, 'rapid-delivery')
     cityKey = Number(cityMatch.cityKey || 0) || 0
   }
 
@@ -92,7 +92,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
       external_delivery_id: trackingNumber,
       delivery_status: 'pending',
       last_delivery_sync_at: now,
-      rapid_delivery_city_key: cityKey,
+      delivery_city_external_id: cityKey,
       updated_at: now,
     })
     .eq('id', order.id)

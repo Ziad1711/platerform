@@ -37,11 +37,20 @@ const STATUS_DATE_FIELD_MAP: Record<string, string> = {
 export async function POST(request: Request) {
   try {
     const { supabase, user } = await requireAuthenticatedUser()
-    const body = (await request.json().catch(() => ({}))) as { orderId?: string; status?: string; deliveryNote?: string; deliveryCompanyId?: string }
+    const body = (await request.json().catch(() => ({}))) as {
+      orderId?: string
+      status?: string
+      deliveryNote?: string
+      deliveryCompanyId?: string
+      ozoneCityKey?: string | number
+      ozoneCityName?: string
+    }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
     const deliveryNote = typeof body.deliveryNote === 'string' ? body.deliveryNote.trim() : ''
     const deliveryCompanyId = typeof body.deliveryCompanyId === 'string' ? body.deliveryCompanyId.trim() : ''
+    const ozoneCityKey = Number(body.ozoneCityKey || 0) || 0
+    const ozoneCityName = typeof body.ozoneCityName === 'string' ? body.ozoneCityName.trim() : ''
 
     if (!orderId || !status) {
       return NextResponse.json({ error: 'MISSING_REQUIRED_FIELDS' }, { status: 400 })
@@ -176,7 +185,36 @@ export async function POST(request: Request) {
 
         if (ozoneIntegration?.status === 'connected') {
           try {
-            await normalizeOrderCityById(orderId, admin, 'ozone')
+            if (!ozoneCityKey || !ozoneCityName) {
+              warning = 'Veuillez choisir une ville OZONE dans le modal de confirmation.'
+            } else {
+              // Récupérer le coût de livraison pour cette ville OZONE
+              const { data: ozoneRate } = await admin
+                .from('delivery_rates')
+                .select('price')
+                .eq('provider_id', '5f806347-45f1-481a-901d-2eb98b20b3a8')
+                .eq('external_city_key', String(ozoneCityKey))
+                .maybeSingle()
+
+              const ozoneDeliveryFee = ozoneRate?.price ? Number(ozoneRate.price) : 0
+
+              const { error: ozoneCityUpdateError } = await admin
+                .from('orders')
+                .update({
+                  city: ozoneCityName,
+                  delivery_city_external_id: ozoneCityKey,
+                  delivery_fee: ozoneDeliveryFee,
+                  updated_at: now,
+                })
+                .eq('id', orderId)
+
+              if (ozoneCityUpdateError) throw ozoneCityUpdateError
+            }
+
+            if (warning) {
+              return NextResponse.json({ ok: true, warning, trackingNumber })
+            }
+
             // Recharger la commande pour avoir delivery_city_external_id à jour
             const { data: freshOrder } = await admin
               .from('orders')

@@ -7,22 +7,46 @@ export async function POST(request: Request) {
   let rawCity = ''
   try {
     await requireAuthenticatedUser()
-    const body = (await request.json().catch(() => ({}))) as { city?: string; orderId?: string }
+    const body = (await request.json().catch(() => ({}))) as { city?: string; orderId?: string; providerSlug?: string }
     const city = String(body.city || '').trim()
     rawCity = city
     const orderId = String(body.orderId || '').trim() || null
+    let providerSlug = String(body.providerSlug || '').trim() || 'rapid-delivery'
 
-    console.log('[api/orders/normalize-city] request', { city, orderId })
+    console.log('[api/orders/normalize-city] request', { city, orderId, providerSlug })
 
     if (!city) {
       return NextResponse.json({ error: 'CITY_REQUIRED' }, { status: 400 })
+    }
+
+    // Si un orderId est fourni sans providerSlug explicite, on déduit le provider
+    // depuis la delivery_company de la commande
+    if (orderId && !body.providerSlug) {
+      const admin = createAdminClient()
+      const { data: order } = await admin
+        .from('orders')
+        .select('delivery_company_id')
+        .eq('id', orderId)
+        .maybeSingle()
+
+      if (order?.delivery_company_id) {
+        const { data: company } = await admin
+          .from('delivery_companies')
+          .select('api_provider')
+          .eq('id', order.delivery_company_id)
+          .maybeSingle()
+
+        if (company?.api_provider) {
+          providerSlug = company.api_provider
+        }
+      }
     }
 
     const result = await normalizeCityName({
       rawCity: city,
       orderId,
       supabase: createAdminClient(),
-      providerSlug: 'rapid-delivery',
+      providerSlug,
     })
 
     console.log('[api/orders/normalize-city] result', result)

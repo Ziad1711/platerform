@@ -60,11 +60,26 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Migration SQL `20260430_rpc_dashboard_auth_guard.sql` pour renforcer les RPC avec `auth.uid()` guard
 
 ## Current Focus
-Correction du modal "Nouvelle commande" (Ventes) :
-- ✅ Source de commande par défaut changée de `organic` → `ads`
-- ✅ Correction des routes API Rapid Delivery (connect + update-token) : remplacement de l'upsert fragile par select + update/insert
-- ✅ Migration SQL : contrainte unique `(store_id, name)` sur `delivery_companies`
-- ✅ Script de réparation pour stores déjà impactés
+Intégration OZONE Express terminée :
+- ✅ Client API OZONE (lib/integrations/ozone.ts) avec création colis, tracking, BL
+- ✅ Adapter OZONE (lib/integrations/delivery/ozone-adapter.ts) pour le service delivery générique
+- ✅ Wizard connexion OZONE (components/dashboard/integrations/ozone-connect-wizard.tsx)
+- ✅ Routes API OZONE : connect, disconnect, parcels/create, vouchers/create, parcels/sync-all
+- ✅ Auto-création colis OZONE (lib/integrations/ozone-auto.ts) lors du passage au statut `confirmed`
+- ✅ Auto-création branchée dans orders/status/route.ts (api_provider === 'ozone')
+- ✅ Page Ventes (sales/page.tsx) : création colis OZONE + BL
+- ✅ Page Livraison (delivery/page.tsx) : onglet OZONE avec colis/BL
+- ✅ Page Intégrations (integrations/page.tsx) : carte OZONE dans la grille
+- ✅ Migration DB : colonnes ozone_city_key, ozone_parcel_key, ozone_voucher_key sur orders
+- ✅ Seed provider "ozone" dans integration_providers
+- ✅ City normalizer supporte ozone_city_key
+- ✅ Delivery fee resolver supporte OZONE
+- ✅ Parcel/voucher services delivery génériques supportent OZONE
+- ✅ Tracking service delivery générique supporte OZONE
+- ✅ Delivery provider factory supporte OZONE
+- ✅ Delivery provider logs supportent OZONE
+- ✅ Rapid Delivery adapter mis à jour pour compatibilité
+- ✅ Vérification TypeScript : aucune erreur
 
 ## Next Immediate Steps
 
