@@ -7,7 +7,6 @@ import type { DeliveryProvider } from './provider'
 import type { DeliveryIntegrationConfig, OrderDeliveryInfo, CreateParcelResult } from './types'
 import type { DeliveryLogger } from './logger'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
-import { resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 
 type AdminClient = SupabaseClient<any, 'public', any>
 
@@ -27,6 +26,31 @@ export type CreateParcelServiceResult = {
 }
 
 /**
+ * Résout le shop par défaut pour un provider donné
+ */
+async function resolveDefaultShopKey(params: {
+  client: AdminClient
+  integrationId: string
+  storeId: string
+  fallbackShopKey?: number | null
+}) {
+  const direct = Number(params.fallbackShopKey || 0) || 0
+  if (direct) return direct
+
+  const { data, error } = await params.client
+    .from('delivery_shops')
+    .select('external_shop_id')
+    .eq('integration_id', params.integrationId)
+    .eq('store_id', params.storeId)
+    .order('external_shop_id', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw error
+  return Number(data?.external_shop_id || 0) || 0
+}
+
+/**
  * Crée un colis pour une commande via le provider spécifié.
  * Gère la normalisation de ville, résolution de shop, création du colis,
  * résolution de clé courte, et mise à jour des tables.
@@ -43,9 +67,9 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
   }
 
   // 1. Normaliser la ville
-  let cityKey = Number(order.rapidDeliveryCityKey || 0) || 0
+  let cityKey = Number(order.deliveryCityKey || order.rapidDeliveryCityKey || 0) || 0
   if (!cityKey) {
-    const cityMatch = await normalizeOrderCityById(order.id, admin)
+    const cityMatch = await normalizeOrderCityById(order.id, admin, provider.slug)
     cityKey = Number(cityMatch.cityKey || 0) || 0
   }
 
@@ -56,7 +80,7 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
   }
 
   // 2. Résoudre le shop
-  const resolvedShopKey = await resolveDefaultRapidDeliveryShopKey({
+  const resolvedShopKey = await resolveDefaultShopKey({
     client: admin,
     integrationId: config.integrationId,
     storeId: config.storeId,
@@ -107,17 +131,21 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
   }
 
   // 6. Mettre à jour la commande
+  const updatePayload: Record<string, unknown> = {
+    tracking_number: trackingNumber,
+    external_delivery_id: trackingNumber,
+    delivery_status: 'pending',
+    last_delivery_sync_at: now,
+    delivery_city_key: cityKey,
+    updated_at: now,
+  }
+
+  // Compatibilité ascendante : mettre à jour la colonne legacy Rapid
+  updatePayload.rapid_delivery_parcel_key = trackingNumber
+
   const { error: updateOrderError } = await admin
     .from('orders')
-    .update({
-      tracking_number: trackingNumber,
-      rapid_delivery_parcel_key: trackingNumber,
-      external_delivery_id: trackingNumber,
-      delivery_status: 'pending',
-      last_delivery_sync_at: now,
-      rapid_delivery_city_key: cityKey,
-      updated_at: now,
-    })
+    .update(updatePayload)
     .eq('id', order.id)
 
   if (updateOrderError) {
@@ -125,8 +153,28 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
     throw updateOrderError
   }
 
-  // 7. Créer le mapping
-  const { error: mappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
+  // 7. Créer le mapping dans delivery_entity_mappings (provider-agnostic)
+  const { error: mappingError } = await admin.from('delivery_entity_mappings').upsert(
+    {
+      user_id: config.userId,
+      integration_id: config.integrationId,
+      store_id: config.storeId,
+      entity_type: 'parcel',
+      provider_entity_id: trackingNumber,
+      internal_id: order.id,
+      payload: { raw: result.raw, uuid: result.providerId, extracted_tracking: trackingNumber, provider_slug: provider.slug },
+      updated_at: now,
+    },
+    { onConflict: 'integration_id,entity_type,provider_entity_id' }
+  )
+
+  if (mappingError) {
+    logger.error('parcel-mapping-failed', 'Échec création mapping', { error: mappingError.message })
+    throw mappingError
+  }
+
+  // 8. Compatibilité ascendante : aussi dans rapid_delivery_entity_mappings
+  const { error: legacyMappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
     {
       user_id: config.userId,
       integration_id: config.integrationId,
@@ -140,9 +188,9 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
     { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
   )
 
-  if (mappingError) {
-    logger.error('parcel-mapping-failed', 'Échec création mapping', { error: mappingError.message })
-    throw mappingError
+  if (legacyMappingError) {
+    logger.error('parcel-legacy-mapping-failed', 'Échec création mapping legacy', { error: legacyMappingError.message })
+    throw legacyMappingError
   }
 
   logger.info('parcel-complete', 'Création colis terminée', { trackingNumber })

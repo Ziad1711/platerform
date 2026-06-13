@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
+import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
 
 const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   confirmation_rejected: 'confirmation_rejected_at',
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
       .from('orders')
       .select(`
         id, store_id, status, city, address, phone, customer_name, total_selling_price,
-        rapid_delivery_city_key,
+        delivery_city_external_id,
         delivery_company_id, tracking_number, delivery_status_source,
         order_items(quantity, products(name))
       `)
@@ -120,17 +121,28 @@ export async function POST(request: Request) {
           .maybeSingle(),
       ])
 
-      const canAutoCreate =
+      const canAutoCreateRapid =
         (deliveryCompany?.api_provider === 'rapid-delivery' || String(deliveryCompany?.api_provider || '').trim() === '' && String((deliveryCompany as any)?.name || '').toLowerCase().includes('rapid')) &&
         integration?.status === 'connected' &&
         config?.parcel_creation_mode !== 'disabled'
 
-      if (canAutoCreate && config) {
+      if (canAutoCreateRapid && config) {
         try {
-          await normalizeOrderCityById(orderId, admin)
+          await normalizeOrderCityById(orderId, admin, 'rapid-delivery')
+          // Recharger la commande pour avoir delivery_city_external_id à jour
+          const { data: freshOrder } = await admin
+            .from('orders')
+            .select(`
+              id, store_id, status, city, address, phone, customer_name, total_selling_price,
+              delivery_city_external_id,
+              delivery_company_id, tracking_number, delivery_status_source,
+              order_items(quantity, products(name))
+            `)
+            .eq('id', orderId)
+            .maybeSingle()
           const normalizedOrder = {
-            ...order,
-            order_items: (order.order_items || []).map((oi: any) => ({
+            ...(freshOrder || order),
+            order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
               ...oi,
               products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
             })),
@@ -148,6 +160,53 @@ export async function POST(request: Request) {
           trackingNumber = result.trackingNumber
         } catch (error) {
           warning = error instanceof Error ? error.message : 'AUTO_PARCEL_CREATE_FAILED'
+        }
+      }
+
+      // OZONE auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'ozone') {
+        const [{ data: ozoneIntegration }] = await Promise.all([
+          supabase
+            .from('integrations')
+            .select('id, status')
+            .eq('user_id', user.id)
+            .eq('provider', 'ozone')
+            .maybeSingle(),
+        ])
+
+        if (ozoneIntegration?.status === 'connected') {
+          try {
+            await normalizeOrderCityById(orderId, admin, 'ozone')
+            // Recharger la commande pour avoir delivery_city_external_id à jour
+            const { data: freshOrder } = await admin
+              .from('orders')
+              .select(`
+                id, store_id, status, city, address, phone, customer_name, total_selling_price,
+                delivery_city_external_id,
+                delivery_company_id, tracking_number, delivery_status_source,
+                order_items(quantity, products(name))
+              `)
+              .eq('id', orderId)
+              .maybeSingle()
+            const normalizedOrder = {
+              ...(freshOrder || order),
+              order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
+                ...oi,
+                products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+              })),
+            }
+            const result = await autoCreateOzoneParcelForOrder({
+              admin,
+              userId: user.id,
+              integrationId: ozoneIntegration.id,
+              order: normalizedOrder,
+              deliveryNote: deliveryNote || undefined,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            warning = error instanceof Error ? error.message : 'OZONE_AUTO_PARCEL_CREATE_FAILED'
+          }
         }
       }
     }
