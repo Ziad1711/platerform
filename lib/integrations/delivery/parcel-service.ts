@@ -17,6 +17,11 @@ export type CreateParcelServiceInput = {
   order: OrderDeliveryInfo
   defaultShopKey: number
   defaultArticleName?: string | null
+  parcelOptions?: {
+    open?: 1 | 2
+    fragile?: 0 | 1
+    replace?: 0 | 1
+  }
   logger: DeliveryLogger
 }
 
@@ -56,7 +61,7 @@ async function resolveDefaultShopKey(params: {
  * résolution de clé courte, et mise à jour des tables.
  */
 export async function createParcelForOrder(input: CreateParcelServiceInput): Promise<CreateParcelServiceResult> {
-  const { admin, provider, config, order, defaultShopKey, defaultArticleName, logger } = input
+  const { admin, provider, config, order, defaultShopKey, defaultArticleName, parcelOptions, logger } = input
   const now = new Date().toISOString()
   const existingTracking = String(order.trackingNumber || '').trim()
 
@@ -110,6 +115,7 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
     shopKey: resolvedShopKey,
     address: (order.address && String(order.address).trim()) || undefined,
     recipient: String(order.customerName || '').trim() || undefined,
+    options: parcelOptions,
   })
   const durationMs = Date.now() - startTime
 
@@ -135,13 +141,15 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
     tracking_number: trackingNumber,
     external_delivery_id: trackingNumber,
     delivery_status: 'pending',
+    delivery_status_source: 'delivery_company',
     last_delivery_sync_at: now,
     delivery_city_external_id: cityKey,
     updated_at: now,
   }
 
-  // Compatibilité ascendante : mettre à jour la colonne legacy Rapid
-  updatePayload.rapid_delivery_parcel_key = trackingNumber
+  if (provider.slug === 'rapid-delivery') {
+    updatePayload.rapid_delivery_parcel_key = trackingNumber
+  }
 
   const { error: updateOrderError } = await admin
     .from('orders')
@@ -173,24 +181,25 @@ export async function createParcelForOrder(input: CreateParcelServiceInput): Pro
     throw mappingError
   }
 
-  // 8. Compatibilité ascendante : aussi dans rapid_delivery_entity_mappings
-  const { error: legacyMappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
-    {
-      user_id: config.userId,
-      integration_id: config.integrationId,
-      store_id: config.storeId,
-      entity_type: 'parcel',
-      rapid_delivery_id: trackingNumber,
-      internal_id: order.id,
-      payload: { raw: result.raw, uuid: result.providerId, extracted_tracking: trackingNumber },
-      updated_at: now,
-    },
-    { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
-  )
+  if (provider.slug === 'rapid-delivery') {
+    const { error: legacyMappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
+      {
+        user_id: config.userId,
+        integration_id: config.integrationId,
+        store_id: config.storeId,
+        entity_type: 'parcel',
+        rapid_delivery_id: trackingNumber,
+        internal_id: order.id,
+        payload: { raw: result.raw, uuid: result.providerId, extracted_tracking: trackingNumber },
+        updated_at: now,
+      },
+      { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
+    )
 
-  if (legacyMappingError) {
-    logger.error('parcel-legacy-mapping-failed', 'Échec création mapping legacy', { error: legacyMappingError.message })
-    throw legacyMappingError
+    if (legacyMappingError) {
+      logger.error('parcel-legacy-mapping-failed', 'Échec création mapping legacy', { error: legacyMappingError.message })
+      throw legacyMappingError
+    }
   }
 
   logger.info('parcel-complete', 'Création colis terminée', { trackingNumber })

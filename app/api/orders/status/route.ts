@@ -45,6 +45,9 @@ export async function POST(request: Request) {
       deliveryCompanyId?: string
       ozoneCityKey?: string | number
       ozoneCityName?: string
+      ozoneParcelOpen?: 1 | 2
+      ozoneParcelFragile?: 0 | 1
+      ozoneParcelReplace?: 0 | 1
     }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
@@ -52,6 +55,11 @@ export async function POST(request: Request) {
     const deliveryCompanyId = typeof body.deliveryCompanyId === 'string' ? body.deliveryCompanyId.trim() : ''
     const ozoneCityKey = Number(body.ozoneCityKey || 0) || 0
     const ozoneCityName = typeof body.ozoneCityName === 'string' ? body.ozoneCityName.trim() : ''
+    const ozoneParcelOptions = {
+      open: body.ozoneParcelOpen === 2 ? 2 as const : 1 as const,
+      fragile: body.ozoneParcelFragile === 1 ? 1 as const : 0 as const,
+      replace: body.ozoneParcelReplace === 1 ? 1 as const : 0 as const,
+    }
 
     if (!orderId || !status) {
       return NextResponse.json({ error: 'MISSING_REQUIRED_FIELDS' }, { status: 400 })
@@ -75,7 +83,26 @@ export async function POST(request: Request) {
 
     await verifyStoreAccess(supabase, user.id, order.store_id)
 
-    const isDeliveryCompanyLocked = order.delivery_status_source === 'delivery_company'
+    // Vérifier si la commande est liée à un transporteur (Ozone, Rapid Delivery, etc.)
+    // On bloque le changement de statut si :
+    // 1. Le delivery_status_source est déjà 'delivery_company' (colis déjà créé)
+    // 2. OU la commande a une delivery_company_id avec api_provider connu (ozone, rapid-delivery)
+    //    et le statut actuel n'est pas "new" (pour éviter les changements manuels après affectation)
+    let isDeliveryCompanyLocked = order.delivery_status_source === 'delivery_company'
+
+    if (!isDeliveryCompanyLocked && order.delivery_company_id && order.status !== 'new') {
+      // Vérifier si la delivery company est un transporteur avec API
+      const { data: dc } = await supabase
+        .from('delivery_companies')
+        .select('api_provider')
+        .eq('id', order.delivery_company_id)
+        .maybeSingle()
+
+      if (dc?.api_provider && ['ozone', 'rapid-delivery'].includes(dc.api_provider)) {
+        isDeliveryCompanyLocked = true
+      }
+    }
+
     const isAllowedReturnedStockedOverride = order.status === 'returned_not_stocked' && status === 'returned_stocked'
     if (isDeliveryCompanyLocked && !isAllowedReturnedStockedOverride) {
       return NextResponse.json({ error: 'DELIVERY_COMPANY_STATUS_LOCKED' }, { status: 403 })
@@ -84,9 +111,13 @@ export async function POST(request: Request) {
     const now = new Date().toISOString()
     const updatePayload: Record<string, any> = {
       status,
-      delivery_status_source: 'manual',
       updated_at: now,
       last_status_update_at: now,
+    }
+
+    // On ne repasse en 'manual' que si ce n'est pas déjà géré par un transporteur
+    if (order.delivery_status_source !== 'delivery_company') {
+      updatePayload.delivery_status_source = 'manual'
     }
 
     if (deliveryNote) {
@@ -112,7 +143,7 @@ export async function POST(request: Request) {
 
     if (status === 'confirmed' && !trackingNumber && resolvedDeliveryCompanyId) {
       const admin = createAdminClient()
-      const [{ data: deliveryCompany }, { data: integration }, { data: config }] = await Promise.all([
+      const [{ data: deliveryCompany }, { data: integration }] = await Promise.all([
         supabase
           .from('delivery_companies')
           .select('id, name, api_provider')
@@ -124,19 +155,43 @@ export async function POST(request: Request) {
           .eq('user_id', user.id)
           .eq('provider', 'rapid-delivery')
           .maybeSingle(),
-        supabase
+      ])
+
+      let config: {
+        default_shop_key: number | string | null
+        default_article_name: string | null
+        auto_change_status_to_picked_up: boolean | null
+        parcel_creation_mode: string | null
+      } | null = null
+
+      if (integration?.id) {
+        const { data: storeConfig, error: storeConfigError } = await supabase
           .from('rapid_delivery_configs')
           .select('default_shop_key, default_article_name, auto_change_status_to_picked_up, parcel_creation_mode')
           .eq('store_id', order.store_id)
-          .maybeSingle(),
-      ])
+          .maybeSingle()
+
+        if (storeConfigError) throw storeConfigError
+        config = storeConfig
+
+        if (!config) {
+          const { data: integrationConfig, error: integrationConfigError } = await supabase
+            .from('rapid_delivery_configs')
+            .select('default_shop_key, default_article_name, auto_change_status_to_picked_up, parcel_creation_mode')
+            .eq('integration_id', integration.id)
+            .maybeSingle()
+
+          if (integrationConfigError) throw integrationConfigError
+          config = integrationConfig
+        }
+      }
 
       const canAutoCreateRapid =
         (deliveryCompany?.api_provider === 'rapid-delivery' || String(deliveryCompany?.api_provider || '').trim() === '' && String((deliveryCompany as any)?.name || '').toLowerCase().includes('rapid')) &&
         integration?.status === 'connected' &&
         config?.parcel_creation_mode !== 'disabled'
 
-      if (canAutoCreateRapid && config) {
+      if (canAutoCreateRapid && integration?.id) {
         try {
           await normalizeOrderCityById(orderId, admin, 'rapid-delivery')
           // Recharger la commande pour avoir delivery_city_external_id à jour
@@ -177,8 +232,8 @@ export async function POST(request: Request) {
             userId: user.id,
             integrationId: integration.id,
             order: normalizedOrder,
-            defaultShopKey: Number(config.default_shop_key),
-            defaultArticleName: config.default_article_name,
+            defaultShopKey: Number(config?.default_shop_key || 0),
+            defaultArticleName: config?.default_article_name,
             deliveryNote: deliveryNote || undefined,
           })
           warning = result.warning
@@ -196,6 +251,7 @@ export async function POST(request: Request) {
             .select('id, status')
             .eq('user_id', user.id)
             .eq('provider', 'ozone')
+            .eq('store_id', order.store_id)
             .maybeSingle(),
         ])
 
@@ -255,12 +311,17 @@ export async function POST(request: Request) {
               integrationId: ozoneIntegration.id,
               order: normalizedOrder,
               deliveryNote: deliveryNote || undefined,
+              parcelOptions: ozoneParcelOptions,
             })
             warning = result.warning
             trackingNumber = result.trackingNumber
           } catch (error) {
             warning = error instanceof Error ? error.message : 'OZONE_AUTO_PARCEL_CREATE_FAILED'
           }
+        }
+
+        if (!ozoneIntegration && deliveryCompany?.api_provider === 'ozone') {
+          warning = 'Intégration OZONE non connectée pour ce store.'
         }
       }
     }

@@ -1,15 +1,21 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
 import { getRapidDeliveryStateName, mapRapidDeliveryStateToOrderStatus, trackRapidDeliveryParcel } from '@/lib/integrations/rapid-delivery'
 
-const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused']
+const EXCLUDED_ORDER_STATUSES = ['new', 'delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     const { user } = await requireAuthenticatedUser()
     const admin = createAdminClient()
+    const body = (await request.json().catch(() => ({}))) as { storeId?: string; store_id?: string }
+    const storeId = String(body.storeId || body.store_id || request.cookies.get('current-store-id')?.value || '').trim()
+
+    if (!storeId) {
+      return NextResponse.json({ error: 'STORE_REQUIRED' }, { status: 400 })
+    }
 
     const { data: integration, error: integrationError } = await admin
       .from('integrations')
@@ -24,12 +30,35 @@ export async function POST() {
     }
 
     const token = await getDecryptedIntegrationToken(admin, integration.id)
+
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', storeId)
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+
+    const { data: deliveryCompanies, error: deliveryCompaniesError } = await admin
+      .from('delivery_companies')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('api_provider', 'rapid-delivery')
+
+    if (deliveryCompaniesError) throw deliveryCompaniesError
+    const deliveryCompanyIds = (deliveryCompanies || []).map((company) => company.id).filter(Boolean)
+    if (deliveryCompanyIds.length === 0) return NextResponse.json({ synced: 0, errors: 0 })
+
     const { data: orders, error: ordersError } = await admin
       .from('orders')
       .select('id, tracking_number, status')
+      .eq('store_id', storeId)
+      .in('delivery_company_id', deliveryCompanyIds)
       .not('tracking_number', 'is', null)
       .not('tracking_number', 'eq', '')
-      .not('status', 'in', `(${FINAL_ORDER_STATUSES.map((status) => `"${status}"`).join(',')})`)
+      .not('status', 'in', `(${EXCLUDED_ORDER_STATUSES.map((status) => `"${status}"`).join(',')})`)
 
     if (ordersError) throw ordersError
 

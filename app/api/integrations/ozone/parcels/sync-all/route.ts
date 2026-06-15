@@ -1,14 +1,22 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { ozoneAdapter } from '@/lib/integrations/delivery/ozone-adapter'
+import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { trackAndUpdateOrder } from '@/lib/integrations/delivery/tracking-service'
 
-const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused']
+const EXCLUDED_ORDER_STATUSES = ['new', 'delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     const { user } = await requireAuthenticatedUser()
     const admin = createAdminClient()
+    const body = (await request.json().catch(() => ({}))) as { storeId?: string; store_id?: string }
+    const storeId = String(body.storeId || body.store_id || request.cookies.get('current-store-id')?.value || '').trim()
+
+    if (!storeId) {
+      return NextResponse.json({ error: 'STORE_REQUIRED' }, { status: 400 })
+    }
 
     const { data: integration, error: integrationError } = await admin
       .from('integrations')
@@ -25,48 +33,54 @@ export async function POST() {
     const { getDecryptedIntegrationToken } = await import('@/lib/integrations/rapid-delivery-connect')
     const token = await getDecryptedIntegrationToken(admin, integration.id)
 
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', storeId)
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+
+    const { data: deliveryCompanies, error: deliveryCompaniesError } = await admin
+      .from('delivery_companies')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('api_provider', 'ozone')
+
+    if (deliveryCompaniesError) throw deliveryCompaniesError
+    const deliveryCompanyIds = (deliveryCompanies || []).map((company) => company.id).filter(Boolean)
+    if (deliveryCompanyIds.length === 0) return NextResponse.json({ synced: 0, errors: 0 })
+
     const { data: orders, error: ordersError } = await admin
       .from('orders')
       .select('id, tracking_number, status')
+      .eq('store_id', storeId)
+      .in('delivery_company_id', deliveryCompanyIds)
       .not('tracking_number', 'is', null)
       .not('tracking_number', 'eq', '')
-      .not('status', 'in', `(${FINAL_ORDER_STATUSES.map((status) => `"${status}"`).join(',')})`)
+      .not('status', 'in', `(${EXCLUDED_ORDER_STATUSES.map((status) => `"${status}"`).join(',')})`)
 
     if (ordersError) throw ordersError
 
     let synced = 0
     let errors = 0
+    const logger = createDeliveryLogger({ admin, integrationId: integration.id, storeId, userId: user.id })
 
     for (const order of orders || []) {
       try {
         const trackingNumber = String(order.tracking_number || '').trim()
         if (!trackingNumber) continue
 
-        const result = await ozoneAdapter.trackParcel(
-          { integrationId: integration.id, token, baseUrl: null, userId: user.id, storeId: '' },
-          trackingNumber
-        )
-
-        const now = new Date().toISOString()
-        const updatePayload: Record<string, unknown> = {
-          delivery_status: result.deliveryStatus,
-          delivery_status_source: result.orderStatus ? 'delivery_company' : null,
-          delivery_company_status_raw: result.rawStatus || null,
-          last_delivery_sync_at: now,
-          updated_at: now,
-        }
-
-        if (result.orderStatus) {
-          updatePayload.status = result.orderStatus
-          updatePayload.last_status_update_at = now
-        }
-
-        if (result.statusDateField) {
-          updatePayload[result.statusDateField] = now
-        }
-
-        const { error: updateError } = await admin.from('orders').update(updatePayload).eq('id', order.id)
-        if (updateError) throw updateError
+        await trackAndUpdateOrder({
+          admin,
+          provider: ozoneAdapter,
+          config: { integrationId: integration.id, token, baseUrl: null, userId: user.id, storeId },
+          trackingNumber,
+          orderId: order.id,
+          logger,
+        })
         synced += 1
       } catch (error) {
         console.error('OZONE sync-all order failed', {

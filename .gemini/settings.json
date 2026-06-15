@@ -3,5 +3,16 @@
     "checkpointing": {
       "enabled": true
     }
+  },
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "sbp_12a5f34825090abe52a2da2076612c87fb94c832"
+      ]
+    }
   }
 }

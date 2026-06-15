@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     if (ordersError) throw ordersError
 
     const validOrders = (orders || []).filter((order) =>
-      order.status === 'confirmed' && order.rapid_delivery_parcel_key && !order.rapid_delivery_voucher_key
+      ['confirmed', 'dl_pickup_pending'].includes(order.status) && order.rapid_delivery_parcel_key && !order.rapid_delivery_voucher_key
     )
 
     if (validOrders.length !== orderIds.length) {
@@ -95,12 +95,44 @@ export async function POST(request: Request) {
         rapid_delivery_voucher_key: voucherKey,
         last_status_update_at: now,
         delivery_status: 'pickup_pending',
+        status: 'dl_pickup_pending',
+        dl_pickup_pending_at: now,
+        delivery_status_source: 'delivery_company',
         updated_at: now,
       })
       .in('id', validOrders.map((order) => order.id))
 
     if (updateOrdersError) throw updateOrdersError
 
+    // Récupérer le provider_id pour le mapping unifié
+    const { data: integration } = await admin
+      .from('integrations')
+      .select('provider_id')
+      .eq('id', config.integration_id)
+      .maybeSingle()
+
+    // 4. Créer le mapping voucher (nouveau système unifié)
+    await admin.from('delivery_entity_mappings').upsert(
+      {
+        user_id: user.id,
+        integration_id: config.integration_id,
+        provider_id: integration?.provider_id || null,
+        store_id: storeId,
+        entity_type: 'voucher',
+        provider_entity_id: voucherKey,
+        internal_id: validOrders[0].id,
+        payload: { 
+          provider_slug: 'rapid-delivery',
+          raw: created, 
+          order_ids: validOrders.map((order) => order.id), 
+          parcels: parcelKeys 
+        },
+        updated_at: now,
+      },
+      { onConflict: 'integration_id,entity_type,provider_entity_id' }
+    )
+
+    // 5. Mapping legacy (Rapid Delivery spécifique)
     const { error: mappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
       {
         user_id: user.id,

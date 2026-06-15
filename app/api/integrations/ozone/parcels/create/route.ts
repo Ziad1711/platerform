@@ -16,6 +16,9 @@ export async function POST(request: Request) {
       cityKey?: number
       shopKey?: number
       remark?: string
+      parcelOpen?: 1 | 2
+      parcelFragile?: 0 | 1
+      parcelReplace?: 0 | 1
     }
 
     const storeId = String(body.storeId || '').trim()
@@ -34,9 +37,10 @@ export async function POST(request: Request) {
     // Récupérer l'intégration OZONE
     const { data: integration, error: integrationError } = await admin
       .from('integrations')
-      .select('id, status, token_encrypted')
+      .select('id, status')
       .eq('user_id', user.id)
       .eq('provider', 'ozone')
+      .eq('store_id', storeId)
       .maybeSingle()
 
     if (integrationError) throw integrationError
@@ -102,6 +106,11 @@ export async function POST(request: Request) {
       },
       defaultShopKey: shopKey,
       defaultArticleName: body.remark || undefined,
+      parcelOptions: {
+        open: body.parcelOpen === 2 ? 2 : 1,
+        fragile: body.parcelFragile === 1 ? 1 : 0,
+        replace: body.parcelReplace === 1 ? 1 : 0,
+      },
       logger,
     })
 

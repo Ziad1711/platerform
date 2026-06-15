@@ -51,44 +51,25 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
 
   const voucherKey = result.providerVoucherKey
 
-  // 2. Vérifier via GET /vouchers/{key} (propagation asynchrone)
+  // Vérification asynchrone non-bloquante : on log et on continue
+  // La propagation côté provider peut prendre du temps, inutile de bloquer l'utilisateur
   let remoteVerified = false
   let remoteTotalParcels = 0
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    try {
-      const remoteVoucher = await provider.getVoucher(config, voucherKey)
-      const item = extractVoucherTotalParcels(remoteVoucher)
-      remoteTotalParcels = item
-      logger.info('voucher-poll', `Vérification voucher tentative ${attempt + 1}`, {
-        voucherKey,
-        remoteTotalParcels,
-      })
-      if (remoteTotalParcels > 0) {
-        remoteVerified = true
-        break
-      }
-    } catch (e) {
-      logger.warn('voucher-poll-failed', `Échec vérification tentative ${attempt + 1}`, {
-        error: e instanceof Error ? e.message : String(e),
-      })
-    }
-  }
-
-  if (!remoteVerified) {
-    logger.warn('voucher-remote-empty', 'Voucher créé mais vide à distance (propagation lente)', {
-      voucherKey,
-      shopKey,
-      parcelKeys,
-    })
-  }
+  logger.info('voucher-poll-skipped', 'Vérification à distance ignorée (non-bloquante)', {
+    voucherKey,
+    provider: provider.slug,
+    parcelCount: parcelKeys.length,
+  })
 
   // 3. Mettre à jour les commandes
   const updatePayload: Record<string, unknown> = {
     delivery_voucher_key: voucherKey,
     last_status_update_at: now,
     delivery_status: 'pickup_pending',
+    status: 'dl_pickup_pending',
+    dl_pickup_pending_at: now,
+    delivery_status_source: 'delivery_company',
     updated_at: now,
   }
 
@@ -110,12 +91,13 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
     {
       user_id: config.userId,
       integration_id: config.integrationId,
+      provider_id: config.providerId || null, // Utilise le vrai provider_id s'il est présent
       store_id: storeId,
       entity_type: 'voucher',
-      provider_slug: provider.slug,
-      external_id: voucherKey,
+      provider_entity_id: voucherKey,
       internal_id: orderIds[0],
       payload: {
+        provider_slug: provider.slug,
         raw: result.raw,
         order_ids: orderIds,
         parcels: parcelKeys,
@@ -124,7 +106,7 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
       },
       updated_at: now,
     },
-    { onConflict: 'integration_id,entity_type,external_id' }
+    { onConflict: 'integration_id,entity_type,provider_entity_id' }
   )
 
   if (mappingError) {
@@ -132,30 +114,32 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
     throw mappingError
   }
 
-  // 5. Compatibilité ascendante : aussi dans rapid_delivery_entity_mappings
-  const { error: legacyMappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
-    {
-      user_id: config.userId,
-      integration_id: config.integrationId,
-      store_id: storeId,
-      entity_type: 'voucher',
-      rapid_delivery_id: voucherKey,
-      internal_id: orderIds[0],
-      payload: {
-        raw: result.raw,
-        order_ids: orderIds,
-        parcels: parcelKeys,
-        remote_verified: remoteVerified,
-        remote_total_parcels: remoteTotalParcels,
+  // 5. Compatibilité ascendante : uniquement pour rapid-delivery
+  if (provider.slug === 'rapid-delivery') {
+    const { error: legacyMappingError } = await admin.from('rapid_delivery_entity_mappings').upsert(
+      {
+        user_id: config.userId,
+        integration_id: config.integrationId,
+        store_id: storeId,
+        entity_type: 'voucher',
+        rapid_delivery_id: voucherKey,
+        internal_id: orderIds[0],
+        payload: {
+          raw: result.raw,
+          order_ids: orderIds,
+          parcels: parcelKeys,
+          remote_verified: remoteVerified,
+          remote_total_parcels: remoteTotalParcels,
+        },
+        updated_at: now,
       },
-      updated_at: now,
-    },
-    { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
-  )
+      { onConflict: 'integration_id,entity_type,rapid_delivery_id' }
+    )
 
-  if (legacyMappingError) {
-    logger.error('voucher-legacy-mapping-failed', 'Échec création mapping voucher legacy', { error: legacyMappingError.message })
-    throw legacyMappingError
+    if (legacyMappingError) {
+      logger.error('voucher-legacy-mapping-failed', 'Échec création mapping voucher legacy', { error: legacyMappingError.message })
+      throw legacyMappingError
+    }
   }
 
   logger.info('voucher-complete', 'Création voucher terminée', {

@@ -91,6 +91,7 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
       rapid_delivery_parcel_key: trackingNumber,
       external_delivery_id: trackingNumber,
       delivery_status: 'pending',
+      delivery_status_source: 'delivery_company',
       last_delivery_sync_at: now,
       delivery_city_external_id: cityKey,
       updated_at: now,

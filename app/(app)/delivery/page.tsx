@@ -13,7 +13,7 @@ import { Search, ChevronLeft, ChevronRight } from 'lucide-react'
 export default function LivraisonPage() {
   const supabase = createClient()
   const queryClient = useQueryClient()
-  const { currentStoreId, isStoresLoading, accessibleStores } = useStore()
+  const { currentStoreId, isStoresLoading } = useStore()
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [voucherError, setVoucherError] = useState('')
   const [voucherSuccess, setVoucherSuccess] = useState('')
@@ -55,7 +55,6 @@ export default function LivraisonPage() {
     queryKey: ['delivery-page-custom-cities', currentStoreId],
     enabled: !!currentStoreId,
     queryFn: async () => {
-      // Récupérer le pricing_group_id du shop via delivery_shops
       const { data: shop, error: shopError } = await supabase
         .from('delivery_shops')
         .select('pricing_group_id')
@@ -65,7 +64,6 @@ export default function LivraisonPage() {
       if (shopError) throw shopError
 
       if (!shop?.pricing_group_id) {
-        // Fallback: lire depuis rapid_delivery_cities_standard
         const { data: fallback, error: fallbackError } = await supabase
           .from('rapid_delivery_cities_standard')
           .select('city_key, city_name, cost_delivery, cost_refuse, cost_cancel')
@@ -81,7 +79,6 @@ export default function LivraisonPage() {
         }))
       }
 
-      // Lire depuis delivery_rates via le pricing_group_id
       const { data: rates, error: ratesError } = await supabase
         .from('delivery_rates')
         .select('external_city_key, city_name, price, cost_refuse, cost_cancel')
@@ -99,70 +96,106 @@ export default function LivraisonPage() {
     },
   })
 
+  // Fusionner tous les colis confirmés (Rapid + OZONE)
   const { data: confirmedParcels = [] } = useQuery({
     queryKey: ['delivery-page-confirmed-parcels', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: !!currentStoreId && deliveryCompanies.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, customer_name, phone, city, total_selling_price, rapid_delivery_parcel_key, confirmed_at, rapid_delivery_voucher_key, status')
-        .eq('store_id', currentStoreId!)
-        .eq('status', 'confirmed')
-        .not('rapid_delivery_parcel_key', 'is', null)
-        .is('rapid_delivery_voucher_key', null)
-        .order('confirmed_at', { ascending: false })
+      const ozoneCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'ozone')
+        .map((c: any) => c.id)
 
-      if (error) throw error
-      return data || []
+      const rapidCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'rapid-delivery')
+        .map((c: any) => c.id)
+
+      // Colis Rapid Delivery (via rapid_delivery_parcel_key, pas de voucher)
+      const rapidPromise = rapidCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, rapid_delivery_parcel_key, confirmed_at, status')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', rapidCompanyIds)
+            .not('rapid_delivery_parcel_key', 'is', null)
+            .is('rapid_delivery_voucher_key', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.rapid_delivery_parcel_key, _provider: 'Rapid' })))
+        : Promise.resolve([])
+
+      // Colis OZONE (via tracking_number, uniquement ceux sans BL)
+      const ozonePromise = ozoneCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, tracking_number, confirmed_at, status, delivery_voucher_key')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', ozoneCompanyIds)
+            .not('tracking_number', 'is', null)
+            .not('tracking_number', 'eq', '')
+            .is('delivery_voucher_key', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.tracking_number, _provider: 'OZONE' })))
+        : Promise.resolve([])
+
+      const [rapidRes, ozoneRes] = await Promise.all([rapidPromise, ozonePromise])
+      const merged = [...rapidRes, ...ozoneRes]
+      merged.sort((a, b) => new Date(b.confirmed_at).getTime() - new Date(a.confirmed_at).getTime())
+      return merged
     },
   })
 
-  const { data: confirmedOzoneParcels = [] } = useQuery({
-    queryKey: ['delivery-page-confirmed-ozone-parcels', currentStoreId],
+  const { data: allVouchers = [] } = useQuery({
+    queryKey: ['delivery-page-all-vouchers', currentStoreId],
     enabled: !!currentStoreId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, customer_name, phone, city, total_selling_price, ozone_parcel_key, confirmed_at, ozone_voucher_key, status')
+      // 1. Récupérer les nouveaux bons (unifiés)
+      const unifiedPromise = supabase
+        .from('delivery_entity_mappings')
+        .select('id, provider_entity_id, payload, updated_at')
         .eq('store_id', currentStoreId!)
-        .eq('status', 'confirmed')
-        .not('ozone_parcel_key', 'is', null)
-        .is('ozone_voucher_key', null)
-        .order('confirmed_at', { ascending: false })
-
-      if (error) throw error
-      return data || []
-    },
-  })
-
-  const { data: vouchers = [] } = useQuery({
-    queryKey: ['delivery-page-vouchers', rapidDeliveryConfig?.integration_id],
-    enabled: !!rapidDeliveryConfig?.integration_id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('rapid_delivery_entity_mappings')
-        .select('rapid_delivery_id, payload, updated_at')
-        .eq('integration_id', rapidDeliveryConfig!.integration_id)
         .eq('entity_type', 'voucher')
         .order('updated_at', { ascending: false })
 
-      if (error) throw error
-      return data || []
-    },
-  })
-
-  const { data: ozoneVouchers = [] } = useQuery({
-    queryKey: ['delivery-page-ozone-vouchers', currentStoreId],
-    enabled: !!currentStoreId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('ozone_vouchers')
-        .select('id, ozone_voucher_key, payload, updated_at')
+      // 2. Récupérer les anciens bons Rapid Delivery (legacy)
+      const legacyRapidPromise = supabase
+        .from('rapid_delivery_entity_mappings')
+        .select('rapid_delivery_id, payload, updated_at')
         .eq('store_id', currentStoreId!)
+        .eq('entity_type', 'voucher')
         .order('updated_at', { ascending: false })
 
-      if (error) throw error
-      return data || []
+      const [unifiedRes, legacyRes] = await Promise.all([unifiedPromise, legacyRapidPromise])
+
+      const unifiedVouchers = (unifiedRes.data || []).map((v: any) => ({
+        id: v.id,
+        voucherKey: v.provider_entity_id,
+        provider: v.payload?.provider_slug || 'ozone',
+        parcelCount: Array.isArray(v.payload?.parcels) ? v.payload.parcels.length : (v.payload?.count || 0),
+        updated_at: v.updated_at,
+      }))
+
+      const legacyVouchers = (legacyRes.data || []).map((v: any, index: number) => ({
+        id: `legacy-${index}`,
+        voucherKey: v.rapid_delivery_id,
+        provider: 'rapid-delivery',
+        parcelCount: Array.isArray(v.payload?.parcels) ? v.payload.parcels.length : 0,
+        updated_at: v.updated_at,
+      }))
+
+      // Fusionner en évitant les doublons (si un bon est dans les deux tables)
+      const seenKeys = new Set(unifiedVouchers.map(v => v.voucherKey))
+      const combined = [...unifiedVouchers]
+      
+      for (const lv of legacyVouchers) {
+        if (!seenKeys.has(lv.voucherKey)) {
+          combined.push(lv)
+          seenKeys.add(lv.voucherKey)
+        }
+      }
+
+      combined.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      return combined
     },
   })
 
@@ -178,31 +211,51 @@ export default function LivraisonPage() {
     })
   }, [confirmedParcels])
 
+  // Déterminer le provider des colis sélectionnés
+  function getSelectedProvider(): 'rapid' | 'ozone' | 'mixed' | 'none' {
+    if (selectedOrderIds.length === 0) return 'none'
+    const selected = confirmedParcels.filter((o: any) => selectedOrderIds.includes(o.id))
+    if (selected.length === 0) return 'none'
+    const providers = new Set(selected.map((o: any) => o._provider))
+    if (providers.size > 1) return 'mixed'
+    return providers.has('OZONE') ? 'ozone' : 'rapid'
+  }
+
   async function createVoucher() {
     if (!currentStoreId || selectedOrderIds.length === 0) return
+
+    const provider = getSelectedProvider()
+    if (provider === 'mixed') {
+      setVoucherError('Sélectionnez des colis du même transporteur.')
+      return
+    }
 
     setIsCreatingVoucher(true)
     setVoucherError('')
     setVoucherSuccess('')
 
     try {
-      const response = await fetch('/api/integrations/rapid-delivery/vouchers/create', {
+      const endpoint = provider === 'ozone'
+        ? '/api/integrations/ozone/vouchers/create'
+        : '/api/integrations/rapid-delivery/vouchers/create'
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId: currentStoreId, orderIds: selectedOrderIds }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; voucherKey?: string; count?: number } | null
-      if (!response.ok) throw new Error(payload?.error || 'RAPID_DELIVERY_CREATE_VOUCHER_FAILED')
+      if (!response.ok) throw new Error(payload?.error || 'VOUCHER_CREATE_FAILED')
 
       setVoucherSuccess(`Bon ${payload?.voucherKey || ''} créé pour ${Number(payload?.count || 0)} colis.`)
       setSelectedOrderIds([])
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['delivery-page-confirmed-parcels', currentStoreId] }),
-        queryClient.invalidateQueries({ queryKey: ['delivery-page-vouchers', rapidDeliveryConfig?.integration_id] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-page-all-vouchers', currentStoreId] }),
       ])
     } catch (error) {
-      setVoucherError(error instanceof Error ? error.message : 'RAPID_DELIVERY_CREATE_VOUCHER_FAILED')
+      setVoucherError(error instanceof Error ? error.message : 'VOUCHER_CREATE_FAILED')
     } finally {
       setIsCreatingVoucher(false)
     }
@@ -243,38 +296,59 @@ export default function LivraisonPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <div className="rounded-xl border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">Sociétés actives</div>
-              <div className="mt-2 text-xl sm:text-2xl font-semibold text-foreground">{deliveryCompanies.length}</div>
+          {/* Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-xl border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Sociétés</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">{deliveryCompanies.length}</div>
             </div>
-            <div className="rounded-xl border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">Mode Rapid Delivery</div>
-              <div className="mt-2 text-xl sm:text-2xl font-semibold text-foreground">{rapidDeliveryConfig?.parcel_creation_mode || '-'}</div>
+            <div className="rounded-xl border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Colis confirmés</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">{confirmedParcels.length}</div>
+            </div>
+            <div className="rounded-xl border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Bons Rapid</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">
+                {allVouchers.filter(v => v.provider === 'rapid-delivery').length}
+              </div>
+            </div>
+            <div className="rounded-xl border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Bons OZONE</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">
+                {allVouchers.filter(v => v.provider === 'ozone').length}
+              </div>
             </div>
           </div>
 
+          {/* Colis confirmés avec bouton de création */}
           <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-base sm:text-lg font-semibold text-foreground">Colis confirmés à ramasser</h2>
-                <p className="text-xs text-muted-foreground">Seuls les colis avec statut confirmé apparaissent ici pour créer un bon de ramassage.</p>
+                <h2 className="text-base sm:text-lg font-semibold text-foreground">Colis confirmés</h2>
+                <p className="text-xs text-muted-foreground">
+                  {deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0
+                    ? 'Sélectionnez les colis à inclure dans un bon de ramassage Rapid Delivery.'
+                    : 'Colis prêts pour expédition.'}
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void createVoucher()}
-                disabled={isCreatingVoucher || selectedOrderIds.length === 0}
-                className="w-full sm:w-auto rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              >
-                {isCreatingVoucher ? 'Création...' : `Créer bon de ramassage (${selectedOrderIds.length})`}
-              </button>
+              {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
+                deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => void createVoucher()}
+                  disabled={isCreatingVoucher || selectedOrderIds.length === 0}
+                  className="w-full sm:w-auto rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {isCreatingVoucher ? 'Création...' : `Créer bon de ramassage (${selectedOrderIds.length})`}
+                </button>
+              )}
             </div>
 
             {voucherSuccess ? <p className="text-sm text-emerald-600">{voucherSuccess}</p> : null}
             {voucherError ? <p className="text-sm text-red-500">{voucherError}</p> : null}
 
             {confirmedParcels.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucun colis confirmé prêt pour un bon.</p>
+              <p className="text-sm text-muted-foreground">Aucun colis confirmé.</p>
             ) : (
               <>
                 {/* Desktop table */}
@@ -282,14 +356,18 @@ export default function LivraisonPage() {
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
-                        <th className="px-2 py-2">
-                          <input
-                            type="checkbox"
-                            checked={allSelected}
-                            onChange={(e) => setSelectedOrderIds(e.target.checked ? confirmedParcels.map((row: any) => row.id) : [])}
-                          />
-                        </th>
+                        {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0) && (
+                          <th className="px-2 py-2">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={(e) => setSelectedOrderIds(e.target.checked ? confirmedParcels.map((row: any) => row.id) : [])}
+                            />
+                          </th>
+                        )}
                         <th className="px-2 py-2">Tracking</th>
+                        <th className="px-2 py-2">Transporteur</th>
                         <th className="px-2 py-2">Client</th>
                         <th className="px-2 py-2">Téléphone</th>
                         <th className="px-2 py-2">Ville</th>
@@ -299,16 +377,28 @@ export default function LivraisonPage() {
                     <tbody>
                       {confirmedParcels.map((order: any) => {
                         const checked = selectedOrderIds.includes(order.id)
+                        const isRapid = order._provider === 'Rapid'
+                        const canCreateVoucher = isRapid || order._provider === 'OZONE'
                         return (
-                          <tr key={order.id} className="border-b last:border-b-0">
+                          <tr key={`${order._provider}-${order.id}`} className="border-b last:border-b-0">
+                            {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0) && (
+                              <td className="px-2 py-2">
+                                {canCreateVoucher ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => setSelectedOrderIds((current) => e.target.checked ? [...current, order.id] : current.filter((id) => id !== order.id))}
+                                  />
+                                ) : null}
+                              </td>
+                            )}
+                            <td className="px-2 py-2 text-foreground font-mono text-xs">{order._tracking}</td>
                             <td className="px-2 py-2">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(e) => setSelectedOrderIds((current) => e.target.checked ? [...current, order.id] : current.filter((id) => id !== order.id))}
-                              />
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${isRapid ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {order._provider}
+                              </span>
                             </td>
-                            <td className="px-2 py-2 text-foreground">{order.rapid_delivery_parcel_key}</td>
                             <td className="px-2 py-2 text-foreground">{order.customer_name || '-'}</td>
                             <td className="px-2 py-2">{order.phone || '-'}</td>
                             <td className="px-2 py-2">{order.city || '-'}</td>
@@ -324,27 +414,36 @@ export default function LivraisonPage() {
                 <div className="sm:hidden space-y-2">
                   {confirmedParcels.map((order: any) => {
                     const checked = selectedOrderIds.includes(order.id)
+                    const isRapid = order._provider === 'Rapid'
+                    const canCreateVoucher = isRapid || order._provider === 'OZONE'
                     return (
                       <div
-                        key={order.id}
+                        key={`${order._provider}-${order.id}`}
                         className={`rounded-lg border p-3 text-sm space-y-1.5 transition-colors ${checked ? 'border-primary/50 bg-primary/5' : ''}`}
                       >
                         <div className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            className="mt-0.5 shrink-0"
-                            onChange={(e) => setSelectedOrderIds((current) => e.target.checked ? [...current, order.id] : current.filter((id) => id !== order.id))}
-                          />
+                          {canCreateVoucher && (
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              className="mt-0.5 shrink-0"
+                              onChange={(e) => setSelectedOrderIds((current) => e.target.checked ? [...current, order.id] : current.filter((id) => id !== order.id))}
+                            />
+                          )}
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-foreground truncate">{order.customer_name || '-'}</div>
-                            <div className="text-xs text-muted-foreground">Tracking: {order.rapid_delivery_parcel_key}</div>
+                            <div className="text-xs text-muted-foreground">
+                              <span className={`inline-block rounded-full px-1.5 py-0.5 text-xs font-medium mr-1 ${isRapid ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {order._provider}
+                              </span>
+                              {order._tracking}
+                            </div>
                           </div>
                           <div className="text-right shrink-0">
                             <div className="font-semibold text-foreground">{formatCurrency(Number(order.total_selling_price || 0))}</div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground pl-6">
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground pl-0">
                           <span>{order.phone || '-'}</span>
                           <span>{order.city || '-'}</span>
                         </div>
@@ -356,125 +455,88 @@ export default function LivraisonPage() {
             )}
           </div>
 
-          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage (Rapid Delivery)</h2>
-            {vouchers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucun bon créé pour le moment.</p>
-            ) : (
+          {/* Bons de ramassage unifiés */}
+          {allVouchers.length > 0 && (
+            <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
+              <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage</h2>
               <div className="space-y-2">
-                {vouchers.map((voucher: any, index: number) => (
-                  <div key={`${voucher.rapid_delivery_id}-${index}`} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border px-3 py-2 text-sm gap-2">
-                    <div>
-                      <div className="font-medium text-foreground">Bon #{voucher.rapid_delivery_id}</div>
-                      <div className="text-muted-foreground">{Array.isArray(voucher.payload?.parcels) ? voucher.payload.parcels.length : 0} colis</div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/api/integrations/rapid-delivery/vouchers/${encodeURIComponent(voucher.rapid_delivery_id)}/labels`}
-                        target="_blank"
-                        className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
-                      >
-                        Étiquettes
-                      </Link>
-                      <Link
-                        href={`/dashboard/livraison/vouchers/${encodeURIComponent(voucher.rapid_delivery_id)}`}
-                        target="_blank"
-                        className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
-                      >
-                        Bon
-                      </Link>
-                      <div className="text-xs text-muted-foreground sm:ml-2">{voucher.updated_at ? new Date(voucher.updated_at).toLocaleString('fr-MA') : '-'}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">Colis OZONE confirmés à ramasser</h2>
-            <p className="text-xs text-muted-foreground">Colis OZONE prêts pour la création d'un bon de ramassage.</p>
-
-            {confirmedOzoneParcels.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucun colis OZONE confirmé prêt pour un bon.</p>
-            ) : (
-              <>
-                {/* Desktop table */}
-                <div className="hidden sm:block overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="px-2 py-2">Tracking</th>
-                        <th className="px-2 py-2">Client</th>
-                        <th className="px-2 py-2">Téléphone</th>
-                        <th className="px-2 py-2">Ville</th>
-                        <th className="px-2 py-2">Montant</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {confirmedOzoneParcels.map((order: any) => (
-                        <tr key={order.id} className="border-b last:border-b-0">
-                          <td className="px-2 py-2 text-foreground">{order.ozone_parcel_key}</td>
-                          <td className="px-2 py-2 text-foreground">{order.customer_name || '-'}</td>
-                          <td className="px-2 py-2">{order.phone || '-'}</td>
-                          <td className="px-2 py-2">{order.city || '-'}</td>
-                          <td className="px-2 py-2">{formatCurrency(Number(order.total_selling_price || 0))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile cards */}
-                <div className="sm:hidden space-y-2">
-                  {confirmedOzoneParcels.map((order: any) => (
-                    <div key={order.id} className="rounded-lg border p-3 text-sm space-y-1.5">
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-foreground truncate">{order.customer_name || '-'}</div>
-                          <div className="text-xs text-muted-foreground">Tracking: {order.ozone_parcel_key}</div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-semibold text-foreground">{formatCurrency(Number(order.total_selling_price || 0))}</div>
+                {allVouchers.map((voucher: any) => {
+                  const isOzone = voucher.provider === 'ozone'
+                  const isRapid = voucher.provider === 'rapid-delivery'
+                  
+                  return (
+                    <div key={voucher.id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border px-3 py-2 text-sm gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${isOzone ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {isOzone ? 'OZONE' : 'RAPID'}
+                        </span>
+                        <div>
+                          <div className="font-medium text-foreground">Bon #{voucher.voucherKey}</div>
+                          <div className="text-muted-foreground text-xs">{voucher.parcelCount} colis</div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground pl-0">
-                        <span>{order.phone || '-'}</span>
-                        <span>{order.city || '-'}</span>
+                      
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isRapid && (
+                          <>
+                            <Link
+                              href={`/api/integrations/rapid-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/pdf`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Bon de ramassage
+                            </Link>
+                            <Link
+                              href={`/api/integrations/rapid-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Étiquettes
+                            </Link>
+                          </>
+                        )}
+                        
+                        {isOzone && (
+                          <>
+                            <Link
+                              href={`https://client.ozoneexpress.ma/pdf-delivery-note?dn-ref=${encodeURIComponent(voucher.voucherKey)}`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Standard
+                            </Link>
+                            <Link
+                              href={`https://client.ozoneexpress.ma/pdf-delivery-note-tickets?dn-ref=${encodeURIComponent(voucher.voucherKey)}`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              A4
+                            </Link>
+                            <Link
+                              href={`https://client.ozoneexpress.ma/pdf-delivery-note-tickets-4-4?dn-ref=${encodeURIComponent(voucher.voucherKey)}`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              10x10
+                            </Link>
+                          </>
+                        )}
+                        
+                        <div className="text-[10px] text-muted-foreground ml-auto sm:ml-2">
+                          {voucher.updated_at ? new Date(voucher.updated_at).toLocaleString('fr-MA') : '-'}
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage (OZONE)</h2>
-            {ozoneVouchers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucun bon OZONE créé pour le moment.</p>
-            ) : (
-              <div className="space-y-2">
-                {ozoneVouchers.map((voucher: any) => (
-                  <div key={voucher.id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border px-3 py-2 text-sm gap-2">
-                    <div>
-                      <div className="font-medium text-foreground">Bon #{voucher.ozone_voucher_key}</div>
-                      <div className="text-muted-foreground">{Array.isArray(voucher.payload?.parcels) ? voucher.payload.parcels.length : 0} colis</div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-xs text-muted-foreground">{voucher.updated_at ? new Date(voucher.updated_at).toLocaleString('fr-MA') : '-'}</div>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">Sociétés de livraison</h2>
-            {deliveryCompanies.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucune société active.</p>
-            ) : (
+          {/* Sociétés de livraison */}
+          {deliveryCompanies.length > 0 && (
+            <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
+              <h2 className="text-base sm:text-lg font-semibold text-foreground">Sociétés de livraison</h2>
               <div className="space-y-2">
                 {deliveryCompanies.map((company: any) => (
                   <div key={company.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
@@ -486,127 +548,109 @@ export default function LivraisonPage() {
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">Villes Rapid Delivery</h2>
-            <p className="text-xs text-muted-foreground">Villes et tarifs liés à votre intégration Rapid Delivery.</p>
-            {customCities.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucune ville liée à votre intégration Rapid Delivery.</p>
-            ) : (
-              <>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="Rechercher une ville..."
-                    value={citySearch}
-                    onChange={(e) => { setCitySearch(e.target.value); setCityPage(1) }}
-                    className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
+          {/* Villes */}
+          {customCities.length > 0 && (
+            <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
+              <h2 className="text-base sm:text-lg font-semibold text-foreground">Villes et tarifs</h2>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Rechercher une ville..."
+                  value={citySearch}
+                  onChange={(e) => { setCitySearch(e.target.value); setCityPage(1) }}
+                  className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
 
-                {(() => {
-                  const filtered = customCities.filter((city: any) =>
-                    city.city_name.toLowerCase().includes(citySearch.toLowerCase())
-                  )
-                  const totalPages = Math.max(1, Math.ceil(filtered.length / 10))
-                  const page = Math.min(cityPage, totalPages)
-                  const start = (page - 1) * 10
-                  const paged = filtered.slice(start, start + 10)
+              {(() => {
+                const filtered = customCities.filter((city: any) =>
+                  city.city_name.toLowerCase().includes(citySearch.toLowerCase())
+                )
+                const totalPages = Math.max(1, Math.ceil(filtered.length / 10))
+                const page = Math.min(cityPage, totalPages)
+                const start = (page - 1) * 10
+                const paged = filtered.slice(start, start + 10)
 
-                  return (
-                    <>
-                      {/* Desktop table */}
-                      <div className="hidden sm:block overflow-auto">
-                        <table className="min-w-full text-sm">
-                          <thead>
-                            <tr className="border-b text-left text-muted-foreground">
-                              <th className="px-2 py-2">Ville</th>
-                              <th className="px-2 py-2">Livraison</th>
-                              <th className="px-2 py-2">Refus</th>
-                              <th className="px-2 py-2">Annulation</th>
+                return (
+                  <>
+                    <div className="hidden sm:block overflow-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="border-b text-left text-muted-foreground">
+                            <th className="px-2 py-2">Ville</th>
+                            <th className="px-2 py-2">Livraison</th>
+                            <th className="px-2 py-2">Refus</th>
+                            <th className="px-2 py-2">Annulation</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paged.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="px-2 py-6 text-center text-sm text-muted-foreground">Aucune ville trouvée.</td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {paged.length === 0 ? (
-                              <tr>
-                                <td colSpan={4} className="px-2 py-6 text-center text-sm text-muted-foreground">Aucune ville trouvée.</td>
+                          ) : (
+                            paged.map((city: any) => (
+                              <tr key={city.city_key} className="border-b last:border-b-0">
+                                <td className="px-2 py-2 text-foreground">{city.city_name}</td>
+                                <td className="px-2 py-2">{formatCurrency(Number(city.cost_delivery || 0))}</td>
+                                <td className="px-2 py-2">{formatCurrency(Number(city.cost_refuse || 0))}</td>
+                                <td className="px-2 py-2">{formatCurrency(Number(city.cost_cancel || 0))}</td>
                               </tr>
-                            ) : (
-                              paged.map((city: any) => (
-                                <tr key={city.city_key} className="border-b last:border-b-0">
-                                  <td className="px-2 py-2 text-foreground">{city.city_name}</td>
-                                  <td className="px-2 py-2">{formatCurrency(Number(city.cost_delivery || 0))}</td>
-                                  <td className="px-2 py-2">{formatCurrency(Number(city.cost_refuse || 0))}</td>
-                                  <td className="px-2 py-2">{formatCurrency(Number(city.cost_cancel || 0))}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
 
-                      {/* Mobile cards */}
-                      <div className="sm:hidden space-y-2">
-                        {paged.length === 0 ? (
-                          <p className="text-sm text-muted-foreground text-center py-4">Aucune ville trouvée.</p>
-                        ) : (
-                          paged.map((city: any) => (
-                            <div key={city.city_key} className="rounded-lg border p-3 text-sm space-y-1.5">
-                              <div className="font-medium text-foreground">{city.city_name}</div>
-                              <div className="grid grid-cols-3 gap-2 text-xs">
-                                <div>
-                                  <span className="text-muted-foreground">Livraison</span>
-                                  <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_delivery || 0))}</div>
-                                </div>
-                                <div>
-                                  <span className="text-muted-foreground">Refus</span>
-                                  <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_refuse || 0))}</div>
-                                </div>
-                                <div>
-                                  <span className="text-muted-foreground">Annulation</span>
-                                  <div className="font-medium text-foreground">{formatCurrency(Number(city.cost_cancel || 0))}</div>
-                                </div>
-                              </div>
+                    <div className="sm:hidden space-y-2">
+                      {paged.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">Aucune ville trouvée.</p>
+                      ) : (
+                        paged.map((city: any) => (
+                          <div key={city.city_key} className="rounded-lg border p-3 text-sm space-y-1.5">
+                            <div className="font-medium text-foreground">{city.city_name}</div>
+                            <div className="grid grid-cols-3 gap-2 text-xs">
+                              <div><span className="text-muted-foreground">Livraison</span><div className="font-medium text-foreground">{formatCurrency(Number(city.cost_delivery || 0))}</div></div>
+                              <div><span className="text-muted-foreground">Refus</span><div className="font-medium text-foreground">{formatCurrency(Number(city.cost_refuse || 0))}</div></div>
+                              <div><span className="text-muted-foreground">Annulation</span><div className="font-medium text-foreground">{formatCurrency(Number(city.cost_cancel || 0))}</div></div>
                             </div>
-                          ))
-                        )}
-                      </div>
-
-                      {/* Pagination */}
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-2 pt-2">
-                          <button
-                            type="button"
-                            disabled={page <= 1}
-                            onClick={() => setCityPage(page - 1)}
-                            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
-                          >
-                            <ChevronLeft className="h-3.5 w-3.5" />
-                            Précédent
-                          </button>
-                          <span className="text-xs text-muted-foreground px-2">
-                            Page {page} / {totalPages}
-                          </span>
-                          <button
-                            type="button"
-                            disabled={page >= totalPages}
-                            onClick={() => setCityPage(page + 1)}
-                            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
-                          >
-                            Suivant
-                            <ChevronRight className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                          </div>
+                        ))
                       )}
-                    </>
-                  )
-                })()}
-              </>
-            )}
-          </div>
+                    </div>
+
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 pt-2">
+                        <button
+                          type="button"
+                          disabled={page <= 1}
+                          onClick={() => setCityPage(page - 1)}
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          <ChevronLeft className="h-3.5 w-3.5" />
+                          Précédent
+                        </button>
+                        <span className="text-xs text-muted-foreground px-2">Page {page} / {totalPages}</span>
+                        <button
+                          type="button"
+                          disabled={page >= totalPages}
+                          onClick={() => setCityPage(page + 1)}
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          Suivant
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          )}
         </>
       )}
     </div>

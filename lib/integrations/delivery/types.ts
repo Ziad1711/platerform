@@ -59,6 +59,11 @@ export type ParcelCreationInput = {
   address?: string
   recipient?: string
   remark?: string
+  options?: {
+    open?: 1 | 2
+    fragile?: 0 | 1
+    replace?: 0 | 1
+  }
 }
 
 /** Informations nécessaires pour créer un voucher */
@@ -70,6 +75,7 @@ export type VoucherCreationInput = {
 /** Configuration d'intégration delivery */
 export type DeliveryIntegrationConfig = {
   integrationId: string
+  providerId?: string
   token: string
   baseUrl: string | null
   userId: string

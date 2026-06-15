@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     // Récupérer l'intégration OZONE
     const { data: integration, error: integrationError } = await admin
       .from('integrations')
-      .select('id, status')
+      .select('id, status, provider_id')
       .eq('user_id', user.id)
       .eq('provider', 'ozone')
       .maybeSingle()
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
     const parcelKeyField = 'tracking_number'
     const validOrders = (orders || []).filter((order) =>
-      order.status === 'confirmed' && String(order[parcelKeyField] || '').trim() && !order.delivery_voucher_key && !order.rapid_delivery_voucher_key
+      ['confirmed', 'dl_pickup_pending'].includes(order.status) && String(order[parcelKeyField] || '').trim() && !order.delivery_voucher_key && !order.rapid_delivery_voucher_key
     )
 
     if (validOrders.length !== orderIds.length) {
@@ -70,6 +70,7 @@ export async function POST(request: Request) {
       provider: ozoneAdapter,
       config: {
         integrationId: integration.id,
+        providerId: integration.provider_id,
         token,
         baseUrl: null,
         userId: user.id,
@@ -87,8 +88,9 @@ export async function POST(request: Request) {
       voucherKey: result.voucherKey,
       count: result.totalParcels,
     })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'OZONE_CREATE_VOUCHER_FAILED'
+  } catch (error: any) {
+    const message = error?.message || error?.error_description || 'OZONE_CREATE_VOUCHER_FAILED'
+    console.error('OZONE_VOUCHER_ROUTE_ERROR:', error)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

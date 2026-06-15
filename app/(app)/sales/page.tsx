@@ -82,6 +82,17 @@ const USER_EDITABLE_STATUSES = [
   'refused',
   'returned_not_stocked',
   'returned_stocked',
+  'dl_no_answer',
+  'dl_unreachable',
+  'dl_out_of_zone',
+  'dl_client_interested',
+  'dl_postponed',
+  'dl_address_change',
+  'dl_pickup_pending',
+  'dl_refund',
+  'dl_follow_up_request',
+  'dl_billing_error',
+  'dl_out_for_delivery',
 ] as const
 
 const getNowLocalDateTimeValue = () => {
@@ -499,6 +510,9 @@ export default function VentesPage() {
   const [deliveryNoteOzoneCityKey, setDeliveryNoteOzoneCityKey] = useState('')
   const [deliveryNoteOzoneSearchTerm, setDeliveryNoteOzoneSearchTerm] = useState('')
   const [deliveryNoteOzoneDropdownOpen, setDeliveryNoteOzoneDropdownOpen] = useState(false)
+  const [deliveryNoteOzoneOpen, setDeliveryNoteOzoneOpen] = useState(true)
+  const [deliveryNoteOzoneFragile, setDeliveryNoteOzoneFragile] = useState(false)
+  const [deliveryNoteOzoneReplace, setDeliveryNoteOzoneReplace] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
@@ -611,7 +625,7 @@ export default function VentesPage() {
             unit_selling_price,
             products(name)
           ),
-          delivery_companies(name),
+          delivery_companies(name, api_provider),
           confirmation_agents(name)
         `, { count: 'exact' })
         .order('order_date', { ascending: false })
@@ -645,7 +659,7 @@ export default function VentesPage() {
               unit_selling_price,
               products(name)
             ),
-            delivery_companies(name),
+            delivery_companies(name, api_provider),
             confirmation_agents(name)
           `, { count: 'exact' })
 
@@ -1459,11 +1473,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1 }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -1706,8 +1720,12 @@ export default function VentesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rapidDeliveryIntegration?.id, rapidDeliveryIntegration?.status])
 
+  const isOrderLinkedToApiProvider = (order: any) => {
+    return order?.delivery_companies?.api_provider === 'ozone' || order?.delivery_companies?.api_provider === 'rapid-delivery'
+  }
+
   const getAllowedStatusOptionsForOrder = (order: any) => {
-    if (order?.delivery_status_source === 'delivery_company') {
+    if (order?.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)) {
       if (order?.status === 'returned_not_stocked') {
         return userStatusOptions.filter((option) => option.value === 'returned_stocked')
       }
@@ -3754,8 +3772,8 @@ export default function VentesPage() {
                   const status = statusConfig[order.status as keyof typeof statusConfig]
                   const StatusIcon = status?.icon || Clock
                   const allowedStatusOptions = getAllowedStatusOptionsForOrder(order)
-                  const isDeliveryLocked = order.delivery_status_source === 'delivery_company' && order.status !== 'returned_not_stocked'
-                  const isReturnedOverrideOnly = order.delivery_status_source === 'delivery_company' && order.status === 'returned_not_stocked'
+                  const isDeliveryLocked = (order.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)) && order.status !== 'returned_not_stocked'
+                  const isReturnedOverrideOnly = (order.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)) && order.status === 'returned_not_stocked'
                   const normalizedOrderPhone = normalizePhoneForBlacklist(order.phone)
                   const isBlacklisted = normalizedOrderPhone ? blacklistPhonesSet.has(normalizedOrderPhone) : false
                   const productNames = (order.order_items || [])
@@ -4249,6 +4267,38 @@ export default function VentesPage() {
                       </p>
                     </div>
                   ) : null}
+                  {isDeliveryNoteOzone ? (
+                    <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="text-sm font-medium text-foreground">Options colis OZONE</div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Autoriser l'ouverture du colis</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteOzoneOpen}
+                          onChange={(e) => setDeliveryNoteOzoneOpen(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Colis fragile</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteOzoneFragile}
+                          onChange={(e) => setDeliveryNoteOzoneFragile(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Remplacement</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteOzoneReplace}
+                          onChange={(e) => setDeliveryNoteOzoneReplace(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-foreground">
                       Note de livraison <span className="text-muted-foreground font-normal">(optionnelle)</span>
@@ -4300,6 +4350,9 @@ export default function VentesPage() {
                         deliveryCompanyId: resolvedCompanyId,
                         ozoneCityKey: selectedOzoneCity ? Number(selectedOzoneCity.city_key) : undefined,
                         ozoneCityName: selectedOzoneCity ? String(selectedOzoneCity.city_name || '') : undefined,
+                        ozoneParcelOpen: isDeliveryNoteOzone ? (deliveryNoteOzoneOpen ? 1 : 2) : undefined,
+                        ozoneParcelFragile: isDeliveryNoteOzone ? (deliveryNoteOzoneFragile ? 1 : 0) : undefined,
+                        ozoneParcelReplace: isDeliveryNoteOzone ? (deliveryNoteOzoneReplace ? 1 : 0) : undefined,
                       },
 
                       {
@@ -4308,6 +4361,9 @@ export default function VentesPage() {
                           setDeliveryNoteText('')
                           setDeliveryNoteSelectedCompanyId('')
                           setDeliveryNoteOzoneCityKey('')
+                          setDeliveryNoteOzoneOpen(true)
+                          setDeliveryNoteOzoneFragile(false)
+                          setDeliveryNoteOzoneReplace(false)
                         },
                       }
                     )

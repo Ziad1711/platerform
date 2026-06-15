@@ -32,6 +32,14 @@ export async function GET(request: Request) {
     const mapped = mapRapidDeliveryStateToOrderStatus(stateName)
 
     if (orderId) {
+      // Ne pas synchroniser si la commande est déjà dans un état final ou confirmée (ex: confirmed)
+      const { data: currentOrder } = await admin.from('orders').select('status').eq('id', orderId).single()
+      const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
+      
+      if (currentOrder && FINAL_ORDER_STATUSES.includes(currentOrder.status)) {
+        return NextResponse.json({ ok: true, tracking: payload, mapped, skipped: true })
+      }
+
       const now = new Date().toISOString()
       const updatePayload: Record<string, unknown> = {
         delivery_status: mapped.deliveryStatus,
