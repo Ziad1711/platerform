@@ -513,6 +513,17 @@ export default function VentesPage() {
   const [deliveryNoteOzoneOpen, setDeliveryNoteOzoneOpen] = useState(true)
   const [deliveryNoteOzoneFragile, setDeliveryNoteOzoneFragile] = useState(false)
   const [deliveryNoteOzoneReplace, setDeliveryNoteOzoneReplace] = useState(false)
+  const [deliveryNoteForcelogCanOpen, setDeliveryNoteForcelogCanOpen] = useState(false)
+  const [deliveryNoteForcelogFragile, setDeliveryNoteForcelogFragile] = useState(false)
+  const [deliveryNoteForcelogProductNature, setDeliveryNoteForcelogProductNature] = useState('')
+  const [deliveryNoteAmeexCityKey, setDeliveryNoteAmeexCityKey] = useState('')
+  const [deliveryNoteAmeexSearchTerm, setDeliveryNoteAmeexSearchTerm] = useState('')
+  const [deliveryNoteAmeexDropdownOpen, setDeliveryNoteAmeexDropdownOpen] = useState(false)
+  const [deliveryNoteAmeexOpen, setDeliveryNoteAmeexOpen] = useState(true)
+  const [deliveryNoteAmeexTry, setDeliveryNoteAmeexTry] = useState(true)
+  const [deliveryNoteAmeexFragile, setDeliveryNoteAmeexFragile] = useState(false)
+  const [deliveryNoteAmeexReplace, setDeliveryNoteAmeexReplace] = useState(true)
+  const [deliveryNoteAmeexParcelType, setDeliveryNoteAmeexParcelType] = useState<'SIMPLE' | 'STOCK'>('SIMPLE')
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
@@ -1043,6 +1054,29 @@ export default function VentesPage() {
     [deliveryCompaniesForOrder, deliveryNoteSelectedCompanyId]
   )
   const isDeliveryNoteOzone = deliveryNoteSelectedCompany?.api_provider === 'ozone'
+  const isDeliveryNoteForcelog = deliveryNoteSelectedCompany?.api_provider === 'forcelog'
+  const isDeliveryNoteAmeex = deliveryNoteSelectedCompany?.api_provider === 'ameex'
+
+  const { data: ameexCities = [] } = useQuery({
+    queryKey: ['ameex-cities-delivery-note'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name, price')
+        .eq('provider_id', '729e93ed-207f-4281-8ef6-de37006993de')
+        .order('city_name', { ascending: true })
+      if (error) throw error
+      const uniqueMap = new Map<string, any>()
+      for (const rate of data || []) {
+        uniqueMap.set(String(rate.external_city_key), {
+          city_key: rate.external_city_key,
+          city_name: rate.city_name,
+          cost_delivery: rate.price,
+        })
+      }
+      return Array.from(uniqueMap.values())
+    },
+  })
 
   const { data: rapidDeliveryIntegration } = useQuery({
     queryKey: ['rapid-delivery-integration-status'],
@@ -1473,11 +1507,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1 }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -4159,9 +4193,9 @@ export default function VentesPage() {
       ) : null}
 
       {deliveryNoteModalOrder ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-10 pb-16 sm:items-center sm:p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDeliveryNoteModalOrder(null)} />
-          <div className="relative z-10 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+          <div className="relative z-10 w-full max-w-md my-auto">
             <div className="rounded-2xl border border-border/50 bg-card p-0 shadow-2xl">
               {/* Header */}
               <div className="border-b border-border/50 px-6 py-5">
@@ -4299,6 +4333,154 @@ export default function VentesPage() {
                       </label>
                     </div>
                   ) : null}
+                  {isDeliveryNoteForcelog ? (
+                    <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="text-sm font-medium text-foreground">Options colis ForceLog</div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Autoriser l'ouverture du colis</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteForcelogCanOpen}
+                          onChange={(e) => setDeliveryNoteForcelogCanOpen(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Colis fragile</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteForcelogFragile}
+                          onChange={(e) => setDeliveryNoteForcelogFragile(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-foreground">
+                          Nature du produit
+                        </label>
+                        <select
+                          value={deliveryNoteForcelogProductNature}
+                          onChange={(e) => setDeliveryNoteForcelogProductNature(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                        >
+                          <option value="">-- Sélectionner --</option>
+                          <option value="vetement">Vêtement</option>
+                          <option value="electronique">Électronique</option>
+                          <option value="cosmetique">Cosmétique</option>
+                          <option value="alimentaire">Alimentaire</option>
+                          <option value="accessoire">Accessoire</option>
+                          <option value="autre">Autre</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : null}
+                  {isDeliveryNoteAmeex ? (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        Ville AMEEX <span className="text-muted-foreground font-normal">(obligatoire)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={deliveryNoteAmeexSearchTerm}
+                          onChange={(e) => {
+                            setDeliveryNoteAmeexSearchTerm(e.target.value)
+                            setDeliveryNoteAmeexCityKey('')
+                          }}
+                          onFocus={() => setDeliveryNoteAmeexDropdownOpen(true)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                          placeholder="Tapez pour rechercher une ville..."
+                        />
+                        {deliveryNoteAmeexDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setDeliveryNoteAmeexDropdownOpen(false)} />
+                            <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-48 overflow-y-auto rounded-xl border border-border bg-popover shadow-xl">
+                              {(ameexCities || []).filter((city: any) =>
+                                !deliveryNoteAmeexSearchTerm ||
+                                String(city.city_name || '').toLowerCase().includes(deliveryNoteAmeexSearchTerm.toLowerCase())
+                              ).length === 0 ? (
+                                <div className="px-3.5 py-2.5 text-sm text-muted-foreground">Aucune ville trouvée</div>
+                              ) : (
+                                (ameexCities || []).filter((city: any) =>
+                                  !deliveryNoteAmeexSearchTerm ||
+                                  String(city.city_name || '').toLowerCase().includes(deliveryNoteAmeexSearchTerm.toLowerCase())
+                                ).map((city: any) => (
+                                  <button
+                                    key={city.city_key}
+                                    type="button"
+                                    className={`w-full text-left px-3.5 py-2.5 text-sm hover:bg-secondary transition-colors ${
+                                      String(deliveryNoteAmeexCityKey) === String(city.city_key)
+                                        ? 'bg-primary/10 text-primary font-medium'
+                                        : 'text-foreground'
+                                    }`}
+                                    onClick={() => {
+                                      setDeliveryNoteAmeexCityKey(String(city.city_key))
+                                      setDeliveryNoteAmeexSearchTerm(String(city.city_name || ''))
+                                      setDeliveryNoteAmeexDropdownOpen(false)
+                                    }}
+                                  >
+                                    {city.city_name} — {formatCurrency(city.cost_delivery || 0)}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                  {isDeliveryNoteAmeex ? (
+                    <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="text-sm font-medium text-foreground">Options colis AMEEX</div>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-foreground">Type de colis</label>
+                        <select
+                          value={deliveryNoteAmeexParcelType}
+                          onChange={(e) => setDeliveryNoteAmeexParcelType(e.target.value as 'SIMPLE' | 'STOCK')}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm"
+                        >
+                          <option value="SIMPLE">Simple</option>
+                          <option value="STOCK">Stock</option>
+                        </select>
+                      </div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Autoriser l'ouverture du colis</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteAmeexOpen}
+                          onChange={(e) => setDeliveryNoteAmeexOpen(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Colis fragile</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteAmeexFragile}
+                          onChange={(e) => setDeliveryNoteAmeexFragile(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Remplacement</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteAmeexReplace}
+                          onChange={(e) => setDeliveryNoteAmeexReplace(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Essayer le produit</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteAmeexTry}
+                          onChange={(e) => setDeliveryNoteAmeexTry(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-foreground">
                       Note de livraison <span className="text-muted-foreground font-normal">(optionnelle)</span>
@@ -4339,6 +4521,13 @@ export default function VentesPage() {
                       setFormError('Veuillez choisir une ville OZONE.')
                       return
                     }
+                    const selectedAmeexCity = isDeliveryNoteAmeex
+                      ? (ameexCities as any[]).find((city: any) => String((city as any).city_key) === String(deliveryNoteAmeexCityKey))
+                      : null
+                    if (isDeliveryNoteAmeex && !selectedAmeexCity) {
+                      setFormError('Veuillez choisir une ville AMEEX.')
+                      return
+                    }
                     setDeliveryNoteModalOrder(null)
                     setUpdatingOrderId(order.id)
                     const resolvedCompanyId = deliveryNoteSelectedCompanyId === 'internal' ? undefined : deliveryNoteSelectedCompanyId
@@ -4353,6 +4542,16 @@ export default function VentesPage() {
                         ozoneParcelOpen: isDeliveryNoteOzone ? (deliveryNoteOzoneOpen ? 1 : 2) : undefined,
                         ozoneParcelFragile: isDeliveryNoteOzone ? (deliveryNoteOzoneFragile ? 1 : 0) : undefined,
                         ozoneParcelReplace: isDeliveryNoteOzone ? (deliveryNoteOzoneReplace ? 1 : 0) : undefined,
+                        forcelogCanOpen: isDeliveryNoteForcelog ? deliveryNoteForcelogCanOpen : undefined,
+                        forcelogFragile: isDeliveryNoteForcelog ? deliveryNoteForcelogFragile : undefined,
+                        forcelogProductNature: isDeliveryNoteForcelog ? (deliveryNoteForcelogProductNature || undefined) : undefined,
+                        ameexCityKey: selectedAmeexCity ? String(selectedAmeexCity.city_key) : undefined,
+                        ameexCityName: selectedAmeexCity ? String(selectedAmeexCity.city_name || '') : undefined,
+                        ameexParcelType: isDeliveryNoteAmeex ? deliveryNoteAmeexParcelType : undefined,
+                        ameexOpen: isDeliveryNoteAmeex ? deliveryNoteAmeexOpen : undefined,
+                        ameexFragile: isDeliveryNoteAmeex ? deliveryNoteAmeexFragile : undefined,
+                        ameexReplace: isDeliveryNoteAmeex ? deliveryNoteAmeexReplace : undefined,
+                        ameexTry: isDeliveryNoteAmeex ? deliveryNoteAmeexTry : undefined,
                       },
 
                       {
@@ -4364,6 +4563,16 @@ export default function VentesPage() {
                           setDeliveryNoteOzoneOpen(true)
                           setDeliveryNoteOzoneFragile(false)
                           setDeliveryNoteOzoneReplace(false)
+                          setDeliveryNoteForcelogCanOpen(false)
+                          setDeliveryNoteForcelogFragile(false)
+                          setDeliveryNoteForcelogProductNature('')
+                          setDeliveryNoteAmeexCityKey('')
+                          setDeliveryNoteAmeexSearchTerm('')
+                          setDeliveryNoteAmeexOpen(true)
+                          setDeliveryNoteAmeexTry(true)
+                          setDeliveryNoteAmeexFragile(false)
+                          setDeliveryNoteAmeexReplace(true)
+                          setDeliveryNoteAmeexParcelType('SIMPLE')
                         },
                       }
                     )

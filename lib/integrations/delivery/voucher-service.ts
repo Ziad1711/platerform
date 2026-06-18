@@ -76,6 +76,11 @@ export async function createVoucherForParcels(input: CreateVoucherServiceInput):
   // Compatibilité ascendante
   updatePayload.rapid_delivery_voucher_key = voucherKey
 
+  // Compatibilité AMEEX : stocker la référence du bon de livraison
+  if (provider.slug === 'ameex') {
+    updatePayload.ameex_delivery_note_ref = voucherKey
+  }
+
   const { error: updateOrdersError } = await admin
     .from('orders')
     .update(updatePayload)

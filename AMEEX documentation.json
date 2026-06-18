@@ -1,0 +1,1274 @@
+Webhook
+Le webhook recevra le suivi uniquement pour les colis ajoutés par API
+
+Webhook
+Overview
+This document describes the structure of the webhook data and the process used to send parcel delivery status updates to customers.This webhook allows customers to receive real-time updates about the delivery status of their parcels.
+
+Endpoint
+The webhook data is sent to the customer's provided URL using an HTTP POST request.
+
+Request Format
+The request payload is encoded as application/x-www-form-urlencoded and includes delivery status details in the following JSON structure:
+
+Example Payloads
+Example 1:Parcel In Progress
+{
+"CODE":"TGR1223B1EL127",
+"STATUT":"IN_PROGRESS",
+"COMMENT":"",
+"STATUT_S":"NO_ANSWER_TEAM",
+"STATUT_NAME":"En cours",
+"STATUT_COLOR":"#fdac41",
+"STATUT_S_NAME":"Pas de réponse ( Suivi )",
+"STATUT_S_COLOR":"#ffba57"
+}
+Example 2:Parcel Delivered
+{
+"CODE":"BSK0224B34RN3412",
+"STATUT":"DELIVERED",
+"COMMENT":"",
+"STATUT_NAME":"Livré",
+"STATUT_COLOR":"#24d651"
+}
+Example 3:Parcel Distribution
+{
+"CODE":"BSK0224B34SI6512",
+"STATUT":"DISTRIBUTION",
+"COMMENT":" Livreur Casa3 | Téléphone: 0808080808  ",
+"STATUT_NAME":"Mise en distribution",
+"STATUT_COLOR":"#25a0d7"
+}
+Example 4:Parcel(Postponed||Scheduled)
+{
+"CODE":"BSK0224B34BV8312",
+"DATE":"2024-06-27",
+"STATUT":"IN_PROGRESS",
+"COMMENT":"",
+"STATUT_S":"POSTPONED",
+"STATUT_NAME":"En cours",
+"STATUT_COLOR":"#fdac41",
+"STATUT_S_NAME":"Reporté",
+"STATUT_S_COLOR":"#25a0d7"
+}
+Field Descriptions
+CODE: A unique Tracking Number for the parcel.
+DATE (optional): The date associated with the parcel status update.
+STATUT: The current status of the parcel (e.g., IN_PROGRESS,DELIVERED, DISTRIBUTION). You get list of status from here
+COMMENT: Additional information or notes about the parcel (e.g., delivery person details).
+STATUT_S (optional): Sub-status providing further details about the main status.
+STATUT_NAME: A user-friendly name for the status (e.g., "En cours", "Livré").
+STATUT_COLOR: The associated color for the main status, typically used in UI elements.
+STATUT_S_NAME (optional): A user-friendly name for the sub-status.
+STATUT_S_COLOR (optional): The associated color for the sub-status.
+Example Usage
+Customers can configure their system to receive and process the webhook payload.For example:
+
+PHP Example
+$webhookPayload=$_POST;
+$parcelCode=$webhookPayload['CODE'];
+$status=$webhookPayload['STATUT'];
+Notes
+Customers should ensure their endpoint can handleapplication/x-www-form-urlencoded payloads.
+Webhooks are retried in case of failure(retry logic to be discussed separately).
+Fields marked as"optional"may not always be present in the payload.
+
+{
+  "info": {
+    "_postman_id": "42275c47-2a3a-438e-bc03-0bc212790831",
+    "name": "AMEEX Customers API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "55987628",
+    "_collection_link": "https://go.postman.co/collection/55987628-42275c47-2a3a-438e-bc03-0bc212790831?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Parcel",
+      "item": [
+        {
+          "name": "Add Parcel",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "type",
+                  "value": "SIMPLE",
+                  "type": "text",
+                  "description": "SIMPLE / STOCK"
+                },
+                {
+                  "key": "business",
+                  "value": "2",
+                  "type": "text",
+                  "description": "Business ID : API ID"
+                },
+                {
+                  "key": "order_num",
+                  "value": "ORDER_NUM_1",
+                  "type": "text",
+                  "description": "Order Number : Optional"
+                },
+                {
+                  "key": "replace",
+                  "value": "true",
+                  "type": "text",
+                  "description": "false / true"
+                },
+                {
+                  "key": "exchange_code",
+                  "value": "EXCHANGE_PARCEL_CODE",
+                  "type": "text"
+                },
+                {
+                  "key": "open",
+                  "value": "YES",
+                  "type": "text",
+                  "description": "YES / NO"
+                },
+                {
+                  "key": "try",
+                  "value": "YES",
+                  "type": "text",
+                  "description": "YES / NO"
+                },
+                {
+                  "key": "fragile",
+                  "value": "0",
+                  "type": "text",
+                  "description": "0 / 1"
+                },
+                {
+                  "key": "receiver",
+                  "value": "Receiver Name Here",
+                  "type": "text",
+                  "description": "Receiver name here : Required"
+                },
+                {
+                  "key": "phone",
+                  "value": "0606060606",
+                  "type": "text",
+                  "description": "Phone here : Required"
+                },
+                {
+                  "key": "city",
+                  "value": "1",
+                  "type": "text",
+                  "description": "City Id here : Required"
+                },
+                {
+                  "key": "address",
+                  "value": "Address Here",
+                  "type": "text",
+                  "description": "Address here : Required"
+                },
+                {
+                  "key": "comment",
+                  "value": "Comment Here ",
+                  "type": "text",
+                  "description": "Comment here : Optional"
+                },
+                {
+                  "key": "product",
+                  "value": "Product Name",
+                  "type": "text",
+                  "description": "Product name here : Optional"
+                },
+                {
+                  "key": "cod",
+                  "value": "499",
+                  "type": "text",
+                  "description": "COD / CRBT / PRICE : Required"
+                },
+                {
+                  "key": "products[0][id]",
+                  "value": "4aad2a54-3064-11ef-9ede-3ceceff12da9",
+                  "type": "text",
+                  "description": "Optional"
+                },
+                {
+                  "key": "products[0][qty]",
+                  "value": "10",
+                  "type": "text",
+                  "description": "Optional"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Action/Type/Add",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Action",
+                "Type",
+                "Add"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Edit Parcel",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "order_num",
+                  "value": "ORDER_NUM_EDIT",
+                  "type": "text",
+                  "description": "Order Number : Optional"
+                },
+                {
+                  "key": "replace",
+                  "value": "false",
+                  "type": "text",
+                  "description": "false / true"
+                },
+                {
+                  "key": "exchange_code",
+                  "value": "EXCHANGE_PARCEL_CODE",
+                  "type": "text"
+                },
+                {
+                  "key": "open",
+                  "value": "YES",
+                  "type": "text",
+                  "description": "YES / NO"
+                },
+                {
+                  "key": "try",
+                  "value": "YES",
+                  "type": "text",
+                  "description": "YES / NO"
+                },
+                {
+                  "key": "fragile",
+                  "value": "0",
+                  "type": "text",
+                  "description": "0 / 1"
+                },
+                {
+                  "key": "receiver",
+                  "value": "Receiver Name Here _ EDIT",
+                  "type": "text",
+                  "description": "Receiver name here : Required"
+                },
+                {
+                  "key": "phone",
+                  "value": "0606060607",
+                  "type": "text",
+                  "description": "Phone here : Required"
+                },
+                {
+                  "key": "city",
+                  "value": "1",
+                  "type": "text",
+                  "description": "City Id here : Required"
+                },
+                {
+                  "key": "address",
+                  "value": "Address Here_EDIT",
+                  "type": "text",
+                  "description": "Address here : Required"
+                },
+                {
+                  "key": "comment",
+                  "value": "Comment Here _ EDIT",
+                  "type": "text",
+                  "description": "Comment here : Optional"
+                },
+                {
+                  "key": "product",
+                  "value": "Product Name _ EDIT",
+                  "type": "text",
+                  "description": "Product name here : Optional"
+                },
+                {
+                  "key": "cod",
+                  "value": "599",
+                  "type": "text",
+                  "description": "COD / CRBT / PRICE : Required"
+                },
+                {
+                  "key": "products[0][id]",
+                  "value": "4aad2a54-3064-11ef-9ede-3ceceff12da9",
+                  "type": "text",
+                  "description": "Optional"
+                },
+                {
+                  "key": "products[0][qty]",
+                  "value": "12",
+                  "type": "text",
+                  "description": "Optional"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Action/Type/Edit?ParcelCode=MRK0824B2LP5041691",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Action",
+                "Type",
+                "Edit"
+              ],
+              "query": [
+                {
+                  "key": "ParcelCode",
+                  "value": "MRK0824B2LP5041691"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Parcel",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Action/Type/Delete?ParcelCode=PARCEL_CODE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Action",
+                "Type",
+                "Delete"
+              ],
+              "query": [
+                {
+                  "key": "ParcelCode",
+                  "value": "PARCEL_CODE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Parcel Info",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Info?ParcelCode=PARCEL_CODE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Info"
+              ],
+              "query": [
+                {
+                  "key": "ParcelCode",
+                  "value": "PARCEL_CODE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Parcel Tracking",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Tracking?ParcelCode=PARCEL_CODE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Tracking"
+              ],
+              "query": [
+                {
+                  "key": "ParcelCode",
+                  "value": "PARCEL_CODE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Parcel Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Statuts",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Statuts"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Parcel Mass Tracking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "codes",
+                  "value": "TRACKING_NUMBER_1,TRACKING_NUMBER_2,TRACKING_NUMBER_3",
+                  "description": "MAX: 25 CODE",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/MassTracking",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "MassTracking"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Parcel Mass Info",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "codes",
+                  "value": "TRACKING_NUMBER_1,TRACKING_NUMBER_2,TRACKING_NUMBER_3",
+                  "description": "MAX: 25 CODE",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/MassInfo",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "MassInfo"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Relaunch Parcel",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Action/Type/Relaunch?ParcelCode=PARCEL_CODE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Action",
+                "Type",
+                "Relaunch"
+              ],
+              "query": [
+                {
+                  "key": "ParcelCode",
+                  "value": "PARCEL_CODE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Relaunch Parcel - New Customer",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "order_num",
+                  "value": "ORDER_NUM_",
+                  "type": "text",
+                  "description": "Order Number : Optional"
+                },
+                {
+                  "key": "receiver",
+                  "value": "Receiver Name Here",
+                  "type": "text",
+                  "description": "Receiver name here : Required"
+                },
+                {
+                  "key": "phone",
+                  "value": "0606060607",
+                  "type": "text",
+                  "description": "Phone here : Required"
+                },
+                {
+                  "key": "city",
+                  "value": "4",
+                  "type": "text",
+                  "description": "City Id here : Required"
+                },
+                {
+                  "key": "address",
+                  "value": "Address Here",
+                  "type": "text",
+                  "description": "Address here : Required"
+                },
+                {
+                  "key": "comment",
+                  "value": "Comment Here",
+                  "type": "text",
+                  "description": "Comment here : Optional"
+                },
+                {
+                  "key": "price",
+                  "value": "599",
+                  "type": "text",
+                  "description": "COD / CRBT / PRICE : Required"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Action/Type/RelaunchNew?ParcelCode=PARCEL_CODE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Action",
+                "Type",
+                "RelaunchNew"
+              ],
+              "query": [
+                {
+                  "key": "ParcelCode",
+                  "value": "PARCEL_CODE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Parcels List",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API ID KEY",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "start",
+                  "value": "0",
+                  "type": "text"
+                },
+                {
+                  "key": "length",
+                  "value": "10",
+                  "type": "text"
+                },
+                {
+                  "key": "search[value]",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "search[regex]",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "business",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "team",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "city",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "situation",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "statut",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "statut_s",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "type",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "date_type",
+                  "value": "",
+                  "type": "text"
+                },
+                {
+                  "key": "date[from]",
+                  "value": "09/24/2020",
+                  "type": "text"
+                },
+                {
+                  "key": "date[to]",
+                  "value": "08/21/2024",
+                  "type": "text"
+                },
+                {
+                  "key": "all_data",
+                  "value": "1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/Parcels/Json",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "Parcels",
+                "Json"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Delivery Note",
+      "item": [
+        {
+          "name": "Add Delivery Note",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "business",
+                  "value": "2",
+                  "description": "Business ID : API ID",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/DeliveryNotes/Action/Type/Add",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "DeliveryNotes",
+                "Action",
+                "Type",
+                "Add"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Parcels To Delivery Note",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "parcels[]",
+                  "value": "PARCEL_CODE_1",
+                  "description": "Business ID : API ID",
+                  "type": "text"
+                },
+                {
+                  "key": "parcels[]",
+                  "value": "PARCEL_CODE_2",
+                  "type": "text"
+                },
+                {
+                  "key": "parcels[]",
+                  "value": "PARCEL_CODE_3",
+                  "type": "text"
+                },
+                {
+                  "key": "parcels[]",
+                  "value": "PARCEL_CODE_4",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/DeliveryNotes/Action/Type/AddParcels?Ref=DELIVERY_NOTE_REF_HERE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "DeliveryNotes",
+                "Action",
+                "Type",
+                "AddParcels"
+              ],
+              "query": [
+                {
+                  "key": "Ref",
+                  "value": "DELIVERY_NOTE_REF_HERE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Delivery Note",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/DeliveryNotes/Action/Type/Delete?Ref=DELIVERY_NOTE_REF_HERE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "DeliveryNotes",
+                "Action",
+                "Type",
+                "Delete"
+              ],
+              "query": [
+                {
+                  "key": "Ref",
+                  "value": "DELIVERY_NOTE_REF_HERE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Save Delivery Note",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/DeliveryNotes/Action/Type/Save?Ref=DELIVERY_NOTE_REF_HERE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "DeliveryNotes",
+                "Action",
+                "Type",
+                "Save"
+              ],
+              "query": [
+                {
+                  "key": "Ref",
+                  "value": "DELIVERY_NOTE_REF_HERE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Delivery Note Labels - HTML",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/DeliveryNotes/Print/Type/Labels?Ref=DELIVERY_NOTE_REF_HERE&LabelType=Label_100_100",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "DeliveryNotes",
+                "Print",
+                "Type",
+                "Labels"
+              ],
+              "query": [
+                {
+                  "key": "Ref",
+                  "value": "DELIVERY_NOTE_REF_HERE"
+                },
+                {
+                  "key": "LabelType",
+                  "value": "Label_100_100",
+                  "description": "Label_100_100 / Label_A4 / Label_A4_8 / "
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Delivery Note Details - HTML",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/DeliveryNotes/Print/Type/Note?Ref=DELIVERY_NOTE_REF_HERE",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "DeliveryNotes",
+                "Print",
+                "Type",
+                "Note"
+              ],
+              "query": [
+                {
+                  "key": "Ref",
+                  "value": "DELIVERY_NOTE_REF_HERE"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pickup Request",
+      "item": [
+        {
+          "name": "Add Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "C-Api-Id",
+                "value": "API ID HERE",
+                "type": "text"
+              },
+              {
+                "key": "C-Api-Key",
+                "value": "API KEY HERE",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "mdl_business",
+                  "value": "2",
+                  "description": "Business ID : API ID",
+                  "type": "text"
+                },
+                {
+                  "key": "mdl_type",
+                  "value": "PARCEL_M",
+                  "type": "text"
+                },
+                {
+                  "key": "mdl_city",
+                  "value": "1",
+                  "description": "City ID Here ",
+                  "type": "text"
+                },
+                {
+                  "key": "p_address",
+                  "value": "Address Here",
+                  "description": "Address Here",
+                  "type": "text"
+                },
+                {
+                  "key": "p_phone",
+                  "value": "0606060606",
+                  "description": "Phone Here",
+                  "type": "text"
+                },
+                {
+                  "key": "p_note",
+                  "value": "Note Here",
+                  "description": "Note Here",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.ameex.app/customer/Delivery/PickupRequests/Action/Type/Add",
+              "protocol": "https",
+              "host": [
+                "api",
+                "ameex",
+                "app"
+              ],
+              "path": [
+                "customer",
+                "Delivery",
+                "PickupRequests",
+                "Action",
+                "Type",
+                "Add"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}

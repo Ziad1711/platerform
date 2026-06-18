@@ -11,6 +11,8 @@ import IntegrationCard from '@/components/dashboard/integrations/integration-car
 import DeliveryConnectWizard from '@/components/dashboard/integrations/delivery-connect-wizard'
 import OzoneConnectWizard from '@/components/dashboard/integrations/ozone-connect-wizard'
 import FacebookAdsConnectWizard from '@/components/dashboard/integrations/facebook-ads-connect-wizard'
+import ForceLogConnectWizard from '@/components/dashboard/integrations/forcelog-connect-wizard'
+import AmeexConnectWizard from '@/components/dashboard/integrations/ameex-connect-wizard'
 import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
@@ -136,7 +138,7 @@ export default function IntegrationsPage() {
       setSelectedCustomSiteStoreWebsite(null)
     } else {
       setConnectProviderSlug(providerSlug)
-      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'ozone') {
+      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex') {
         setYoucanStoreSlug('')
       }
       setConnectError('')
@@ -461,8 +463,28 @@ export default function IntegrationsPage() {
         />
       ) : null}
 
+      {isConnectModalOpen && connectProviderSlug === 'forcelog' ? (
+        <ForceLogConnectWizard
+          onClose={() => {
+            setIsConnectModalOpen(false)
+            setConnectProviderSlug(null)
+            setConnectError('')
+          }}
+        />
+      ) : null}
+
+      {isConnectModalOpen && connectProviderSlug === 'ameex' ? (
+        <AmeexConnectWizard
+          onClose={() => {
+            setIsConnectModalOpen(false)
+            setConnectProviderSlug(null)
+            setConnectError('')
+          }}
+        />
+      ) : null}
+
       {/* YouCan Connect Modal */}
-      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && (
+      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"

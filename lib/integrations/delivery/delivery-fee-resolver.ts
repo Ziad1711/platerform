@@ -17,12 +17,13 @@ type SupabaseLike = ReturnType<typeof createAdminClient>
 export async function resolveDeliveryFee(params: {
   supabase?: SupabaseLike
   storeId: string
-  cityKey: number
+  cityKey: number | string
   integrationId?: string | null
   providerSlug?: string
 }): Promise<number> {
   const supabase = params.supabase || createAdminClient()
-  const { storeId, cityKey } = params
+  const { storeId } = params
+  const cityKey = String(params.cityKey)
   const providerSlug = params.providerSlug || 'rapid-delivery'
 
   // 1. Récupérer le provider réel (source générique delivery_rates)
@@ -89,18 +90,34 @@ export async function resolveDeliveryFee(params: {
     }
   }
 
-  // 5. Fallback legacy Rapid Delivery
+  // 5. Fallback : delivery_rates direct provider
+  if (providerSlug === 'forcelog' || providerSlug === 'ameex') {
+    const { data: rate } = await supabase
+      .from('delivery_rates')
+      .select('price')
+      .eq('provider_id', provider.id)
+      .eq('external_city_key', cityKey)
+      .maybeSingle()
+
+    if (rate?.price !== undefined && rate?.price !== null) {
+      return Number(rate.price)
+    }
+    return 0
+  }
+
+  // 6. Fallback legacy Rapid Delivery
   return fallbackStandardRate(supabase, cityKey)
 }
 
 async function fallbackStandardRate(
   supabase: SupabaseLike,
-  cityKey: number
+  cityKey: string
 ): Promise<number> {
+  const numericKey = Number(cityKey) || 0
   const { data: standard } = await supabase
     .from('rapid_delivery_cities_standard')
     .select('cost_delivery')
-    .eq('city_key', cityKey)
+    .eq('city_key', numericKey)
     .maybeSingle()
 
   if (standard?.cost_delivery !== undefined && standard?.cost_delivery !== null) {
@@ -111,7 +128,7 @@ async function fallbackStandardRate(
   const { data: legacy } = await supabase
     .from('rapid_delivery_cities')
     .select('cost_delivery')
-    .eq('city_key', cityKey)
+    .eq('city_key', numericKey)
     .limit(1)
     .maybeSingle()
 

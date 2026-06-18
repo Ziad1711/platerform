@@ -13,7 +13,7 @@ type NormalizeCityParams = {
 
 export type NormalizeCityResult = {
   cityName: string
-  cityKey: number | null
+  cityKey: string | null
   source: 'exact_match' | 'common_alias' | 'alias_cache' | 'ai_learned' | 'ai_not_found' | 'ai_invalid' | 'ai_failed' | 'no_provider_cities'
   learned: boolean
   /** Étape finale atteinte dans le pipeline de normalisation */
@@ -29,6 +29,35 @@ async function listCitiesForProvider(supabase: SupabaseLike, providerSlug: strin
     // Ozone est volontairement exclu du flux IA/alias.
     // La ville Ozone doit être choisie manuellement dans le modal de confirmation.
     return []
+  }
+
+  if (providerSlug === 'forcelog') {
+    // ForceLog : les villes viennent de delivery_rates
+    const { data, error } = await supabase
+      .from('delivery_rates')
+      .select('external_city_key, city_name')
+      .eq('provider_id', '422b8621-f708-4e5a-ba50-c9196c214a8a')
+      .order('city_name', { ascending: true })
+
+    if (error) throw error
+    return (data || []).map((city) => ({
+      city_key: String(city.external_city_key),
+      city_name: city.city_name,
+    }))
+  }
+
+  if (providerSlug === 'ameex') {
+    const { data, error } = await supabase
+      .from('delivery_rates')
+      .select('external_city_key, city_name')
+      .eq('provider_id', '729e93ed-207f-4281-8ef6-de37006993de')
+      .order('city_name', { ascending: true })
+
+    if (error) throw error
+    return (data || []).map((city) => ({
+      city_key: String(city.external_city_key),
+      city_name: city.city_name,
+    }))
   }
 
   // Rapid Delivery : rapid_delivery_cities_standard
@@ -59,8 +88,30 @@ async function findAliasForProvider(
   supabase: SupabaseLike,
   normalizedAlias: string,
   providerSlug: string
-): Promise<{ canonical_city_name: string; city_key: number | null } | null> {
+): Promise<{ canonical_city_name: string; city_key: string | null } | null> {
   if (providerSlug === 'ozone') return null
+
+  if (providerSlug === 'forcelog') {
+    const { data, error } = await supabase
+      .from('forcelog_city_aliases')
+      .select('canonical_city_name, city_key')
+      .eq('alias', normalizedAlias)
+      .maybeSingle()
+
+    if (error) throw error
+    return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
+  }
+
+  if (providerSlug === 'ameex') {
+    const { data, error } = await supabase
+      .from('ameex_city_aliases')
+      .select('canonical_city_name, city_key')
+      .eq('alias', normalizedAlias)
+      .maybeSingle()
+
+    if (error) throw error
+    return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
+  }
 
   const { data, error } = await supabase
     .from('rapid_delivery_city_aliases')
@@ -69,14 +120,14 @@ async function findAliasForProvider(
     .maybeSingle()
 
   if (error) throw error
-  return data || null
+  return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
 }
 
 async function persistAliasForProvider(params: {
   supabase: SupabaseLike
   alias: string
   canonicalCityName: string
-  cityKey: number | null
+  cityKey: string | null
   orderId?: string | null
   source: string
   confidenceScore: number
@@ -87,11 +138,13 @@ async function persistAliasForProvider(params: {
 
   if (providerSlug === 'ozone') return
 
-  await supabase.from('rapid_delivery_city_aliases').upsert(
+  const table = providerSlug === 'forcelog' ? 'forcelog_city_aliases' : providerSlug === 'ameex' ? 'ameex_city_aliases' : 'rapid_delivery_city_aliases'
+
+  await supabase.from(table).upsert(
     {
       alias,
       canonical_city_name: canonicalCityName,
-      city_key: cityKey,
+      city_key: cityKey || '',
       learned_from_order_id: orderId || null,
       learned_at: now,
       last_used_at: now,
@@ -107,17 +160,19 @@ async function persistAliasForProvider(params: {
 async function updateAliasUsage(
   supabase: SupabaseLike,
   normalizedAlias: string,
-  cityKey: number | null,
+  cityKey: string | null,
   providerSlug: string
 ) {
   const now = new Date().toISOString()
 
   if (providerSlug === 'ozone') return
 
+  const table = providerSlug === 'forcelog' ? 'forcelog_city_aliases' : providerSlug === 'ameex' ? 'ameex_city_aliases' : 'rapid_delivery_city_aliases'
+
   await supabase
-    .from('rapid_delivery_city_aliases')
+    .from(table)
     .update({
-      city_key: cityKey,
+      city_key: cityKey || '',
       last_used_at: now,
       updated_at: now,
     })
@@ -128,7 +183,7 @@ async function persistOrderDeliveryCity(params: {
   supabase: SupabaseLike
   orderId?: string | null
   cityName: string
-  cityKey: number | null
+  cityKey: string | null
 }) {
   if (!params.orderId) return
 
@@ -180,7 +235,7 @@ function resolveCityKeyFromCandidates(
   candidates: Array<{ city_name: string; city_key: number | string }>
 ) {
   const match = candidates.find((city) => normalizeAlias(city.city_name) === normalizeAlias(cityName))
-  return Number(match?.city_key || 0) || null
+  return match ? String(match.city_key || '') : null
 }
 
 async function resolveWithDeepSeek(rawCity: string, candidates: string[]) {
@@ -257,33 +312,33 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
   // 2. Exact match
   const exactMatch = cities.find((city) => normalizeAlias(city.city_name) === normalizedAlias)
   if (exactMatch) {
+    const cityKey = String(exactMatch.city_key || '') || null
     console.log('[city-normalizer] exact-match', {
       rawCity,
       matchedCity: exactMatch.city_name,
-      cityKey: exactMatch.city_key,
+      cityKey,
     })
     if (params.orderId) {
       await persistOrderDeliveryCity({
         supabase,
         orderId: params.orderId,
         cityName: exactMatch.city_name,
-        cityKey: Number(exactMatch.city_key || 0) || null,
+        cityKey,
       })
     }
     return {
       cityName: exactMatch.city_name,
-      cityKey: Number(exactMatch.city_key || 0) || null,
+      cityKey,
       source: 'exact_match',
       learned: false,
       finalStage: 'exact_match',
     }
   }
 
-  // 3. Alias en cache Rapid Delivery
+  // 3. Alias en cache
   const cachedAlias = await findAliasForProvider(supabase, normalizedAlias, params.providerSlug)
   if (cachedAlias) {
-    const repairedCityKey =
-      Number(cachedAlias.city_key || 0) || resolveCityKeyFromCandidates(cachedAlias.canonical_city_name, cities)
+    const repairedCityKey = cachedAlias.city_key || resolveCityKeyFromCandidates(cachedAlias.canonical_city_name, cities)
 
     console.log('[city-normalizer] alias-cache-hit', {
       rawCity,
@@ -366,7 +421,7 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
     }
   }
 
-  const aiCityKey = Number(aiCity.city_key || 0) || resolveCityKeyFromCandidates(aiCity.city_name, cities)
+  const aiCityKey = String(aiCity.city_key || '') || resolveCityKeyFromCandidates(aiCity.city_name, cities)
 
   await persistAliasForProvider({
     supabase,

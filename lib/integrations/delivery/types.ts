@@ -77,6 +77,8 @@ export type DeliveryIntegrationConfig = {
   integrationId: string
   providerId?: string
   token: string
+  /** Clé API spécifique au provider (ex: AMEEX apiKey) */
+  apiKey?: string
   baseUrl: string | null
   userId: string
   storeId: string

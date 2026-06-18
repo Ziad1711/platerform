@@ -2,6 +2,8 @@
 // Interface abstraite pour un provider de livraison
 // ============================================================
 
+import { forcelogAdapter } from './forcelog-adapter'
+import { ameexAdapter } from './ameex-adapter'
 import type {
   CreateParcelResult,
   CreateVoucherResult,
@@ -37,3 +39,21 @@ export interface DeliveryProvider {
   /** Résout une clé courte à partir d'un UUID (si applicable) */
   resolveShortTrackingKey?(config: DeliveryIntegrationConfig, uuid: string): Promise<string | null>
 }
+
+const providerRegistry = new Map<string, DeliveryProvider>()
+
+export function registerProvider(provider: DeliveryProvider) {
+  providerRegistry.set(provider.slug, provider)
+}
+
+export function getProvider(slug: string): DeliveryProvider | undefined {
+  return providerRegistry.get(slug)
+}
+
+export function listProviders(): DeliveryProvider[] {
+  return Array.from(providerRegistry.values())
+}
+
+// Enregistrer les providers au chargement
+registerProvider(forcelogAdapter)
+registerProvider(ameexAdapter)

@@ -8,7 +8,7 @@ import { useStore } from '@/lib/store-context'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 export default function LivraisonPage() {
   const supabase = createClient()
@@ -20,6 +20,14 @@ export default function LivraisonPage() {
   const [isCreatingVoucher, setIsCreatingVoucher] = useState(false)
   const [citySearch, setCitySearch] = useState('')
   const [cityPage, setCityPage] = useState(1)
+
+  // Modal ForceLog
+  const [showForceLogModal, setShowForceLogModal] = useState(false)
+  const [flPickupPhone, setFlPickupPhone] = useState('')
+  const [flPickupCityKey, setFlPickupCityKey] = useState('')
+  const [flPickupCityName, setFlPickupCityName] = useState('')
+  const [flPickupAddress, setFlPickupAddress] = useState('')
+  const [flPickupStickers, setFlPickupStickers] = useState(false)
 
   const { data: deliveryCompanies = [] } = useQuery({
     queryKey: ['delivery-page-companies', currentStoreId],
@@ -48,6 +56,47 @@ export default function LivraisonPage() {
 
       if (error) throw error
       return data || null
+    },
+  })
+
+  // Configuration ForceLog pré-remplie
+  const { data: forcelogConfig } = useQuery({
+    queryKey: ['delivery-page-forcelog-config', currentStoreId],
+    enabled: !!currentStoreId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('forcelog_configs')
+        .select('pickup_phone, pickup_city_key, pickup_city_name, pickup_address, pickup_stickers')
+        .eq('store_id', currentStoreId!)
+        .maybeSingle()
+
+      if (error) throw error
+      return data || null
+    },
+  })
+
+  // Villes disponibles pour ForceLog (via delivery_rates)
+  const { data: forcelogCities = [] } = useQuery({
+    queryKey: ['delivery-page-forcelog-cities', currentStoreId],
+    enabled: !!currentStoreId,
+    queryFn: async () => {
+      // Récupérer le provider_id forcelog (depuis integration_providers)
+      const { data: flProvider } = await supabase
+        .from('integration_providers')
+        .select('id')
+        .eq('slug', 'forcelog')
+        .maybeSingle()
+
+      if (!flProvider?.id) return []
+
+      const { data, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name')
+        .eq('provider_id', flProvider.id)
+        .order('city_name', { ascending: true })
+
+      if (error) throw error
+      return data || []
     },
   })
 
@@ -109,6 +158,14 @@ export default function LivraisonPage() {
         .filter((c: any) => c.api_provider === 'rapid-delivery')
         .map((c: any) => c.id)
 
+      const forcelogCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'forcelog')
+        .map((c: any) => c.id)
+
+      const ameexCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'ameex')
+        .map((c: any) => c.id)
+
       // Colis Rapid Delivery (via rapid_delivery_parcel_key, pas de voucher)
       const rapidPromise = rapidCompanyIds.length > 0
         ? supabase
@@ -138,8 +195,36 @@ export default function LivraisonPage() {
             .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.tracking_number, _provider: 'OZONE' })))
         : Promise.resolve([])
 
-      const [rapidRes, ozoneRes] = await Promise.all([rapidPromise, ozonePromise])
-      const merged = [...rapidRes, ...ozoneRes]
+      // Colis ForceLog (via forcelog_parcel_key, sans pickup déjà créé)
+      const forcelogPromise = forcelogCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, forcelog_parcel_key, confirmed_at, status')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', forcelogCompanyIds)
+            .not('forcelog_parcel_key', 'is', null)
+            .is('forcelog_pickup_key', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.forcelog_parcel_key, _provider: 'ForceLog' })))
+        : Promise.resolve([])
+
+      // Colis AMEEX (via ameex_parcel_code, sans delivery_note déjà créé)
+      const ameexPromise = ameexCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, ameex_parcel_code, confirmed_at, status')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', ameexCompanyIds)
+            .not('ameex_parcel_code', 'is', null)
+            .is('ameex_delivery_note_ref', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.ameex_parcel_code, _provider: 'Ameex' })))
+        : Promise.resolve([])
+
+      const [rapidRes, ozoneRes, forcelogRes, ameexRes] = await Promise.all([rapidPromise, ozonePromise, forcelogPromise, ameexPromise])
+      const merged = [...rapidRes, ...ozoneRes, ...forcelogRes, ...ameexRes]
       merged.sort((a, b) => new Date(b.confirmed_at).getTime() - new Date(a.confirmed_at).getTime())
       return merged
     },
@@ -152,7 +237,7 @@ export default function LivraisonPage() {
       // 1. Récupérer les nouveaux bons (unifiés)
       const unifiedPromise = supabase
         .from('delivery_entity_mappings')
-        .select('id, provider_entity_id, payload, updated_at')
+        .select('id, integration_id, provider_entity_id, payload, updated_at')
         .eq('store_id', currentStoreId!)
         .eq('entity_type', 'voucher')
         .order('updated_at', { ascending: false })
@@ -169,8 +254,9 @@ export default function LivraisonPage() {
 
       const unifiedVouchers = (unifiedRes.data || []).map((v: any) => ({
         id: v.id,
+        integrationId: v.integration_id,
         voucherKey: v.provider_entity_id,
-        provider: v.payload?.provider_slug || 'ozone',
+        provider: v.payload?.provider_slug || 'unknown',
         parcelCount: Array.isArray(v.payload?.parcels) ? v.payload.parcels.length : (v.payload?.count || 0),
         updated_at: v.updated_at,
       }))
@@ -212,12 +298,14 @@ export default function LivraisonPage() {
   }, [confirmedParcels])
 
   // Déterminer le provider des colis sélectionnés
-  function getSelectedProvider(): 'rapid' | 'ozone' | 'mixed' | 'none' {
+  function getSelectedProvider(): 'rapid' | 'ozone' | 'forcelog' | 'ameex' | 'mixed' | 'none' {
     if (selectedOrderIds.length === 0) return 'none'
     const selected = confirmedParcels.filter((o: any) => selectedOrderIds.includes(o.id))
     if (selected.length === 0) return 'none'
     const providers = new Set(selected.map((o: any) => o._provider))
     if (providers.size > 1) return 'mixed'
+    if (providers.has('ForceLog')) return 'forcelog'
+    if (providers.has('Ameex')) return 'ameex'
     return providers.has('OZONE') ? 'ozone' : 'rapid'
   }
 
@@ -230,6 +318,17 @@ export default function LivraisonPage() {
       return
     }
 
+    // Pour ForceLog, ouvrir le modal avec les infos pré-remplies depuis la config
+    if (provider === 'forcelog') {
+      setFlPickupPhone(forcelogConfig?.pickup_phone || '')
+      setFlPickupCityKey(forcelogConfig?.pickup_city_key || '')
+      setFlPickupCityName(forcelogConfig?.pickup_city_name || '')
+      setFlPickupAddress(forcelogConfig?.pickup_address || '')
+      setFlPickupStickers(forcelogConfig?.pickup_stickers ?? false)
+      setShowForceLogModal(true)
+      return
+    }
+
     setIsCreatingVoucher(true)
     setVoucherError('')
     setVoucherSuccess('')
@@ -237,7 +336,9 @@ export default function LivraisonPage() {
     try {
       const endpoint = provider === 'ozone'
         ? '/api/integrations/ozone/vouchers/create'
-        : '/api/integrations/rapid-delivery/vouchers/create'
+        : provider === 'ameex'
+          ? '/api/integrations/ameex/vouchers/create'
+          : '/api/integrations/rapid-delivery/vouchers/create'
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -245,10 +346,12 @@ export default function LivraisonPage() {
         body: JSON.stringify({ storeId: currentStoreId, orderIds: selectedOrderIds }),
       })
 
-      const payload = (await response.json().catch(() => null)) as { error?: string; voucherKey?: string; count?: number } | null
+      const payload = (await response.json().catch(() => null)) as { error?: string; voucherKey?: string; count?: number; pickupKey?: string; totalParcels?: number } | null
       if (!response.ok) throw new Error(payload?.error || 'VOUCHER_CREATE_FAILED')
 
-      setVoucherSuccess(`Bon ${payload?.voucherKey || ''} créé pour ${Number(payload?.count || 0)} colis.`)
+      const key = payload?.voucherKey || payload?.pickupKey || ''
+      const count = Number(payload?.count ?? payload?.totalParcels ?? 0)
+      setVoucherSuccess(`Bon ${key} créé pour ${count} colis.`)
       setSelectedOrderIds([])
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['delivery-page-confirmed-parcels', currentStoreId] }),
@@ -256,6 +359,51 @@ export default function LivraisonPage() {
       ])
     } catch (error) {
       setVoucherError(error instanceof Error ? error.message : 'VOUCHER_CREATE_FAILED')
+    } finally {
+      setIsCreatingVoucher(false)
+    }
+  }
+
+  async function submitForceLogPickup() {
+    if (!currentStoreId || selectedOrderIds.length === 0) return
+    if (!flPickupPhone.trim() || !flPickupCityKey.trim() || !flPickupAddress.trim()) {
+      setVoucherError('Veuillez remplir tous les champs de ramassage.')
+      return
+    }
+
+    setIsCreatingVoucher(true)
+    setVoucherError('')
+    setVoucherSuccess('')
+    setShowForceLogModal(false)
+
+    try {
+      const response = await fetch('/api/integrations/forcelog/pickups/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: currentStoreId,
+          orderIds: selectedOrderIds,
+          pickupPhone: flPickupPhone.trim(),
+          pickupCityKey: flPickupCityKey.trim(),
+          pickupCityName: flPickupCityName.trim() || flPickupCityKey.trim(),
+          pickupAddress: flPickupAddress.trim(),
+          pickupStickers: flPickupStickers,
+        }),
+      })
+
+      const payload = (await response.json().catch(() => null)) as { error?: string; pickupKey?: string; totalParcels?: number } | null
+      if (!response.ok) throw new Error(payload?.error || 'FORCELOG_PICKUP_FAILED')
+
+      const key = payload?.pickupKey || ''
+      const count = Number(payload?.totalParcels ?? 0)
+      setVoucherSuccess(`Bon de ramassage ForceLog ${key} créé pour ${count} colis.`)
+      setSelectedOrderIds([])
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['delivery-page-confirmed-parcels', currentStoreId] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-page-all-vouchers', currentStoreId] }),
+      ])
+    } catch (error) {
+      setVoucherError(error instanceof Error ? error.message : 'FORCELOG_PICKUP_FAILED')
     } finally {
       setIsCreatingVoucher(false)
     }
@@ -280,6 +428,98 @@ export default function LivraisonPage() {
           <StoreSelector />
         </div>
       </div>
+
+      {/* Modal ForceLog */}
+      {showForceLogModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border bg-card p-5 shadow-lg space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-foreground">Bon de ramassage ForceLog</h3>
+              <button type="button" onClick={() => setShowForceLogModal(false)} className="rounded-md p-1 hover:bg-secondary">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Renseignez les informations de ramassage pour {selectedOrderIds.length} colis.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Téléphone de ramassage *</label>
+                <input
+                  type="text"
+                  value={flPickupPhone}
+                  onChange={(e) => setFlPickupPhone(e.target.value)}
+                  placeholder="06XXXXXXXX"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Ville de ramassage *</label>
+                <select
+                  value={flPickupCityKey}
+                  onChange={(e) => {
+                    const selected = forcelogCities.find((c: any) => c.external_city_key === e.target.value)
+                    setFlPickupCityKey(e.target.value)
+                    setFlPickupCityName(selected?.city_name || e.target.value)
+                  }}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">Sélectionnez une ville...</option>
+                  {forcelogCities.map((city: any) => (
+                    <option key={city.external_city_key} value={city.external_city_key}>
+                      {city.city_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Adresse de ramassage *</label>
+                <input
+                  type="text"
+                  value={flPickupAddress}
+                  onChange={(e) => setFlPickupAddress(e.target.value)}
+                  placeholder="ex: 12 Rue exemple, Bureau 5"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-medium text-foreground">Imprimer les étiquettes</label>
+                    <p className="text-[10px] text-muted-foreground">Générer les étiquettes de colis (STICKERS)</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={flPickupStickers}
+                    onClick={() => setFlPickupStickers(!flPickupStickers)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${flPickupStickers ? 'bg-primary' : 'bg-input'}`}
+                  >
+                    <span className={`pointer-events-none block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform ${flPickupStickers ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowForceLogModal(false)}
+                className="flex-1 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitForceLogPickup()}
+                disabled={isCreatingVoucher}
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {isCreatingVoucher ? 'Création...' : 'Créer le bon'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!currentStoreId ? (
         <div className="flex items-center justify-center py-12">
@@ -327,12 +567,14 @@ export default function LivraisonPage() {
                 <h2 className="text-base sm:text-lg font-semibold text-foreground">Colis confirmés</h2>
                 <p className="text-xs text-muted-foreground">
                   {deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0
-                    ? 'Sélectionnez les colis à inclure dans un bon de ramassage Rapid Delivery.'
+                    ? 'Sélectionnez les colis à inclure dans un bon de ramassage.'
                     : 'Colis prêts pour expédition.'}
                 </p>
               </div>
               {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
-                deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0) && (
+                deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0 ||
+                deliveryCompanies.filter((c: any) => c.api_provider === 'forcelog').length > 0 ||
+                deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0) && (
                 <button
                   type="button"
                   onClick={() => void createVoucher()}
@@ -357,7 +599,9 @@ export default function LivraisonPage() {
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
                         {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
-                          deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0) && (
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0 ||
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'forcelog').length > 0 ||
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0) && (
                           <th className="px-2 py-2">
                             <input
                               type="checkbox"
@@ -377,12 +621,23 @@ export default function LivraisonPage() {
                     <tbody>
                       {confirmedParcels.map((order: any) => {
                         const checked = selectedOrderIds.includes(order.id)
+                        const isAmeex = order._provider === 'Ameex'
                         const isRapid = order._provider === 'Rapid'
-                        const canCreateVoucher = isRapid || order._provider === 'OZONE'
+                        const isForceLog = order._provider === 'ForceLog'
+                        const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog || isAmeex
+                        const badgeClass = isRapid
+                          ? 'bg-[#27BEE3]/10 text-[#27BEE3]'
+                          : isForceLog
+                            ? 'bg-[#FFCD06]/10 text-[#B8860B]'
+                            : isAmeex
+                              ? 'bg-[#E56C33]/10 text-[#E56C33]'
+                              : 'bg-[#E41B29]/10 text-[#E41B29]'
                         return (
                           <tr key={`${order._provider}-${order.id}`} className="border-b last:border-b-0">
                             {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
-                              deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0) && (
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0 ||
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'forcelog').length > 0 ||
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0) && (
                               <td className="px-2 py-2">
                                 {canCreateVoucher ? (
                                   <input
@@ -395,7 +650,7 @@ export default function LivraisonPage() {
                             )}
                             <td className="px-2 py-2 text-foreground font-mono text-xs">{order._tracking}</td>
                             <td className="px-2 py-2">
-                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${isRapid ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
                                 {order._provider}
                               </span>
                             </td>
@@ -415,7 +670,13 @@ export default function LivraisonPage() {
                   {confirmedParcels.map((order: any) => {
                     const checked = selectedOrderIds.includes(order.id)
                     const isRapid = order._provider === 'Rapid'
-                    const canCreateVoucher = isRapid || order._provider === 'OZONE'
+                    const isForceLog = order._provider === 'ForceLog'
+                    const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog
+                    const badgeClass = isRapid
+                      ? 'bg-[#27BEE3]/10 text-[#27BEE3]'
+                      : isForceLog
+                        ? 'bg-[#FFCD06]/10 text-[#B8860B]'
+                        : 'bg-[#E41B29]/10 text-[#E41B29]'
                     return (
                       <div
                         key={`${order._provider}-${order.id}`}
@@ -433,7 +694,7 @@ export default function LivraisonPage() {
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-foreground truncate">{order.customer_name || '-'}</div>
                             <div className="text-xs text-muted-foreground">
-                              <span className={`inline-block rounded-full px-1.5 py-0.5 text-xs font-medium mr-1 ${isRapid ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              <span className={`inline-block rounded-full px-1.5 py-0.5 text-xs font-medium mr-1 ${badgeClass}`}>
                                 {order._provider}
                               </span>
                               {order._tracking}
@@ -460,15 +721,26 @@ export default function LivraisonPage() {
             <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
               <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage</h2>
               <div className="space-y-2">
-                {allVouchers.map((voucher: any) => {
+                  {allVouchers.map((voucher: any) => {
                   const isOzone = voucher.provider === 'ozone'
                   const isRapid = voucher.provider === 'rapid-delivery'
+                  const isForceLog = voucher.provider === 'forcelog'
+                  const isAmeex = voucher.provider === 'ameex'
+                  
+                  const badgeClass = isOzone
+                    ? 'bg-[#E41B29]/10 text-[#E41B29]'
+                    : isForceLog
+                      ? 'bg-[#FFCD06]/10 text-[#B8860B]'
+                      : isAmeex
+                        ? 'bg-[#E56C33]/10 text-[#E56C33]'
+                        : 'bg-[#27BEE3]/10 text-[#27BEE3]'
+                  const badgeLabel = isOzone ? 'OZONE' : isForceLog ? 'ForceLog' : isAmeex ? 'AMEEX' : 'RAPID'
                   
                   return (
                     <div key={voucher.id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border px-3 py-2 text-sm gap-2">
                       <div className="flex items-center gap-2">
-                        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${isOzone ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                          {isOzone ? 'OZONE' : 'RAPID'}
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${badgeClass}`}>
+                          {badgeLabel}
                         </span>
                         <div>
                           <div className="font-medium text-foreground">Bon #{voucher.voucherKey}</div>
@@ -488,6 +760,18 @@ export default function LivraisonPage() {
                             </Link>
                             <Link
                               href={`/api/integrations/rapid-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Étiquettes
+                            </Link>
+                          </>
+                        )}
+                        
+                        {isForceLog && (
+                          <>
+                            <Link
+                              href={`/api/integrations/forcelog/labels/pickup/${encodeURIComponent(voucher.voucherKey)}`}
                               target="_blank"
                               className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                             >
@@ -518,6 +802,25 @@ export default function LivraisonPage() {
                               className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                             >
                               10x10
+                            </Link>
+                          </>
+                        )}
+                        
+                        {isAmeex && (
+                          <>
+                            <Link
+                              href={`/api/integrations/ameex/vouchers/${encodeURIComponent(voucher.voucherKey)}/pdf`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Bon de livraison
+                            </Link>
+                            <Link
+                              href={`/api/integrations/ameex/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Étiquettes
                             </Link>
                           </>
                         )}

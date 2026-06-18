@@ -5,6 +5,7 @@ import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
+import { createForceLogParcelForOrder } from '@/lib/integrations/delivery/forcelog-adapter'
 
 const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   confirmation_rejected: 'confirmation_rejected_at',
@@ -48,6 +49,16 @@ export async function POST(request: Request) {
       ozoneParcelOpen?: 1 | 2
       ozoneParcelFragile?: 0 | 1
       ozoneParcelReplace?: 0 | 1
+      forcelogCanOpen?: boolean
+      forcelogFragile?: boolean
+      forcelogProductNature?: string
+      ameexCityKey?: string
+      ameexCityName?: string
+      ameexParcelType?: string
+      ameexOpen?: boolean
+      ameexFragile?: boolean
+      ameexReplace?: boolean
+      ameexTry?: boolean
     }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
@@ -98,7 +109,7 @@ export async function POST(request: Request) {
         .eq('id', order.delivery_company_id)
         .maybeSingle()
 
-      if (dc?.api_provider && ['ozone', 'rapid-delivery'].includes(dc.api_provider)) {
+      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'forcelog', 'ameex'].includes(dc.api_provider)) {
         isDeliveryCompanyLocked = true
       }
     }
@@ -243,6 +254,43 @@ export async function POST(request: Request) {
         }
       }
 
+      // ForceLog auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'forcelog') {
+        const [{ data: flIntegration }] = await Promise.all([
+          supabase
+            .from('integrations')
+            .select('id, status')
+            .eq('user_id', user.id)
+            .eq('provider', 'forcelog')
+            .eq('store_id', order.store_id)
+            .maybeSingle(),
+        ])
+
+        if (flIntegration?.status === 'connected') {
+          try {
+            const result = await createForceLogParcelForOrder({
+              admin,
+              orderId,
+              storeId: order.store_id,
+              userId: user.id,
+              integrationId: flIntegration.id,
+              deliveryNote: deliveryNote || undefined,
+              canOpen: body.forcelogCanOpen,
+              fragile: body.forcelogFragile,
+              productNature: body.forcelogProductNature,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            warning = error instanceof Error ? error.message : 'FORCELOG_AUTO_PARCEL_CREATE_FAILED'
+          }
+        }
+
+        if (!flIntegration && deliveryCompany?.api_provider === 'forcelog') {
+          warning = 'Intégration ForceLog non connectée pour ce store.'
+        }
+      }
+
       // OZONE auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'ozone') {
         const [{ data: ozoneIntegration }] = await Promise.all([
@@ -322,6 +370,74 @@ export async function POST(request: Request) {
 
         if (!ozoneIntegration && deliveryCompany?.api_provider === 'ozone') {
           warning = 'Intégration OZONE non connectée pour ce store.'
+        }
+      }
+
+      // AMEEX auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'ameex') {
+        const [{ data: ameexIntegration }] = await Promise.all([
+          supabase
+            .from('integrations')
+            .select('id, status')
+            .eq('user_id', user.id)
+            .eq('provider', 'ameex')
+            .eq('store_id', order.store_id)
+            .maybeSingle(),
+        ])
+
+        if (ameexIntegration?.status === 'connected') {
+          try {
+            const ameexCityKey = body.ameexCityKey || ''
+            const ameexCityName = body.ameexCityName || ''
+
+            if (ameexCityKey && ameexCityName) {
+              // Récupérer le coût de livraison pour cette ville AMEEX
+              const { data: ameexRate } = await admin
+                .from('delivery_rates')
+                .select('price')
+                .eq('provider_id', '729e93ed-207f-4281-8ef6-de37006993de')
+                .eq('external_city_key', String(ameexCityKey))
+                .maybeSingle()
+
+              const ameexDeliveryFee = ameexRate?.price ? Number(ameexRate.price) : 0
+
+              const { error: ameexCityUpdateError } = await admin
+                .from('orders')
+                .update({
+                  city: ameexCityName,
+                  delivery_city_external_id: Number(ameexCityKey) || null,
+                  ameex_city_key: String(ameexCityKey),
+                  delivery_fee: ameexDeliveryFee,
+                  updated_at: now,
+                })
+                .eq('id', orderId)
+
+              if (ameexCityUpdateError) throw ameexCityUpdateError
+            }
+
+            const { createAmeexParcelForOrder } = await import('@/lib/integrations/delivery/ameex-adapter')
+            const result = await createAmeexParcelForOrder({
+              admin,
+              orderId,
+              storeId: order.store_id,
+              userId: user.id,
+              integrationId: ameexIntegration.id,
+              deliveryNote: deliveryNote || undefined,
+              parcelType: body.ameexParcelType,
+              canOpen: body.ameexOpen,
+              fragile: body.ameexFragile,
+              replace: body.ameexReplace,
+              tryEnabled: body.ameexTry,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            warning = error instanceof Error ? error.message : 'AMEEX_AUTO_PARCEL_CREATE_FAILED'
+          }
+        }
+
+        if (!ameexIntegration && deliveryCompany?.api_provider === 'ameex') {
+          warning = 'Intégration AMEEX non connectée pour ce store.'
         }
       }
     }
