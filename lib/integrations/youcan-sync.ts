@@ -22,11 +22,37 @@ function normalizeAddressNode(value: any) {
   return null
 }
 
-function pickFirstNonEmptyString(...values: any[]) {
+function isMeaningfulAddress(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return false
+
+  // Reject values that are only punctuation, whitespace, or separators
+  // e.g. ",", ", ", " ,", " - ", etc.
+  const onlyPunctuation = /^[\s,;\-./\\|_]+$/.test(trimmed)
+  if (onlyPunctuation) return false
+
+  // Must contain at least one alphanumeric character (including Unicode/arabic)
+  // to be meaningful. \p{L} matches any Unicode letter, \p{N} any Unicode number.
+  return /[\p{L}\p{N}]/u.test(trimmed)
+}
+
+/** Generic: picks the first non-blank string from a list. No address-specific validation. */
+function pickFirstNonBlankString(...values: any[]) {
   for (const value of values) {
     if (typeof value !== 'string') continue
     const normalized = value.trim()
     if (normalized.length > 0) return normalized
+  }
+
+  return null
+}
+
+/** Address-specific: picks the first string that passes isMeaningfulAddress. */
+function pickFirstNonEmptyAddress(...values: any[]) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const normalized = value.trim()
+    if (normalized.length > 0 && isMeaningfulAddress(normalized)) return normalized
   }
 
   return null
@@ -40,7 +66,7 @@ function pickAddressLine(addressNode: any) {
       ? addressNode.extra_fields
       : null
 
-  return pickFirstNonEmptyString(
+  return pickFirstNonEmptyAddress(
     addressNode?.first_line,
     addressNode?.second_line,
     addressNode?.address,
@@ -392,6 +418,28 @@ async function resolveInternalVariantAndProduct(params: {
       .eq('youcan_id', youcanVariantId)
       .maybeSingle()
     internalVariantId = variantMap?.internal_id || null
+
+    // Auto-repair: if the mapped variant no longer exists in product_variants,
+    // reset the mapping to null so it gets rebuilt
+    if (internalVariantId) {
+      const { data: existingVariant } = await supabase
+        .from('product_variants')
+        .select('id')
+        .eq('id', internalVariantId)
+        .maybeSingle()
+
+      if (!existingVariant) {
+        // Stale mapping — clear it so upsertVariantFromYouCan will recreate
+        await supabase
+          .from('youcan_entity_mappings')
+          .update({ internal_id: null, updated_at: new Date().toISOString() })
+          .eq('integration_id', integrationId)
+          .eq('entity_type', 'variant')
+          .eq('youcan_id', youcanVariantId)
+
+        internalVariantId = null
+      }
+    }
   }
 
   if (!internalProductId) {
@@ -470,22 +518,22 @@ export async function upsertYouCanOrderFromPayload(params: {
 
   const customerNameFromFirstAndLast = `${String(customer?.first_name || '').trim()} ${String(customer?.last_name || '').trim()}`.trim()
   const customerName =
-    pickFirstNonEmptyString(customerNameFromFirstAndLast, customer?.full_name) || 'Client YouCan'
+    pickFirstNonBlankString(customerNameFromFirstAndLast, customer?.full_name) || 'Client YouCan'
 
-  const phone = pickFirstNonEmptyString(
+  const phone = pickFirstNonBlankString(
     customer?.phone,
     shippingAddress?.phone,
     paymentAddress?.phone,
     customerAddress?.phone
   )
 
-  const address = pickFirstNonEmptyString(
+  const address = pickFirstNonEmptyAddress(
     pickAddressLine(shippingAddress),
     pickAddressLine(paymentAddress),
     pickAddressLine(customerAddress)
   )
 
-  const city = pickFirstNonEmptyString(
+  const city = pickFirstNonBlankString(
     shippingAddress?.city,
     paymentAddress?.city,
     customerAddress?.city,
@@ -584,7 +632,13 @@ export async function upsertYouCanOrderFromPayload(params: {
 
   if (orderItems.length > 0) {
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      // Cleanup: if this is a newly created order and items failed, remove the orphan order
+      if (!existingOrderMap?.internal_id) {
+        await supabase.from('orders').delete().eq('id', internalOrderId)
+      }
+      throw itemsError
+    }
   }
 
   await supabase.from('youcan_entity_mappings').upsert(
