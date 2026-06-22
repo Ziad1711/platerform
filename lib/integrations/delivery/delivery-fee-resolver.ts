@@ -91,7 +91,7 @@ export async function resolveDeliveryFee(params: {
   }
 
   // 5. Fallback : delivery_rates direct provider
-  if (providerSlug === 'forcelog' || providerSlug === 'ameex') {
+  if (providerSlug === 'forcelog' || providerSlug === 'ameex' || providerSlug === 'sendit') {
     const { data: rate } = await supabase
       .from('delivery_rates')
       .select('price')

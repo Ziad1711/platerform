@@ -1,0 +1,2273 @@
+{
+  "info": {
+    "_postman_id": "612c318f-33d9-48de-97cc-ba0e9d17c679",
+    "name": "Api Seller V2.5",
+    "description": "Api DigyLog v2.5",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "55987628",
+    "_collection_link": "https://go.postman.co/collection/55987628-612c318f-33d9-48de-97cc-ba0e9d17c679?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Order",
+      "item": [
+        {
+          "name": "Add orders",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"mode\": 1, // 1 for standard order, 2 for FC order\n    \"network\": 1, // Get from /networks\n    \"fc\":0, // required if mode=2 get from /fcs\n    \"store\": \"store1\", // name or id Get from /stores\n    \"status\": 1, // 0 for add and not send orders, 1 for add & send  orders\n    \"checkDuplicate\":1, // block if another order with the same num exists\n    \"orders\": [\n        {\n            \"num\": \"WP808208863DL\",\n            \"type\": 2,\n            \"originTraking\":\"S454555\",\n            \"name\": \"Bilal\",\n            \"phone\": \"0608278001\",\n            \"address\": \"Skoura ouarzazate\",\n            \"city\": \"Agadir\", // name or id\n            \"price\": 200,\n            \"openproduct\": 1, // allow open product,\n            \"port\": 1, //shipping cost paid by — 1: Customer, 2: Seller. For mode=2, only port=1 allowed.\n            \"note\": \"\", // note for delivery service,\n            \"refs\": [\n                {\n                    \"ref\":\"\" , // required if mode=2\n                    \"designation\": \"وردة الحب الأبدية تحت قبة زجاجية  هدية رومانسية تضيء المشاعر\",\n                    \"quantity\": 1\n                }\n            ]\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "## Add Orders\n\nCreates one or more delivery orders. Supports both standard orders (mode=1) and fulfilment center orders (mode=2).\n\n**Method & URL**\n```\nPOST {{baseUrl}}/orders\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| mode | integer | `1` = standard order, `2` = fulfilment center (FC) order |\n| network | integer | Delivery network ID — retrieve from `GET /networks` |\n| fc | integer | Fulfilment center ID — required when `mode=2`, retrieve from `GET /fcs` |\n| store | string | Store name or ID — retrieve from `GET /stores` |\n| status | integer | `0` = add without sending, `1` = add and send immediately |\n| checkDuplicate | integer | `1` = block creation if another order with the same `num` already exists |\n| orders | array | List of order objects (see fields below) |\n\n**Order Object Fields**\n\n| Field | Type | Description |\n|-------|------|-------------|\n| num | string | Seller's internal order reference number |\n| type | integer | Order type |\n| name | string | Recipient full name |\n| phone | string | Recipient phone number |\n| address | string | Recipient delivery address |\n| city | string | Destination city — name or ID, retrieve from `GET /cities` |\n| price | number | Cash on delivery amount |\n| openproduct | integer | `1` = allow open product inspection on delivery |\n| port | integer | `1` = customer pays shipping, `2` = seller pays shipping (only `port=1` allowed when `mode=2`) |\n| note | string | Optional note for the delivery service |\n| refs | array | List of product references: `{ref, designation, quantity}` |\n\n**Example Body**\n```json\n{\n  \"mode\": 1,\n  \"network\": 1,\n  \"fc\": 0,\n  \"store\": \"store1\",\n  \"status\": 0,\n  \"checkDuplicate\": 1,\n  \"orders\": [\n    {\n      \"num\": \"WP808208863DL\",\n      \"type\": 1,\n      \"name\": \"Bilal\",\n      \"phone\": \"0608278001\",\n      \"address\": \"Skoura ouarzazate\",\n      \"city\": \"Agadir\",\n      \"price\": 200,\n      \"openproduct\": 1,\n      \"port\": 1,\n      \"note\": \"\",\n      \"refs\": [{\"ref\": \"\", \"designation\": \"...\", \"quantity\": 1}]\n    }\n  ]\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Get infos of specific order",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/order/:traking/infos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                ":traking",
+                "infos"
+              ],
+              "variable": [
+                {
+                  "key": "traking",
+                  "value": "S5000CK",
+                  "description": "(Required) Traking of the order"
+                }
+              ]
+            },
+            "description": "## Get Full Info of a Specific Order\n\nReturns complete details for a specific order identified by its tracking number, including all available fields and metadata.\n\n**Method & URL**\n```\nGET {{baseUrl}}/order/:traking/infos\n```\n\n**Path Parameters**\n\n| Parameter | Description |\n|-----------|-------------|\n| traking | The order tracking number |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n> For a lightweight version, see **Get min infos of specific order**."
+          },
+          "response": []
+        },
+        {
+          "name": "Get min infos of specific order",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/order/:traking/infos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                ":traking",
+                "infos"
+              ],
+              "variable": [
+                {
+                  "key": "traking",
+                  "value": "S5000CK",
+                  "description": "(Required) Traking of the order"
+                }
+              ]
+            },
+            "description": "## Get Minimal Info of a Specific Order\n\nReturns a lightweight summary of a specific order identified by its tracking number. Use this endpoint when only basic order data is needed, to reduce payload size.\n\n**Method & URL**\n```\nGET {{baseUrl}}/order/:traking/infos\n```\n\n**Path Parameters**\n\n| Parameter | Description |\n|-----------|-------------|\n| traking | The order tracking number |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n> For full order details, see **Get infos of specific order**."
+          },
+          "response": []
+        },
+        {
+          "name": "Get list of complaints of specific order",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/order/:traking/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                ":traking",
+                "complaints"
+              ],
+              "variable": [
+                {
+                  "key": "traking",
+                  "value": "SF9429A",
+                  "description": "(Required) Traking of the order"
+                }
+              ]
+            },
+            "description": "## Get List of Complaints of Specific Order\n\nRetrieves a list of complaints associated with a specific order, identified by its tracking code.\n\n---\n\n### HTTP Method & Endpoint\n\n```\nGET {{baseUrl}}/order/:traking/complaints\n```\n\n---\n\n### Authentication\n\nThis request uses a Bearer token for authentication. The token is referenced via the `{{token}}` variable, which should be set in your active environment.\n\n---\n\n### Path Variables\n\n| Variable  | Required | Description                        | Example   |\n|-----------|----------|------------------------------------|-----------|\n| `traking` | ✅ Yes   | The tracking code of the order     | `SF9429A` |\n\n---\n\n### Headers\n\n| Key       | Value                | Description                                      |\n|-----------|----------------------|--------------------------------------------------|\n| `Accept`  | `application/json`   | Specifies that the response should be JSON       |\n| `Referer` | `{{referer}}`        | The referrer URL, set via environment variable   |\n\n---\n\n### Expected Behavior\n\nWhen a valid tracking code is provided, the API returns a list of complaints linked to the corresponding order. Each complaint entry typically includes details such as the complaint ID, status, description, and timestamps.\n\nIf the tracking code does not match any order, the API will return an appropriate error response (e.g., `404 Not Found`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get articles of specific order",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/order/:traking/refs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                ":traking",
+                "refs"
+              ],
+              "variable": [
+                {
+                  "key": "traking",
+                  "value": "S5000CK",
+                  "description": "(Required) Traking of the order"
+                }
+              ]
+            },
+            "description": "## Get Refs of a Specific Order\n\nRetrieves the product references (refs) associated with a specific order identified by its tracking number.\n\n**Method & URL**\n```\nGET {{baseUrl}}/order/:traking/refs\n```\n\n**Path Parameters**\n\n| Parameter | Description |\n|-----------|-------------|\n| traking | The order tracking number |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        },
+        {
+          "name": "Get historics of specific orders",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json,",
+                "type": "text"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/historics?trackings=FAAEF9E7CA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "historics"
+              ],
+              "query": [
+                {
+                  "key": "trackings",
+                  "value": "FAAEF9E7CA"
+                }
+              ]
+            },
+            "description": "## Get Historics of Specific Orders\n\nRetrieves the status history for one or more orders identified by their tracking numbers.\n\n**Method & URL**\n```\nGET {{baseUrl}}/historics\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| trackings | string | Comma-separated list of order tracking numbers (e.g., `FAAEF9E7CA,S8BAF7BBA`) |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        },
+        {
+          "name": "Download orders labels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"orders\":[\"S4001940AA\",\"S4001941BA\"]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/labels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "labels"
+              ]
+            },
+            "description": "## Download Orders Labels\n\nGenerates and downloads shipping labels for a list of orders identified by their tracking numbers.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/labels\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| orders | array of strings | List of order tracking numbers for which to generate labels |\n\n**Example Body**\n```json\n{\n  \"orders\": [\"S4001940AA\", \"S4001941BA\"]\n}\n```\n\n> To download labels for a full BL (Bon de Livraison), see **Download BL labels**."
+          },
+          "response": []
+        },
+        {
+          "name": "Send orders (when created with status=0)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"orders\":[\"S6CA3E30A\",\"S8BAF7BBA\"]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/send",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "send"
+              ]
+            },
+            "description": "## Send Orders (Created with status=0)\n\nSends one or more orders that were previously created with `status=0` (i.e., added without being sent). This transitions them into the active delivery workflow.\n\n**Method & URL**\n```\nPUT {{baseUrl}}/orders/send\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nNo authentication configured for this request.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| orders | array of strings | List of order tracking numbers to send |\n\n**Example Body**\n```json\n{\n  \"orders\": [\"S6CA3E30A\", \"S8BAF7BBA\"]\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Send orders to the call center",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"orders\":[\"S6CA3E30A\",\"S8BAF7BBA\"]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/callcenter",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "callcenter"
+              ]
+            },
+            "description": "## Send Orders to the Call Center\n\nForwards one or more orders to the call center for processing or follow-up.\n\n**Method & URL**\n```\nPUT {{baseUrl}}/orders/callcenter\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nNo authentication configured for this request.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| orders | array of strings | List of order tracking numbers to send to the call center |\n\n**Example Body**\n```json\n{\n  \"orders\": [\"S6CA3E30A\", \"S8BAF7BBA\"]\n}\n```"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "BLS",
+      "item": [
+        {
+          "name": "Get List of BLS",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bls?currentPage=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bls"
+              ],
+              "query": [
+                {
+                  "key": "currentPage",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "## Get List of BLs\n\nRetrieves a paginated list of Bons de Livraison (BLs) for the seller account.\n\n**Method & URL**\n```\nGET {{baseUrl}}/bls\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| currentPage | integer | Page number for pagination (e.g., `1`) |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nNo authentication configured for this request.\n\n**Response**\n\nReturns a paginated list of BL objects, each containing summary information such as BL ID, creation date, and order count."
+          },
+          "response": []
+        },
+        {
+          "name": "Get BL's orders",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bls/28144/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bls",
+                "28144",
+                "orders"
+              ]
+            },
+            "description": "## Get BL's Orders\n\nRetrieves all orders associated with a specific Bon de Livraison (BL).\n\n**Method & URL**\n```\nGET {{baseUrl}}/bls/28144/orders\n```\n\n> **Note:** The BL ID (`28144`) is currently hardcoded in the URL. Replace it with the desired BL ID when making requests.\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Response**\n\nReturns a list of orders belonging to the specified BL, including their tracking numbers and statuses."
+          },
+          "response": []
+        },
+        {
+          "name": "Download BL",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bl/:id/pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bl",
+                ":id",
+                "pdf"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "## Download BL (PDF)\n\nDownloads the Bon de Livraison (BL) document as a PDF file for a specific BL identified by its ID.\n\n**Method & URL**\n```\nGET {{baseUrl}}/bl/:id/pdf\n```\n\n**Path Parameters**\n\n| Parameter | Description |\n|-----------|-------------|\n| id | The ID of the Bon de Livraison (BL) |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Response**\n\nReturns the BL as a downloadable PDF file."
+          },
+          "response": []
+        },
+        {
+          "name": "Download BL labels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"bl\":498600\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/labels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "labels"
+              ]
+            },
+            "description": "## Download BL Labels\n\nGenerates and downloads shipping labels for all orders within a specific Bon de Livraison (BL) identified by its ID.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/labels\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| bl | integer | The ID of the Bon de Livraison (BL) for which to generate labels |\n\n**Example Body**\n```json\n{\n  \"bl\": 498600\n}\n```\n\n> To download labels for individual orders by tracking number, see **Download orders labels**."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "BRS",
+      "item": [
+        {
+          "name": "Get List of BR",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/brs?currentPage=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "brs"
+              ],
+              "query": [
+                {
+                  "key": "currentPage",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "## Get List of BRs\n\nRetrieves a paginated list of Bons de Retour (BRs — return slips) for the seller account.\n\n**Method & URL**\n```\nGET {{baseUrl}}/brs\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| currentPage | integer | Page number for pagination (e.g., `1`) |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Response**\n\nReturns a paginated list of BR objects. Each BR (Bon de Retour) represents a return batch containing orders that were not delivered and are being returned to the seller."
+          },
+          "response": []
+        },
+        {
+          "name": "Get BR's orders",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/brs/28144/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "brs",
+                "28144",
+                "orders"
+              ]
+            },
+            "description": "## Get BR's Orders\n\nRetrieves all orders associated with a specific Bon de Retour (BR — return slip).\n\n**Method & URL**\n```\nGET {{baseUrl}}/brs/28144/orders\n```\n\n> **Note:** The BR ID (`28144`) is currently hardcoded in the URL. Replace it with the desired BR ID when making requests.\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Response**\n\nReturns a list of orders belonging to the specified BR, including their tracking numbers and return statuses."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Complaint",
+      "item": [
+        {
+          "name": "Add complaint Type \"Urgent Delivery\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":1,\n    \"note\":\"Merci d'appeler le client\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Urgent Delivery (Type 1)\n\nFiles a complaint to flag an order for urgent delivery, with an optional note for the delivery team (e.g., to call the customer).\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `1` for urgent delivery |\n| note | string | Optional instruction for the delivery team |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 1,\n  \"note\": \"Merci d'appeler le client\"\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Add complaint Type \"Change recipient\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":2,\n    \"ordertype\":1,\n    \"name\":\"test\",\n    \"phone\":\"0600000005\",\n    \"address\":\"Rue 58 Rabat\",\n    \"city\":\"Rabat\",\n    \"price\":200,\n    \"dateRep\":\"2026-05-18\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Change Recipient (Type 2)\n\nFiles a complaint to request a change of the recipient's details for an order, including name, phone, address, city, price, and redelivery date.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `2` for change recipient |\n| ordertype | integer | Order type |\n| name | string | New recipient name |\n| phone | string | New recipient phone number |\n| address | string | New delivery address |\n| city | string | New destination city (name or ID) |\n| price | number | Updated cash on delivery amount |\n| dateRep | string | Requested redelivery date (format: `YYYY-MM-DD`) |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 2,\n  \"ordertype\": 1,\n  \"name\": \"test\",\n  \"phone\": \"0600000005\",\n  \"address\": \"Rue 58 Rabat\",\n  \"city\": \"Rabat\",\n  \"price\": 200,\n  \"dateRep\": \"2026-05-18\"\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Add complaint Type \"Request to try another attempt\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":3,\n    \"dateRep\":\"2026-05-18\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Request Another Delivery Attempt (Type 3)\n\nFiles a complaint to request that the delivery service make another attempt to deliver an order on a specified date.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `3` for another attempt |\n| dateRep | string | Requested redelivery date (format: `YYYY-MM-DD`) |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 3,\n  \"dateRep\": \"2026-05-18\"\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Add complaint Type \"Delay in updating the order status\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Delay in Updating Order Status (Type 4)\n\nFiles a complaint to report that an order's status has not been updated in a timely manner.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `4` for delay in status update |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 4\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Add complaint Type \"Cancellation request\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":5,\n    \"note\":\"Merci d'annuler cette cmd\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Cancellation Request (Type 5)\n\nFiles a complaint requesting the cancellation of a specific order.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `5` for cancellation request |\n| note | string | Optional message or reason for the cancellation |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 5,\n  \"note\": \"Merci d'annuler cette cmd\"\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Add complaint Type \"Change Infos\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":9,\n    \"ordertype\":1,\n    \"name\":\"test\",\n    \"phone\":\"0600000005\",\n    \"address\":\"Rue 58 Rabat\",\n    \"price\":200,\n    \"dateRep\":\"2026-05-18\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Change Order Info (Type 9)\n\nFiles a complaint to request a change to the recipient's information or order details (e.g., name, phone, address, price, or scheduled redelivery date).\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `9` for change info |\n| ordertype | integer | Order type |\n| name | string | Updated recipient name |\n| phone | string | Updated recipient phone number |\n| address | string | Updated delivery address |\n| price | number | Updated cash on delivery amount |\n| dateRep | string | Requested redelivery date (format: `YYYY-MM-DD`) |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 9,\n  \"ordertype\": 1,\n  \"name\": \"test\",\n  \"phone\": \"0600000005\",\n  \"address\": \"Rue 58 Rabat\",\n  \"price\": 200,\n  \"dateRep\": \"2026-05-18\"\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Add complaint Type \"Return Request\"",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tracking\":\"S8BAF7BBA\",\n    \"type\":10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints"
+              ]
+            },
+            "description": "## Add Complaint — Return Request (Type 10)\n\nFiles a complaint to request that an order be returned to the seller.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/complaints\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| tracking | string | The order tracking number |\n| type | integer | Complaint type — use `10` for return request |\n\n**Example Body**\n```json\n{\n  \"tracking\": \"S8BAF7BBA\",\n  \"type\": 10\n}\n```\n\n> Use `GET /complaint-types` to retrieve all available complaint type IDs. Use `GET /complaints/:tracking/check` to verify eligibility before submitting."
+          },
+          "response": []
+        },
+        {
+          "name": "Get List of complaint types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/complaint-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaint-types"
+              ]
+            },
+            "description": "## Get List of Complaint Types\n\nRetrieves all available complaint types that can be filed for an order. Use the returned type IDs when submitting a complaint via `POST /complaints`.\n\n**Method & URL**\n```\nGET {{baseUrl}}/complaint-types\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Common Complaint Types**\n\n| Type ID | Description |\n|---------|-------------|\n| 1 | Urgent Delivery |\n| 2 | Change Recipient |\n| 3 | Request Another Attempt |\n| 4 | Delay in Updating Order Status |\n| 5 | Cancellation Request |\n| 9 | Change Order Info |\n| 10 | Return Request |"
+          },
+          "response": []
+        },
+        {
+          "name": "Pre-flight check before opening a complaint",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/complaints/:tracking/check?type=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "complaints",
+                ":tracking",
+                "check"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "1"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "tracking",
+                  "value": "FAAEF9E7CA"
+                }
+              ]
+            },
+            "description": "## Pre-flight Check Before Opening a Complaint\n\nVerifies whether a complaint of a specific type can be filed for a given order before actually submitting it. Use this to validate eligibility and avoid submission errors.\n\n**Method & URL**\n```\nGET {{baseUrl}}/complaints/:tracking/check\n```\n\n**Path Parameters**\n\n| Parameter | Description |\n|-----------|-------------|\n| tracking | The order tracking number |\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| type | integer | The complaint type ID to check (e.g., `1`) — retrieve from `GET /complaint-types` |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Store",
+      "item": [
+        {
+          "name": "Add Store",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"name\":\"test\",\r\n    \"phone\":\"0600000203\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/stores",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stores"
+              ]
+            },
+            "description": "## Add Store\n\nCreates a new store under the authenticated seller account.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/stores\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| name | string | The name of the store |\n| phone | string | Contact phone number for the store |\n\n**Example Body**\n```json\n{\n  \"name\": \"test\",\n  \"phone\": \"0600000203\"\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Get List of stores",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stores",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stores"
+              ]
+            },
+            "description": "## Get List of Stores\n\nRetrieves the list of stores associated with the authenticated seller account.\n\n**Method & URL**\n```\nGET {{baseUrl}}/stores\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Response**\n\nReturns a JSON array of store objects belonging to the authenticated seller."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "City",
+      "item": [
+        {
+          "name": "Get List of cities",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cities"
+              ]
+            },
+            "description": "## Get List of Cities\n\nRetrieves all available delivery cities. Use the returned city names or IDs when creating orders or querying delivery costs.\n\n**Method & URL**\n```\nGET {{baseUrl}}/cities\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "FulfilmentCenter",
+      "item": [
+        {
+          "name": "Get List of fulfilment centers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/fc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fc"
+              ]
+            },
+            "description": "## Get List of Fulfilment Centers\n\nRetrieves all fulfilment centers (FCs) available to the authenticated seller. Use the returned IDs when creating FC orders (`mode=2`) via `POST /orders`.\n\n**Method & URL**\n```\nGET {{baseUrl}}/fc\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Network",
+      "item": [
+        {
+          "name": "Get List of networks",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/networks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "networks"
+              ]
+            },
+            "description": "## Get List of Networks\n\nRetrieves all delivery networks available to the authenticated seller. Use the returned network IDs when creating orders, querying delivery costs, or managing pickup requests.\n\n**Method & URL**\n```\nGET {{baseUrl}}/networks\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        },
+        {
+          "name": "Add network",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"network\":1\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/networks?",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "networks"
+              ],
+              "query": [
+                {
+                  "key": "",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "## Add Network\n\nSubscribes the seller to a delivery network, making it available for use when creating orders.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/networks\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| network | integer | The ID of the delivery network to add — retrieve available networks from `GET /networks` |\n\n**Example Body**\n```json\n{\n  \"network\": 1\n}\n```"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Status",
+      "item": [
+        {
+          "name": "Get List of status",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/statuses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "statuses"
+              ]
+            },
+            "description": "## Get List of Statuses\n\nRetrieves all available order statuses. Use the returned status IDs and labels to interpret order state throughout the delivery lifecycle.\n\n**Method & URL**\n```\nGET {{baseUrl}}/statuses\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhook",
+      "item": [
+        {
+          "name": "Add or Update webhook",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"url\":\"https://your-webhook.com\"\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook"
+              ]
+            },
+            "description": "## Add or Update Webhook\n\nRegisters or updates the webhook URL that Digylog calls to notify the seller of events (e.g., order status changes, new return slips, stock discrepancies).\n\n**Method & URL**\n```\nPUT {{baseUrl}}/webhook/test\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Verification Handshake**\n\nBefore saving the webhook, Digylog performs a verification handshake:\n\n1. Digylog sends a `PUT` request to your endpoint with the following body:\n   ```json\n   { \"type\": \"subscribe\", \"key\": \"<64-character hex string>\" }\n   ```\n2. Your endpoint **must** respond with HTTP `2xx` and the following body:\n   ```json\n   { \"key\": \"<same 64-character hex string>\" }\n   ```\n3. If the response does not match, the webhook is **not saved** and the API returns `400`.\n\n**Supported Event Types**\n\n| Event | Description |\n|-------|-------------|\n| `order-status-changed` | Fired when an order's delivery status changes |\n| `new-br` | Fired when a new Bon de Retour is created |\n| `stock-diff` | Fired when a stock discrepancy is detected at a fulfilment center |\n\n> Use `GET /webhook/events` to retrieve the full list of subscribable event types."
+          },
+          "response": []
+        },
+        {
+          "name": "Get webhook available events",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook",
+                "events"
+              ]
+            },
+            "description": "## Get Webhook Available Events\n\nReturns the list of event types that can be subscribed to via webhooks. Use these event type identifiers when registering or updating a webhook.\n\n**Method & URL**\n```\nGET {{baseUrl}}/webhook/events\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Supported Event Types** (examples)\n\n| Event | Description |\n|-------|-------------|\n| `order-status-changed` | Fired when an order's delivery status is updated |\n| `new-br` | Fired when a new Bon de Retour (return slip) is created |\n| `stock-diff` | Fired when a stock discrepancy is detected at a fulfilment center |"
+          },
+          "response": []
+        },
+        {
+          "name": "test webhook event",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"type\": \"order-status-changed\",\r\n    \"payload\": {\r\n        \"num\": \"55\",\r\n        \"traking\": \"S1416MB\",\r\n        \"status\": \"Livrée\",\r\n        \"idStatus\": \"6\",\r\n        \"motif\": \"\",\r\n        \"postponedTo\": null,\r\n        \"updatedAt\": \"2026-04-05 16:10\",\r\n        \"driverPhone\": \"0658855885\"\r\n    }\r\n    // -----------------------------------------------------------------------\r\n    //  \"type\": \"new-br\",\r\n    // \"payload\": {\r\n    //     \"num\": \"55\",\r\n    //     \"totalOrders\": \"120\"\r\n    // }\r\n    // -----------------------------------------------------------------------\r\n    // \"type\": \"stock-diff\",\r\n    // \"payload\": {\r\n    //     \"article\": \"Prodcut1\",\r\n    //     \"ref\": \"P1\",\r\n    //     \"fc\": \"fc casablanca\",\r\n    //     \"sentQuantity\": \"40\",\r\n    //     \"receivedQuantity\": \"38\"\r\n    // }\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook"
+              ]
+            },
+            "description": "## Add or Update Webhook\n\nRegisters or updates the webhook URL that Digylog calls to notify the seller of events (e.g., order status changes, new return slips, stock discrepancies).\n\n**Method & URL**\n```\nPUT {{baseUrl}}/webhook/test\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Verification Handshake**\n\nBefore saving the webhook, Digylog performs a verification handshake:\n\n1. Digylog sends a `PUT` request to your endpoint with the following body:\n   ```json\n   { \"type\": \"subscribe\", \"key\": \"<64-character hex string>\" }\n   ```\n2. Your endpoint **must** respond with HTTP `2xx` and the following body:\n   ```json\n   { \"key\": \"<same 64-character hex string>\" }\n   ```\n3. If the response does not match, the webhook is **not saved** and the API returns `400`.\n\n**Supported Event Types**\n\n| Event | Description |\n|-------|-------------|\n| `order-status-changed` | Fired when an order's delivery status changes |\n| `new-br` | Fired when a new Bon de Retour is created |\n| `stock-diff` | Fired when a stock discrepancy is detected at a fulfilment center |\n\n> Use `GET /webhook/events` to retrieve the full list of subscribable event types."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete webhook",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhook",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhook"
+              ]
+            },
+            "description": "## Test Webhook Event Delivery\n\nSimulates a webhook event delivery to test your endpoint's ability to receive and process Digylog webhook payloads. Use this to verify your webhook handler before going live.\n\n**Method & URL**\n```\nPUT {{baseUrl}}/webhook/test\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Content-Type | application/json |\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\nSend a payload matching one of the supported event types:\n\n**`order-status-changed`**\n```json\n{\n  \"type\": \"order-status-changed\",\n  \"payload\": {\n    \"num\": \"55\",\n    \"traking\": \"S1416MB\",\n    \"status\": \"Livrée\",\n    \"idStatus\": \"6\",\n    \"motif\": \"\",\n    \"postponedTo\": null,\n    \"updatedAt\": \"2026-04-05 16:10\",\n    \"driverPhone\": \"0658855885\"\n  }\n}\n```\n\n**`new-br`**\n```json\n{\n  \"type\": \"new-br\",\n  \"payload\": {\n    \"num\": \"BR-001\",\n    \"totalOrders\": 5\n  }\n}\n```\n\n**`stock-diff`**\n```json\n{\n  \"type\": \"stock-diff\",\n  \"payload\": {\n    \"article\": \"Product Name\",\n    \"ref\": \"SKU-001\",\n    \"fc\": 6,\n    \"sentQuantity\": 10,\n    \"receivedQuantity\": 9\n  }\n}\n```"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pickup",
+      "item": [
+        {
+          "name": "Get Pickup areas",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pickup/areas?network=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pickup",
+                "areas"
+              ],
+              "query": [
+                {
+                  "key": "network",
+                  "value": "1",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "## Get Pickup Areas\n\nReturns the list of available pickup areas for a specific delivery network. Use the returned area IDs when creating a pickup request.\n\n**Method & URL**\n```\nGET {{baseUrl}}/pickup/areas\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| network | integer | Delivery network ID — retrieve from `GET /networks` |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Last Pickup request by network",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lastpickup?network=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lastpickup"
+              ],
+              "query": [
+                {
+                  "key": "network",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "## Get Last Pickup Request by Network\n\nRetrieves the most recent pickup request made for a specific delivery network.\n\n**Method & URL**\n```\nGET {{baseUrl}}/lastpickup\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| network | integer | Delivery network ID — retrieve from `GET /networks` |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Accept | application/json |\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        },
+        {
+          "name": "Create pickup request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"area\":162,\r\n    \"phone\":\"0606060606\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/pickup/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pickup",
+                "request"
+              ]
+            },
+            "description": "## Create Pickup Request\n\nSubmits a new pickup request for a specific area, scheduling a courier to collect orders from the seller's location.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/pickup/request\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nNo authentication configured for this request.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| area | integer | Pickup area ID — retrieve from `GET /pickup/areas` |\n| phone | string | Contact phone number for the pickup |\n\n**Example Body**\n```json\n{\n  \"area\": 162,\n  \"phone\": \"0606060606\"\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel pickup request",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/pickup/:id/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pickup",
+                ":id",
+                "cancel"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "177340"
+                }
+              ]
+            },
+            "description": "## Cancel Pickup Request\n\nCancels an existing pickup request identified by its ID.\n\n**Method & URL**\n```\nPUT {{baseUrl}}/pickup/:id/cancel\n```\n\n**Path Parameters**\n\n| Parameter | Description |\n|-----------|-------------|\n| id | The ID of the pickup request to cancel |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nNo authentication configured for this request."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Delivery cost",
+      "item": [
+        {
+          "name": "Get delivery cost for standard orde",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/deliverycost?network=1&city=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "deliverycost"
+              ],
+              "query": [
+                {
+                  "key": "network",
+                  "value": "1"
+                },
+                {
+                  "key": "city",
+                  "value": "1"
+                },
+                {
+                  "key": "",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "## Get Delivery Cost for Standard Order\n\nReturns the delivery cost for a standard order based on the destination city and delivery network, without requiring package dimensions.\n\n**Method & URL**\n```\nGET {{baseUrl}}/deliverycost\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| network | integer | Delivery network ID — retrieve from `GET /networks` |\n| city | integer | Destination city ID — retrieve from `GET /cities` |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n> For volumetric/weight-based cost calculation, see **Get the estimated delivery cost**."
+          },
+          "response": []
+        },
+        {
+          "name": "Get the estimated delivery cost",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calculate-delivery?network=1&city=1&height=0.5&width=0.5&length=0.5&weight=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calculate-delivery"
+              ],
+              "query": [
+                {
+                  "key": "network",
+                  "value": "1"
+                },
+                {
+                  "key": "city",
+                  "value": "1"
+                },
+                {
+                  "key": "height",
+                  "value": "0.5"
+                },
+                {
+                  "key": "width",
+                  "value": "0.5"
+                },
+                {
+                  "key": "length",
+                  "value": "0.5"
+                },
+                {
+                  "key": "weight",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "## Get Estimated Delivery Cost\n\nCalculates the estimated delivery cost for a shipment based on the destination city, delivery network, and package dimensions/weight.\n\n**Method & URL**\n```\nGET {{baseUrl}}/calculate-delivery\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| network | integer | Delivery network ID — retrieve from `GET /networks` |\n| city | integer | Destination city ID — retrieve from `GET /cities` |\n| height | number | Package height in meters |\n| width | number | Package width in meters |\n| length | number | Package length in meters |\n| weight | number | Package weight in kilograms |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n> For a simpler cost lookup without dimensions, see **Get delivery cost for standard order**."
+          },
+          "response": []
+        },
+        {
+          "name": "Get all delivery prices per city for a network",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/prices?network=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prices"
+              ],
+              "query": [
+                {
+                  "key": "network",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "## Get All Delivery Prices per City for a Network\n\nReturns the full delivery price list for all cities under a specific delivery network. Useful for displaying shipping costs to customers or for bulk price lookups.\n\n**Method & URL**\n```\nGET {{baseUrl}}/prices\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| network | integer | Delivery network ID — retrieve from `GET /networks` |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Customer metrics",
+      "item": [
+        {
+          "name": "Get Customer metrics",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics/customer?phone=0668314050",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics",
+                "customer"
+              ],
+              "query": [
+                {
+                  "key": "phone",
+                  "value": "0668314050"
+                }
+              ]
+            },
+            "description": "## Get Customer Metrics\n\nReturns delivery performance metrics for a specific customer identified by their phone number. Useful for assessing customer reliability before creating an order (e.g., delivery rate, return rate).\n\n**Method & URL**\n```\nGET {{baseUrl}}/metrics/customer\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| phone | string | The customer's phone number (e.g., `0668314050`) |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Article",
+      "item": [
+        {
+          "name": "Add artice",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"ref\":\"sku\",\r\n    \"designation\":\"profuct1\",\r\n    \"link\":\"https://digylog.com/profuct1\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/articles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "articles"
+              ]
+            },
+            "description": "## Add Article\n\nCreates a new article (product) in the seller's catalogue. Articles can be referenced when creating fulfilment center orders.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/articles\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| ref | string | The article's SKU or internal reference code |\n| designation | string | The article's name or description |\n| link | string | URL to the product page |\n\n**Example Body**\n```json\n{\n  \"ref\": \"sku\",\n  \"designation\": \"profuct1\",\n  \"link\": \"https://digylog.com/profuct1\"\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Update article link",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"link\":\"https://digylog.com/profuct1\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/article/:id/link",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "article",
+                ":id",
+                "link"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": "id or ref of article"
+                }
+              ]
+            },
+            "description": "## Update Article Link\n\nUpdates the product page URL for an existing article identified by its ID or reference.\n\n**Method & URL**\n```\nPUT {{baseUrl}}/article/:id/link\n```\n\n---\n\n### Authentication\n\nBearer token — include the following header in the request:\n\n| Header | Value |\n|---|---|\n| `Authorization` | `Bearer {{token}}` |\n\n---\n\n### Headers\n\n| Key | Value | Description |\n|---|---|---|\n| `Referer` | `{{referer}}` | The referring URL, used for request origin tracking |\n\n---\n\n### Path Variables\n\n| Variable | Description |\n|---|---|\n| `id` | The ID or reference (`ref`) of the article to update |\n\n---\n\n### Request Body\n\nSend a JSON body with the new link:\n\n```json\n{\n    \"link\": \"https://example.com/product-page\"\n}\n```\n\n| Field | Type | Description |\n|---|---|---|\n| `link` | `string` | The new product page URL to associate with the article |\n\n---\n\n### Response\n\nOn success, returns the updated article object with the new link applied."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Stock",
+      "item": [
+        {
+          "name": "GET Article Stock breakdown by status",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"orders\":[\"S4001940AA\",\"S4001941BA\"]\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/stock?fc=6&article=25770E",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stock"
+              ],
+              "query": [
+                {
+                  "key": "fc",
+                  "value": "6"
+                },
+                {
+                  "key": "article",
+                  "value": "25770E"
+                }
+              ]
+            },
+            "description": "## Get Article Stock Breakdown by Status\n\nReturns a breakdown of stock quantities for a specific article at a given fulfilment center, grouped by status (e.g., available, reserved, in transit).\n\n**Method & URL**\n```\nGET {{baseUrl}}/stock\n```\n\n**Query Parameters**\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| fc | integer | Fulfilment center ID (e.g., `6`) |\n| article | string | Article reference/SKU (e.g., `25770E`) |\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Blacklist",
+      "item": [
+        {
+          "name": "Check whether phones are blacklisted",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "{{referer}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"phones\":[\"0600000001\",\"0600000002\"]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/blacklist/check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "blacklist",
+                "check"
+              ]
+            },
+            "description": "## Check Whether Phones Are Blacklisted\n\nChecks if one or more phone numbers are on the blacklist, helping sellers avoid creating orders for known problematic recipients.\n\n**Method & URL**\n```\nPOST {{baseUrl}}/blacklist/check\n```\n\n**Request Headers**\n\n| Header | Value |\n|--------|-------|\n| Referer | {{referer}} |\n\n**Authentication**\n\nBearer token — include `Authorization: Bearer {{token}}` in the request header.\n\n**Request Body** (JSON)\n\n| Field | Type | Description |\n|-------|------|-------------|\n| phones | array of strings | List of phone numbers to check against the blacklist |\n\n**Example Body**\n```json\n{\n  \"phones\": [\"0600000001\", \"0600000002\"]\n}\n```"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          "pm.request.headers.add({\r",
+          "    key: 'Authorization',\r",
+          "    value: 'Bearer pm.variables.get(\"token\")'\r",
+          "},\r",
+          "{\r",
+          "    key:'Referer',\r",
+          "    value:'pm.variables.get(\"Referer\")'\r",
+          "});\r",
+          "\r",
+          "// Add other request headers\r",
+          "pm.request.headers.add(\r",
+          "    {\r",
+          "        key: 'Content-Type',\r",
+          "        value: 'application/json'\r",
+          "    },\r",
+          "    {\r",
+          "        key: 'Referer',\r",
+          "        value: pm.variables.get(\"referer\")\r",
+          "    }\r",
+          ");"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.digylog.com/api/v2/seller"
+    },
+    {
+      "key": "referer",
+      "value": "https://apiseller.digylog.com"
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ]
+}

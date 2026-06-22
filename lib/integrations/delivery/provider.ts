@@ -4,6 +4,7 @@
 
 import { forcelogAdapter } from './forcelog-adapter'
 import { ameexAdapter } from './ameex-adapter'
+import { senditAdapter } from './sendit-adapter'
 import type {
   CreateParcelResult,
   CreateVoucherResult,
@@ -57,3 +58,4 @@ export function listProviders(): DeliveryProvider[] {
 // Enregistrer les providers au chargement
 registerProvider(forcelogAdapter)
 registerProvider(ameexAdapter)
+registerProvider(senditAdapter)

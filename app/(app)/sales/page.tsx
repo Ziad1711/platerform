@@ -15,6 +15,7 @@ import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 
 const OZONE_PROVIDER_ID = '5f806347-45f1-481a-901d-2eb98b20b3a8'
+const SENDIT_PROVIDER_ID = '5998e563-96ed-47cc-881a-43f41827f858'
 
 async function normalizeOrderCityRequest(city: string, orderId?: string) {
   const response = await fetch('/api/orders/normalize-city', {
@@ -524,6 +525,21 @@ export default function VentesPage() {
   const [deliveryNoteAmeexFragile, setDeliveryNoteAmeexFragile] = useState(false)
   const [deliveryNoteAmeexReplace, setDeliveryNoteAmeexReplace] = useState(true)
   const [deliveryNoteAmeexParcelType, setDeliveryNoteAmeexParcelType] = useState<'SIMPLE' | 'STOCK'>('SIMPLE')
+  // Sendit delivery note state
+  const [deliveryNoteSenditCityKey, setDeliveryNoteSenditCityKey] = useState('')
+  const [deliveryNoteSenditSearchTerm, setDeliveryNoteSenditSearchTerm] = useState('')
+  const [deliveryNoteSenditDropdownOpen, setDeliveryNoteSenditDropdownOpen] = useState(false)
+  const [deliveryNoteSenditAllowOpen, setDeliveryNoteSenditAllowOpen] = useState(true)
+  const [deliveryNoteSenditAllowTry, setDeliveryNoteSenditAllowTry] = useState(true)
+  const [deliveryNoteSenditProductsFromStock, setDeliveryNoteSenditProductsFromStock] = useState(false)
+  const [deliveryNoteSenditPackagingId, setDeliveryNoteSenditPackagingId] = useState('')
+  const [deliveryNoteSenditOptionExchange, setDeliveryNoteSenditOptionExchange] = useState(false)
+  const [deliveryNoteSenditDeliveryExchangeId, setDeliveryNoteSenditDeliveryExchangeId] = useState('')
+  const [deliveryNoteSenditPickupDistrictId, setDeliveryNoteSenditPickupDistrictId] = useState('')
+  const [deliveryNoteSenditPickupSearchTerm, setDeliveryNoteSenditPickupSearchTerm] = useState('')
+  const [deliveryNoteSenditPickupDropdownOpen, setDeliveryNoteSenditPickupDropdownOpen] = useState(false)
+  const [deliveryNoteSenditPickupDistricts, setDeliveryNoteSenditPickupDistricts] = useState<any[]>([])
+  const [deliveryNoteSenditConfigLoaded, setDeliveryNoteSenditConfigLoaded] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
@@ -1056,6 +1072,7 @@ export default function VentesPage() {
   const isDeliveryNoteOzone = deliveryNoteSelectedCompany?.api_provider === 'ozone'
   const isDeliveryNoteForcelog = deliveryNoteSelectedCompany?.api_provider === 'forcelog'
   const isDeliveryNoteAmeex = deliveryNoteSelectedCompany?.api_provider === 'ameex'
+  const isDeliveryNoteSendit = deliveryNoteSelectedCompany?.api_provider === 'sendit'
 
   const { data: ameexCities = [] } = useQuery({
     queryKey: ['ameex-cities-delivery-note'],
@@ -1077,6 +1094,105 @@ export default function VentesPage() {
       return Array.from(uniqueMap.values())
     },
   })
+
+  const { data: senditCities = [] } = useQuery({
+    queryKey: ['sendit-cities-delivery-note'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name, price')
+        .eq('provider_id', SENDIT_PROVIDER_ID)
+        .order('city_name', { ascending: true })
+      if (error) throw error
+      const uniqueMap = new Map<string, any>()
+      for (const rate of data || []) {
+        uniqueMap.set(String(rate.external_city_key), {
+          city_key: rate.external_city_key,
+          city_name: rate.city_name,
+          cost_delivery: rate.price,
+        })
+      }
+      return Array.from(uniqueMap.values())
+    },
+  })
+
+  // Charger les districts de ramassage Sendit (villes source)
+  const { data: senditPickupDistrictsQuery = [] } = useQuery({
+    queryKey: ['sendit-pickup-districts-delivery-note'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name')
+        .eq('provider_id', SENDIT_PROVIDER_ID)
+        .order('city_name', { ascending: true })
+      if (error) throw error
+      const uniqueMap = new Map<string, any>()
+      for (const rate of data || []) {
+        uniqueMap.set(String(rate.external_city_key), {
+          city_key: rate.external_city_key,
+          city_name: rate.city_name,
+        })
+      }
+      return Array.from(uniqueMap.values())
+    },
+  })
+
+  // Charger la config Sendit pour récupérer le default_pickup_district_id
+  const { data: senditConfig } = useQuery({
+    queryKey: ['sendit-config-delivery-note', deliveryNoteModalOrder?.store_id],
+    queryFn: async () => {
+      if (!deliveryNoteModalOrder?.store_id) return null
+      const { data, error } = await supabase
+        .from('sendit_configs')
+        .select('default_pickup_district_id')
+        .eq('store_id', deliveryNoteModalOrder.store_id)
+        .maybeSingle()
+      if (error) throw error
+      return data || null
+    },
+    enabled: !!deliveryNoteModalOrder?.store_id && isDeliveryNoteSendit,
+  })
+
+  // Initialiser le pickup district depuis la config Sendit
+  useEffect(() => {
+    if (senditConfig?.default_pickup_district_id && isDeliveryNoteSendit && !deliveryNoteSenditConfigLoaded) {
+      const districtId = String(senditConfig.default_pickup_district_id)
+      setDeliveryNoteSenditPickupDistrictId(districtId)
+      const district = (senditPickupDistrictsQuery || []).find((d: any) => String(d.city_key) === districtId)
+      if (district) {
+        setDeliveryNoteSenditPickupSearchTerm(String(district.city_name || ''))
+      }
+      setDeliveryNoteSenditConfigLoaded(true)
+    }
+  }, [senditConfig, isDeliveryNoteSendit, senditPickupDistrictsQuery, deliveryNoteSenditConfigLoaded])
+
+  // Sauvegarder le pickup district dans sendit_configs quand l'utilisateur change
+  const savePickupDistrictMutation = useMutation({
+    mutationFn: async (pickupDistrictId: string) => {
+      if (!deliveryNoteModalOrder?.store_id) return
+      const response = await fetch('/api/integrations/sendit/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          publicKey: '__skip__',
+          secretKey: '__skip__',
+          storeId: deliveryNoteModalOrder.store_id,
+          pickupDistrictId,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(payload?.error || 'SENDIT_UPDATE_PICKUP_FAILED')
+      }
+    },
+  })
+
+  // Quand l'utilisateur change le pickup district, sauvegarder dans sendit_configs
+  useEffect(() => {
+    if (deliveryNoteSenditPickupDistrictId && deliveryNoteSenditConfigLoaded && deliveryNoteModalOrder?.store_id) {
+      savePickupDistrictMutation.mutate(deliveryNoteSenditPickupDistrictId)
+    }
+  }, [deliveryNoteSenditPickupDistrictId])
 
   const { data: rapidDeliveryIntegration } = useQuery({
     queryKey: ['rapid-delivery-integration-status'],
@@ -1507,11 +1623,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean; senditCityKey?: string; senditCityName?: string; senditAllowOpen?: boolean; senditAllowTry?: boolean; senditProductsFromStock?: boolean; senditPackagingId?: string; senditOptionExchange?: boolean; senditDeliveryExchangeId?: string; senditPickupDistrictId?: string }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -4481,6 +4597,179 @@ export default function VentesPage() {
                       </label>
                     </div>
                   ) : null}
+                  {isDeliveryNoteSendit ? (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        Ville Sendit <span className="text-muted-foreground font-normal">(obligatoire)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={deliveryNoteSenditSearchTerm}
+                          onChange={(e) => {
+                            setDeliveryNoteSenditSearchTerm(e.target.value)
+                            setDeliveryNoteSenditCityKey('')
+                          }}
+                          onFocus={() => setDeliveryNoteSenditDropdownOpen(true)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                          placeholder="Tapez pour rechercher une ville Sendit..."
+                        />
+                        {deliveryNoteSenditDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setDeliveryNoteSenditDropdownOpen(false)} />
+                            <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-48 overflow-y-auto rounded-xl border border-border bg-popover shadow-xl">
+                              {(senditCities || []).filter((city: any) =>
+                                !deliveryNoteSenditSearchTerm ||
+                                String(city.city_name || '').toLowerCase().includes(deliveryNoteSenditSearchTerm.toLowerCase())
+                              ).length === 0 ? (
+                                <div className="px-3.5 py-2.5 text-sm text-muted-foreground">Aucune ville trouvée</div>
+                              ) : (
+                                (senditCities || []).filter((city: any) =>
+                                  !deliveryNoteSenditSearchTerm ||
+                                  String(city.city_name || '').toLowerCase().includes(deliveryNoteSenditSearchTerm.toLowerCase())
+                                ).map((city: any) => (
+                                  <button
+                                    key={city.city_key}
+                                    type="button"
+                                    className={`w-full text-left px-3.5 py-2.5 text-sm hover:bg-secondary transition-colors ${
+                                      String(deliveryNoteSenditCityKey) === String(city.city_key)
+                                        ? 'bg-primary/10 text-primary font-medium'
+                                        : 'text-foreground'
+                                    }`}
+                                    onClick={() => {
+                                      setDeliveryNoteSenditCityKey(String(city.city_key))
+                                      setDeliveryNoteSenditSearchTerm(String(city.city_name || ''))
+                                      setDeliveryNoteSenditDropdownOpen(false)
+                                    }}
+                                  >
+                                    {city.city_name} — {formatCurrency(city.cost_delivery || 0)}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                  {isDeliveryNoteSendit ? (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        Ville de ramassage (pickup district) <span className="text-muted-foreground font-normal">(optionnelle)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={deliveryNoteSenditPickupSearchTerm}
+                          onChange={(e) => {
+                            setDeliveryNoteSenditPickupSearchTerm(e.target.value)
+                            setDeliveryNoteSenditPickupDistrictId('')
+                          }}
+                          onFocus={() => setDeliveryNoteSenditPickupDropdownOpen(true)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                          placeholder="Tapez pour rechercher une ville de ramassage..."
+                        />
+                        {deliveryNoteSenditPickupDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setDeliveryNoteSenditPickupDropdownOpen(false)} />
+                            <div className="absolute left-0 top-full mt-1 z-50 w-full max-h-48 overflow-y-auto rounded-xl border border-border bg-popover shadow-xl">
+                              {(senditPickupDistrictsQuery || []).filter((city: any) =>
+                                !deliveryNoteSenditPickupSearchTerm ||
+                                String(city.city_name || '').toLowerCase().includes(deliveryNoteSenditPickupSearchTerm.toLowerCase())
+                              ).length === 0 ? (
+                                <div className="px-3.5 py-2.5 text-sm text-muted-foreground">Aucune ville trouvée</div>
+                              ) : (
+                                (senditPickupDistrictsQuery || []).filter((city: any) =>
+                                  !deliveryNoteSenditPickupSearchTerm ||
+                                  String(city.city_name || '').toLowerCase().includes(deliveryNoteSenditPickupSearchTerm.toLowerCase())
+                                ).map((city: any) => (
+                                  <button
+                                    key={city.city_key}
+                                    type="button"
+                                    className={`w-full text-left px-3.5 py-2.5 text-sm hover:bg-secondary transition-colors ${
+                                      String(deliveryNoteSenditPickupDistrictId) === String(city.city_key)
+                                        ? 'bg-primary/10 text-primary font-medium'
+                                        : 'text-foreground'
+                                    }`}
+                                    onClick={() => {
+                                      setDeliveryNoteSenditPickupDistrictId(String(city.city_key))
+                                      setDeliveryNoteSenditPickupSearchTerm(String(city.city_name || ''))
+                                      setDeliveryNoteSenditPickupDropdownOpen(false)
+                                    }}
+                                  >
+                                    {city.city_name}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                  {isDeliveryNoteSendit ? (
+                    <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="text-sm font-medium text-foreground">Options colis Sendit</div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Autoriser l'ouverture du colis</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteSenditAllowOpen}
+                          onChange={(e) => setDeliveryNoteSenditAllowOpen(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Autoriser l'essayage</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteSenditAllowTry}
+                          onChange={(e) => setDeliveryNoteSenditAllowTry(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Produits depuis le stock</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteSenditProductsFromStock}
+                          onChange={(e) => setDeliveryNoteSenditProductsFromStock(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-foreground">Packaging</label>
+                        <input
+                          type="text"
+                          value={deliveryNoteSenditPackagingId}
+                          onChange={(e) => setDeliveryNoteSenditPackagingId(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm"
+                          placeholder="ID du packaging (optionnel)"
+                        />
+                      </div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Option échange</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteSenditOptionExchange}
+                          onChange={(e) => setDeliveryNoteSenditOptionExchange(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      {deliveryNoteSenditOptionExchange && (
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-foreground">ID livraison échange</label>
+                          <input
+                            type="text"
+                            value={deliveryNoteSenditDeliveryExchangeId}
+                            onChange={(e) => setDeliveryNoteSenditDeliveryExchangeId(e.target.value)}
+                            className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm"
+                            placeholder="ID de livraison pour échange"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-foreground">
                       Note de livraison <span className="text-muted-foreground font-normal">(optionnelle)</span>
@@ -4528,6 +4817,13 @@ export default function VentesPage() {
                       setFormError('Veuillez choisir une ville AMEEX.')
                       return
                     }
+                    const selectedSenditCity = isDeliveryNoteSendit
+                      ? (senditCities as any[]).find((city: any) => String((city as any).city_key) === String(deliveryNoteSenditCityKey))
+                      : null
+                    if (isDeliveryNoteSendit && !selectedSenditCity) {
+                      setFormError('Veuillez choisir une ville Sendit.')
+                      return
+                    }
                     setDeliveryNoteModalOrder(null)
                     setUpdatingOrderId(order.id)
                     const resolvedCompanyId = deliveryNoteSelectedCompanyId === 'internal' ? undefined : deliveryNoteSelectedCompanyId
@@ -4552,6 +4848,15 @@ export default function VentesPage() {
                         ameexFragile: isDeliveryNoteAmeex ? deliveryNoteAmeexFragile : undefined,
                         ameexReplace: isDeliveryNoteAmeex ? deliveryNoteAmeexReplace : undefined,
                         ameexTry: isDeliveryNoteAmeex ? deliveryNoteAmeexTry : undefined,
+                        senditCityKey: selectedSenditCity ? String(selectedSenditCity.city_key) : undefined,
+                        senditCityName: selectedSenditCity ? String(selectedSenditCity.city_name || '') : undefined,
+                        senditAllowOpen: isDeliveryNoteSendit ? deliveryNoteSenditAllowOpen : undefined,
+                        senditAllowTry: isDeliveryNoteSendit ? deliveryNoteSenditAllowTry : undefined,
+                        senditProductsFromStock: isDeliveryNoteSendit ? deliveryNoteSenditProductsFromStock : undefined,
+                        senditPackagingId: isDeliveryNoteSendit ? (deliveryNoteSenditPackagingId || undefined) : undefined,
+                        senditOptionExchange: isDeliveryNoteSendit ? deliveryNoteSenditOptionExchange : undefined,
+                        senditDeliveryExchangeId: isDeliveryNoteSendit ? (deliveryNoteSenditDeliveryExchangeId || undefined) : undefined,
+                        senditPickupDistrictId: isDeliveryNoteSendit ? (deliveryNoteSenditPickupDistrictId || undefined) : undefined,
                       },
 
                       {
@@ -4573,6 +4878,10 @@ export default function VentesPage() {
                           setDeliveryNoteAmeexFragile(false)
                           setDeliveryNoteAmeexReplace(true)
                           setDeliveryNoteAmeexParcelType('SIMPLE')
+                          setDeliveryNoteSenditPickupDistrictId('')
+                          setDeliveryNoteSenditPickupSearchTerm('')
+                          setDeliveryNoteSenditPickupDropdownOpen(false)
+                          setDeliveryNoteSenditConfigLoaded(false)
                         },
                       }
                     )

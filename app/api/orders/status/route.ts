@@ -6,6 +6,7 @@ import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-
 import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { createForceLogParcelForOrder } from '@/lib/integrations/delivery/forcelog-adapter'
+import { createSenditParcelForOrder } from '@/lib/integrations/delivery/sendit-adapter'
 
 const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   confirmation_rejected: 'confirmation_rejected_at',
@@ -59,6 +60,15 @@ export async function POST(request: Request) {
       ameexFragile?: boolean
       ameexReplace?: boolean
       ameexTry?: boolean
+      senditCityKey?: string
+      senditCityName?: string
+      senditAllowOpen?: boolean
+      senditAllowTry?: boolean
+      senditProductsFromStock?: boolean
+      senditPackagingId?: string
+      senditOptionExchange?: boolean
+      senditDeliveryExchangeId?: string
+      senditPickupDistrictId?: string
     }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
@@ -109,7 +119,7 @@ export async function POST(request: Request) {
         .eq('id', order.delivery_company_id)
         .maybeSingle()
 
-      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'forcelog', 'ameex'].includes(dc.api_provider)) {
+      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'forcelog', 'ameex', 'sendit'].includes(dc.api_provider)) {
         isDeliveryCompanyLocked = true
       }
     }
@@ -370,6 +380,80 @@ export async function POST(request: Request) {
 
         if (!ozoneIntegration && deliveryCompany?.api_provider === 'ozone') {
           warning = 'Intégration OZONE non connectée pour ce store.'
+        }
+      }
+
+      // Sendit auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'sendit') {
+        const [{ data: senditIntegration }] = await Promise.all([
+          supabase
+            .from('integrations')
+            .select('id, status')
+            .eq('user_id', user.id)
+            .eq('provider', 'sendit')
+            .eq('store_id', order.store_id)
+            .maybeSingle(),
+        ])
+
+        if (senditIntegration?.status === 'connected') {
+          try {
+            const senditCityKey = body.senditCityKey || ''
+            const senditCityName = body.senditCityName || ''
+
+            if (senditCityKey && senditCityName) {
+              const { data: senditRate } = await admin
+                .from('delivery_rates')
+                .select('price')
+                .eq('provider_id', '5998e563-96ed-47cc-881a-43f41827f858')
+                .eq('external_city_key', String(senditCityKey))
+                .maybeSingle()
+
+              const senditDeliveryFee = senditRate?.price ? Number(senditRate.price) : 0
+
+              const { error: senditCityUpdateError } = await admin
+                .from('orders')
+                .update({
+                  city: senditCityName,
+                  delivery_city_external_id: Number(senditCityKey) || null,
+                  delivery_fee: senditDeliveryFee,
+                  updated_at: now,
+                })
+                .eq('id', orderId)
+
+              if (senditCityUpdateError) throw senditCityUpdateError
+            }
+
+            const result = await createSenditParcelForOrder({
+              admin,
+              orderId,
+              storeId: order.store_id,
+              userId: user.id,
+              integrationId: senditIntegration.id,
+              deliveryNote: deliveryNote || undefined,
+              allowOpen: body.senditAllowOpen,
+              allowTry: body.senditAllowTry,
+              productsFromStock: body.senditProductsFromStock,
+              packagingId: body.senditPackagingId,
+              optionExchange: body.senditOptionExchange,
+              deliveryExchangeId: body.senditDeliveryExchangeId,
+              pickupDistrictId: body.senditPickupDistrictId,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            const errMsg = error instanceof Error ? error.message : 'SENDIT_AUTO_PARCEL_CREATE_FAILED'
+            try {
+              const { createDeliveryLogger } = await import('@/lib/integrations/delivery/logger')
+              const errLogger = createDeliveryLogger({ admin, integrationId: senditIntegration.id, storeId: order.store_id, userId: user.id })
+              errLogger.error('parcel-create-failed', errMsg, { orderId })
+            } catch {}
+            warning = errMsg
+          }
+
+        }
+
+        if (!senditIntegration && deliveryCompany?.api_provider === 'sendit') {
+          warning = 'Intégration Sendit non connectée pour ce store.'
         }
       }
 

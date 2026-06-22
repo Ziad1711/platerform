@@ -13,6 +13,8 @@ import OzoneConnectWizard from '@/components/dashboard/integrations/ozone-connec
 import FacebookAdsConnectWizard from '@/components/dashboard/integrations/facebook-ads-connect-wizard'
 import ForceLogConnectWizard from '@/components/dashboard/integrations/forcelog-connect-wizard'
 import AmeexConnectWizard from '@/components/dashboard/integrations/ameex-connect-wizard'
+import SenditConnectWizard from '@/components/dashboard/integrations/sendit-connect-wizard'
+import DigylogConnectWizard from '@/components/dashboard/integrations/digylog-connect-wizard'
 import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
@@ -138,7 +140,7 @@ export default function IntegrationsPage() {
       setSelectedCustomSiteStoreWebsite(null)
     } else {
       setConnectProviderSlug(providerSlug)
-      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex') {
+      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex' && providerSlug !== 'sendit' && providerSlug !== 'digylog') {
         setYoucanStoreSlug('')
       }
       setConnectError('')
@@ -483,8 +485,28 @@ export default function IntegrationsPage() {
         />
       ) : null}
 
+      {isConnectModalOpen && connectProviderSlug === 'sendit' ? (
+        <SenditConnectWizard
+          onClose={() => {
+            setIsConnectModalOpen(false)
+            setConnectProviderSlug(null)
+            setConnectError('')
+          }}
+        />
+      ) : null}
+
+      {isConnectModalOpen && connectProviderSlug === 'digylog' ? (
+        <DigylogConnectWizard
+          onClose={() => {
+            setIsConnectModalOpen(false)
+            setConnectProviderSlug(null)
+            setConnectError('')
+          }}
+        />
+      ) : null}
+
       {/* YouCan Connect Modal */}
-      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && (
+      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && connectProviderSlug !== 'sendit' && connectProviderSlug !== 'digylog' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"

@@ -166,6 +166,14 @@ export default function LivraisonPage() {
         .filter((c: any) => c.api_provider === 'ameex')
         .map((c: any) => c.id)
 
+      const senditCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'sendit')
+        .map((c: any) => c.id)
+
+      const digylogCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'digylog')
+        .map((c: any) => c.id)
+
       // Colis Rapid Delivery (via rapid_delivery_parcel_key, pas de voucher)
       const rapidPromise = rapidCompanyIds.length > 0
         ? supabase
@@ -223,8 +231,37 @@ export default function LivraisonPage() {
             .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.ameex_parcel_code, _provider: 'Ameex' })))
         : Promise.resolve([])
 
-      const [rapidRes, ozoneRes, forcelogRes, ameexRes] = await Promise.all([rapidPromise, ozonePromise, forcelogPromise, ameexPromise])
-      const merged = [...rapidRes, ...ozoneRes, ...forcelogRes, ...ameexRes]
+      // Colis Sendit (via sendit_parcel_code, sans voucher déjà créé)
+      const senditPromise = senditCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, sendit_parcel_code, confirmed_at, status')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', senditCompanyIds)
+            .not('sendit_parcel_code', 'is', null)
+            .is('sendit_voucher_key', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.sendit_parcel_code, _provider: 'Sendit' })))
+        : Promise.resolve([])
+
+      // Colis Digylog (via tracking_number, sans voucher déjà créé)
+      const digylogPromise = digylogCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, tracking_number, confirmed_at, status')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', digylogCompanyIds)
+            .not('tracking_number', 'is', null)
+            .not('tracking_number', 'eq', '')
+            .is('delivery_voucher_key', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.tracking_number, _provider: 'Digylog' })))
+        : Promise.resolve([])
+
+      const [rapidRes, ozoneRes, forcelogRes, ameexRes, senditRes, digylogRes] = await Promise.all([rapidPromise, ozonePromise, forcelogPromise, ameexPromise, senditPromise, digylogPromise])
+      const merged = [...rapidRes, ...ozoneRes, ...forcelogRes, ...ameexRes, ...senditRes, ...digylogRes]
       merged.sort((a, b) => new Date(b.confirmed_at).getTime() - new Date(a.confirmed_at).getTime())
       return merged
     },
@@ -258,6 +295,7 @@ export default function LivraisonPage() {
         voucherKey: v.provider_entity_id,
         provider: v.payload?.provider_slug || 'unknown',
         parcelCount: Array.isArray(v.payload?.parcels) ? v.payload.parcels.length : (v.payload?.count || 0),
+        fileUrl: v.payload?.fileUrl || '',
         updated_at: v.updated_at,
       }))
 
@@ -298,7 +336,7 @@ export default function LivraisonPage() {
   }, [confirmedParcels])
 
   // Déterminer le provider des colis sélectionnés
-  function getSelectedProvider(): 'rapid' | 'ozone' | 'forcelog' | 'ameex' | 'mixed' | 'none' {
+  function getSelectedProvider(): 'rapid' | 'ozone' | 'forcelog' | 'ameex' | 'sendit' | 'digylog' | 'mixed' | 'none' {
     if (selectedOrderIds.length === 0) return 'none'
     const selected = confirmedParcels.filter((o: any) => selectedOrderIds.includes(o.id))
     if (selected.length === 0) return 'none'
@@ -306,6 +344,8 @@ export default function LivraisonPage() {
     if (providers.size > 1) return 'mixed'
     if (providers.has('ForceLog')) return 'forcelog'
     if (providers.has('Ameex')) return 'ameex'
+    if (providers.has('Sendit')) return 'sendit'
+    if (providers.has('Digylog')) return 'digylog'
     return providers.has('OZONE') ? 'ozone' : 'rapid'
   }
 
@@ -338,7 +378,11 @@ export default function LivraisonPage() {
         ? '/api/integrations/ozone/vouchers/create'
         : provider === 'ameex'
           ? '/api/integrations/ameex/vouchers/create'
-          : '/api/integrations/rapid-delivery/vouchers/create'
+          : provider === 'sendit'
+            ? '/api/integrations/sendit/vouchers/create'
+            : provider === 'digylog'
+              ? '/api/integrations/digylog/vouchers/create'
+              : '/api/integrations/rapid-delivery/vouchers/create'
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -574,7 +618,9 @@ export default function LivraisonPage() {
               {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
                 deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0 ||
                 deliveryCompanies.filter((c: any) => c.api_provider === 'forcelog').length > 0 ||
-                deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0) && (
+                deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0 ||
+                deliveryCompanies.filter((c: any) => c.api_provider === 'sendit').length > 0 ||
+                deliveryCompanies.filter((c: any) => c.api_provider === 'digylog').length > 0) && (
                 <button
                   type="button"
                   onClick={() => void createVoucher()}
@@ -601,7 +647,9 @@ export default function LivraisonPage() {
                         {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
                           deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0 ||
                           deliveryCompanies.filter((c: any) => c.api_provider === 'forcelog').length > 0 ||
-                          deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0) && (
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0 ||
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'sendit').length > 0 ||
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'digylog').length > 0) && (
                           <th className="px-2 py-2">
                             <input
                               type="checkbox"
@@ -624,20 +672,28 @@ export default function LivraisonPage() {
                         const isAmeex = order._provider === 'Ameex'
                         const isRapid = order._provider === 'Rapid'
                         const isForceLog = order._provider === 'ForceLog'
-                        const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog || isAmeex
+                        const isSendit = order._provider === 'Sendit'
+                        const isDigylog = order._provider === 'Digylog'
+                        const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog || isAmeex || isSendit || isDigylog
                         const badgeClass = isRapid
                           ? 'bg-[#27BEE3]/10 text-[#27BEE3]'
                           : isForceLog
                             ? 'bg-[#FFCD06]/10 text-[#B8860B]'
                             : isAmeex
                               ? 'bg-[#E56C33]/10 text-[#E56C33]'
-                              : 'bg-[#E41B29]/10 text-[#E41B29]'
+                              : isSendit
+                                ? 'bg-[#8B5CF6]/10 text-[#8B5CF6]'
+                                : isDigylog
+                                  ? 'bg-[#10B981]/10 text-[#10B981]'
+                                  : 'bg-[#E41B29]/10 text-[#E41B29]'
                         return (
                           <tr key={`${order._provider}-${order.id}`} className="border-b last:border-b-0">
                             {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
                               deliveryCompanies.filter((c: any) => c.api_provider === 'ozone').length > 0 ||
                               deliveryCompanies.filter((c: any) => c.api_provider === 'forcelog').length > 0 ||
-                              deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0) && (
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0 ||
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'sendit').length > 0 ||
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'digylog').length > 0) && (
                               <td className="px-2 py-2">
                                 {canCreateVoucher ? (
                                   <input
@@ -671,12 +727,18 @@ export default function LivraisonPage() {
                     const checked = selectedOrderIds.includes(order.id)
                     const isRapid = order._provider === 'Rapid'
                     const isForceLog = order._provider === 'ForceLog'
-                    const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog
+                    const isSendit = order._provider === 'Sendit'
+                    const isDigylog = order._provider === 'Digylog'
+                    const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog || isSendit || isDigylog
                     const badgeClass = isRapid
                       ? 'bg-[#27BEE3]/10 text-[#27BEE3]'
                       : isForceLog
                         ? 'bg-[#FFCD06]/10 text-[#B8860B]'
-                        : 'bg-[#E41B29]/10 text-[#E41B29]'
+                        : isSendit
+                          ? 'bg-[#8B5CF6]/10 text-[#8B5CF6]'
+                          : isDigylog
+                            ? 'bg-[#10B981]/10 text-[#10B981]'
+                            : 'bg-[#E41B29]/10 text-[#E41B29]'
                     return (
                       <div
                         key={`${order._provider}-${order.id}`}
@@ -726,6 +788,8 @@ export default function LivraisonPage() {
                   const isRapid = voucher.provider === 'rapid-delivery'
                   const isForceLog = voucher.provider === 'forcelog'
                   const isAmeex = voucher.provider === 'ameex'
+                  const isSendit = voucher.provider === 'sendit'
+                  const isDigylog = voucher.provider === 'digylog'
                   
                   const badgeClass = isOzone
                     ? 'bg-[#E41B29]/10 text-[#E41B29]'
@@ -733,8 +797,12 @@ export default function LivraisonPage() {
                       ? 'bg-[#FFCD06]/10 text-[#B8860B]'
                       : isAmeex
                         ? 'bg-[#E56C33]/10 text-[#E56C33]'
-                        : 'bg-[#27BEE3]/10 text-[#27BEE3]'
-                  const badgeLabel = isOzone ? 'OZONE' : isForceLog ? 'ForceLog' : isAmeex ? 'AMEEX' : 'RAPID'
+                        : isSendit
+                          ? 'bg-[#8B5CF6]/10 text-[#8B5CF6]'
+                          : isDigylog
+                            ? 'bg-[#10B981]/10 text-[#10B981]'
+                            : 'bg-[#27BEE3]/10 text-[#27BEE3]'
+                  const badgeLabel = isOzone ? 'OZONE' : isForceLog ? 'ForceLog' : isAmeex ? 'AMEEX' : isSendit ? 'SENDIT' : isDigylog ? 'DIGYLOG' : 'RAPID'
                   
                   return (
                     <div key={voucher.id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border px-3 py-2 text-sm gap-2">
@@ -817,6 +885,41 @@ export default function LivraisonPage() {
                             </Link>
                             <Link
                               href={`/api/integrations/ameex/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels`}
+                              target="_blank"
+                              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                              Étiquettes
+                            </Link>
+                          </>
+                        )}
+                        
+                        {isSendit && (
+                          <>
+                            {voucher.fileUrl ? (
+                              <a
+                                href={voucher.fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                              >
+                                PDF
+                              </a>
+                            ) : (
+                              <Link
+                                href={`/api/integrations/sendit/labels/${encodeURIComponent(voucher.voucherKey)}?storeId=${encodeURIComponent(currentStoreId || '')}`}
+                                target="_blank"
+                                className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                              >
+                                Étiquettes
+                              </Link>
+                            )}
+                          </>
+                        )}
+                        
+                        {isDigylog && (
+                          <>
+                            <Link
+                              href={`/api/integrations/digylog/labels/${encodeURIComponent(voucher.voucherKey)}`}
                               target="_blank"
                               className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                             >

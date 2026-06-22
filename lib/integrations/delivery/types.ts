@@ -64,6 +64,7 @@ export type ParcelCreationInput = {
     fragile?: 0 | 1
     replace?: 0 | 1
   }
+  providerOptions?: Record<string, unknown>
 }
 
 /** Informations nécessaires pour créer un voucher */
