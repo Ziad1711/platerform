@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { downloadBlLabels, downloadLabels, DigylogConfig } from '@/lib/integrations/digylog'
+import { apiFetchRaw, DigylogConfig } from '@/lib/integrations/digylog'
 
 export async function GET(
   _req: NextRequest,
@@ -21,40 +21,46 @@ export async function GET(
     // Récupérer l'intégration Digylog active pour ce user
     const { data: integration } = await supabase
       .from('integrations')
-      .select('id, config')
+      .select('id, access_token')
       .eq('user_id', user.id)
       .eq('provider_id', 'eeeb5b4f-741b-4d53-b4dd-72a7bd26f9cf')
-      .eq('status', 'active')
+      .eq('status', 'connected')
       .maybeSingle()
 
-    if (!integration) {
+    if (!integration?.access_token) {
       return NextResponse.json({ error: 'Intégration Digylog introuvable' }, { status: 404 })
     }
 
-    const cfg: DigylogConfig = integration.config as DigylogConfig
+    const cfg: DigylogConfig = { token: integration.access_token, referer: 'https://apiseller.digylog.com' }
 
-    // Essayer d'abord avec downloadLabels (par tracking numbers)
-    // Si le code est un BL ID (nombre), utiliser downloadBlLabels
+    // Construire le body selon que le code est un BL ID (nombre) ou un tracking
     const blId = parseInt(code, 10)
-    if (!isNaN(blId) && String(blId) === code) {
-      const result = await downloadBlLabels(cfg, blId)
-      // L'API retourne un JSON avec l'URL du PDF
-      if (result?.url) {
-        const pdfRes = await fetch(result.url)
-        const pdfBuffer = await pdfRes.arrayBuffer()
-        return new NextResponse(pdfBuffer, {
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="digylog-label-${code}.pdf"`,
-          },
-        })
-      }
+    const isBlId = !isNaN(blId) && String(blId) === code
+    const body = isBlId ? JSON.stringify({ bl: blId }) : JSON.stringify({ orders: [code] })
+
+    // Appel brut à l'API /labels de Digylog
+    const rawRes = await apiFetchRaw(cfg, '/labels', {
+      method: 'POST',
+      body,
+    })
+
+    const contentType = rawRes.headers.get('content-type') || ''
+
+    // Cas 1 : l'API retourne directement un PDF
+    if (contentType.includes('application/pdf') || contentType.includes('application/octet-stream')) {
+      const pdfBuffer = await rawRes.arrayBuffer()
+      return new NextResponse(pdfBuffer, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="digylog-label-${code}.pdf"`,
+        },
+      })
     }
 
-    // Fallback: downloadLabels par tracking numbers
-    const result = await downloadLabels(cfg, [code])
-    if (result?.url) {
-      const pdfRes = await fetch(result.url)
+    // Cas 2 : l'API retourne un JSON avec une URL de PDF
+    const json = await rawRes.json().catch(() => null)
+    if (json?.url) {
+      const pdfRes = await fetch(json.url)
       const pdfBuffer = await pdfRes.arrayBuffer()
       return new NextResponse(pdfBuffer, {
         headers: {

@@ -1,39 +1,51 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createOrders, DigylogConfig, DigylogCreateOrdersPayload } from '@/lib/integrations/digylog'
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
+    assertTrustedOrigin(request)
+    const { supabase, user } = await requireAuthenticatedUser()
+    const body = (await request.json().catch(() => ({}))) as {
+      storeId?: string
+      orderIds?: string[]
     }
 
-    const { storeId, orderIds } = await req.json()
-    if (!storeId || !orderIds?.length) {
+    const storeId = String(body.storeId || '').trim()
+    const orderIds = Array.isArray(body.orderIds) ? body.orderIds.map(String).filter(Boolean) : []
+
+    if (!storeId || orderIds.length === 0) {
       return NextResponse.json({ error: 'storeId et orderIds requis' }, { status: 400 })
     }
 
+    await verifyStoreAccess(supabase, user.id, storeId)
+
+    const admin = createAdminClient()
+
     // Récupérer l'intégration Digylog
-    const { data: integration } = await supabase
+    const { data: integration, error: integrationError } = await admin
       .from('integrations')
-      .select('id, config')
+      .select('id, provider_id, access_token')
       .eq('user_id', user.id)
       .eq('provider_id', 'eeeb5b4f-741b-4d53-b4dd-72a7bd26f9cf')
-      .eq('status', 'active')
+      .eq('status', 'connected')
       .maybeSingle()
 
-    if (!integration) {
+    if (integrationError) throw integrationError
+    if (!integration?.access_token) {
       return NextResponse.json({ error: 'Intégration Digylog introuvable' }, { status: 404 })
     }
 
-    const cfg: DigylogConfig = integration.config as DigylogConfig
+    const cfg: DigylogConfig = { token: integration.access_token, referer: 'https://apiseller.digylog.com' }
 
-    // Récupérer les commandes
-    const { data: orders, error: ordersError } = await supabase
+    // Récupérer les commandes avec leurs articles
+    const { data: orders, error: ordersError } = await admin
       .from('orders')
-      .select('id, customer_name, phone, city, address, total_selling_price, tracking_number, delivery_city_external_id')
+      .select(`
+        id, customer_name, phone, city, address, total_selling_price, tracking_number,
+        order_items(quantity, products(name))
+      `)
       .in('id', orderIds)
       .eq('store_id', storeId)
 
@@ -43,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Récupérer la config Digylog pour le store
-    const { data: digylogConfig } = await supabase
+    const { data: digylogConfig } = await admin
       .from('digylog_configs')
       .select('default_network_id, default_external_store, default_order_mode, default_send_status')
       .eq('store_id', storeId)
@@ -60,46 +72,88 @@ export async function POST(req: NextRequest) {
       store: digylogConfig.default_external_store || storeId,
       status: (digylogConfig.default_send_status ?? 1) as 0 | 1,
       checkDuplicate: 1,
-      orders: orders.map((o) => ({
-        num: o.tracking_number || `ORDER-${o.id}`,
-        name: o.customer_name || 'Client',
-        phone: o.phone || '',
-        address: o.address || '',
-        city: o.delivery_city_external_id || o.city || '',
-        price: Number(o.total_selling_price) || 0,
-      })),
+      orders: orders.map((o: any) => {
+        const items = o.order_items || []
+        const refs = items.length > 0
+          ? items.map((oi: any) => ({
+              ref: '',
+              designation: oi.products?.name || 'Produit',
+              quantity: Number(oi.quantity) || 1,
+            }))
+          : [{ ref: '', designation: 'Produit', quantity: 1 }]
+
+        return {
+          num: o.tracking_number || `ORDER-${o.id}`,
+          type: 1,
+          name: o.customer_name || 'Client',
+          phone: o.phone || '',
+          address: o.address || '',
+          city: o.city || '',
+          price: Number(o.total_selling_price) || 0,
+          port: 2,
+          openproduct: 1,
+          refs,
+        }
+      }),
     }
 
-    const result = await createOrders(cfg, payload)
+    const raw = await createOrders(cfg, payload)
 
-    // Mettre à jour les commandes avec le BL créé
-    if (result?.bl) {
-      const blId = result.bl
-      await supabase
-        .from('orders')
-        .update({ delivery_voucher_key: String(blId) })
-        .in('id', orderIds)
-        .eq('store_id', storeId)
-
-      // Enregistrer dans delivery_entity_mappings
-      await supabase
-        .from('delivery_entity_mappings')
-        .insert({
-          store_id: storeId,
-          integration_id: integration.id,
-          entity_type: 'voucher',
-          provider_entity_id: String(blId),
-          payload: {
-            provider_slug: 'digylog',
-            count: orders.length,
-            parcels: orders.map((o) => o.tracking_number),
-          },
-        })
+    // Vérifier les erreurs métier Digylog (tableau avec isSuccess)
+    let result: any = raw
+    if (Array.isArray(raw)) {
+      const failed = raw.find((r: any) => r.isSuccess === false)
+      if (failed) {
+        const errMsg = failed.errors?.join('; ') || 'Erreur inconnue'
+        return NextResponse.json({ error: `DIGYLOG_ORDER_FAILED:${errMsg}` }, { status: 400 })
+      }
+      result = raw[0] || {}
     }
+
+    // Générer un ID de voucher (soit le BL Digylog, soit un hash des trackings)
+    const voucherKey = String(result?.bl || result?.tracking || result?.num || `DIGYLOG-${Date.now()}`)
+
+    const now = new Date().toISOString()
+
+    // Mettre à jour les commandes avec le voucher key
+    const { error: updateError } = await admin
+      .from('orders')
+      .update({
+        delivery_voucher_key: voucherKey,
+        delivery_status: 'pickup_pending',
+        updated_at: now,
+      })
+      .in('id', orderIds)
+      .eq('store_id', storeId)
+
+    if (updateError) throw updateError
+
+    // Enregistrer dans delivery_entity_mappings (upsert pour éviter les doublons)
+    const { error: mappingError } = await admin
+      .from('delivery_entity_mappings')
+      .upsert({
+        provider_id: integration.provider_id,
+        integration_id: integration.id,
+        user_id: user.id,
+        store_id: storeId,
+        entity_type: 'voucher',
+        provider_entity_id: voucherKey,
+        internal_id: orderIds[0],
+        payload: {
+          provider_slug: 'digylog',
+          count: orders.length,
+          parcels: orders.map((o) => o.tracking_number),
+          order_ids: orderIds,
+        },
+        created_at: now,
+        updated_at: now,
+      }, { onConflict: 'integration_id,entity_type,provider_entity_id' })
+
+    if (mappingError) throw mappingError
 
     return NextResponse.json({
       success: true,
-      voucherKey: String(result?.bl || ''),
+      voucherKey,
       count: orders.length,
     })
   } catch (error) {

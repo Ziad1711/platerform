@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 type SupabaseLike = ReturnType<typeof createAdminClient>
 
+const DIGYLOG_PROVIDER_ID = 'eeeb5b4f-741b-4d53-b4dd-72a7bd26f9cf'
+
 type NormalizeCityParams = {
   rawCity: string
   orderId?: string | null
@@ -51,6 +53,20 @@ async function listCitiesForProvider(supabase: SupabaseLike, providerSlug: strin
       .from('delivery_rates')
       .select('external_city_key, city_name')
       .eq('provider_id', '729e93ed-207f-4281-8ef6-de37006993de')
+      .order('city_name', { ascending: true })
+
+    if (error) throw error
+    return (data || []).map((city) => ({
+      city_key: String(city.external_city_key),
+      city_name: city.city_name,
+    }))
+  }
+
+  if (providerSlug === 'digylog') {
+    const { data, error } = await supabase
+      .from('delivery_rates')
+      .select('external_city_key, city_name')
+      .eq('provider_id', DIGYLOG_PROVIDER_ID)
       .order('city_name', { ascending: true })
 
     if (error) throw error
@@ -113,6 +129,17 @@ async function findAliasForProvider(
     return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
   }
 
+  if (providerSlug === 'digylog') {
+    const { data, error } = await supabase
+      .from('digylog_city_aliases')
+      .select('canonical_city_name, city_key')
+      .eq('alias', normalizedAlias)
+      .maybeSingle()
+
+    if (error) throw error
+    return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
+  }
+
   const { data, error } = await supabase
     .from('rapid_delivery_city_aliases')
     .select('canonical_city_name, city_key')
@@ -138,7 +165,13 @@ async function persistAliasForProvider(params: {
 
   if (providerSlug === 'ozone') return
 
-  const table = providerSlug === 'forcelog' ? 'forcelog_city_aliases' : providerSlug === 'ameex' ? 'ameex_city_aliases' : 'rapid_delivery_city_aliases'
+  const table = providerSlug === 'forcelog'
+    ? 'forcelog_city_aliases'
+    : providerSlug === 'ameex'
+      ? 'ameex_city_aliases'
+      : providerSlug === 'digylog'
+        ? 'digylog_city_aliases'
+        : 'rapid_delivery_city_aliases'
 
   await supabase.from(table).upsert(
     {
@@ -167,7 +200,13 @@ async function updateAliasUsage(
 
   if (providerSlug === 'ozone') return
 
-  const table = providerSlug === 'forcelog' ? 'forcelog_city_aliases' : providerSlug === 'ameex' ? 'ameex_city_aliases' : 'rapid_delivery_city_aliases'
+  const table = providerSlug === 'forcelog'
+    ? 'forcelog_city_aliases'
+    : providerSlug === 'ameex'
+      ? 'ameex_city_aliases'
+      : providerSlug === 'digylog'
+        ? 'digylog_city_aliases'
+        : 'rapid_delivery_city_aliases'
 
   await supabase
     .from(table)

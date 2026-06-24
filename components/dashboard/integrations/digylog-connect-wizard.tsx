@@ -6,6 +6,16 @@ import { X, Copy, Check } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { SITE_URL } from '@/lib/marketing/site-url'
 
+type DigylogStore = Record<string, any>
+
+function getDigylogStoreValue(store: DigylogStore) {
+  return String(store.id ?? store.store_id ?? store.key ?? store.name ?? store.label ?? '').trim()
+}
+
+function getDigylogStoreLabel(store: DigylogStore) {
+  return String(store.name ?? store.label ?? store.store ?? getDigylogStoreValue(store) ?? '').trim()
+}
+
 export default function DigylogConnectWizard({
   onClose,
 }: {
@@ -13,15 +23,16 @@ export default function DigylogConnectWizard({
 }) {
   const queryClient = useQueryClient()
   const { currentStoreId, setCurrentStoreId, accessibleStores, isStoresLoading } = useStore()
-  const [step, setStep] = useState<'token' | 'config' | 'done'>('token')
+  const [step, setStep] = useState<'token' | 'store' | 'done'>('token')
   const [token, setToken] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [integrationId, setIntegrationId] = useState('')
-  const [defaultNetworkId, setDefaultNetworkId] = useState(1)
+  const [defaultNetworkId] = useState(2)
   const [defaultOrderMode, setDefaultOrderMode] = useState<1 | 2>(1)
   const [defaultSendStatus, setDefaultSendStatus] = useState<0 | 1>(1)
   const [defaultExternalStore, setDefaultExternalStore] = useState('')
+  const [digylogStores, setDigylogStores] = useState<DigylogStore[]>([])
   const [webhookUrl, setWebhookUrl] = useState('')
   const [copied, setCopied] = useState(false)
 
@@ -38,7 +49,7 @@ export default function DigylogConnectWizard({
     } catch { /* ignore */ }
   }
 
-  const validateAndConnect = async () => {
+  const validateTokenAndLoadStores = async () => {
     const tk = token.trim()
     if (!tk) {
       setError('Veuillez entrer votre token API Digylog.')
@@ -60,10 +71,51 @@ export default function DigylogConnectWizard({
         body: JSON.stringify({
           storeId: currentStoreId,
           token: tk,
+          validateOnly: true,
+        }),
+      })
+
+      const payload = (await response.json().catch(() => null)) as { error?: string; detail?: string; stores?: DigylogStore[] } | null
+      if (!response.ok) {
+        const msg = payload?.detail ? `${payload.error}: ${payload.detail}` : (payload?.error || 'DIGYLOG_CONNECT_FAILED')
+        throw new Error(msg)
+      }
+
+      const stores = payload?.stores || []
+      setDigylogStores(stores)
+      const firstStore = stores.find((store) => getDigylogStoreValue(store))
+      setDefaultExternalStore(firstStore ? getDigylogStoreValue(firstStore) : '')
+      setStep('store')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'DIGYLOG_CONNECT_FAILED')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const connectDigylog = async () => {
+    const tk = token.trim()
+    if (!tk || !currentStoreId) return
+    if (!defaultExternalStore.trim()) {
+      setError('Veuillez choisir un store Digylog.')
+      return
+    }
+
+    setIsLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/integrations/digylog/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: currentStoreId,
+          token: tk,
           defaultNetworkId,
           defaultOrderMode,
           defaultSendStatus,
-          defaultExternalStore: defaultExternalStore || undefined,
+          defaultExternalStore,
+          defaultPort: 2,
           webhookUrl,
         }),
       })
@@ -93,7 +145,7 @@ export default function DigylogConnectWizard({
             <h3 className="text-lg font-semibold text-foreground">Connecter Digylog</h3>
             <p className="text-sm text-muted-foreground">
               {step === 'token' ? 'Entrez votre token API Digylog pour commencer.' : ''}
-              {step === 'config' ? 'Configurez les paramètres par défaut.' : ''}
+              {step === 'store' ? 'Choisissez le store Digylog à utiliser par défaut.' : ''}
               {step === 'done' ? 'Connexion réussie.' : ''}
             </p>
           </div>
@@ -174,13 +226,60 @@ export default function DigylogConnectWizard({
 
               <button
                 type="button"
-                onClick={() => void validateAndConnect()}
+                onClick={() => void validateTokenAndLoadStores()}
                 disabled={isLoading || !token.trim()}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {isLoading ? 'Vérification...' : 'Continuer'}
+              </button>
+            </>
+          ) : null}
+
+          {step === 'store' ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                Network ID par défaut : <span className="font-medium text-foreground">2</span> · Livraison payée par défaut : <span className="font-medium text-foreground">vendeur</span>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Store Digylog</label>
+                <select
+                  value={defaultExternalStore}
+                  onChange={(e) => { setDefaultExternalStore(e.target.value); setError('') }}
+                  disabled={isLoading}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                >
+                  <option value="" disabled>Choisir un store Digylog</option>
+                  {digylogStores.map((store, index) => {
+                    const value = getDigylogStoreValue(store)
+                    return value ? (
+                      <option key={`${value}-${index}`} value={value}>
+                        {getDigylogStoreLabel(store)}
+                      </option>
+                    ) : null
+                  })}
+                </select>
+                {digylogStores.length === 0 ? (
+                  <input
+                    type="text"
+                    value={defaultExternalStore}
+                    onChange={(e) => setDefaultExternalStore(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="Nom ou ID du store Digylog"
+                  />
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => void connectDigylog()}
+                disabled={isLoading || !defaultExternalStore.trim()}
                 className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 {isLoading ? 'Connexion...' : 'Connecter Digylog'}
               </button>
-            </>
+              <button type="button" onClick={() => setStep('token')} className="w-full rounded-xl border border-border py-3 text-sm font-medium text-foreground hover:bg-muted">
+                Retour
+              </button>
+            </div>
           ) : null}
 
           {step === 'done' ? (

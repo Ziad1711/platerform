@@ -7,6 +7,7 @@ import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { createForceLogParcelForOrder } from '@/lib/integrations/delivery/forcelog-adapter'
 import { createSenditParcelForOrder } from '@/lib/integrations/delivery/sendit-adapter'
+import { createDigylogParcelForOrder } from '@/lib/integrations/delivery/digylog-adapter'
 
 const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   confirmation_rejected: 'confirmation_rejected_at',
@@ -69,6 +70,13 @@ export async function POST(request: Request) {
       senditOptionExchange?: boolean
       senditDeliveryExchangeId?: string
       senditPickupDistrictId?: string
+      digylogNetworkId?: string | number
+      digylogExternalStore?: string
+      digylogOrderMode?: 1 | 2
+      digylogSendStatus?: 0 | 1
+      digylogCheckDuplicate?: 0 | 1
+      digylogOpenProduct?: 1 | 2
+      digylogPort?: 1 | 2
     }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
@@ -119,7 +127,7 @@ export async function POST(request: Request) {
         .eq('id', order.delivery_company_id)
         .maybeSingle()
 
-      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'forcelog', 'ameex', 'sendit'].includes(dc.api_provider)) {
+      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'forcelog', 'ameex', 'sendit', 'digylog'].includes(dc.api_provider)) {
         isDeliveryCompanyLocked = true
       }
     }
@@ -522,6 +530,61 @@ export async function POST(request: Request) {
 
         if (!ameexIntegration && deliveryCompany?.api_provider === 'ameex') {
           warning = 'Intégration AMEEX non connectée pour ce store.'
+        }
+      }
+
+      // Digylog auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'digylog') {
+        const { data: digylogIntegration } = await supabase
+          .from('integrations')
+          .select('id, status')
+          .eq('user_id', user.id)
+          .eq('provider', 'digylog')
+          .eq('store_id', order.store_id)
+          .maybeSingle()
+
+        if (digylogIntegration?.status === 'connected') {
+          try {
+            const normalized = await normalizeOrderCityById(orderId, admin, 'digylog')
+            if (normalized.cityKey) {
+              const deliveryFee = await resolveDeliveryFee({
+                supabase: admin,
+                storeId: order.store_id,
+                cityKey: String(normalized.cityKey),
+                integrationId: digylogIntegration.id,
+                providerSlug: 'digylog',
+              })
+
+              await admin
+                .from('orders')
+                .update({ delivery_fee: deliveryFee, updated_at: now })
+                .eq('id', orderId)
+            }
+
+            const result = await createDigylogParcelForOrder({
+              admin,
+              orderId,
+              storeId: order.store_id,
+              userId: user.id,
+              integrationId: digylogIntegration.id,
+              deliveryNote: deliveryNote || undefined,
+              networkId: Number(body.digylogNetworkId || 0) || undefined,
+              externalStore: body.digylogExternalStore,
+              orderMode: body.digylogOrderMode,
+              sendStatus: body.digylogSendStatus,
+              checkDuplicate: body.digylogCheckDuplicate,
+              openProduct: body.digylogOpenProduct,
+              port: body.digylogPort,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            warning = error instanceof Error ? error.message : 'DIGYLOG_AUTO_PARCEL_CREATE_FAILED'
+          }
+        }
+
+        if (!digylogIntegration && deliveryCompany?.api_provider === 'digylog') {
+          warning = 'Intégration Digylog non connectée pour ce store.'
         }
       }
     }

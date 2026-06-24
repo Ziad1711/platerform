@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createDeliveryLogger } from './logger'
 import * as digylog from '@/lib/integrations/digylog'
 import { resolveDeliveryFee } from './delivery-fee-resolver'
+import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -47,11 +48,11 @@ export async function createDigylogParcelForOrder(params: {
     // 2. Récupérer l'intégration + token
     const { data: integration } = await admin
       .from('integrations')
-      .select('id, token, status')
+      .select('id, access_token, status')
       .eq('id', integrationId)
       .maybeSingle()
 
-    if (!integration || integration.status !== 'connected' || !integration.token) {
+    if (!integration || integration.status !== 'connected' || !integration.access_token) {
       throw new Error('DIGYLOG_INTEGRATION_NOT_CONNECTED')
     }
 
@@ -62,18 +63,24 @@ export async function createDigylogParcelForOrder(params: {
       .eq('store_id', storeId)
       .maybeSingle()
 
-    const networkId = params.networkId || config?.default_network_id || 1
+    const networkId = params.networkId || config?.default_network_id || 2
     const orderMode = params.orderMode || (config?.default_order_mode as 1 | 2) || 1
     const sendStatus = params.sendStatus ?? (config?.default_send_status as 0 | 1) ?? 1
     const checkDuplicate = params.checkDuplicate ?? (config?.check_duplicate as 0 | 1) ?? 1
     const openProduct = params.openProduct || (config?.openproduct_default as 1 | 2) || 1
-    const port = params.port || (config?.port_default as 1 | 2) || 1
+    const port = params.port || (config?.port_default as 1 | 2) || 2
     const externalStore = params.externalStore || config?.default_external_store || ''
 
-    // 4. Résoudre la ville
-    const cityKey = order.delivery_city_external_id
-    if (!cityKey) {
-      throw new Error('DIGYLOG_MISSING_CITY_KEY')
+    // 4. Résoudre la ville (Digylog attend le NOM de la ville, pas l'ID)
+    let cityName = order.city || ''
+    let cityKey = order.delivery_city_external_id
+    if (!cityName || !cityKey) {
+      const normalized = await normalizeOrderCityById(orderId, admin, 'digylog')
+      cityName = normalized.cityName || cityName
+      cityKey = normalized.cityKey || cityKey
+    }
+    if (!cityName) {
+      throw new Error('DIGYLOG_MISSING_CITY_NAME')
     }
 
     // 5. Résoudre les frais de livraison
@@ -97,20 +104,21 @@ export async function createDigylogParcelForOrder(params: {
     }
 
     // 7. Appel API Digylog
-    const cfg: digylog.DigylogConfig = { token: integration.token }
+    const cfg: digylog.DigylogConfig = { token: integration.access_token, referer: 'https://apiseller.digylog.com' }
     const payload: digylog.DigylogCreateOrdersPayload = {
       mode: orderMode,
       network: networkId,
-      store: externalStore || storeId,
+      store: externalStore || '',
       status: sendStatus,
       checkDuplicate,
       orders: [
         {
           num: orderId,
+          type: 1,
           name: order.customer_name || 'Client',
           phone: order.phone || '',
           address: order.address || '',
-          city: String(cityKey),
+          city: cityName,
           price: Number(order.total_selling_price) || 0,
           openproduct: openProduct,
           port,
@@ -120,12 +128,23 @@ export async function createDigylogParcelForOrder(params: {
       ],
     }
 
-    const result = await digylog.createOrders(cfg, payload)
+    const raw = await digylog.createOrders(cfg, payload)
 
-    // 8. Extraire le tracking number
+    // 8. Vérifier les erreurs métier Digylog (tableau avec isSuccess)
+    let result: any = raw
+    if (Array.isArray(raw)) {
+      const failed = raw.find((r: any) => r.isSuccess === false)
+      if (failed) {
+        const errMsg = failed.errors?.join('; ') || 'Erreur inconnue'
+        throw new Error(`DIGYLOG_ORDER_FAILED:${errMsg}`)
+      }
+      result = raw[0] || {}
+    }
+
+    // 9. Extraire le tracking number
     const trackingNumber = result?.tracking || result?.num || result?.orders?.[0]?.tracking || ''
     if (!trackingNumber) {
-      logger.warn('parcel-create-no-tracking', 'Aucun tracking retourné par Digylog', { result })
+      throw new Error('DIGYLOG_NO_TRACKING_RETURNED')
     }
 
     // 9. Mettre à jour la commande

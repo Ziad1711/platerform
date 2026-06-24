@@ -14,15 +14,15 @@ export async function POST(request: Request) {
 
     const { data: integration } = await supabase
       .from('integrations')
-      .select('token')
+      .select('access_token')
       .eq('id', integrationId)
       .maybeSingle()
 
-    if (!integration?.token) {
+    if (!integration?.access_token) {
       return NextResponse.json({ error: 'INTEGRATION_NOT_FOUND' }, { status: 404 })
     }
 
-    const cfg: digylog.DigylogConfig = { token: integration.token }
+    const cfg: digylog.DigylogConfig = { token: integration.access_token, referer: 'https://apiseller.digylog.com' }
     const cities = await digylog.getCities(cfg)
 
     return NextResponse.json({ ok: true, data: cities })

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { getStores, registerWebhook } from '@/lib/integrations/digylog'
 
 export async function POST(request: Request) {
   try {
@@ -12,7 +13,9 @@ export async function POST(request: Request) {
       defaultOrderMode?: number
       defaultSendStatus?: number
       defaultExternalStore?: string
+      defaultPort?: number
       webhookUrl?: string
+      validateOnly?: boolean
     }
 
     const { storeId, token } = body
@@ -24,19 +27,24 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient()
 
-    // 1. Vérifier que le token est valide en appelant l'API Digylog
-    const testRes = await fetch('https://api.digylog.com/api/v2/seller/cities', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Referer: 'https://apiseller.digylog.com',
-      },
-    })
+    // 1. Vérifier le token + récupérer les stores Digylog
+    let digylogStores: any[] = []
+    try {
+      const storesPayload = await getStores({ token, referer: 'https://apiseller.digylog.com' })
+      digylogStores = Array.isArray(storesPayload)
+        ? storesPayload
+        : Array.isArray(storesPayload?.data)
+          ? storesPayload.data
+          : Array.isArray(storesPayload?.stores)
+            ? storesPayload.stores
+            : []
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return NextResponse.json({ error: 'TOKEN_INVALID', detail: detail.slice(0, 300) }, { status: 400 })
+    }
 
-    if (!testRes.ok) {
-      const text = await testRes.text().catch(() => '')
-      return NextResponse.json({ error: 'TOKEN_INVALID', detail: `HTTP ${testRes.status}: ${text.slice(0, 300)}` }, { status: 400 })
+    if (body.validateOnly) {
+      return NextResponse.json({ ok: true, stores: digylogStores })
     }
 
     // 2. Créer/mettre à jour l'intégration
@@ -86,10 +94,11 @@ export async function POST(request: Request) {
     const configData: Record<string, any> = {
       integration_id: integrationId,
       store_id: storeId,
-      default_network_id: body.defaultNetworkId || 1,
+      default_network_id: body.defaultNetworkId || 2,
       default_order_mode: body.defaultOrderMode || 1,
       default_send_status: body.defaultSendStatus ?? 1,
       default_external_store: body.defaultExternalStore || null,
+      port_default: body.defaultPort || 2,
       updated_at: new Date().toISOString(),
     }
 
@@ -106,28 +115,38 @@ export async function POST(request: Request) {
       await supabase.from('digylog_configs').insert(configData)
     }
 
+    const { data: existingCompany } = await admin
+      .from('delivery_companies')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('name', 'Digylog')
+      .maybeSingle()
+
+    if (existingCompany?.id) {
+      await admin
+        .from('delivery_companies')
+        .update({ api_provider: 'digylog', is_active: true })
+        .eq('id', existingCompany.id)
+    } else {
+      await admin
+        .from('delivery_companies')
+        .insert({
+          store_id: storeId,
+          name: 'Digylog',
+          api_provider: 'digylog',
+          is_active: true,
+          created_at: new Date().toISOString(),
+        })
+    }
+
     // 4. Enregistrer le webhook automatiquement
     // L'URL du webhook pointe vers notre API
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL || 'http://localhost:3000'
     const webhookUrl = `${baseUrl}/api/integrations/digylog/webhook`
 
     try {
-      const whRes = await fetch('https://api.digylog.com/api/v2/seller/webhook', {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Referer: 'https://apiseller.digylog.com',
-        },
-        body: JSON.stringify({ url: webhookUrl }),
-      })
-      if (!whRes.ok) {
-        const whText = await whRes.text().catch(() => '')
-        console.warn(`[digylog] webhook register returned ${whRes.status}: ${whText.slice(0, 200)}`)
-      } else {
-        console.log(`[digylog] webhook registered at ${webhookUrl}`)
-      }
+      await registerWebhook({ token, referer: 'https://apiseller.digylog.com' }, body.webhookUrl || webhookUrl)
+      console.log(`[digylog] webhook registered at ${body.webhookUrl || webhookUrl}`)
     } catch (e) {
       console.warn('[digylog] webhook register fetch failed', e)
     }

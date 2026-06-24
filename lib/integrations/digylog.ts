@@ -36,6 +36,28 @@ async function apiFetch<T = any>(
   return res.json()
 }
 
+/**
+ * Variante de apiFetch qui retourne la Response brute (pour les endpoints
+ * pouvant renvoyer du binaire comme /labels ou /bl/{id}/pdf).
+ * L'appelant doit inspecter le content-type pour décider du traitement.
+ */
+export async function apiFetchRaw(
+  cfg: DigylogConfig,
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const url = `${DIGYLOG_BASE_URL}${path}`
+  const res = await fetch(url, {
+    ...options,
+    headers: { ...headers(cfg), ...(options.headers as Record<string, string> || {}) },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`DIGYLOG_API_ERROR:${res.status}:${text.slice(0, 500)}`)
+  }
+  return res
+}
+
 // ─── Orders ───────────────────────────────────────────────
 
 export type DigylogOrderRef = {

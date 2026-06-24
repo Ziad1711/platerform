@@ -540,6 +540,15 @@ export default function VentesPage() {
   const [deliveryNoteSenditPickupDropdownOpen, setDeliveryNoteSenditPickupDropdownOpen] = useState(false)
   const [deliveryNoteSenditPickupDistricts, setDeliveryNoteSenditPickupDistricts] = useState<any[]>([])
   const [deliveryNoteSenditConfigLoaded, setDeliveryNoteSenditConfigLoaded] = useState(false)
+  // Digylog delivery note state
+  const [deliveryNoteDigylogNetworkId, setDeliveryNoteDigylogNetworkId] = useState('')
+  const [deliveryNoteDigylogExternalStore, setDeliveryNoteDigylogExternalStore] = useState('')
+  const [deliveryNoteDigylogOrderMode, setDeliveryNoteDigylogOrderMode] = useState<1 | 2>(1)
+  const [deliveryNoteDigylogSendStatus, setDeliveryNoteDigylogSendStatus] = useState<0 | 1>(1)
+  const [deliveryNoteDigylogCheckDuplicate, setDeliveryNoteDigylogCheckDuplicate] = useState(true)
+  const [deliveryNoteDigylogOpenProduct, setDeliveryNoteDigylogOpenProduct] = useState(true)
+  const [deliveryNoteDigylogPort, setDeliveryNoteDigylogPort] = useState<1 | 2>(2)
+  const [deliveryNoteDigylogConfigLoaded, setDeliveryNoteDigylogConfigLoaded] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
@@ -1073,6 +1082,7 @@ export default function VentesPage() {
   const isDeliveryNoteForcelog = deliveryNoteSelectedCompany?.api_provider === 'forcelog'
   const isDeliveryNoteAmeex = deliveryNoteSelectedCompany?.api_provider === 'ameex'
   const isDeliveryNoteSendit = deliveryNoteSelectedCompany?.api_provider === 'sendit'
+  const isDeliveryNoteDigylog = deliveryNoteSelectedCompany?.api_provider === 'digylog'
 
   const { data: ameexCities = [] } = useQuery({
     queryKey: ['ameex-cities-delivery-note'],
@@ -1193,6 +1203,30 @@ export default function VentesPage() {
       savePickupDistrictMutation.mutate(deliveryNoteSenditPickupDistrictId)
     }
   }, [deliveryNoteSenditPickupDistrictId])
+
+  const { data: digylogConfig } = useQuery({
+    queryKey: ['digylog-config-delivery-note', deliveryNoteModalOrder?.store_id],
+    queryFn: async () => {
+      if (!deliveryNoteModalOrder?.store_id) return null
+      const response = await fetch(`/api/integrations/digylog/config?storeId=${encodeURIComponent(deliveryNoteModalOrder.store_id)}`)
+      const payload = (await response.json().catch(() => null)) as { data?: any; error?: string } | null
+      if (!response.ok) throw new Error(payload?.error || 'DIGYLOG_CONFIG_FAILED')
+      return payload?.data || null
+    },
+    enabled: !!deliveryNoteModalOrder?.store_id && isDeliveryNoteDigylog,
+  })
+
+  useEffect(() => {
+    if (!isDeliveryNoteDigylog || deliveryNoteDigylogConfigLoaded) return
+    setDeliveryNoteDigylogNetworkId(String(digylogConfig?.default_network_id || 2))
+    setDeliveryNoteDigylogExternalStore(String(digylogConfig?.default_external_store || ''))
+    setDeliveryNoteDigylogOrderMode((Number(digylogConfig?.default_order_mode) === 2 ? 2 : 1) as 1 | 2)
+    setDeliveryNoteDigylogSendStatus((Number(digylogConfig?.default_send_status) === 0 ? 0 : 1) as 0 | 1)
+    setDeliveryNoteDigylogCheckDuplicate(Number(digylogConfig?.check_duplicate ?? 1) === 1)
+    setDeliveryNoteDigylogOpenProduct(Number(digylogConfig?.openproduct_default ?? 1) === 1)
+    setDeliveryNoteDigylogPort((Number(digylogConfig?.port_default ?? 2) === 1 ? 1 : 2) as 1 | 2)
+    setDeliveryNoteDigylogConfigLoaded(true)
+  }, [digylogConfig, isDeliveryNoteDigylog, deliveryNoteDigylogConfigLoaded])
 
   const { data: rapidDeliveryIntegration } = useQuery({
     queryKey: ['rapid-delivery-integration-status'],
@@ -1623,11 +1657,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean; senditCityKey?: string; senditCityName?: string; senditAllowOpen?: boolean; senditAllowTry?: boolean; senditProductsFromStock?: boolean; senditPackagingId?: string; senditOptionExchange?: boolean; senditDeliveryExchangeId?: string; senditPickupDistrictId?: string }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean; senditCityKey?: string; senditCityName?: string; senditAllowOpen?: boolean; senditAllowTry?: boolean; senditProductsFromStock?: boolean; senditPackagingId?: string; senditOptionExchange?: boolean; senditDeliveryExchangeId?: string; senditPickupDistrictId?: string; digylogNetworkId?: number; digylogExternalStore?: string; digylogOrderMode?: 1 | 2; digylogSendStatus?: 0 | 1; digylogCheckDuplicate?: 0 | 1; digylogOpenProduct?: 1 | 2; digylogPort?: 1 | 2 }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -4770,6 +4804,73 @@ export default function VentesPage() {
                       )}
                     </div>
                   ) : null}
+                  {isDeliveryNoteDigylog ? (
+                    <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="text-sm font-medium text-foreground">Paramètres Digylog</div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-foreground">Réseau de livraison</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={deliveryNoteDigylogNetworkId}
+                          onChange={(e) => setDeliveryNoteDigylogNetworkId(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                          placeholder="2"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-foreground">Type d'expédition</label>
+                        <select
+                          value={deliveryNoteDigylogOrderMode}
+                          onChange={(e) => setDeliveryNoteDigylogOrderMode(Number(e.target.value) === 2 ? 2 : 1)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm"
+                        >
+                          <option value={1}>Commande standard</option>
+                          <option value={2}>Fulfillment center</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-foreground">Action après création</label>
+                        <select
+                          value={deliveryNoteDigylogSendStatus}
+                          onChange={(e) => setDeliveryNoteDigylogSendStatus(Number(e.target.value) === 0 ? 0 : 1)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm"
+                        >
+                          <option value={0}>Créer sans envoyer</option>
+                          <option value={1}>Créer et envoyer</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-foreground">Frais de livraison payés par</label>
+                        <select
+                          value={deliveryNoteDigylogPort}
+                          onChange={(e) => setDeliveryNoteDigylogPort(Number(e.target.value) === 2 ? 2 : 1)}
+                          className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm"
+                        >
+                          <option value={1}>Le client</option>
+                          <option value={2}>Le vendeur</option>
+                        </select>
+                      </div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Autoriser l'ouverture du colis</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteDigylogOpenProduct}
+                          onChange={(e) => setDeliveryNoteDigylogOpenProduct(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                        <span>Bloquer les commandes en double</span>
+                        <input
+                          type="checkbox"
+                          checked={deliveryNoteDigylogCheckDuplicate}
+                          onChange={(e) => setDeliveryNoteDigylogCheckDuplicate(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary/20"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-foreground">
                       Note de livraison <span className="text-muted-foreground font-normal">(optionnelle)</span>
@@ -4857,6 +4958,13 @@ export default function VentesPage() {
                         senditOptionExchange: isDeliveryNoteSendit ? deliveryNoteSenditOptionExchange : undefined,
                         senditDeliveryExchangeId: isDeliveryNoteSendit ? (deliveryNoteSenditDeliveryExchangeId || undefined) : undefined,
                         senditPickupDistrictId: isDeliveryNoteSendit ? (deliveryNoteSenditPickupDistrictId || undefined) : undefined,
+                        digylogNetworkId: isDeliveryNoteDigylog ? (Number(deliveryNoteDigylogNetworkId) || undefined) : undefined,
+                        digylogExternalStore: isDeliveryNoteDigylog ? (deliveryNoteDigylogExternalStore || undefined) : undefined,
+                        digylogOrderMode: isDeliveryNoteDigylog ? deliveryNoteDigylogOrderMode : undefined,
+                        digylogSendStatus: isDeliveryNoteDigylog ? deliveryNoteDigylogSendStatus : undefined,
+                        digylogCheckDuplicate: isDeliveryNoteDigylog ? (deliveryNoteDigylogCheckDuplicate ? 1 : 0) : undefined,
+                        digylogOpenProduct: isDeliveryNoteDigylog ? (deliveryNoteDigylogOpenProduct ? 1 : 2) : undefined,
+                        digylogPort: isDeliveryNoteDigylog ? deliveryNoteDigylogPort : undefined,
                       },
 
                       {
@@ -4882,6 +4990,7 @@ export default function VentesPage() {
                           setDeliveryNoteSenditPickupSearchTerm('')
                           setDeliveryNoteSenditPickupDropdownOpen(false)
                           setDeliveryNoteSenditConfigLoaded(false)
+                          setDeliveryNoteDigylogConfigLoaded(false)
                         },
                       }
                     )
