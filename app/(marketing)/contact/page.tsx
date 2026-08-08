@@ -26,13 +26,13 @@ export default function ContactPage() {
             <h2 className="text-2xl font-semibold text-jisra-cream">Nous écrire</h2>
             <p className="mt-4 text-base leading-8 text-jisra-cream/70">
               Envoyez un email à{' '}
-              <a className="font-semibold text-jisra-green-light" href="mailto:contact@jisra.app">
-                contact@jisra.app
+              <a className="font-semibold text-jisra-green-light" href="mailto:contact@jisra.io">
+                contact@jisra.io
               </a>{' '}
               avec votre store principal, votre volume mensuel et vos outils actuels.
             </p>
             <AnimatedButton
-              href="mailto:contact@jisra.app?subject=Demande%20de%20contact%20jisra"
+              href="mailto:contact@jisra.io?subject=Demande%20de%20contact%20jisra"
               className="mt-8"
             >
               Ouvrir mon email

@@ -8,7 +8,7 @@ const nextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'platerform.vercel.app',
+        hostname: 'jisra.io',
       },
     ],
   },

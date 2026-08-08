@@ -18,7 +18,7 @@ export function getAllowedRequestOrigins(request: Request) {
     process.env.APP_URL,
     process.env.NEXT_PUBLIC_SITE_URL,
     process.env.SITE_URL,
-    'https://jisra.app',
+    'https://jisra.io',
   ]
 
   if (requestOrigin) allowed.add(requestOrigin)
