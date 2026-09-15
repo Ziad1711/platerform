@@ -75,13 +75,20 @@ export async function POST(request: Request) {
 
     if (storeError) throw storeError
 
+    // La relation propriétaire est déjà créée par le trigger `trg_add_store_owner_member`.
+    // On garde un upsert idempotent pour ne jamais échouer sur la contrainte unique
+    // `store_members_unique_user_store` (ni casser si le trigger est absent).
     const { error: memberError } = await supabase
       .from('store_members')
-      .insert({
-        store_id: store.id,
-        user_id: user.id,
-        role: 'owner',
-      })
+      .upsert(
+        {
+          store_id: store.id,
+          user_id: user.id,
+          role: 'owner',
+          status: 'active',
+        },
+        { onConflict: 'store_id,user_id', ignoreDuplicates: true }
+      )
 
     if (memberError) throw memberError
 
