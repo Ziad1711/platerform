@@ -2102,6 +2102,10 @@ export default function VentesPage() {
   }, [marocGoDeliveryIntegration?.id, marocGoDeliveryIntegration?.status])
 
   const isOrderLinkedToApiProvider = (order: any) => {
+    // Même règle que l'API /api/orders/status : une commande encore au statut
+    // "new" reste modifiable (le colis n'a pas encore été transmis au transporteur).
+    if (!order || order.status === 'new') return false
+
     return order?.delivery_companies?.api_provider === 'ozone'
       || order?.delivery_companies?.api_provider === 'rapid-delivery'
       || order?.delivery_companies?.api_provider === 'maroc-go-delivery'
@@ -3450,19 +3454,19 @@ export default function VentesPage() {
       {stockWarning && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-border flex items-center gap-3 bg-amber-50">
-              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5 text-amber-600" />
+            <div className="px-6 py-4 border-b border-border flex items-center gap-3 bg-amber-50 dark:bg-amber-500/10">
+              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-300" />
               </div>
               <div>
-                <div className="font-semibold text-foreground">Attention : rupture de stock</div>
-                <div className="text-xs text-muted-foreground">La commande peut tout de même être créée</div>
+                <div className="font-semibold text-amber-900 dark:text-amber-100">Attention : rupture de stock</div>
+                <div className="text-xs text-amber-700 dark:text-amber-300">La commande peut tout de même être créée</div>
               </div>
             </div>
 
             <div className="px-6 py-5 space-y-3 text-sm text-foreground">
               <p>{stockWarning.message}</p>
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                 Créez la commande malgré tout, ou ouvrez la page Stock pour enregistrer une entrée de stock pour ce produit.
               </div>
             </div>
