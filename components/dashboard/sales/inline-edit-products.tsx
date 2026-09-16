@@ -106,7 +106,9 @@ export default function InlineEditProducts({
   // Calculate fixed position for product dropdown based on input element
   const openProductDropdown = useCallback((index: number) => {
     setOpenDropdownIndex(index)
-    const el = searchInputRefs.current[index]
+    // Fallback sur la ligne produit : quand un produit est déjà sélectionné,
+    // l'input de recherche n'est pas rendu dans le DOM.
+    const el = searchInputRefs.current[index] || productRowRefs.current[index]
     if (el) {
       const rect = el.getBoundingClientRect()
       setDropdownPos({
@@ -127,7 +129,7 @@ export default function InlineEditProducts({
   useEffect(() => {
     if (openDropdownIndex === null) return
     const handleReposition = () => {
-      const el = searchInputRefs.current[openDropdownIndex]
+      const el = searchInputRefs.current[openDropdownIndex] || productRowRefs.current[openDropdownIndex]
       if (el) {
         const rect = el.getBoundingClientRect()
         setDropdownPos({
@@ -299,19 +301,28 @@ export default function InlineEditProducts({
                     {/* Product selector: show name if selected, otherwise show search input */}
                     <div className="relative">
                       {item.product_id && product ? (
-                        <div className="flex items-center justify-between rounded-lg border border-border bg-card h-10 px-3">
+                        <div
+                          ref={(el) => {
+                            productRowRefs.current[index] = el
+                          }}
+                          className="flex items-center justify-between rounded-lg border border-border bg-card h-10 px-3"
+                        >
                           <span className="text-sm font-medium text-foreground truncate">{product.name}</span>
                           <button
                             type="button"
                             onClick={() => {
                               if (openDropdownIndex === index) {
                                 closeProductDropdown()
-                              } else {
-                                openProductDropdown(index)
+                                setProductSearchTerms((prev) =>
+                                  prev.map((term, i) => (i === index ? product.name : term))
+                                )
+                                return
                               }
+                              // Vider la recherche pour afficher toute la liste des produits
                               setProductSearchTerms((prev) =>
-                                prev.map((term, i) => (i === index ? product.name : term))
+                                prev.map((term, i) => (i === index ? '' : term))
                               )
+                              openProductDropdown(index)
                             }}
                             className="text-xs text-primary hover:underline shrink-0 ml-2"
                           >
@@ -395,7 +406,6 @@ export default function InlineEditProducts({
                         </>
                       )}
                     </div>
-REPLACE
 
                     {/* Variant selector */}
                     {variants.length > 0 && (
@@ -453,7 +463,6 @@ REPLACE
                         />
                       </div>
                     </div>
-REPLACE
 
                     {product && (
                       <div className="text-xs text-muted-foreground">
