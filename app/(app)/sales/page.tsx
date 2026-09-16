@@ -452,6 +452,11 @@ export default function VentesPage() {
     productVariantId: string | null
     message: string
   } | null>(null)
+  const [statusOverrideWarning, setStatusOverrideWarning] = useState<{
+    orderId: string
+    status: string
+    label: string
+  } | null>(null)
   const allowOutOfStockOrderRef = useRef(false)
   const createFormScrollRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -2111,15 +2116,12 @@ export default function VentesPage() {
       || order?.delivery_companies?.api_provider === 'maroc-go-delivery'
   }
 
-  const getAllowedStatusOptionsForOrder = (order: any) => {
-    if (order?.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)) {
-      if (order?.status === 'returned_not_stocked') {
-        return userStatusOptions.filter((option) => option.value === 'returned_stocked')
-      }
-      return []
-    }
-    return userStatusOptions
-  }
+  // Le statut reste toujours modifiable (correction d'erreur). Les commandes
+  // pilotées par un transporteur demandent une confirmation côté UI.
+  const getAllowedStatusOptionsForOrder = (_order: any) => userStatusOptions
+
+  const isStatusCarrierLocked = (order: any) =>
+    order?.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)
 
   const onChangeProduct = (index: number, productId: string) => {
     const product = (products || []).find((p: any) => p.id === productId)
@@ -3501,6 +3503,55 @@ export default function VentesPage() {
         </div>
       )}
 
+      {statusOverrideWarning && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-border flex items-center gap-3 bg-amber-50 dark:bg-amber-500/10">
+              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-300" />
+              </div>
+              <div>
+                <div className="font-semibold text-amber-900 dark:text-amber-100">Attention : statut géré par le transporteur</div>
+                <div className="text-xs text-amber-700 dark:text-amber-300">Une correction manuelle reprend la main</div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 space-y-3 text-sm text-foreground">
+              <p>
+                Cette commande est suivie par la société de livraison. En passant au statut «{' '}
+                <span className="font-semibold">{statusOverrideWarning.label}</span> », vous reprenez la gestion
+                manuelle du statut de cette commande.
+              </p>
+            </div>
+
+            <div className="px-6 pb-6 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => setStatusOverrideWarning(null)}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-border text-foreground hover:bg-secondary text-sm font-medium transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const { orderId, status: nextStatus } = statusOverrideWarning
+                  setStatusOverrideWarning(null)
+                  setUpdatingOrderId(orderId)
+                  updateOrderStatusMutation.mutate(
+                    { orderId, status: nextStatus },
+                    { onSettled: () => setUpdatingOrderId(null) }
+                  )
+                }}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium shadow-lg shadow-primary/25 transition-all"
+              >
+                Confirmer la modification
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isImportOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-5xl max-h-[90vh] flex flex-col">
@@ -4288,8 +4339,7 @@ export default function VentesPage() {
                   const status = statusConfig[order.status as keyof typeof statusConfig]
                   const StatusIcon = status?.icon || Clock
                   const allowedStatusOptions = getAllowedStatusOptionsForOrder(order)
-                  const isDeliveryLocked = (order.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)) && order.status !== 'returned_not_stocked'
-                  const isReturnedOverrideOnly = (order.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)) && order.status === 'returned_not_stocked'
+                  const isStatusLockedByCarrier = isStatusCarrierLocked(order)
                   const normalizedOrderPhone = normalizePhoneForBlacklist(order.phone)
                   const isBlacklisted = normalizedOrderPhone ? blacklistPhonesSet.has(normalizedOrderPhone) : false
                   const productNames = (order.order_items || [])
@@ -4335,58 +4385,56 @@ export default function VentesPage() {
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <StatusIcon className="w-3.5 h-3.5 text-muted-foreground" />
-                          {isDeliveryLocked ? (
-                            <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${status?.color || 'bg-secondary text-foreground'}`}>
-                              {status?.label || order.status}
-                            </span>
-                          ) : (
-                            <select
-                              value={order.status}
-                              onChange={(e) => {
-                                const nextStatus = e.target.value
-                                if (nextStatus === order.status) return
+                          <select
+                            value={order.status}
+                            onChange={(e) => {
+                              const nextStatus = e.target.value
+                              if (nextStatus === order.status) return
 
-                                if (nextStatus === 'confirmed') {
-                                  setDeliveryNoteText(order.delivery_note || '')
-                                  setDeliveryNoteSelectedCompanyId(order.delivery_company_id || '')
-                                  setDeliveryNoteOzoneCityKey('')
-                                  setDeliveryNoteModalOrder(order)
-                                  return
+                              if (nextStatus === 'confirmed') {
+                                setDeliveryNoteText(order.delivery_note || '')
+                                setDeliveryNoteSelectedCompanyId(order.delivery_company_id || '')
+                                setDeliveryNoteOzoneCityKey('')
+                                setDeliveryNoteModalOrder(order)
+                                return
+                              }
+
+                              // Statut piloté par le transporteur : confirmation avant correction.
+                              if (isStatusLockedByCarrier) {
+                                setStatusOverrideWarning({
+                                  orderId: order.id,
+                                  status: nextStatus,
+                                  label:
+                                    statusOptions.find((option) => option.value === nextStatus)?.label ||
+                                    nextStatus,
+                                })
+                                return
+                              }
+
+                              setUpdatingOrderId(order.id)
+                              updateOrderStatusMutation.mutate(
+                                { orderId: order.id, status: nextStatus },
+                                {
+                                  onSettled: () => setUpdatingOrderId(null),
                                 }
-
-                                setUpdatingOrderId(order.id)
-                                updateOrderStatusMutation.mutate(
-                                  { orderId: order.id, status: nextStatus },
-                                  {
-                                    onSettled: () => setUpdatingOrderId(null),
-                                  }
-                                )
-                              }}
-                              disabled={(updateOrderStatusMutation.isPending && updatingOrderId === order.id) || (isReturnedOverrideOnly && allowedStatusOptions.length === 0)}
-                              className={`text-xs font-medium rounded-full px-2.5 py-1 border ${status?.color || 'bg-secondary text-foreground'} ${
-                                updateOrderStatusMutation.isPending && updatingOrderId === order.id
-                                  ? 'opacity-60 cursor-not-allowed'
-                                  : ''
-                              }`}
-                            >
-                              {isReturnedOverrideOnly ? (
-                                <>
-                                  <option value={order.status}>{status?.label || order.status}</option>
-                                  {allowedStatusOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </>
-                              ) : (
-                                allowedStatusOptions.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))
-                              )}
-                            </select>
-                          )}
+                              )
+                            }}
+                            disabled={updateOrderStatusMutation.isPending && updatingOrderId === order.id}
+                            className={`text-xs font-medium rounded-full px-2.5 py-1 border ${status?.color || 'bg-secondary text-foreground'} ${
+                              updateOrderStatusMutation.isPending && updatingOrderId === order.id
+                                ? 'opacity-60 cursor-not-allowed'
+                                : ''
+                            }`}
+                          >
+                            {!allowedStatusOptions.some((option) => option.value === order.status) ? (
+                              <option value={order.status}>{status?.label || order.status}</option>
+                            ) : null}
+                            {allowedStatusOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </td>
                       <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] text-foreground">

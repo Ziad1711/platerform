@@ -113,41 +113,17 @@ export async function POST(request: Request) {
 
     await verifyStoreAccess(supabase, user.id, order.store_id)
 
-    // Vérifier si la commande est liée à un transporteur (Ozone, Rapid Delivery, etc.)
-    // On bloque le changement de statut si :
-    // 1. Le delivery_status_source est déjà 'delivery_company' (colis déjà créé)
-    // 2. OU la commande a une delivery_company_id avec api_provider connu (ozone, rapid-delivery)
-    //    et le statut actuel n'est pas "new" (pour éviter les changements manuels après affectation)
-    let isDeliveryCompanyLocked = order.delivery_status_source === 'delivery_company'
-
-    if (!isDeliveryCompanyLocked && order.delivery_company_id && order.status !== 'new') {
-      // Vérifier si la delivery company est un transporteur avec API
-      const { data: dc } = await supabase
-        .from('delivery_companies')
-        .select('api_provider')
-        .eq('id', order.delivery_company_id)
-        .maybeSingle()
-
-      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'maroc-go-delivery', 'forcelog', 'ameex', 'sendit', 'digylog'].includes(dc.api_provider)) {
-        isDeliveryCompanyLocked = true
-      }
-    }
-
-    const isAllowedReturnedStockedOverride = order.status === 'returned_not_stocked' && status === 'returned_stocked'
-    if (isDeliveryCompanyLocked && !isAllowedReturnedStockedOverride) {
-      return NextResponse.json({ error: 'DELIVERY_COMPANY_STATUS_LOCKED' }, { status: 403 })
-    }
-
+    // Le statut reste toujours corrigeable manuellement, même pour une commande
+    // suivie par un transporteur (rattrapage d'une erreur de statut) : le client
+    // affiche un avertissement de confirmation avant d'envoyer la modification.
     const now = new Date().toISOString()
     const updatePayload: Record<string, any> = {
       status,
       updated_at: now,
       last_status_update_at: now,
-    }
-
-    // On ne repasse en 'manual' que si ce n'est pas déjà géré par un transporteur
-    if (order.delivery_status_source !== 'delivery_company') {
-      updatePayload.delivery_status_source = 'manual'
+      // La modification manuelle reprend la main pour ne pas être écrasée
+      // par une prochaine synchro du transporteur.
+      delivery_status_source: 'manual',
     }
 
     if (deliveryNote) {
