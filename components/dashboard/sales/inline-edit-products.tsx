@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Plus, X, Package } from 'lucide-react'
+import { Plus, X, Package, Pencil } from 'lucide-react'
 
 interface Product {
   id: string
@@ -224,6 +224,14 @@ export default function InlineEditProducts({
 
   const validItems = localItems.filter((item) => item.product_id && Number(item.quantity) > 0)
 
+  // On ne persiste un nom personnalisé que s'il diffère vraiment du nom catalogue :
+  // le champ est pré-rempli par défaut avec le nom du produit.
+  const itemsToSave = validItems.map((item) => {
+    const catalogueName = String(products.find((p) => p.id === item.product_id)?.name || '').trim()
+    const override = String(item.product_name_override || '').trim()
+    return { ...item, product_name_override: override && override !== catalogueName ? override : null }
+  })
+
   // Products already selected (to exclude from add dropdown)
   // Only exclude products WITHOUT variants that are already present.
   // Products with variants remain selectable to allow adding different variations.
@@ -412,12 +420,18 @@ export default function InlineEditProducts({
 
                     {/* Nom affiché dans la commande (product_id inchangé) */}
                     <div>
-                      <label className="block text-[11px] font-medium text-muted-foreground leading-none mb-1.5">
-                        Nom dans la commande
-                      </label>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <label className="block text-[11px] font-medium text-muted-foreground leading-none">
+                          Nom dans la commande
+                        </label>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                          <Pencil className="h-3 w-3" />
+                          Modifiable
+                        </span>
+                      </div>
                       <input
                         type="text"
-                        value={item.product_name_override || ''}
+                        value={item.product_name_override ?? product?.name ?? ''}
                         onChange={(e) => {
                           const value = e.target.value
                           setLocalItems((prev) =>
@@ -426,9 +440,12 @@ export default function InlineEditProducts({
                             )
                           )
                         }}
-                        placeholder={product?.name || 'Nom du produit'}
-                        className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm"
+                        placeholder="Nom du produit"
+                        className="w-full rounded-lg border border-dashed border-primary/50 bg-card px-3 h-10 text-sm text-foreground transition-colors hover:border-primary focus:border-solid focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       />
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        Cliquez pour renommer. Le produit lié (stock, coûts, variantes) reste inchangé.
+                      </p>
                     </div>
 
                     {/* Variant selector */}
@@ -578,11 +595,11 @@ export default function InlineEditProducts({
                 <button
                   type="button"
                   onClick={() => {
-                    if (validItems.length === 0) return
-                    onSave(validItems)
+                    if (itemsToSave.length === 0) return
+                    onSave(itemsToSave)
                     close()
                   }}
-                  disabled={validItems.length === 0}
+                  disabled={itemsToSave.length === 0}
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                 >
                   Enregistrer
