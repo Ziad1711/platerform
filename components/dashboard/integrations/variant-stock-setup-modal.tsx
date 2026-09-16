@@ -31,12 +31,9 @@ type Props = {
 export default function VariantStockSetupModal({ storeId, products, onDone }: Props) {
   const [index, setIndex] = useState(0)
   const [modes, setModes] = useState<Record<string, 'shared' | 'variant'>>(() =>
-    Object.fromEntries(
-      products.map((product) => [
-        product.productId,
-        product.stockTrackingMode === 'variant' ? 'variant' : 'shared',
-      ])
-    )
+    // Ces produits sont signalés comme "packs quantité probables" : on suggère le stock
+    // partagé. Le marchand peut basculer sur "stock par variante" si nécessaire.
+    Object.fromEntries(products.map((product) => [product.productId, 'shared' as const]))
   )
   const [multipliers, setMultipliers] = useState<Record<string, string>>(() =>
     Object.fromEntries(

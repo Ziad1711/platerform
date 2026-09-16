@@ -81,7 +81,9 @@ export async function getIntegrationMarketplaceData(storeId?: string | null) {
     .eq('user_id', user.id)
 
   if (storeId) {
-    integrationsQuery = integrationsQuery.eq('store_id', storeId)
+    // Certaines intégrations sont globales à l'utilisateur (store_id NULL), ex: YouCan,
+    // et d'autres sont liées à un store précis. On accepte les deux.
+    integrationsQuery = integrationsQuery.or(`store_id.eq.${storeId},store_id.is.null`)
   }
 
   const [{ data: providers, error: providersError }, { data: userIntegrations, error: userIntegrationsError }, { data: providerMetrics, error: providerMetricsError }] = await Promise.all([
