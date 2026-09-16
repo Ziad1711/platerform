@@ -20,6 +20,7 @@ export default function LivraisonPage() {
   const [isCreatingVoucher, setIsCreatingVoucher] = useState(false)
   const [citySearch, setCitySearch] = useState('')
   const [cityPage, setCityPage] = useState(1)
+  const [voucherLabelVersions, setVoucherLabelVersions] = useState<Record<string, 'v1' | 'v2' | 'v3'>>({})
 
   // Modal ForceLog
   const [showForceLogModal, setShowForceLogModal] = useState(false)
@@ -865,12 +866,22 @@ export default function LivraisonPage() {
                             >
                               Bon de ramassage
                             </Link>
+                            <select
+                              value={voucherLabelVersions[voucher.id] || 'v1'}
+                              onChange={(e) => setVoucherLabelVersions((prev) => ({ ...prev, [voucher.id]: e.target.value as 'v1' | 'v2' | 'v3' }))}
+                              aria-label="Version des étiquettes"
+                              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                            >
+                              <option value="v1">Étiquettes V1</option>
+                              <option value="v2">Étiquettes V2</option>
+                              <option value="v3">Étiquettes V3</option>
+                            </select>
                             <Link
-                              href={`/api/integrations/rapid-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels`}
+                              href={`/api/integrations/rapid-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels?version=${voucherLabelVersions[voucher.id] || 'v1'}`}
                               target="_blank"
                               className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                             >
-                              Étiquettes
+                              Télécharger
                             </Link>
                           </>
                         )}
@@ -884,12 +895,22 @@ export default function LivraisonPage() {
                             >
                               Bon de ramassage
                             </Link>
+                            <select
+                              value={voucherLabelVersions[voucher.id] || 'v1'}
+                              onChange={(e) => setVoucherLabelVersions((prev) => ({ ...prev, [voucher.id]: e.target.value as 'v1' | 'v2' | 'v3' }))}
+                              aria-label="Version des étiquettes"
+                              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                            >
+                              <option value="v1">Étiquettes V1</option>
+                              <option value="v2">Étiquettes V2</option>
+                              <option value="v3">Étiquettes V3</option>
+                            </select>
                             <Link
-                              href={`/api/integrations/maroc-go-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels`}
+                              href={`/api/integrations/maroc-go-delivery/vouchers/${encodeURIComponent(voucher.voucherKey)}/labels?version=${voucherLabelVersions[voucher.id] || 'v1'}`}
                               target="_blank"
                               className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
                             >
-                              Étiquettes
+                              Télécharger
                             </Link>
                           </>
                         )}

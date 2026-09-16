@@ -4,7 +4,9 @@ import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { downloadRapidDeliveryHtml } from '@/lib/integrations/rapid-delivery'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
 
-export async function GET(_request: Request, context: { params: Promise<{ key: string }> }) {
+const LABEL_VERSIONS = ['v1', 'v2', 'v3']
+
+export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
   try {
     const { user } = await requireAuthenticatedUser()
     const { key } = await context.params
@@ -12,6 +14,10 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
     if (!voucherKey) {
       return NextResponse.json({ error: 'MISSING_VOUCHER_KEY' }, { status: 400 })
     }
+
+    const { searchParams } = new URL(request.url)
+    const requestedVersion = String(searchParams.get('version') || '').trim().toLowerCase()
+    const version = LABEL_VERSIONS.includes(requestedVersion) ? requestedVersion : 'v1'
 
     const admin = createAdminClient()
     const { data: mapping, error: mappingError } = await admin
@@ -28,13 +34,13 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
     }
 
     const token = await getDecryptedIntegrationToken(admin, mapping.integration_id)
-    const html = await downloadRapidDeliveryHtml(token, `/vouchers/${encodeURIComponent(voucherKey)}/labels/v1/download`)
+    const html = await downloadRapidDeliveryHtml(token, `/vouchers/${encodeURIComponent(voucherKey)}/labels/${version}/download`)
 
     return new NextResponse(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Disposition': `attachment; filename="rapid-delivery-voucher-${voucherKey}-labels-v1.html"`,
+        'Content-Disposition': `attachment; filename="rapid-delivery-voucher-${voucherKey}-labels-${version}.html"`,
       },
     })
   } catch (error) {
