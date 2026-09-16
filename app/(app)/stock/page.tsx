@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
-import { Search, Filter, MoreVertical, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info, DollarSign } from 'lucide-react'
+import { Search, Filter, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info, DollarSign } from 'lucide-react'
 
 import { useEffect, useMemo, useState } from 'react'
 
@@ -28,6 +28,17 @@ export default function StocksPage() {
   const [newUnitCost, setNewUnitCost] = useState('')
   const [newInvoiceNumber, setNewInvoiceNumber] = useState('')
   const [createError, setCreateError] = useState('')
+  const [isEditOpen, setIsEditOpen] = useState(false)
+  const [editingMovement, setEditingMovement] = useState<any>(null)
+  const [editProductId, setEditProductId] = useState('')
+  const [editVariantId, setEditVariantId] = useState('')
+  const [editMovementType, setEditMovementType] = useState<'in' | 'adjustment'>('in')
+  const [editAdjustmentDirection, setEditAdjustmentDirection] = useState<'in' | 'out'>('out')
+  const [editQuantity, setEditQuantity] = useState('1')
+  const [editUnitCost, setEditUnitCost] = useState('')
+  const [editSupplierId, setEditSupplierId] = useState('')
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState('')
+  const [editError, setEditError] = useState('')
   const supabase = createClient()
   const queryClient = useQueryClient()
 
@@ -76,6 +87,61 @@ export default function StocksPage() {
       return data || []
     },
   })
+
+  const editStoreId = editingMovement?.store_id || ''
+
+  const { data: productsForEdit } = useQuery({
+    queryKey: ['stock-products-for-edit-movement', editStoreId],
+    enabled: !!editStoreId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, sku, stock_tracking_mode')
+        .eq('store_id', editStoreId)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const { data: variantsForEditProduct } = useQuery({
+    queryKey: ['stock-variants-for-edit-product', editStoreId, editProductId],
+    enabled: !!editStoreId && !!editProductId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('product_variants')
+        .select('id, name, sku, stock_multiplier')
+        .eq('store_id', editStoreId)
+        .eq('product_id', editProductId)
+        .order('created_at', { ascending: true })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const { data: suppliersForEdit } = useQuery({
+    queryKey: ['stock-suppliers-for-edit-movement', editStoreId],
+    enabled: !!editStoreId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('id, name')
+        .eq('store_id', editStoreId)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const editProductStockMode = useMemo(
+    () =>
+      (productsForEdit || []).find((product: any) => product.id === editProductId)?.stock_tracking_mode ||
+      'variant',
+    [productsForEdit, editProductId]
+  )
 
   useEffect(() => {
     if (!isCreateOpen) return
@@ -194,6 +260,84 @@ export default function StocksPage() {
       setCreateError(error?.message || 'Erreur lors de la création du mouvement.')
     },
   })
+
+  const updateMovementMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingMovement) throw new Error('Aucun mouvement sélectionné.')
+      if (!editProductId) throw new Error('Veuillez sélectionner un produit.')
+
+      if (
+        editProductStockMode === 'variant' &&
+        (variantsForEditProduct || []).length > 0 &&
+        !editVariantId
+      ) {
+        throw new Error('Veuillez sélectionner une variante pour ce produit.')
+      }
+
+      const quantity = Number(editQuantity || 0)
+      const unitCost = Number(editUnitCost || 0)
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new Error('La quantité doit être supérieure à 0.')
+      }
+
+      if (!Number.isFinite(unitCost) || unitCost < 0) {
+        throw new Error('Le coût unitaire doit être positif.')
+      }
+
+      const { error } = await supabase
+        .from('inventory_movements')
+        .update({
+          product_id: editProductId,
+          product_variant_id: editVariantId || null,
+          movement_type: editMovementType,
+          adjustment_direction: editMovementType === 'adjustment' ? editAdjustmentDirection : null,
+          supplier_id: editSupplierId || null,
+          quantity,
+          remaining_qty: editMovementType === 'in' ? quantity : null,
+          unit_cost: unitCost,
+          total_cost: quantity * unitCost,
+          invoice_number: editInvoiceNumber.trim() || null,
+        })
+        .eq('id', editingMovement.id)
+
+      if (error) throw error
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['inventory-movements-details'] }),
+        queryClient.invalidateQueries({ queryKey: ['stock-summary'] }),
+      ])
+      setIsEditOpen(false)
+      setEditingMovement(null)
+      setEditError('')
+    },
+    onError: (error: any) => {
+      setEditError(error?.message || 'Erreur lors de la modification du mouvement.')
+    },
+  })
+
+  // Seuls les mouvements saisis manuellement (entrée, achat, ajustement) sont
+  // modifiables : les sorties et retours générés par les commandes sont liés
+  // au FIFO (inventory_consumptions) et ne doivent pas être édités.
+  const isMovementEditable = (movement: any) =>
+    !!movement && !['order', 'order_return'].includes(String(movement.source_type || ''))
+
+  const openEditMovement = (movement: any) => {
+    if (!isMovementEditable(movement)) return
+
+    setEditingMovement(movement)
+    setEditProductId(movement.product_id || '')
+    setEditVariantId(movement.product_variant_id || '')
+    setEditMovementType(movement.movement_type === 'adjustment' ? 'adjustment' : 'in')
+    setEditAdjustmentDirection(movement.adjustment_direction === 'in' ? 'in' : 'out')
+    setEditQuantity(String(movement.quantity ?? 1))
+    setEditUnitCost(movement.unit_cost != null ? String(movement.unit_cost) : '')
+    setEditSupplierId(movement.supplier_id || '')
+    setEditInvoiceNumber(movement.invoice_number || '')
+    setEditError('')
+    setIsEditOpen(true)
+  }
 
   const { data: movementsResponse, isLoading } = useQuery({
     queryKey: ['inventory-movements-details', currentStoreId, search, movementType, currentPage],
@@ -348,7 +492,7 @@ export default function StocksPage() {
       // Récupérer tous les mouvements
       let allMovementsQuery = supabase
         .from('inventory_movements')
-        .select('product_id, movement_type, adjustment_direction, quantity')
+        .select('product_id, movement_type, adjustment_direction, quantity, unit_cost, total_cost')
 
       if (currentStoreId) {
         allMovementsQuery = allMovementsQuery.eq('store_id', currentStoreId)
@@ -360,8 +504,12 @@ export default function StocksPage() {
 
       if (movementsError) throw movementsError
 
-      // Calculer le stock pour chaque produit
+      // Calculer le stock et le coût moyen d'achat pour chaque produit.
+      // Le coût moyen est déduit des mouvements d'entrée : default_purchase_cost
+      // peut rester à 0 si le produit n'a jamais été rafraîchi par une commande.
       const stockByProduct: Record<string, number> = {}
+      const purchaseByProduct: Record<string, { quantity: number; amount: number }> = {}
+
       allMovements?.forEach(movement => {
         const productId = movement.product_id
         if (!stockByProduct[productId]) {
@@ -379,6 +527,21 @@ export default function StocksPage() {
         ) {
           stockByProduct[productId] -= movement.quantity
         }
+
+        if (movement.movement_type === 'in') {
+          const quantity = Number(movement.quantity || 0)
+          const unitCost = Number(movement.unit_cost || 0)
+          const totalCost = movement.total_cost != null
+            ? Number(movement.total_cost)
+            : quantity * unitCost
+
+          if (!purchaseByProduct[productId]) {
+            purchaseByProduct[productId] = { quantity: 0, amount: 0 }
+          }
+
+          purchaseByProduct[productId].quantity += quantity
+          purchaseByProduct[productId].amount += Number.isFinite(totalCost) ? totalCost : 0
+        }
       })
 
       // Calculer les statistiques
@@ -388,7 +551,14 @@ export default function StocksPage() {
 
       products?.forEach(product => {
         const stock = stockByProduct[product.id] || 0
-        totalValue += stock * product.default_purchase_cost
+        const purchase = purchaseByProduct[product.id]
+        const averageUnitCost = purchase && purchase.quantity > 0
+          ? purchase.amount / purchase.quantity
+          : 0
+        const fallbackUnitCost = Number(product.default_purchase_cost || 0)
+        const effectiveUnitCost = averageUnitCost > 0 ? averageUnitCost : fallbackUnitCost
+
+        totalValue += stock * effectiveUnitCost
         finalStockUnits += stock
         
         if (stock === 0) {
@@ -694,6 +864,192 @@ export default function StocksPage() {
         </div>
       ) : null}
 
+      {isEditOpen && editingMovement ? (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b flex items-center justify-between shrink-0 bg-card">
+              <h3 className="text-lg font-semibold text-foreground">Modifier le mouvement de stock</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditOpen(false)
+                  setEditingMovement(null)
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-foreground mb-1">Store</label>
+                  <input
+                    value={(stores || []).find((store: any) => store.id === editingMovement.store_id)?.name || 'Store actuel'}
+                    disabled
+                    className="w-full border rounded-lg px-3 py-2 bg-secondary text-muted-foreground"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Le store d'un mouvement ne peut pas être modifié.
+                  </p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-foreground mb-1">Produit</label>
+                  <select
+                    value={editProductId}
+                    onChange={(e) => {
+                      setEditProductId(e.target.value)
+                      setEditVariantId('')
+                    }}
+                    className="w-full border rounded-lg px-3 py-2"
+                  >
+                    <option value="">Choisir un produit</option>
+                    {(productsForEdit || []).map((product: any) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name} {product.sku ? `(${product.sku})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-foreground mb-1">
+                    {editProductStockMode === 'shared' ? 'Variante (optionnel)' : 'Variante'}
+                  </label>
+                  <select
+                    value={editVariantId}
+                    onChange={(e) => setEditVariantId(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                    disabled={!editProductId || !(variantsForEditProduct || []).length}
+                  >
+                    <option value="">
+                      {(variantsForEditProduct || []).length > 0
+                        ? editProductStockMode === 'shared'
+                          ? 'Stock global du produit (recommandé)'
+                          : 'Choisir une variante'
+                        : 'Aucune variante (produit simple)'}
+                    </option>
+                    {(variantsForEditProduct || []).map((variant: any) => {
+                      const multiplier = Number(variant.stock_multiplier || 1)
+                      return (
+                        <option key={variant.id} value={variant.id}>
+                          {variant.name} {variant.sku ? `(${variant.sku})` : ''}
+                          {multiplier > 1 ? ` — ${multiplier} unités / vente` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {editProductStockMode === 'shared'
+                      ? 'Stock unique partagé par toutes les variantes (packs quantité).'
+                      : 'Stock propre à la variante sélectionnée.'}
+                  </p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-foreground mb-1">Fournisseur (optionnel)</label>
+                  <select
+                    value={editSupplierId}
+                    onChange={(e) => setEditSupplierId(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                  >
+                    <option value="">Aucun fournisseur</option>
+                    {(suppliersForEdit || []).map((supplier: any) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-foreground mb-1">Type de mouvement</label>
+                  <select
+                    value={editMovementType}
+                    onChange={(e) => setEditMovementType(e.target.value as 'in' | 'adjustment')}
+                    className="w-full border rounded-lg px-3 py-2"
+                  >
+                    <option value="in">Entrée</option>
+                    <option value="adjustment">Ajustement</option>
+                  </select>
+                </div>
+
+                {editMovementType === 'adjustment' ? (
+                  <div>
+                    <label className="block text-sm text-foreground mb-1">Sens d'ajustement</label>
+                    <select
+                      value={editAdjustmentDirection}
+                      onChange={(e) => setEditAdjustmentDirection(e.target.value as 'in' | 'out')}
+                      className="w-full border rounded-lg px-3 py-2"
+                    >
+                      <option value="in">Ajustement entrée (+)</option>
+                      <option value="out">Ajustement sortie (-)</option>
+                    </select>
+                  </div>
+                ) : null}
+
+                <div>
+                  <label className="block text-sm text-foreground mb-1">Quantité</label>
+                  <input
+                    type="number"
+                    min={1}
+                    step="1"
+                    value={editQuantity}
+                    onChange={(e) => setEditQuantity(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-foreground mb-1">Coût unitaire</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={editUnitCost}
+                    onChange={(e) => setEditUnitCost(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-foreground mb-1">N° facture (optionnel)</label>
+                  <input
+                    value={editInvoiceNumber}
+                    onChange={(e) => setEditInvoiceNumber(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholder="Ex: FAC-2026-001"
+                  />
+                </div>
+              </div>
+
+              {editError ? <div className="text-sm text-red-600">{editError}</div> : null}
+            </div>
+
+            <div className="p-6 border-t flex items-center justify-end gap-3 shrink-0 bg-card">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditOpen(false)
+                  setEditingMovement(null)
+                }}
+                className="px-4 py-2 rounded-lg border text-foreground"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => updateMovementMutation.mutate()}
+                disabled={updateMovementMutation.isPending}
+                className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white disabled:opacity-50"
+              >
+                {updateMovementMutation.isPending ? 'Enregistrement...' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
         <div className="col-span-2 md:col-span-1 bg-card rounded-xl shadow p-4 sm:p-5">
@@ -740,10 +1096,10 @@ export default function StocksPage() {
             {movements?.filter(m => m.movement_type === 'out' || (m.movement_type === 'adjustment' && m.adjustment_direction === 'out')).length || 0} mouvements
           </div>
         </div>
-        <div className="col-span-2 md:col-span-1 bg-card rounded-xl shadow p-4 sm:p-5">
+        <div className="col-span-2 md:col-span-1 rounded-xl shadow p-4 sm:p-5 bg-primary/10 border border-primary/20">
           <div className="flex items-center justify-between">
-            <div className="text-xs sm:text-sm text-muted-foreground">Stock finale</div>
-            <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
+            <div className="text-xs sm:text-sm font-medium text-foreground">Stock finale</div>
+            <Package className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
           </div>
           <div className="text-lg sm:text-2xl font-bold text-foreground mt-1">{stockSummary?.finalStockUnits || 0} unités</div>
           <div className="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2">Entrées - sorties (stock net actuel)</div>
@@ -912,12 +1268,17 @@ export default function StocksPage() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-sm font-medium align-top">
-                      <button className="text-primary hover:text-blue-900 mr-3">
-                        Détails
-                      </button>
-                      <button className="text-muted-foreground hover:text-muted-foreground">
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
+                      {isMovementEditable(movement) ? (
+                        <button
+                          type="button"
+                          onClick={() => openEditMovement(movement)}
+                          className="text-primary hover:text-blue-900"
+                        >
+                          Modifier
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Automatique</span>
+                      )}
                     </td>
                   </tr>
                 )})}
