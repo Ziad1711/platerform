@@ -76,6 +76,29 @@ async function listCitiesForProvider(supabase: SupabaseLike, providerSlug: strin
     }))
   }
 
+  // Maroc Go Delivery : les villes viennent de delivery_rates (schéma générique)
+  if (providerSlug === 'maroc-go-delivery') {
+    const { data: provider } = await supabase
+      .from('integration_providers')
+      .select('id')
+      .eq('slug', 'maroc-go-delivery')
+      .maybeSingle()
+
+    if (!provider?.id) return []
+
+    const { data, error } = await supabase
+      .from('delivery_rates')
+      .select('external_city_key, city_name')
+      .eq('provider_id', provider.id)
+      .order('city_name', { ascending: true })
+
+    if (error) throw error
+    return (data || []).map((city) => ({
+      city_key: String(city.external_city_key),
+      city_name: city.city_name,
+    }))
+  }
+
   // Rapid Delivery : rapid_delivery_cities_standard
   const { data, error } = await supabase
     .from('rapid_delivery_cities_standard')
@@ -140,6 +163,17 @@ async function findAliasForProvider(
     return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
   }
 
+  if (providerSlug === 'maroc-go-delivery') {
+    const { data, error } = await supabase
+      .from('maroc_go_delivery_city_aliases')
+      .select('canonical_city_name, city_key')
+      .eq('alias', normalizedAlias)
+      .maybeSingle()
+
+    if (error) throw error
+    return data ? { canonical_city_name: data.canonical_city_name, city_key: data.city_key || null } : null
+  }
+
   const { data, error } = await supabase
     .from('rapid_delivery_city_aliases')
     .select('canonical_city_name, city_key')
@@ -171,7 +205,9 @@ async function persistAliasForProvider(params: {
       ? 'ameex_city_aliases'
       : providerSlug === 'digylog'
         ? 'digylog_city_aliases'
-        : 'rapid_delivery_city_aliases'
+        : providerSlug === 'maroc-go-delivery'
+          ? 'maroc_go_delivery_city_aliases'
+          : 'rapid_delivery_city_aliases'
 
   await supabase.from(table).upsert(
     {
@@ -206,7 +242,9 @@ async function updateAliasUsage(
       ? 'ameex_city_aliases'
       : providerSlug === 'digylog'
         ? 'digylog_city_aliases'
-        : 'rapid_delivery_city_aliases'
+        : providerSlug === 'maroc-go-delivery'
+          ? 'maroc_go_delivery_city_aliases'
+          : 'rapid_delivery_city_aliases'
 
   await supabase
     .from(table)

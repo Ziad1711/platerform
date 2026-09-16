@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
+import { autoCreateMarocGoDeliveryParcelForOrder } from '@/lib/integrations/maroc-go-delivery-auto'
 import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { createForceLogParcelForOrder } from '@/lib/integrations/delivery/forcelog-adapter'
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
         .eq('id', order.delivery_company_id)
         .maybeSingle()
 
-      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'forcelog', 'ameex', 'sendit', 'digylog'].includes(dc.api_provider)) {
+      if (dc?.api_provider && ['ozone', 'rapid-delivery', 'maroc-go-delivery', 'forcelog', 'ameex', 'sendit', 'digylog'].includes(dc.api_provider)) {
         isDeliveryCompanyLocked = true
       }
     }
@@ -275,6 +276,86 @@ export async function POST(request: Request) {
             integrationId: integration.id,
             error: warning,
           })
+        }
+      }
+
+      // Maroc Go Delivery auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'maroc-go-delivery') {
+        const { data: marocGoIntegration } = await supabase
+          .from('integrations')
+          .select('id, status')
+          .eq('user_id', user.id)
+          .eq('provider', 'maroc-go-delivery')
+          .maybeSingle()
+
+        const { data: marocGoConfig, error: marocGoConfigError } = await supabase
+          .from('maroc_go_delivery_configs')
+          .select('default_shop_key, default_article_name, auto_change_status_to_picked_up, parcel_creation_mode')
+          .eq('store_id', order.store_id)
+          .maybeSingle()
+
+        if (marocGoConfigError) throw marocGoConfigError
+
+        const canAutoCreateMarocGo =
+          marocGoIntegration?.status === 'connected' &&
+          marocGoConfig?.parcel_creation_mode !== 'disabled'
+
+        if (canAutoCreateMarocGo && marocGoIntegration?.id && marocGoConfig) {
+          try {
+            await normalizeOrderCityById(orderId, admin, 'maroc-go-delivery')
+            // Recharger la commande pour avoir delivery_city_external_id à jour
+            const { data: freshOrder } = await admin
+              .from('orders')
+              .select(`
+                id, store_id, status, city, address, phone, customer_name, total_selling_price,
+                delivery_city_external_id,
+                delivery_company_id, tracking_number, delivery_status_source,
+                order_items(quantity, products(name))
+              `)
+              .eq('id', orderId)
+              .maybeSingle()
+            const normalizedOrder = {
+              ...(freshOrder || order),
+              order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
+                ...oi,
+                products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+              })),
+            }
+            const marocGoCityKey = Number(normalizedOrder.delivery_city_external_id || 0) || 0
+            if (marocGoCityKey) {
+              const marocGoDeliveryFee = await resolveDeliveryFee({
+                supabase: admin,
+                storeId: order.store_id,
+                cityKey: marocGoCityKey,
+                integrationId: marocGoIntegration.id,
+                providerSlug: 'maroc-go-delivery',
+              })
+
+              await admin
+                .from('orders')
+                .update({ delivery_fee: marocGoDeliveryFee, updated_at: now })
+                .eq('id', orderId)
+            }
+            const result = await autoCreateMarocGoDeliveryParcelForOrder({
+              admin,
+              userId: user.id,
+              integrationId: marocGoIntegration.id,
+              order: normalizedOrder,
+              defaultShopKey: Number(marocGoConfig.default_shop_key || 0),
+              defaultArticleName: marocGoConfig.default_article_name,
+              deliveryNote: deliveryNote || undefined,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            warning = error instanceof Error ? error.message : 'MAROC_GO_DELIVERY_AUTO_PARCEL_CREATE_FAILED'
+            console.error('Maroc Go Delivery auto parcel creation failed', {
+              orderId,
+              storeId: order.store_id,
+              integrationId: marocGoIntegration.id,
+              error: warning,
+            })
+          }
         }
       }
 

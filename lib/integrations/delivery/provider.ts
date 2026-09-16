@@ -5,6 +5,7 @@
 import { forcelogAdapter } from './forcelog-adapter'
 import { ameexAdapter } from './ameex-adapter'
 import { senditAdapter } from './sendit-adapter'
+import { marocGoDeliveryAdapter } from './maroc-go-delivery-adapter'
 import type {
   CreateParcelResult,
   CreateVoucherResult,
@@ -59,3 +60,4 @@ export function listProviders(): DeliveryProvider[] {
 registerProvider(forcelogAdapter)
 registerProvider(ameexAdapter)
 registerProvider(senditAdapter)
+registerProvider(marocGoDeliveryAdapter)

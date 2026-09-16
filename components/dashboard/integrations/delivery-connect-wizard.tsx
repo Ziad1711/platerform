@@ -35,8 +35,12 @@ function sanitizeRapidDeliveryToken(rawToken: string) {
 
 export default function DeliveryConnectWizard({
   onClose,
+  providerSlug = 'rapid-delivery',
+  providerName = 'Rapid Delivery',
 }: {
   onClose: () => void
+  providerSlug?: string
+  providerName?: string
 }) {
   const queryClient = useQueryClient()
   const [step, setStep] = useState<'connecting' | 'mapping' | 'syncing' | 'done'>('connecting')
@@ -55,7 +59,7 @@ export default function DeliveryConnectWizard({
     const sanitizedToken = sanitizeRapidDeliveryToken(token)
 
     if (!sanitizedToken) {
-      setError('Veuillez entrer votre token API Rapid Delivery.')
+      setError(`Veuillez entrer votre token API ${providerName}.`)
       return
     }
 
@@ -69,7 +73,7 @@ export default function DeliveryConnectWizard({
     setWarning('')
 
     try {
-      const response = await fetch('/api/integrations/rapid-delivery/validate', {
+      const response = await fetch(`/api/integrations/${providerSlug}/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiToken: sanitizedToken }),
@@ -82,7 +86,7 @@ export default function DeliveryConnectWizard({
       setShops(nextShops)
       setStores(nextStores)
       setMappings(buildInitialMappings(nextShops, nextStores))
-      if (nextShops.length === 0) setWarning('Aucun shop trouvé sur Rapid Delivery.')
+      if (nextShops.length === 0) setWarning(`Aucun shop trouvé sur ${providerName}.`)
       if (nextStores.length === 0) setWarning('Aucun store interne trouvé. Créez un store avant de continuer.')
       setStep('mapping')
     } catch (err) {
@@ -96,7 +100,7 @@ export default function DeliveryConnectWizard({
     const sanitizedToken = sanitizeRapidDeliveryToken(token)
 
     if (!sanitizedToken) {
-      setError('Veuillez entrer votre token API Rapid Delivery.')
+      setError(`Veuillez entrer votre token API ${providerName}.`)
       return
     }
 
@@ -111,7 +115,7 @@ export default function DeliveryConnectWizard({
     setWarning(isMappingIncomplete ? 'Certains shops resteront non mappés.' : '')
 
     try {
-      const response = await fetch('/api/integrations/rapid-delivery/connect', {
+      const response = await fetch(`/api/integrations/${providerSlug}/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -139,7 +143,7 @@ export default function DeliveryConnectWizard({
       <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-foreground">Connecter Rapid Delivery</h3>
+            <h3 className="text-lg font-semibold text-foreground">Connecter {providerName}</h3>
             <p className="text-sm text-muted-foreground">Validation du token, mapping des shops et synchronisation des tarifs.</p>
           </div>
           <button type="button" onClick={() => !isLoading && onClose()} className="rounded-lg p-2 text-muted-foreground hover:bg-muted">
@@ -154,11 +158,11 @@ export default function DeliveryConnectWizard({
             {step === 'connecting' ? (
               <>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Token API Rapid Delivery</label>
+                  <label className="text-sm font-medium text-foreground">Token API {providerName}</label>
                   <input
                     type="password"
                     autoComplete="new-password"
-                    name="rapid-delivery-api-token"
+                    name={`${providerSlug}-api-token`}
                     spellCheck={false}
                     autoCapitalize="none"
                     value={token}
@@ -166,7 +170,7 @@ export default function DeliveryConnectWizard({
                       setToken(e.target.value)
                       setError('')
                     }}
-                    placeholder="Collez votre token API Rapid Delivery"
+                    placeholder={`Collez votre token API ${providerName}`}
                     disabled={isLoading}
                     className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/20"
                   />
@@ -184,7 +188,7 @@ export default function DeliveryConnectWizard({
               <>
                 <div className="rounded-xl border border-border overflow-hidden">
                   <div className="grid grid-cols-2 bg-muted/40 px-4 py-3 text-sm font-medium text-foreground">
-                    <div>Shops Rapid Delivery</div>
+                    <div>Shops {providerName}</div>
                     <div>Stores internes</div>
                   </div>
                   <div className="divide-y divide-border">

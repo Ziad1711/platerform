@@ -501,6 +501,11 @@ export default function VentesPage() {
   const [rapidDeliveryCityKey, setRapidDeliveryCityKey] = useState('')
   const [rapidDeliveryShopKey, setRapidDeliveryShopKey] = useState('')
   const [rapidDeliveryRemark, setRapidDeliveryRemark] = useState('')
+  const [isMarocGoDeliveryModalOpen, setIsMarocGoDeliveryModalOpen] = useState(false)
+  const [marocGoDeliveryOrder, setMarocGoDeliveryOrder] = useState<any | null>(null)
+  const [marocGoDeliveryCityKey, setMarocGoDeliveryCityKey] = useState('')
+  const [marocGoDeliveryShopKey, setMarocGoDeliveryShopKey] = useState('')
+  const [marocGoDeliveryRemark, setMarocGoDeliveryRemark] = useState('')
   const [isOzoneModalOpen, setIsOzoneModalOpen] = useState(false)
   const [ozoneOrder, setOzoneOrder] = useState<any | null>(null)
   const [ozoneCityKey, setOzoneCityKey] = useState('')
@@ -1243,6 +1248,20 @@ export default function VentesPage() {
     },
   })
 
+  const { data: marocGoDeliveryIntegration } = useQuery({
+    queryKey: ['maroc-go-delivery-integration-status'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('integrations')
+        .select('id, status')
+        .eq('provider', 'maroc-go-delivery')
+        .maybeSingle()
+
+      if (error) throw error
+      return data || null
+    },
+  })
+
   const { data: ozoneIntegration } = useQuery({
     queryKey: ['ozone-integration-status'],
     queryFn: async () => {
@@ -1413,6 +1432,50 @@ export default function VentesPage() {
 
       if (error) throw error
       return data || []
+    },
+  })
+
+  const { data: marocGoDeliveryCities = [] } = useQuery({
+    queryKey: ['maroc-go-delivery-cities', marocGoDeliveryIntegration?.id],
+    enabled: !!marocGoDeliveryIntegration?.id,
+    queryFn: async () => {
+      const { data: shop } = await supabase
+        .from('delivery_shops')
+        .select('pricing_group_id')
+        .eq('integration_id', marocGoDeliveryIntegration!.id)
+        .not('pricing_group_id', 'is', null)
+        .limit(1)
+        .maybeSingle()
+
+      if (!shop?.pricing_group_id) return []
+
+      const { data: rates, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name, price')
+        .eq('pricing_group_id', shop.pricing_group_id)
+        .order('city_name', { ascending: true })
+
+      if (error) throw error
+      return (rates || []).map((rate: any) => ({
+        city_key: rate.external_city_key,
+        city_name: rate.city_name,
+        cost_delivery: rate.price,
+      }))
+    },
+  })
+
+  const { data: marocGoDeliveryShops = [] } = useQuery({
+    queryKey: ['maroc-go-delivery-shops', marocGoDeliveryIntegration?.id],
+    enabled: !!marocGoDeliveryIntegration?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_shops')
+        .select('external_shop_id, external_name')
+        .eq('integration_id', marocGoDeliveryIntegration!.id)
+        .order('external_name', { ascending: true })
+
+      if (error) throw error
+      return (data || []).map((shop: any) => ({ shop_key: shop.external_shop_id, name: shop.external_name }))
     },
   })
 
@@ -1819,6 +1882,81 @@ export default function VentesPage() {
     },
   })
 
+  const createMarocGoDeliveryParcelMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentStoreId || !marocGoDeliveryOrder?.id) throw new Error('Commande introuvable.')
+      if (!marocGoDeliveryCityKey || !marocGoDeliveryShopKey) throw new Error('Choisissez la ville et le shop.')
+
+      const response = await fetch('/api/integrations/maroc-go-delivery/parcels/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: currentStoreId,
+          orderId: marocGoDeliveryOrder.id,
+          cityKey: Number(marocGoDeliveryCityKey),
+          shopKey: Number(marocGoDeliveryShopKey),
+          remark: marocGoDeliveryRemark,
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || 'MAROC_GO_DELIVERY_CREATE_FAILED')
+      }
+
+      return response.json()
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      setIsMarocGoDeliveryModalOpen(false)
+      setMarocGoDeliveryOrder(null)
+      setMarocGoDeliveryCityKey('')
+      setMarocGoDeliveryShopKey('')
+      setMarocGoDeliveryRemark('')
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur création colis Maroc Go Delivery')
+    },
+  })
+
+  const trackMarocGoDeliveryMutation = useMutation({
+    mutationFn: async ({ orderId, trackingNumber }: { orderId: string; trackingNumber: string }) => {
+      const params = new URLSearchParams({ orderId, trackingNumber })
+      const response = await fetch(`/api/integrations/maroc-go-delivery/parcels/track?${params.toString()}`)
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || 'MAROC_GO_DELIVERY_TRACK_FAILED')
+      }
+      return response.json()
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur suivi Maroc Go Delivery')
+    },
+  })
+
+  const syncAllMarocGoDeliveryMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/integrations/maroc-go-delivery/parcels/sync-all', {
+        method: 'POST',
+      })
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+      if (!response.ok) throw new Error(payload?.error || 'MAROC_GO_DELIVERY_SYNC_ALL_FAILED')
+      return payload
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur synchronisation Maroc Go Delivery')
+    },
+  })
+
   const updateOrderFieldMutation = useMutation({
     mutationFn: async ({ orderId, field, value }: { orderId: string; field: string; value: any }) => {
       const { error } = await supabase
@@ -1926,8 +2064,16 @@ export default function VentesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rapidDeliveryIntegration?.id, rapidDeliveryIntegration?.status])
 
+  useEffect(() => {
+    if (!marocGoDeliveryIntegration || marocGoDeliveryIntegration.status !== 'connected') return
+    syncAllMarocGoDeliveryMutation.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marocGoDeliveryIntegration?.id, marocGoDeliveryIntegration?.status])
+
   const isOrderLinkedToApiProvider = (order: any) => {
-    return order?.delivery_companies?.api_provider === 'ozone' || order?.delivery_companies?.api_provider === 'rapid-delivery'
+    return order?.delivery_companies?.api_provider === 'ozone'
+      || order?.delivery_companies?.api_provider === 'rapid-delivery'
+      || order?.delivery_companies?.api_provider === 'maroc-go-delivery'
   }
 
   const getAllowedStatusOptionsForOrder = (order: any) => {
@@ -3733,6 +3879,39 @@ export default function VentesPage() {
                       Créer colis OZONE
                     </button>
                   ) : null}
+                  {marocGoDeliveryIntegration?.status === 'connected'
+                    && selectedOrderForDetails.delivery_companies?.api_provider === 'maroc-go-delivery' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMarocGoDeliveryOrder(selectedOrderForDetails)
+                          setMarocGoDeliveryCityKey('')
+                          setMarocGoDeliveryShopKey('')
+                          setMarocGoDeliveryRemark('')
+                          setFormError('')
+                          setIsMarocGoDeliveryModalOpen(true)
+                        }}
+                        className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                      >
+                        Créer colis Maroc Go Delivery
+                      </button>
+                      {selectedOrderForDetails.tracking_number ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            trackMarocGoDeliveryMutation.mutate({
+                              orderId: selectedOrderForDetails.id,
+                              trackingNumber: selectedOrderForDetails.tracking_number,
+                            })
+                          }
+                          className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                        >
+                          Synchroniser suivi Maroc Go
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
                 </div>
               </div>
 
@@ -3864,11 +4043,17 @@ export default function VentesPage() {
             </div>
             <button
               type="button"
-              onClick={() => syncAllRapidDeliveryMutation.mutate()}
-              disabled={syncAllRapidDeliveryMutation.isPending || rapidDeliveryIntegration?.status !== 'connected'}
+              onClick={() => {
+                if (rapidDeliveryIntegration?.status === 'connected') syncAllRapidDeliveryMutation.mutate()
+                if (marocGoDeliveryIntegration?.status === 'connected') syncAllMarocGoDeliveryMutation.mutate()
+              }}
+              disabled={
+                (syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending)
+                || (rapidDeliveryIntegration?.status !== 'connected' && marocGoDeliveryIntegration?.status !== 'connected')
+              }
               className="inline-flex items-center justify-center border border-border hover:bg-secondary text-foreground text-sm font-medium p-2 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
             >
-              <RefreshCw className={`w-4 h-4 ${syncAllRapidDeliveryMutation.isPending ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${(syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending) ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline ml-1">Resynchroniser</span>
             </button>
             <button
@@ -4314,6 +4499,77 @@ export default function VentesPage() {
                 className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 {createRapidDeliveryParcelMutation.isPending ? 'Création...' : 'Créer le colis'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isMarocGoDeliveryModalOpen && marocGoDeliveryOrder ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setIsMarocGoDeliveryModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Créer colis Maroc Go Delivery</h3>
+                <p className="text-sm text-muted-foreground">Commande #{String(marocGoDeliveryOrder.id || '').slice(0, 8)}</p>
+              </div>
+              <button type="button" onClick={() => setIsMarocGoDeliveryModalOpen(false)} className="text-sm text-muted-foreground">
+                Fermer
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">Ville Maroc Go Delivery</label>
+                <select
+                  value={marocGoDeliveryCityKey}
+                  onChange={(e) => setMarocGoDeliveryCityKey(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Choisir une ville</option>
+                  {marocGoDeliveryCities.map((city: any) => (
+                    <option key={city.city_key} value={city.city_key}>
+                      {city.city_name} — {formatCurrency(city.cost_delivery || 0)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">Shop de dépôt</label>
+                <select
+                  value={marocGoDeliveryShopKey}
+                  onChange={(e) => setMarocGoDeliveryShopKey(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Choisir un shop</option>
+                  {marocGoDeliveryShops.map((shop: any) => (
+                    <option key={shop.shop_key} value={shop.shop_key}>
+                      {shop.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">Remarque</label>
+                <textarea
+                  value={marocGoDeliveryRemark}
+                  onChange={(e) => setMarocGoDeliveryRemark(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                  placeholder="Instruction de livraison"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => createMarocGoDeliveryParcelMutation.mutate()}
+                disabled={createMarocGoDeliveryParcelMutation.isPending}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {createMarocGoDeliveryParcelMutation.isPending ? 'Création...' : 'Créer le colis'}
               </button>
             </div>
           </div>

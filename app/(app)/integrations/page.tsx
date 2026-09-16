@@ -143,7 +143,7 @@ export default function IntegrationsPage() {
       setSelectedCustomSiteStoreWebsite(null)
     } else {
       setConnectProviderSlug(providerSlug)
-      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex' && providerSlug !== 'sendit' && providerSlug !== 'digylog') {
+      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'maroc-go-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex' && providerSlug !== 'sendit' && providerSlug !== 'digylog') {
         setYoucanStoreSlug('')
       }
       setConnectError('')
@@ -490,6 +490,20 @@ export default function IntegrationsPage() {
 
       {isConnectModalOpen && connectProviderSlug === 'rapid-delivery' ? (
         <DeliveryConnectWizard
+          onClose={() => {
+            if (!isConnecting) {
+              setIsConnectModalOpen(false)
+              setConnectProviderSlug(null)
+              setConnectError('')
+            }
+          }}
+        />
+      ) : null}
+
+      {isConnectModalOpen && connectProviderSlug === 'maroc-go-delivery' ? (
+        <DeliveryConnectWizard
+          providerSlug="maroc-go-delivery"
+          providerName="Maroc Go Delivery"
           onClose={() => {
             if (!isConnecting) {
               setIsConnectModalOpen(false)

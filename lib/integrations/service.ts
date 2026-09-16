@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
 
-export type IntegrationProvider = 'youcan' | 'rapid-delivery' | 'facebook-ads' | 'ozone'
+export type IntegrationProvider = 'youcan' | 'rapid-delivery' | 'maroc-go-delivery' | 'facebook-ads' | 'ozone'
 
 export type IntegrationRecord = {
   id: string
