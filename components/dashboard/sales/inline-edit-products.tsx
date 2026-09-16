@@ -24,6 +24,8 @@ interface OrderItem {
   quantity: number
   unit_selling_price: number
   products?: { name: string } | null
+  /** Nom affiché dans la commande (le product_id reste inchangé) */
+  product_name_override?: string | null
 }
 
 interface InlineEditProductsProps {
@@ -168,6 +170,7 @@ export default function InlineEditProducts({
               ...item,
               product_id: productId,
               product_variant_id: firstVariant?.id || null,
+              product_name_override: null,
               unit_selling_price: Number(
                 firstVariant?.selling_price ?? product?.default_selling_price ?? 0
               ),
@@ -232,7 +235,7 @@ export default function InlineEditProducts({
 
   // Summary text shown when modal is closed
   const summary = items
-    .map((item) => `${item.quantity}x ${item.products?.name || '?'}`)
+    .map((item) => `${item.quantity}x ${item.product_name_override || item.products?.name || '?'}`)
     .join(', ')
 
   return (
@@ -307,7 +310,7 @@ export default function InlineEditProducts({
                           }}
                           className="flex items-center justify-between rounded-lg border border-border bg-card h-10 px-3"
                         >
-                          <span className="text-sm font-medium text-foreground truncate">{product.name}</span>
+                          <span className="text-sm font-medium text-foreground truncate">{item.product_name_override || product.name}</span>
                           <button
                             type="button"
                             onClick={() => {
@@ -405,6 +408,27 @@ export default function InlineEditProducts({
                           </div>
                         </>
                       )}
+                    </div>
+
+                    {/* Nom affiché dans la commande (product_id inchangé) */}
+                    <div>
+                      <label className="block text-[11px] font-medium text-muted-foreground leading-none mb-1.5">
+                        Nom dans la commande
+                      </label>
+                      <input
+                        type="text"
+                        value={item.product_name_override || ''}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          setLocalItems((prev) =>
+                            prev.map((it, i) =>
+                              i === index ? { ...it, product_name_override: value } : it
+                            )
+                          )
+                        }}
+                        placeholder={product?.name || 'Nom du produit'}
+                        className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm"
+                      />
                     </div>
 
                     {/* Variant selector */}

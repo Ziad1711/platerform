@@ -665,6 +665,7 @@ export default function VentesPage() {
             product_id,
             product_variant_id,
             unit_selling_price,
+            product_name_override,
             products(name)
           ),
           delivery_companies(name, api_provider),
@@ -699,6 +700,7 @@ export default function VentesPage() {
               product_id,
               product_variant_id,
               unit_selling_price,
+              product_name_override,
               products(name)
             ),
             delivery_companies(name, api_provider),
@@ -2025,6 +2027,7 @@ export default function VentesPage() {
         unit_selling_price: Number(item.unit_selling_price) || 0,
         unit_purchase_cost_snapshot: Number(item.unit_purchase_cost_snapshot) || 0,
         item_type: item.item_type || 'product',
+        product_name_override: String(item.product_name_override || '').trim() || null,
       }))
 
       // Validate payload before delete
@@ -3838,7 +3841,7 @@ export default function VentesPage() {
                 <div className="text-sm text-foreground">
                   Produits: {(selectedOrderForDetails.order_items || [])
                     .map((item: any) => {
-                      const productName = item?.products?.name
+                      const productName = item?.product_name_override || item?.products?.name
                       const variantName = item?.product_variant_id ? orderVariantsById?.[item.product_variant_id]?.name : null
                       if (!productName) return null
                       return variantName ? `${productName} (${variantName})` : productName
@@ -4175,7 +4178,7 @@ export default function VentesPage() {
                   const isBlacklisted = normalizedOrderPhone ? blacklistPhonesSet.has(normalizedOrderPhone) : false
                   const productNames = (order.order_items || [])
                     .map((item: any) => {
-                      const productName = item?.products?.name
+                      const productName = item?.product_name_override || item?.products?.name
                       const variantName = item?.product_variant_id ? orderVariantsById?.[item.product_variant_id]?.name : null
                       if (!productName) return null
                       return variantName ? `${productName} (${variantName})` : productName
