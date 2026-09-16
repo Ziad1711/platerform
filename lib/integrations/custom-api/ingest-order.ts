@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { computePayloadHash, checkIdempotency, recordIdempotency } from './idempotency'
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
+import { normalizeMoroccanPhone } from '@/lib/utils'
 
 export type IngestOrderPayload = {
   idempotency_key: string
@@ -87,7 +88,7 @@ export async function ingestOrder(
       store_id: storeId,
       external_order_id: payload.external_order_id,
       customer_name: payload.customer_name.trim(),
-      phone: payload.phone || null,
+      phone: normalizeMoroccanPhone(payload.phone) || null,
       city: payload.city || null,
       address: payload.address || null,
       total_selling_price: payload.total_selling_price,

@@ -181,15 +181,19 @@ export async function POST(request: Request) {
 
     let importedProducts = 0
     let importedOrders = 0
+    let pendingVariantSetup: Awaited<ReturnType<typeof importYouCanProducts>>['pendingVariantSetup'] = []
 
     if (importProducts) {
-      importedProducts = await importYouCanProducts({
+      const productsResult = await importYouCanProducts({
         supabase,
         integrationId: integration.id,
         userId: user.id,
         storeId,
         accessToken: decryptedAccessToken,
       })
+
+      importedProducts = productsResult.imported
+      pendingVariantSetup = productsResult.pendingVariantSetup
 
       await supabase
         .from('youcan_sync_jobs')
@@ -255,6 +259,7 @@ export async function POST(request: Request) {
       importedProducts,
       importedOrders,
       warnings,
+      pendingVariantSetup,
       debug: {
         publicBaseUrl: publicBaseUrl.origin,
         webhookId,

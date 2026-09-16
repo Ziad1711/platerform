@@ -26,6 +26,21 @@ export function cn(...classes: (string | boolean | undefined | null)[]) {
   return classes.filter(Boolean).join(' ')
 }
 
+export function normalizeMoroccanPhone(value: unknown): string {
+  const normalizedNumerals = String(value ?? '')
+    .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+  const digits = normalizedNumerals.replace(/\D/g, '')
+
+  const internationalMatch = digits.match(/^(?:00212|212)0?([67]\d{8})$/)
+  if (internationalMatch) return `0${internationalMatch[1]}`
+
+  if (/^[67]\d{8}$/.test(digits)) return `0${digits}`
+  if (/^0[67]\d{8}$/.test(digits)) return digits
+
+  return digits
+}
+
 export function getPeriodRange(period: DashboardPeriod, options?: PeriodRangeOptions): { start: Date | null; end: Date | null } {
   const now = new Date()
 

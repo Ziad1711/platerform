@@ -60,7 +60,18 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Migration SQL `20260430_rpc_dashboard_auth_guard.sql` pour renforcer les RPC avec `auth.uid()` guard
 
 ## Current Focus
-Intégration OZONE Express terminée :
+Refonte complète de l'assistant IA terminée :
+- ✅ **Scope multi-store** : `targetStoreIds` passé correctement à l'agent via `scopeStoreIds`
+- ✅ **Mémoire conversationnelle** : `ThreadAnalyticMemory` avec `last_range`, `last_dimension`, `last_metric_family`, `last_store_scope`
+- ✅ **Persistance mémoire** : stockée dans les métadonnées du dernier message assistant
+- ✅ **Nouveaux types** : `ComparisonRange`, `AssistantStructuredResponse`, `AgentScopeContext`, `RunSecureAgentInput`
+- ✅ **Nouveaux tools métier** : `getCityPerformance`, `getConfirmationPerformance`, `getDeliveryPerformance`, `getProductPerformance`, `getAdsPerformanceByCampaign`, `getStoreComparison`, `getOrderSearch`, `getCustomerOrderHistory`, `getDailyRevenueTrend`
+- ✅ **Prompt système refondu** : 5 blocs (rôle métier, vérité données, mémoire, planification, format réponse)
+- ✅ **buildTruthMessageText corrigé** : ne supprime plus les chiffres, sépare faits/interprétation/recommandations
+- ✅ **Comparaison multi-périodes** : `extractComparisonRanges`, `period_comparison` intent, prompt dédié
+- ✅ **TypeScript** : aucune erreur de compilation
+- ✅ **Sécurité multi-tenant** : tous les tools filtrent par `storeIds` validés côté serveur
+
 - ✅ Client API OZONE (lib/integrations/ozone.ts) avec création colis, tracking, BL
 - ✅ Adapter OZONE (lib/integrations/delivery/ozone-adapter.ts) pour le service delivery générique
 - ✅ Wizard connexion OZONE (components/dashboard/integrations/ozone-connect-wizard.tsx)

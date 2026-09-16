@@ -37,7 +37,7 @@ export default function StocksPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('id, name, sku')
+        .select('id, name, sku, stock_tracking_mode')
         .eq('store_id', selectedCreateStoreId)
         .order('created_at', { ascending: false })
 
@@ -52,7 +52,7 @@ export default function StocksPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('product_variants')
-        .select('id, name, sku')
+        .select('id, name, sku, stock_multiplier')
         .eq('store_id', selectedCreateStoreId)
         .eq('product_id', newProductId)
         .order('created_at', { ascending: true })
@@ -99,6 +99,13 @@ export default function StocksPage() {
     }
   }, [productsForCreate, newProductId])
 
+  const selectedProductStockMode = useMemo(
+    () =>
+      (productsForCreate || []).find((product: any) => product.id === newProductId)?.stock_tracking_mode ||
+      'variant',
+    [productsForCreate, newProductId]
+  )
+
   useEffect(() => {
     if (!newProductId) {
       setNewVariantId('')
@@ -110,16 +117,29 @@ export default function StocksPage() {
       return
     }
 
-    if (!newVariantId || !variantsForSelectedProduct.some((v: any) => v.id === newVariantId)) {
-      setNewVariantId(variantsForSelectedProduct[0].id)
+    // Mode "stock par variante" (couleur, taille...): une variante est nécessaire.
+    if (selectedProductStockMode === 'variant') {
+      if (!newVariantId || !variantsForSelectedProduct.some((v: any) => v.id === newVariantId)) {
+        setNewVariantId(variantsForSelectedProduct[0].id)
+      }
+      return
     }
-  }, [newProductId, variantsForSelectedProduct, newVariantId])
+
+    // Mode "stock unique partagé" (packs quantité): le stock global du produit suffit.
+    if (newVariantId && !variantsForSelectedProduct.some((v: any) => v.id === newVariantId)) {
+      setNewVariantId('')
+    }
+  }, [newProductId, variantsForSelectedProduct, newVariantId, selectedProductStockMode])
 
   const createMovementMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCreateStoreId) throw new Error('Veuillez sélectionner un store.')
       if (!newProductId) throw new Error('Veuillez sélectionner un produit.')
-      if ((variantsForSelectedProduct || []).length > 0 && !newVariantId) {
+      if (
+        selectedProductStockMode === 'variant' &&
+        (variantsForSelectedProduct || []).length > 0 &&
+        !newVariantId
+      ) {
         throw new Error('Veuillez sélectionner une variante pour ce produit.')
       }
 
@@ -516,7 +536,9 @@ export default function StocksPage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm text-foreground mb-1">Variante</label>
+                  <label className="block text-sm text-foreground mb-1">
+                    {selectedProductStockMode === 'shared' ? 'Variante (optionnel)' : 'Variante'}
+                  </label>
                   <select
                     value={newVariantId}
                     onChange={(e) => setNewVariantId(e.target.value)}
@@ -525,15 +547,26 @@ export default function StocksPage() {
                   >
                     <option value="">
                       {(variantsForSelectedProduct || []).length > 0
-                        ? 'Choisir une variante'
+                        ? selectedProductStockMode === 'shared'
+                          ? 'Stock global du produit (recommandé)'
+                          : 'Choisir une variante'
                         : 'Aucune variante (produit simple)'}
                     </option>
-                    {(variantsForSelectedProduct || []).map((variant: any) => (
-                      <option key={variant.id} value={variant.id}>
-                        {variant.name} {variant.sku ? `(${variant.sku})` : ''}
-                      </option>
-                    ))}
+                    {(variantsForSelectedProduct || []).map((variant: any) => {
+                      const multiplier = Number(variant.stock_multiplier || 1)
+                      return (
+                        <option key={variant.id} value={variant.id}>
+                          {variant.name} {variant.sku ? `(${variant.sku})` : ''}
+                          {multiplier > 1 ? ` — ${multiplier} unités / vente` : ''}
+                        </option>
+                      )
+                    })}
                   </select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {selectedProductStockMode === 'shared'
+                      ? 'Stock unique partagé par toutes les variantes (packs quantité).'
+                      : 'Stock propre à la variante sélectionnée.'}
+                  </p>
                 </div>
 
                 <div className="md:col-span-2">

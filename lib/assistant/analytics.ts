@@ -15,6 +15,7 @@ type OrderRow = {
   confirmation_cost_allocated?: number | string | null
 }
 
+type SpendRow = { spend_converted?: number | string | null }
 type AmountRow = { amount?: number | string | null }
 
 function applyStoreFilter<T extends { eq: Function; in: Function }>(query: T, storeIds: string[]) {
@@ -25,6 +26,11 @@ function applyStoreFilter<T extends { eq: Function; in: Function }>(query: T, st
 }
 
 function resolveDateRange(range: AnalyticsRange) {
+  // Cas plage absolue (objet { start, end })
+  if (typeof range === 'object' && 'start' in range && 'end' in range) {
+    return { start: range.start, end: range.end }
+  }
+
   const now = new Date()
 
   const getCasablancaDateParts = (date: Date) => {
@@ -112,7 +118,7 @@ export async function getDashboardKPIs(supabase: SupabaseServerClient, storeIds:
     applyStoreFilter(
       supabase
         .from('ad_spend_daily')
-        .select('amount')
+        .select('spend_converted')
         .gte('spend_date', start)
         .lt('spend_date', end),
       storeIds
@@ -122,8 +128,8 @@ export async function getDashboardKPIs(supabase: SupabaseServerClient, storeIds:
   if (ordersRes.error || adSpendRes.error) throw new Error('ANALYTICS_KPI_FAILED')
 
   const orders = ((ordersRes.data || []) as OrderRow[])
-  const adSpendRows = ((adSpendRes.data || []) as AmountRow[])
-  const adSpendTotal = adSpendRows.reduce((sum: number, row: AmountRow) => sum + Number(row.amount || 0), 0)
+  const adSpendRows = ((adSpendRes.data || []) as SpendRow[])
+  const adSpendTotal = adSpendRows.reduce((sum: number, row: SpendRow) => sum + Number(row.spend_converted || 0), 0)
 
   const totalOrders = orders.length
   const delivered = orders.filter((o: OrderRow) => o.status === 'delivered')
@@ -219,9 +225,10 @@ export async function getTopProducts(supabase: SupabaseServerClient, storeIds: s
 export async function getAdsSpend(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
   const { start, end } = resolveDateRange(range)
 
+  // Source primaire : ad_spend_daily
   const query = supabase
     .from('ad_spend_daily')
-    .select('platform, amount')
+    .select('platform, spend_converted')
     .gte('spend_date', start)
     .lt('spend_date', end)
 
@@ -229,15 +236,32 @@ export async function getAdsSpend(supabase: SupabaseServerClient, storeIds: stri
 
   if (error) throw new Error('ANALYTICS_ADS_FAILED')
 
-  const rows = (data || []) as Array<{ platform?: string | null; amount?: number | string | null }>
-  const total = rows.reduce((sum: number, row) => sum + Number(row.amount || 0), 0)
-  const byPlatform: Record<string, number> = {}
-  for (const row of rows) {
-    const key = row.platform || 'unknown'
-    byPlatform[key] = (byPlatform[key] || 0) + Number(row.amount || 0)
+  const rows = (data || []) as Array<{ platform?: string | null; spend_converted?: number | string | null }>
+  const dailyTotal = rows.reduce((sum: number, row) => sum + Number(row.spend_converted || 0), 0)
+
+  // Fallback : si ad_spend_daily est vide, utiliser orders.ads_cost_allocated
+  if (dailyTotal > 0) {
+    const byPlatform: Record<string, number> = {}
+    for (const row of rows) {
+      const key = row.platform || 'unknown'
+      byPlatform[key] = (byPlatform[key] || 0) + Number(row.spend_converted || 0)
+    }
+    return { total: dailyTotal, byPlatform, source: 'ad_spend_daily' as const }
   }
 
-  return { total, byPlatform }
+  const ordersQuery = supabase
+    .from('orders')
+    .select('ads_cost_allocated')
+    .gte('order_date', start)
+    .lt('order_date', end)
+
+  const { data: ordersData, error: ordersError } = await applyStoreFilter(ordersQuery, storeIds)
+  if (ordersError) throw new Error('ANALYTICS_ADS_FAILED')
+
+  const allocatedTotal = ((ordersData || []) as Array<{ ads_cost_allocated?: number | string | null }>)
+    .reduce((sum: number, row) => sum + Number(row.ads_cost_allocated || 0), 0)
+
+  return { total: allocatedTotal, byPlatform: { 'allocated_orders': allocatedTotal }, source: 'orders_allocated_fallback' as const }
 }
 
 export async function getProfitSummary(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
@@ -255,7 +279,7 @@ export async function getProfitSummary(supabase: SupabaseServerClient, storeIds:
     applyStoreFilter(
       supabase
         .from('ad_spend_daily')
-        .select('amount')
+        .select('spend_converted')
         .gte('spend_date', start)
         .lt('spend_date', end),
       storeIds
@@ -275,7 +299,7 @@ export async function getProfitSummary(supabase: SupabaseServerClient, storeIds:
   }
 
   const ordersRows = ((ordersRes.data || []) as OrderRow[])
-  const adsRows = ((adsRes.data || []) as AmountRow[])
+  const adsRows = ((adsRes.data || []) as SpendRow[])
   const expensesRows = ((expensesRes.data || []) as AmountRow[])
 
   const delivered = ordersRows.filter((o: OrderRow) => o.status === 'delivered')
@@ -300,7 +324,7 @@ export async function getProfitSummary(supabase: SupabaseServerClient, storeIds:
   }
 
   const revenue = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.total_selling_price || 0), 0)
-  const adSpendDaily = adsRows.reduce((sum: number, row: AmountRow) => sum + Number(row.amount || 0), 0)
+  const adSpendDaily = adsRows.reduce((sum: number, row: SpendRow) => sum + Number(row.spend_converted || 0), 0)
   const allocatedAdCost = ordersRows.reduce((sum: number, o: OrderRow) => sum + Number(o.ads_cost_allocated || 0), 0)
   const adSpend = adSpendDaily > 0 ? adSpendDaily : allocatedAdCost
   const extraExpenses = expensesRows.reduce((sum: number, row: AmountRow) => sum + Number(row.amount || 0), 0)
@@ -471,6 +495,330 @@ export async function getExpensesByCategory(supabase: SupabaseServerClient, stor
   }
 
   return byCategory
+}
+
+export async function getCityPerformance(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  const { start, end } = resolveDateRange(range)
+
+  const query = supabase
+    .from('orders')
+    .select('city, status, total_selling_price, delivery_fee, confirmation_cost_allocated, ads_cost_allocated')
+    .gte('order_date', start)
+    .lt('order_date', end)
+    .not('city', 'is', null)
+
+  const { data, error } = await applyStoreFilter(query, storeIds)
+  if (error) throw new Error('ANALYTICS_CITY_PERFORMANCE_FAILED')
+
+  const rows = (data || []) as Array<{
+    city?: string | null
+    status?: string | null
+    total_selling_price?: number | string | null
+    delivery_fee?: number | string | null
+    confirmation_cost_allocated?: number | string | null
+    ads_cost_allocated?: number | string | null
+  }>
+
+  const byCity: Record<string, {
+    totalOrders: number
+    deliveredOrders: number
+    revenue: number
+    deliveryCost: number
+    confirmationCost: number
+    adCost: number
+  }> = {}
+
+  for (const row of rows) {
+    const city = row.city || 'Inconnue'
+    if (!byCity[city]) {
+      byCity[city] = { totalOrders: 0, deliveredOrders: 0, revenue: 0, deliveryCost: 0, confirmationCost: 0, adCost: 0 }
+    }
+    byCity[city].totalOrders++
+    if (row.status === 'delivered') {
+      byCity[city].deliveredOrders++
+      byCity[city].revenue += Number(row.total_selling_price || 0)
+      byCity[city].deliveryCost += Number(row.delivery_fee || 0)
+      byCity[city].confirmationCost += Number(row.confirmation_cost_allocated || 0)
+    }
+    byCity[city].adCost += Number(row.ads_cost_allocated || 0)
+  }
+
+  return Object.entries(byCity)
+    .map(([city, data]) => ({
+      city,
+      ...data,
+      deliveredRate: data.totalOrders > 0 ? Number(((data.deliveredOrders / data.totalOrders) * 100).toFixed(2)) : 0,
+      profit: data.revenue - data.deliveryCost - data.confirmationCost - data.adCost,
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+}
+
+export async function getConfirmationPerformance(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  const { start, end } = resolveDateRange(range)
+
+  // Utiliser le vrai schéma : confirmation_agents + orders.confirmation_agent_id
+  const query = supabase
+    .from('orders')
+    .select('confirmation_agent_id, status, total_selling_price, confirmation_agents!inner(name)')
+    .gte('order_date', start)
+    .lt('order_date', end)
+    .not('confirmation_agent_id', 'is', null)
+
+  const { data, error } = await applyStoreFilter(query, storeIds)
+  if (error) throw new Error('ANALYTICS_CONFIRMATION_PERFORMANCE_FAILED')
+
+  const rows = (data || []) as Array<{
+    confirmation_agent_id?: string | null
+    status?: string | null
+    total_selling_price?: number | string | null
+    confirmation_agents?: { name?: string | null } | null
+  }>
+
+  const byAgent: Record<string, { totalOrders: number; confirmedOrders: number; revenue: number }> = {}
+
+  for (const row of rows) {
+    const agent = row.confirmation_agents?.name || 'Inconnu'
+    if (!byAgent[agent]) {
+      byAgent[agent] = { totalOrders: 0, confirmedOrders: 0, revenue: 0 }
+    }
+    byAgent[agent].totalOrders++
+    if (row.status === 'delivered') {
+      byAgent[agent].confirmedOrders++
+      byAgent[agent].revenue += Number(row.total_selling_price || 0)
+    }
+  }
+
+  return Object.entries(byAgent)
+    .map(([agent, data]) => ({
+      agent,
+      ...data,
+      confirmationRate: data.totalOrders > 0 ? Number(((data.confirmedOrders / data.totalOrders) * 100).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => b.confirmedOrders - a.confirmedOrders)
+}
+
+export async function getDeliveryPerformance(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  const { start, end } = resolveDateRange(range)
+
+  const query = supabase
+    .from('orders')
+    .select('status, delivery_status, delivery_company, city')
+    .gte('order_date', start)
+    .lt('order_date', end)
+
+  const { data, error } = await applyStoreFilter(query, storeIds)
+  if (error) throw new Error('ANALYTICS_DELIVERY_PERFORMANCE_FAILED')
+
+  const rows = (data || []) as Array<{
+    status?: string | null
+    delivery_status?: string | null
+    delivery_company?: string | null
+    city?: string | null
+  }>
+
+  const total = rows.length
+  const delivered = rows.filter(r => r.status === 'delivered').length
+  const pending = rows.filter(r => r.status === 'pending' || r.delivery_status === 'pending').length
+  const cancelled = rows.filter(r => r.status === 'cancelled').length
+  const returned = rows.filter(r => r.status === 'returned').length
+  const inTransit = rows.filter(r => r.delivery_status === 'in_transit').length
+
+  return {
+    total,
+    delivered,
+    pending,
+    cancelled,
+    returned,
+    inTransit,
+    deliveryRate: total > 0 ? Number(((delivered / total) * 100).toFixed(2)) : 0,
+    cancellationRate: total > 0 ? Number(((cancelled / total) * 100).toFixed(2)) : 0,
+  }
+}
+
+export async function getProductPerformance(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  const { start, end } = resolveDateRange(range)
+
+  const { data: deliveredOrders, error: ordersError } = await applyStoreFilter(
+    supabase
+      .from('orders')
+      .select('id')
+      .eq('status', 'delivered')
+      .gte('order_date', start)
+      .lt('order_date', end),
+    storeIds
+  )
+
+  if (ordersError) throw new Error('ANALYTICS_PRODUCT_PERFORMANCE_FAILED')
+
+  const deliveredOrderIds = ((deliveredOrders || []) as Array<{ id: string }>).map((o) => o.id)
+  if (deliveredOrderIds.length === 0) return []
+
+  let itemsQuery = supabase
+    .from('order_items')
+    .select('product_id, quantity, unit_selling_price, unit_purchase_cost_snapshot, products(name)')
+    .in('order_id', deliveredOrderIds)
+
+  itemsQuery = applyStoreFilter(itemsQuery, storeIds)
+
+  const { data: items, error } = await itemsQuery
+  if (error) throw new Error('ANALYTICS_PRODUCT_PERFORMANCE_FAILED')
+
+  const map = new Map<string, {
+    productName: string
+    qty: number
+    revenue: number
+    cost: number
+    profit: number
+    marginRate: number
+  }>()
+
+  for (const item of items || []) {
+    const id = String(item.product_id)
+    const qty = Number(item.quantity || 0)
+    const price = Number(item.unit_selling_price || 0)
+    const cost = Number(item.unit_purchase_cost_snapshot || 0)
+    const entry = map.get(id) || {
+      productName: (item.products as { name?: string } | null)?.name || 'Produit',
+      qty: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      marginRate: 0,
+    }
+    entry.qty += qty
+    entry.revenue += qty * price
+    entry.cost += qty * cost
+    entry.profit += qty * (price - cost)
+    map.set(id, entry)
+  }
+
+  return Array.from(map.entries())
+    .map(([productId, value]) => ({
+      productId,
+      ...value,
+      marginRate: value.revenue > 0 ? Number(((value.profit / value.revenue) * 100).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+}
+
+export async function getAdsPerformanceByCampaign(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  const { start, end } = resolveDateRange(range)
+
+  const query = supabase
+    .from('ad_spend_daily')
+    .select('campaign_name, platform, spend_converted, impressions, clicks')
+    .gte('spend_date', start)
+    .lt('spend_date', end)
+
+  const { data, error } = await applyStoreFilter(query, storeIds)
+  if (error) throw new Error('ANALYTICS_ADS_CAMPAIGN_FAILED')
+
+  const rows = (data || []) as Array<{
+    campaign_name?: string | null
+    platform?: string | null
+    spend_converted?: number | string | null
+    impressions?: number | string | null
+    clicks?: number | string | null
+  }>
+
+  const byCampaign: Record<string, {
+    platform: string
+    spend: number
+    impressions: number
+    clicks: number
+  }> = {}
+
+  for (const row of rows) {
+    const name = row.campaign_name || row.platform || 'Sans campagne'
+    if (!byCampaign[name]) {
+      byCampaign[name] = { platform: row.platform || 'unknown', spend: 0, impressions: 0, clicks: 0 }
+    }
+    byCampaign[name].spend += Number(row.spend_converted || 0)
+    byCampaign[name].impressions += Number(row.impressions || 0)
+    byCampaign[name].clicks += Number(row.clicks || 0)
+  }
+
+  return Object.entries(byCampaign)
+    .map(([campaign, data]) => ({
+      campaign,
+      ...data,
+      cpc: data.clicks > 0 ? Number((data.spend / data.clicks).toFixed(2)) : 0,
+      cpm: data.impressions > 0 ? Number(((data.spend / data.impressions) * 1000).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => b.spend - a.spend)
+}
+
+export async function getStoreComparison(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  if (storeIds.length < 2) {
+    return { error: 'Au moins 2 stores requis pour une comparaison' }
+  }
+
+  const results: Array<{ storeId: string; kpis: any; profit: any }> = []
+
+  for (const storeId of storeIds) {
+    const [kpis, profit] = await Promise.all([
+      getDashboardKPIs(supabase, [storeId], range),
+      getProfitSummary(supabase, [storeId], range),
+    ])
+    results.push({ storeId, kpis, profit })
+  }
+
+  return results
+}
+
+export async function getOrderSearch(supabase: SupabaseServerClient, storeIds: string[], query: string) {
+  const searchTerm = `%${query}%`
+
+  const dbQuery = supabase
+    .from('orders')
+    .select('id, customer_name, customer_phone, status, total_selling_price, order_date, city')
+    .or(`customer_name.ilike.${searchTerm},customer_phone.ilike.${searchTerm},id.ilike.${searchTerm}`)
+    .order('order_date', { ascending: false })
+    .limit(10)
+
+  const { data, error } = await applyStoreFilter(dbQuery, storeIds)
+  if (error) throw new Error('ANALYTICS_ORDER_SEARCH_FAILED')
+
+  return data || []
+}
+
+export async function getCustomerOrderHistory(supabase: SupabaseServerClient, storeIds: string[], customerName: string) {
+  const searchTerm = `%${customerName}%`
+
+  const dbQuery = supabase
+    .from('orders')
+    .select('id, customer_name, customer_phone, status, total_selling_price, order_date, city, delivery_fee, confirmation_cost_allocated')
+    .ilike('customer_name', searchTerm)
+    .order('order_date', { ascending: false })
+    .limit(20)
+
+  const { data, error } = await applyStoreFilter(dbQuery, storeIds)
+  if (error) throw new Error('ANALYTICS_CUSTOMER_HISTORY_FAILED')
+
+  const orders = (data || []) as Array<{
+    id: string
+    customer_name?: string | null
+    customer_phone?: string | null
+    status?: string | null
+    total_selling_price?: number | string | null
+    order_date?: string | null
+    city?: string | null
+    delivery_fee?: number | string | null
+    confirmation_cost_allocated?: number | string | null
+  }>
+
+  const delivered = orders.filter(o => o.status === 'delivered')
+  const totalRevenue = delivered.reduce((sum, o) => sum + Number(o.total_selling_price || 0), 0)
+  const totalOrders = orders.length
+  const deliveredOrders = delivered.length
+
+  return {
+    customerName,
+    totalOrders,
+    deliveredOrders,
+    totalRevenue,
+    orders,
+  }
 }
 
 export async function getControlledDynamicDataset(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {

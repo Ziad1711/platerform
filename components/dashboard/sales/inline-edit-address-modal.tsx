@@ -55,7 +55,7 @@ export default function InlineEditAddressModal({
     <>
       <div
         onDoubleClick={() => setOpen(true)}
-        className={`cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+        className={`w-full min-w-0 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
         title="Double-clic pour modifier l'adresse"
       >
         {value || <span className="text-muted-foreground italic">Adresse</span>}

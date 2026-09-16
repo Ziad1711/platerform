@@ -1,11 +1,20 @@
 import {
   getAdsSpend,
+  getAdsPerformanceByCampaign,
+  getCityPerformance,
+  getConfirmationPerformance,
+  getCustomerOrderHistory,
   getDashboardKPIs,
+  getDailyRevenueTrend,
+  getDeliveryPerformance,
   getExpensesByCategory,
+  getOrderSearch,
   getOrdersByStatus,
+  getProductPerformance,
   getProfitSummary,
   getRecentOrders,
   getStockSummary,
+  getStoreComparison,
   getSupplierSummary,
   getTopProducts,
 } from '@/lib/assistant/analytics'
@@ -22,6 +31,15 @@ export type AgentToolName =
   | 'getSupplierSummary'
   | 'getOrdersByStatus'
   | 'getExpensesByCategory'
+  | 'getDailyRevenueTrend'
+  | 'getCityPerformance'
+  | 'getConfirmationPerformance'
+  | 'getDeliveryPerformance'
+  | 'getProductPerformance'
+  | 'getAdsPerformanceByCampaign'
+  | 'getStoreComparison'
+  | 'getOrderSearch'
+  | 'getCustomerOrderHistory'
   | 'webSearch'
 
 export interface PlannedToolStep {
@@ -44,20 +62,43 @@ export function selectToolsForIntent(intent: AssistantIntent, userMessage: strin
     small_talk: [],
     dashboard_summary: ['getDashboardKPIs', 'getProfitSummary', 'getAdsSpend'],
     top_products: ['getTopProducts', 'getProfitSummary'],
-    ads_analysis: ['getAdsSpend', 'getDashboardKPIs'],
+    ads_analysis: ['getAdsSpend', 'getAdsPerformanceByCampaign', 'getDashboardKPIs'],
     profit_analysis: ['getProfitSummary', 'getTopProducts'],
     stock_analysis: ['getStockSummary'],
     supplier_summary: ['getSupplierSummary'],
     recent_orders: ['getRecentOrders', 'getOrdersByStatus'],
-    comparison_request: ['getDashboardKPIs', 'getProfitSummary', 'getAdsSpend'],
-    chart_request: ['getDashboardKPIs', 'getTopProducts', 'getExpensesByCategory'],
-    performance_request: ['getDashboardKPIs', 'getOrdersByStatus', 'getProfitSummary'],
+    comparison_request: ['getDashboardKPIs', 'getProfitSummary', 'getAdsSpend', 'getStoreComparison'],
+    period_comparison: ['getDashboardKPIs', 'getProfitSummary', 'getAdsSpend', 'getTopProducts', 'getDailyRevenueTrend'],
+    chart_request: ['getDashboardKPIs', 'getTopProducts', 'getExpensesByCategory', 'getDailyRevenueTrend'],
+    performance_request: ['getDashboardKPIs', 'getOrdersByStatus', 'getProfitSummary', 'getCityPerformance'],
     generic_business_chat: ['getDashboardKPIs', 'getProfitSummary', 'getTopProducts', 'getAdsSpend', 'getRecentOrders'],
   }
 
   const selected = [...(toolsByIntent[intent] || [])]
   const text = userMessage.toLowerCase()
 
+  // Détection de dimension spécifique dans le message
+  if (text.includes('ville') || text.includes('casa') || text.includes('rabat') || text.includes('marrakech') || text.includes('fès') || text.includes('tanger')) {
+    if (!selected.includes('getCityPerformance')) selected.push('getCityPerformance')
+  }
+  if (text.includes('agent') || text.includes('confirmation') || text.includes('confirme')) {
+    if (!selected.includes('getConfirmationPerformance')) selected.push('getConfirmationPerformance')
+  }
+  if (text.includes('livraison') || text.includes('delivery') || text.includes('transport')) {
+    if (!selected.includes('getDeliveryPerformance')) selected.push('getDeliveryPerformance')
+  }
+  if (text.includes('campagne') || text.includes('campaign') || text.includes('roas') || text.includes('cpc') || text.includes('cpm')) {
+    if (!selected.includes('getAdsPerformanceByCampaign')) selected.push('getAdsPerformanceByCampaign')
+  }
+  if (text.includes('compar') || text.includes('vs') || text.includes('versus')) {
+    if (!selected.includes('getStoreComparison')) selected.push('getStoreComparison')
+  }
+  if (text.includes('client') || text.includes('historique') || text.includes('commande de')) {
+    if (!selected.includes('getCustomerOrderHistory')) selected.push('getCustomerOrderHistory')
+  }
+  if (text.includes('recherche') || text.includes('trouve') || text.includes('cherche')) {
+    if (!selected.includes('getOrderSearch')) selected.push('getOrderSearch')
+  }
   if (
     text.includes('marché') ||
     text.includes('concurrence') ||
@@ -83,6 +124,15 @@ export function buildToolPlan(intent: AssistantIntent, userMessage: string): Pla
     getSupplierSummary: 'résumer la situation fournisseurs',
     getOrdersByStatus: 'analyser la distribution des statuts',
     getExpensesByCategory: 'ventiler les dépenses',
+    getDailyRevenueTrend: 'analyser la tendance du revenu quotidien',
+    getCityPerformance: 'analyser la performance par ville',
+    getConfirmationPerformance: 'évaluer les agents de confirmation',
+    getDeliveryPerformance: 'analyser la performance livraison',
+    getProductPerformance: 'analyser la performance détaillée des produits',
+    getAdsPerformanceByCampaign: 'analyser les campagnes publicitaires',
+    getStoreComparison: 'comparer les performances entre stores',
+    getOrderSearch: 'rechercher des commandes spécifiques',
+    getCustomerOrderHistory: 'consulter l’historique client',
     webSearch: 'enrichir avec contexte externe',
   }
 
@@ -143,6 +193,20 @@ export async function executeAgentTool(input: {
   if (toolName === 'getSupplierSummary') return withStoreMeta(await getSupplierSummary(supabase, storeIds))
   if (toolName === 'getOrdersByStatus') return withStoreMeta(await getOrdersByStatus(supabase, storeIds, range))
   if (toolName === 'getExpensesByCategory') return withStoreMeta(await getExpensesByCategory(supabase, storeIds, range))
+  if (toolName === 'getDailyRevenueTrend') return withStoreMeta(await getDailyRevenueTrend(supabase, storeIds, range))
+  if (toolName === 'getCityPerformance') return withStoreMeta(await getCityPerformance(supabase, storeIds, range))
+  if (toolName === 'getConfirmationPerformance') return withStoreMeta(await getConfirmationPerformance(supabase, storeIds, range))
+  if (toolName === 'getDeliveryPerformance') return withStoreMeta(await getDeliveryPerformance(supabase, storeIds, range))
+  if (toolName === 'getProductPerformance') return withStoreMeta(await getProductPerformance(supabase, storeIds, range))
+  if (toolName === 'getAdsPerformanceByCampaign') return withStoreMeta(await getAdsPerformanceByCampaign(supabase, storeIds, range))
+  if (toolName === 'getStoreComparison') return withStoreMeta(await getStoreComparison(supabase, storeIds, range))
+  if (toolName === 'getOrderSearch') return withStoreMeta(await getOrderSearch(supabase, storeIds, userMessage))
+  if (toolName === 'getCustomerOrderHistory') {
+    // Extraire le nom du client du message
+    const nameMatch = userMessage.match(/(?:client|commande\s+de)\s+([A-Za-zÀ-ÿ\s-]+)/i)
+    const customerName = nameMatch ? nameMatch[1].trim() : userMessage
+    return withStoreMeta(await getCustomerOrderHistory(supabase, storeIds, customerName))
+  }
   if (toolName === 'webSearch') {
     return {
       toolName,

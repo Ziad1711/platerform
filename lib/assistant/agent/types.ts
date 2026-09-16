@@ -16,10 +16,25 @@ export interface AgentStoreContext {
   userMainCurrency: string
 }
 
+export interface AgentScopeContext {
+  /** Stores réellement analysés par les tools */
+  scopeStoreIds: string[]
+  /** Store principal pour l'affichage (UI, devise, titre) */
+  displayStoreId: string
+  /** Nom du store principal */
+  displayStoreName: string
+  /** Devise d'affichage */
+  displayCurrency: string
+  /** Devise préférée de l'utilisateur */
+  userMainCurrency: string
+}
+
 export interface RunSecureAgentInput {
   supabase: SupabaseServerClient
-  storeIds: string[]
-  storeContext: AgentStoreContext
+  /** Stores réellement passés aux tools (scope multi-store) */
+  scopeStoreIds: string[]
+  /** Contexte du store principal pour l'affichage */
+  scopeContext: AgentScopeContext
   intent: AssistantIntent
   range: AnalyticsRange
   userMessage: string

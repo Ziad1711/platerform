@@ -4,6 +4,8 @@ import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency } from '@/lib/utils'
+import { detectStockMultiplier, normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
+import { syncProductVariants } from '@/lib/products/variant-sync'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown, Copy } from 'lucide-react'
@@ -16,6 +18,7 @@ type ProductVariantForm = {
   sku: string
   selling_price: string
   purchase_cost: string
+  stock_multiplier?: string | number
   option_values?: Record<string, string>
 }
 
@@ -30,6 +33,7 @@ const EMPTY_VARIANT: ProductVariantForm = {
   sku: '',
   selling_price: '0',
   purchase_cost: '0',
+  stock_multiplier: '1',
 }
 
 const EMPTY_ATTRIBUTE: VariantAttributeForm = {
@@ -117,12 +121,16 @@ const generateVariantsFromAttributes = ({
   return combinations.map((optionValues) => {
     const key = getCombinationKey(optionValues)
     const existing = existingByKey.get(key)
+    const generatedName = buildVariantName(optionValues)
     return {
       id: existing?.id,
-      name: buildVariantName(optionValues),
+      name: generatedName,
       sku: String(existing?.sku || '').trim() || buildVariantSku(baseSku, optionValues),
       selling_price: String(existing?.selling_price || defaultSellingPrice || '0'),
       purchase_cost: String(existing?.purchase_cost || '0'),
+      stock_multiplier: String(
+        existing?.stock_multiplier ?? detectStockMultiplier({ name: generatedName })
+      ),
       option_values: optionValues,
     } as ProductVariantForm
   })
@@ -186,6 +194,7 @@ export default function ProduitsPage() {
   const [selectedProductForEdit, setSelectedProductForEdit] = useState<any | null>(null)
   const [editName, setEditName] = useState('')
   const [editSku, setEditSku] = useState('')
+  const [editStockTrackingMode, setEditStockTrackingMode] = useState<'shared' | 'variant'>('variant')
   const [editSellingPrice, setEditSellingPrice] = useState('0')
   const [editError, setEditError] = useState('')
   const [editImageFile, setEditImageFile] = useState<File | null>(null)
@@ -254,7 +263,7 @@ export default function ProduitsPage() {
 
       let query = supabase
         .from('product_variants')
-        .select('id, product_id, name, sku, selling_price, purchase_cost, option_values')
+        .select('id, product_id, name, sku, selling_price, purchase_cost, stock_multiplier, option_values')
         .order('created_at', { ascending: true })
 
       if (currentStoreId) {
@@ -310,6 +319,7 @@ export default function ProduitsPage() {
           sku: variant.sku.trim(),
           selling_price: Number(variant.selling_price || 0),
           purchase_cost: Number(variant.purchase_cost || 0),
+          stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
           option_values: variant.option_values || {},
         }))
         .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
@@ -349,6 +359,7 @@ export default function ProduitsPage() {
               sku: variant.sku,
               selling_price: variant.selling_price,
               purchase_cost: variant.purchase_cost,
+              stock_multiplier: variant.stock_multiplier,
               option_values: variant.option_values,
             }))
           )
@@ -384,10 +395,12 @@ export default function ProduitsPage() {
 
       const normalizedVariants = (editingVariants || [])
         .map((variant) => ({
+          id: variant.id,
           name: variant.name.trim() || buildVariantName(variant.option_values || {}),
           sku: variant.sku.trim(),
           selling_price: Number(variant.selling_price || 0),
           purchase_cost: Number(variant.purchase_cost || 0),
+          stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
           option_values: variant.option_values || {},
         }))
         .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
@@ -397,30 +410,12 @@ export default function ProduitsPage() {
         if (!variant.sku) throw new Error('Chaque variante doit avoir un SKU.')
       }
 
-      const { error: deleteError } = await supabase
-        .from('product_variants')
-        .delete()
-        .eq('product_id', selectedProductForVariants.id)
-
-      if (deleteError) throw deleteError
-
-      if (normalizedVariants.length > 0) {
-        const { error: insertError } = await supabase
-          .from('product_variants')
-          .insert(
-            normalizedVariants.map((variant) => ({
-              store_id: selectedProductForVariants.store_id,
-              product_id: selectedProductForVariants.id,
-              name: variant.name,
-              sku: variant.sku,
-              selling_price: variant.selling_price,
-              purchase_cost: variant.purchase_cost,
-              option_values: variant.option_values,
-            }))
-          )
-
-        if (insertError) throw insertError
-      }
+      await syncProductVariants({
+        supabase,
+        storeId: selectedProductForVariants.store_id,
+        productId: selectedProductForVariants.id,
+        variants: normalizedVariants,
+      })
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] })
@@ -465,6 +460,9 @@ export default function ProduitsPage() {
         name: editName.trim(),
         sku: editSku.trim() || null,
         default_selling_price: hasVariants ? 0 : Number(editSellingPrice || 0),
+        stock_tracking_mode: editStockTrackingMode,
+        // Action explicite du marchand: la configuration stock/variantes est considérée confirmée.
+        stock_setup_confirmed_at: new Date().toISOString(),
       }
 
       if (imagePath !== undefined) {
@@ -481,10 +479,12 @@ export default function ProduitsPage() {
       if (hasVariants) {
         const normalizedVariants = (editingVariants || [])
           .map((variant) => ({
+            id: variant.id,
             name: variant.name.trim() || buildVariantName(variant.option_values || {}),
             sku: variant.sku.trim(),
             selling_price: Number(variant.selling_price || 0),
             purchase_cost: Number(variant.purchase_cost || 0),
+            stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
             option_values: variant.option_values || {},
           }))
           .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
@@ -494,30 +494,12 @@ export default function ProduitsPage() {
           if (!variant.sku) throw new Error('Chaque variante doit avoir un SKU.')
         }
 
-        const { error: deleteError } = await supabase
-          .from('product_variants')
-          .delete()
-          .eq('product_id', selectedProductForEdit.id)
-
-        if (deleteError) throw deleteError
-
-        if (normalizedVariants.length > 0) {
-          const { error: insertError } = await supabase
-            .from('product_variants')
-            .insert(
-              normalizedVariants.map((variant) => ({
-                store_id: selectedProductForEdit.store_id,
-                product_id: selectedProductForEdit.id,
-                name: variant.name,
-                sku: variant.sku,
-                selling_price: variant.selling_price,
-                purchase_cost: variant.purchase_cost,
-                option_values: variant.option_values,
-              }))
-            )
-
-          if (insertError) throw insertError
-        }
+        await syncProductVariants({
+          supabase,
+          storeId: selectedProductForEdit.store_id,
+          productId: selectedProductForEdit.id,
+          variants: normalizedVariants,
+        })
       }
     },
     onSuccess: async () => {
@@ -531,6 +513,7 @@ export default function ProduitsPage() {
       setEditName('')
       setEditSku('')
       setEditSellingPrice('0')
+      setEditStockTrackingMode('variant')
       setEditError('')
       setEditImageFile(null)
       setEditingAttributes([])
@@ -573,6 +556,7 @@ export default function ProduitsPage() {
               sku: variant.sku,
               selling_price: Number(variant.selling_price || 0),
               purchase_cost: Number(variant.purchase_cost || 0),
+              stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
               option_values: variant.option_values || {},
             }))
           )
@@ -949,6 +933,21 @@ export default function ProduitsPage() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm text-foreground mb-1">Gestion du stock</label>
+                <select
+                  value={editStockTrackingMode}
+                  onChange={(e) => setEditStockTrackingMode(e.target.value === 'shared' ? 'shared' : 'variant')}
+                  className="w-full border rounded-lg px-3 py-2"
+                >
+                  <option value="variant">Stock par variante (couleur, taille...)</option>
+                  <option value="shared">Stock unique partagé (packs quantité 1, 2, 3...)</option>
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  « Stock unique partagé » convient aux variantes qui représentent un nombre d’unités du même produit.
+                </p>
+              </div>
+
               {(editingVariants || []).length === 0 ? (
                 <div>
                   <label className="block text-sm text-foreground mb-1">Prix de vente</label>
@@ -1177,7 +1176,7 @@ export default function ProduitsPage() {
               </div>
 
               {(editingVariants || []).map((variant, index) => (
-                <div key={`edit-variant-${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_auto] gap-3 items-end border rounded-lg p-3">
+                <div key={`edit-variant-${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_0.6fr_auto] gap-3 items-end border rounded-lg p-3">
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">Nom variante</label>
                     <input
@@ -1226,6 +1225,21 @@ export default function ProduitsPage() {
                       className="w-full border rounded-lg px-3 py-2"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Qté / pack</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step="1"
+                      value={variant.stock_multiplier ?? '1'}
+                      onChange={(e) =>
+                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, stock_multiplier: e.target.value } : v)))
+                      }
+                      className="w-full border rounded-lg px-3 py-2"
+                      placeholder="1"
+                    />
+                  </div>
+
                   <div>
                     <button
                       type="button"
@@ -1460,7 +1474,7 @@ export default function ProduitsPage() {
               </div>
 
               {(editingVariants || []).map((variant, index) => (
-                <div key={`${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_auto] gap-3 items-end border rounded-lg p-3">
+                <div key={`${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_0.6fr_auto] gap-3 items-end border rounded-lg p-3">
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">Nom variante</label>
                     <input
@@ -1509,6 +1523,21 @@ export default function ProduitsPage() {
                       className="w-full border rounded-lg px-3 py-2"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Qté / pack</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step="1"
+                      value={variant.stock_multiplier ?? '1'}
+                      onChange={(e) =>
+                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, stock_multiplier: e.target.value } : v)))
+                      }
+                      className="w-full border rounded-lg px-3 py-2"
+                      placeholder="1"
+                    />
+                  </div>
+
                   <div>
                     <button
                       type="button"
@@ -2158,12 +2187,14 @@ export default function ProduitsPage() {
                                   setEditName(String(product.name || ''))
                                   setEditSku(String(product.sku || ''))
                                   setEditSellingPrice(String(product.default_selling_price || 0))
+                                  setEditStockTrackingMode(product.stock_tracking_mode === 'shared' ? 'shared' : 'variant')
                                   const variants = (variantsByProduct?.[product.id] || []).map((variant: any) => ({
                                     id: variant.id,
                                     name: String(variant.name || ''),
                                     sku: String(variant.sku || ''),
                                     selling_price: String(variant.selling_price ?? 0),
                                     purchase_cost: String(variant.purchase_cost ?? 0),
+                                    stock_multiplier: String(variant.stock_multiplier ?? 1),
                                     option_values: variant.option_values || {},
                                   }))
                                   setEditingAttributes(deriveAttributesFromVariants(variants))
@@ -2212,20 +2243,30 @@ export default function ProduitsPage() {
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">SKU</th>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Prix</th>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Coût</th>
+                                  <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Qté / pack</th>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Stock</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {productVariants.map((variant: any) => {
-                                  const variantStock = Number(variantStockData?.[variant.id] || 0)
+                                  const ownStock = variantStockData?.[variant.id]
+                                  const isSharedStock = product.stock_tracking_mode === 'shared'
+                                  const variantStock = isSharedStock ? Number(stock || 0) : Number(ownStock || 0)
+                                  const multiplier = normalizeStockMultiplier(variant.stock_multiplier)
                                   return (
                                     <tr key={variant.id} className="border-t border-border/60">
                                       <td className="px-4 py-2 text-sm text-foreground">{String(variant.name || '-')}</td>
                                       <td className="px-4 py-2 text-sm text-muted-foreground">{String(variant.sku || '-')}</td>
                                       <td className="px-4 py-2 text-sm text-foreground">{formatCurrency(Number(variant.selling_price || 0))}</td>
                                       <td className="px-4 py-2 text-sm text-foreground">{formatCurrency(Number(variant.purchase_cost || 0))}</td>
+                                      <td className="px-4 py-2 text-sm text-foreground">
+                                        {multiplier > 1 ? `${multiplier} unités` : '1 unité'}
+                                      </td>
                                       <td className={`px-4 py-2 text-sm font-medium ${variantStock > 0 ? 'text-green-600' : variantStock === 0 ? 'text-yellow-600' : 'text-red-600'}`}>
                                         {variantStock}
+                                        {isSharedStock ? (
+                                          <span className="ml-1 text-[11px] font-normal text-muted-foreground">(global)</span>
+                                        ) : null}
                                       </td>
                                     </tr>
                                   )

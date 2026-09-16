@@ -3,7 +3,8 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, normalizeMoroccanPhone } from '@/lib/utils'
+import { normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
 import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil } from 'lucide-react'
 import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
@@ -879,7 +880,7 @@ export default function VentesPage() {
 
       let query = supabase
         .from('products')
-        .select('id, name, default_selling_price, default_purchase_cost')
+        .select('id, name, default_selling_price, default_purchase_cost, stock_tracking_mode')
         .order('created_at', { ascending: false })
 
       query = query.eq('store_id', selectedCreateStoreId)
@@ -929,7 +930,7 @@ export default function VentesPage() {
 
       const { data, error } = await supabase
         .from('product_variants')
-        .select('id, product_id, name, sku, selling_price, purchase_cost')
+        .select('id, product_id, name, sku, selling_price, purchase_cost, stock_multiplier')
         .in('store_id', editVariantsStoreIds)
         .order('created_at', { ascending: true })
 
@@ -971,7 +972,7 @@ export default function VentesPage() {
 
       const { data, error } = await supabase
         .from('product_variants')
-        .select('id, product_id, name, sku, selling_price, purchase_cost')
+        .select('id, product_id, name, sku, selling_price, purchase_cost, stock_multiplier')
         .eq('store_id', selectedCreateStoreId)
         .order('created_at', { ascending: true })
 
@@ -1502,22 +1503,38 @@ export default function VentesPage() {
       if (!selectedDeliveryCompanyId) throw new Error('Choisissez une société de livraison (ou Owner).')
 
       for (const item of validItems) {
+        const productName = String(productsMap.get(item.product_id)?.name || 'Produit')
         const productVariants = variantsByProductId?.[item.product_id] || []
         if (productVariants.length > 0 && !item.product_variant_id) {
-          const productName = String(productsMap.get(item.product_id)?.name || 'Produit')
           throw new Error(`Veuillez choisir une variante pour "${productName}".`)
         }
 
-        const stockKey = `${item.product_id}::${item.product_variant_id || '__no_variant__'}`
-        const availableStock = Number(stockMap[stockKey] || 0)
-        const productName = String(productsMap.get(item.product_id)?.name || 'Produit')
+        // Mode "stock partagé": on additionne toutes les variantes du produit.
+        // Mode "stock par variante": on utilise le stock de la variante + le stock produit sans variante.
+        const stockPrefix = `${item.product_id}::`
+        const stockEntries = Object.entries(stockMap as Record<string, number>)
+        const productStockTotal = stockEntries.reduce(
+          (sum, [key, value]) => (key.startsWith(stockPrefix) ? sum + Number(value || 0) : sum),
+          0
+        )
+        const isSharedMode = productsMap.get(item.product_id)?.stock_tracking_mode === 'shared'
+        const availableStock = isSharedMode
+          ? productStockTotal
+          : Number((stockMap as Record<string, number>)[`${stockPrefix}${item.product_variant_id || '__no_variant__'}`] || 0) +
+            Number((stockMap as Record<string, number>)[`${stockPrefix}__no_variant__`] || 0)
+
+        const selectedVariant = productVariants.find((v: any) => v.id === item.product_variant_id)
+        const multiplier = normalizeStockMultiplier(selectedVariant?.stock_multiplier)
+        const requiredQuantity = Number(item.quantity || 0) * multiplier
 
         if (availableStock <= 0) {
           throw new Error(`Le produit "${productName}" est en rupture de stock.`)
         }
 
-        if (Number(item.quantity) > availableStock) {
-          throw new Error(`Stock insuffisant pour "${productName}". Disponible: ${availableStock}.`)
+        if (requiredQuantity > availableStock) {
+          throw new Error(
+            `Stock insuffisant pour "${productName}". Disponible: ${availableStock}, requis: ${requiredQuantity}.`
+          )
         }
       }
 
@@ -1581,7 +1598,7 @@ export default function VentesPage() {
         .insert({
           store_id: selectedCreateStoreId,
           customer_name: customerName.trim(),
-          phone: phone.trim(),
+          phone: normalizeMoroccanPhone(phone),
           address: address.trim(),
           city: normalizedCityValue,
           delivery_city_external_id: normalizedCityKey,
@@ -1606,6 +1623,11 @@ export default function VentesPage() {
       const orderItemsPayload = validItems.map((item) => {
         const product = productsMap.get(item.product_id)
         const variant = (variantsByProductId?.[item.product_id] || []).find((v: any) => v.id === item.product_variant_id)
+        const multiplier = normalizeStockMultiplier(variant?.stock_multiplier)
+        const variantCost = Number(variant?.purchase_cost || 0)
+        // Coût d'UNE UNITÉ VENDUE: coût explicite de la variante, sinon coût physique × multiplicateur du pack.
+        const unitPurchaseCost =
+          variantCost > 0 ? variantCost : Number(product?.default_purchase_cost || 0) * multiplier
         return {
           store_id: selectedCreateStoreId,
           order_id: insertedOrder.id,
@@ -1613,7 +1635,7 @@ export default function VentesPage() {
           product_variant_id: item.product_variant_id || null,
           quantity: Number(item.quantity || 1),
           unit_selling_price: Number(item.unit_selling_price || 0),
-          unit_purchase_cost_snapshot: Number(variant?.purchase_cost ?? product?.default_purchase_cost ?? 0),
+          unit_purchase_cost_snapshot: unitPurchaseCost,
         }
       })
 
@@ -1801,7 +1823,7 @@ export default function VentesPage() {
     mutationFn: async ({ orderId, field, value }: { orderId: string; field: string; value: any }) => {
       const { error } = await supabase
         .from('orders')
-        .update({ [field]: value })
+        .update({ [field]: field === 'phone' ? normalizeMoroccanPhone(value) : value })
         .eq('id', orderId)
 
       if (error) throw error
@@ -2528,7 +2550,7 @@ export default function VentesPage() {
           store_id: currentStoreId,
           order_date: orderDateIso,
           customer_name: customerName,
-          phone: phoneValue,
+          phone: normalizeMoroccanPhone(phoneValue),
           address: addressValue,
           city: String(normalizedCityPayload.cityName || cityValue).trim(),
           delivery_city_external_id: normalizedCityKey,
@@ -3887,7 +3909,7 @@ export default function VentesPage() {
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Date</div>
                   </th>
-                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="sticky left-0 z-10 bg-secondary px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border">
                     <div className="flex items-center justify-center text-center">Client</div>
                   </th>
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -3899,8 +3921,11 @@ export default function VentesPage() {
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Ville</div>
                   </th>
-                  <th rowSpan={2} className="px-4 sm:px-8 py-1 sm:py-2 text-center align-middle text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="w-auto min-w-[200px] sm:min-w-[280px] px-6 sm:px-12 py-1 sm:py-2 text-center align-middle text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Adresse</div>
+                  </th>
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="flex items-center justify-center text-center">Note livraison</div>
                   </th>
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Vente</div>
@@ -3979,7 +4004,7 @@ export default function VentesPage() {
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-muted-foreground">
                         {formatDateTime(order.order_date)}
                       </td>
-                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
+                      <td className="sticky left-0 z-10 bg-card px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border">
                         <div className="text-xs sm:text-sm font-medium text-foreground">
                           <InlineEditText
                             value={order.customer_name || ''}
@@ -4057,13 +4082,29 @@ export default function VentesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] font-medium text-foreground">
+                      <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] text-foreground">
                         <InlineEditProducts
                           items={order.order_items || []}
                           products={(products && products.length > 0) ? products : (editProducts || [])}
                           variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
                           onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
                           onClose={() => {}}
+                        />
+                      </td>
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
+                        <InlineEditProducts
+                          items={order.order_items || []}
+                          products={(products && products.length > 0) ? products : (editProducts || [])}
+                          variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
+                          onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
+                          onClose={() => {}}
+                          triggerLabel={(order.order_items || [])
+                            .map((item: any) => {
+                              const variantName = item?.product_variant_id ? orderVariantsById?.[item.product_variant_id]?.name : null
+                              return variantName || ''
+                            })
+                            .filter(Boolean)
+                            .join(', ') || '—'}
                         />
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
@@ -4075,10 +4116,18 @@ export default function VentesPage() {
                           }}
                         />
                       </td>
-                      <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] text-foreground">
+                      <td className="w-auto min-w-[200px] sm:min-w-[280px] px-6 sm:px-12 py-1 sm:py-2 text-[10px] sm:text-[11px] text-foreground">
                         <InlineEditAddressModal
                           value={order.address || ''}
+                          className="block w-auto max-w-[200px] sm:max-w-[300px] whitespace-normal break-words"
                           onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'address', value: val })}
+                        />
+                      </td>
+                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
+                        <InlineEditText
+                          value={order.delivery_note || ''}
+                          onSave={(val) => updateOrderFieldMutation.mutate({ orderId: order.id, field: 'delivery_note', value: val })}
+                          placeholder="Note livraison"
                         />
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-foreground">

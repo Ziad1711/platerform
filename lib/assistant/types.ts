@@ -9,11 +9,25 @@ export type AssistantIntent =
   | 'supplier_summary'
   | 'recent_orders'
   | 'comparison_request'
+  | 'period_comparison'
   | 'chart_request'
   | 'performance_request'
   | 'generic_business_chat'
 
-export type AnalyticsRange = 'yesterday' | '7d' | '30d' | 'month' | 'last_month'
+export interface ComparisonRange {
+  rangeA: AnalyticsRange
+  rangeB: AnalyticsRange
+  labelA: string
+  labelB: string
+}
+
+export type AnalyticsRange =
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | 'month'
+  | 'last_month'
+  | { start: string; end: string }
 
 export interface AssistantUsage {
   inputTokens: number

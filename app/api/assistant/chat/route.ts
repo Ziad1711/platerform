@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { addMessage, createThread, getThread, listMessages, touchThread } from '@/lib/assistant/chat'
 import { computeCreditsUsed, debitCredits, ensureCreditsAvailable, estimateCreditsForPrompt, toWalletSnapshot } from '@/lib/assistant/credits'
-import { asksForOtherStore, resolveIntent, resolveRangeFromQuestion } from '@/lib/assistant/intents'
+import { asksForOtherStore, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
 import { getAssistantModelName } from '@/lib/assistant/providers'
 import { buildGreetingResponse, buildSmallTalkResponse, buildStructuredResponseFromContext } from '@/lib/assistant/response'
 import { getAccessibleStoreIds, getErrorStatus, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
@@ -134,8 +134,16 @@ export async function POST(request: Request) {
       .slice(-8)
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
+    // Restaurer la mémoire analytique depuis les métadonnées du thread
+    // On cherche dans le dernier message assistant qui contient la mémoire la plus récente
+    const lastAssistantMsg = [...previousMessages].reverse().find(m => m.role === 'assistant')
+    const threadMeta = lastAssistantMsg?.metadata as Record<string, unknown> | undefined
+    const threadMemory: ThreadAnalyticMemory = threadMeta?.analytic_memory
+      ? (threadMeta.analytic_memory as ThreadAnalyticMemory)
+      : createEmptyMemory()
+
     const intent = resolveIntent(message)
-    const range = resolveRangeFromQuestion(message)
+    const range = resolveRangeFromQuestion(message, threadMemory)
 
     if (intent === 'greeting' || intent === 'small_talk') {
       const structuredResponse = intent === 'greeting' ? buildGreetingResponse() : buildSmallTalkResponse()
@@ -179,11 +187,12 @@ export async function POST(request: Request) {
 
     const agentResult = await runSecureAssistantAgent({
       supabase,
-      storeIds: [selectedStoreId],
-      storeContext: {
-        storeId: selectedStoreId,
-        storeName: String(storeMeta.name || 'Store'),
-        storeCurrency: resolvedStoreCurrency,
+      scopeStoreIds: targetStoreIds,
+      scopeContext: {
+        scopeStoreIds: targetStoreIds,
+        displayStoreId: selectedStoreId,
+        displayStoreName: String(storeMeta.name || 'Store'),
+        displayCurrency: resolvedStoreCurrency,
         userMainCurrency,
       },
       intent,
@@ -203,6 +212,9 @@ export async function POST(request: Request) {
 
     const structuredResponse = agentResult.structuredResponse || buildStructuredResponseFromContext(intent, providerResult.text, {})
 
+    // Mettre à jour la mémoire analytique et la persister dans les métadonnées
+    const updatedMemory = updateMemoryFromAnalysis(threadMemory, message, range, intent)
+
     await addMessage(supabase, ensuredThreadId, 'user', message, 0)
     const assistantMessage = await addMessage(
       supabase,
@@ -210,7 +222,10 @@ export async function POST(request: Request) {
       'assistant',
       structuredResponse.message_text,
       creditsUsed,
-      { structured_response: structuredResponse }
+      {
+        structured_response: structuredResponse,
+        analytic_memory: updatedMemory,
+      }
     )
     const nextTitle = isFirstExchange
       ? resolveAiThreadTitle(structuredResponse.conversation_title) || buildAutoThreadTitle(message, structuredResponse.message_text)

@@ -1,4 +1,6 @@
 import { listYouCanOrders, listYouCanProducts } from '@/lib/integrations/youcan'
+import { detectStockMultiplier } from '@/lib/integrations/variant-stock'
+import { normalizeMoroccanPhone } from '@/lib/utils'
 type SupabaseAdmin = any
 
 function parseDate(value: string | null | undefined) {
@@ -241,6 +243,7 @@ async function upsertVariantFromYouCan(params: {
     return null
   }
   const variantName = buildVariantDisplayName(variant)
+  const stockMultiplier = detectStockMultiplier({ name: variantName, optionValues })
 
   const { data: existingProduct } = await supabase
     .from('products')
@@ -287,6 +290,7 @@ async function upsertVariantFromYouCan(params: {
         selling_price: Number.isFinite(sellingPrice) ? sellingPrice : 0,
         purchase_cost: Number.isFinite(purchaseCost) ? purchaseCost : 0,
         option_values: optionValues,
+        stock_multiplier: stockMultiplier,
       })
       .select('id')
       .single()
@@ -303,6 +307,9 @@ async function upsertVariantFromYouCan(params: {
         selling_price: Number.isFinite(sellingPrice) ? sellingPrice : 0,
         purchase_cost: Number.isFinite(purchaseCost) ? purchaseCost : 0,
         option_values: optionValues,
+        // Un multiplicateur détecté explicitement (ex: "3 pièces") met à jour la variante.
+        // Sinon on conserve la valeur configurée manuellement.
+        ...(stockMultiplier > 1 ? { stock_multiplier: stockMultiplier } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', variantId)
@@ -325,6 +332,19 @@ async function upsertVariantFromYouCan(params: {
   return { variantId, youcanVariantId }
 }
 
+export type YouCanPendingVariantSetup = {
+  productId: string
+  productName: string
+  stockTrackingMode: 'shared' | 'variant'
+  variants: Array<{
+    id: string
+    name: string
+    sku: string
+    sellingPrice: number
+    stockMultiplier: number
+  }>
+}
+
 export async function importYouCanProducts(params: {
   supabase: SupabaseAdmin
   integrationId: string
@@ -336,6 +356,29 @@ export async function importYouCanProducts(params: {
 
   let page = 1
   let imported = 0
+  const pendingVariantSetup: YouCanPendingVariantSetup[] = []
+
+  // Les produits dont la configuration stock/variantes a déjà été confirmée
+  // ne sont plus proposés à chaque synchronisation.
+  const { data: configuredRows, error: configuredError } = await supabase
+    .from('products')
+    .select('id, stock_setup_confirmed_at, stock_tracking_mode')
+    .eq('store_id', storeId)
+
+  if (configuredError) throw configuredError
+
+  const configuredProductIds = new Set(
+    (configuredRows || [])
+      .filter((row: any) => Boolean(row.stock_setup_confirmed_at))
+      .map((row: any) => String(row.id))
+  )
+
+  const productModeById = new Map<string, 'shared' | 'variant'>(
+    (configuredRows || []).map((row: any) => [
+      String(row.id),
+      row.stock_tracking_mode === 'shared' ? 'shared' : 'variant',
+    ])
+  )
 
   while (true) {
     const payload = await listYouCanProducts({ accessToken, page })
@@ -357,8 +400,11 @@ export async function importYouCanProducts(params: {
       const variants = rawVariants.filter((variant: any) =>
         shouldImportProductVariant(variant, rawVariants.length)
       )
+
+      const variantRefs: YouCanPendingVariantSetup['variants'] = []
+
       for (const variant of variants) {
-        await upsertVariantFromYouCan({
+        const upsertedVariant = await upsertVariantFromYouCan({
           supabase,
           integrationId,
           userId,
@@ -366,6 +412,53 @@ export async function importYouCanProducts(params: {
           productId,
           variant,
           allowWithoutOptions: rawVariants.length > 1,
+        })
+
+        if (!upsertedVariant?.variantId) continue
+
+        const label = buildVariantDisplayName(variant)
+        variantRefs.push({
+          id: String(upsertedVariant.variantId),
+          name: label,
+          sku: normalizeVariantSku(variant, String(variant?.id || '')),
+          sellingPrice: Number(variant?.price || 0),
+          stockMultiplier: detectStockMultiplier({
+            name: label,
+            optionValues: getVariantOptionValues(variant),
+          }),
+        })
+      }
+
+      // Quantités explicites fournies par la source (ex: "2 unités") => packs quantité
+      // sur un stock unique : le mode est déduit sans ambiguïté, aucune confirmation requise.
+      const hasExplicitPackQuantity =
+        variantRefs.length >= 2 && variantRefs.some((variant) => variant.stockMultiplier > 1)
+
+      if (hasExplicitPackQuantity) {
+        await supabase
+          .from('products')
+          .update({
+            stock_tracking_mode: 'shared',
+            stock_setup_confirmed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', productId)
+          .eq('store_id', storeId)
+      }
+
+      // Plusieurs variantes dont aucune n'indique une quantité explicite
+      // => probable pack quantité à confirmer par l'utilisateur.
+      const needsVariantSetup =
+        variantRefs.length >= 2 &&
+        variantRefs.every((variant) => variant.stockMultiplier === 1) &&
+        !configuredProductIds.has(String(productId))
+
+      if (needsVariantSetup) {
+        pendingVariantSetup.push({
+          productId,
+          productName: String(product?.name || 'Produit YouCan'),
+          stockTrackingMode: productModeById.get(String(productId)) || 'variant',
+          variants: variantRefs,
         })
       }
 
@@ -377,7 +470,7 @@ export async function importYouCanProducts(params: {
     page += 1
   }
 
-  return imported
+  return { imported, pendingVariantSetup }
 }
 
 async function resolveInternalVariantAndProduct(params: {
@@ -520,12 +613,12 @@ export async function upsertYouCanOrderFromPayload(params: {
   const customerName =
     pickFirstNonBlankString(customerNameFromFirstAndLast, customer?.full_name) || 'Client YouCan'
 
-  const phone = pickFirstNonBlankString(
+  const phone = normalizeMoroccanPhone(pickFirstNonBlankString(
     customer?.phone,
     shippingAddress?.phone,
     paymentAddress?.phone,
     customerAddress?.phone
-  )
+  ))
 
   const address = pickFirstNonEmptyAddress(
     pickAddressLine(shippingAddress),

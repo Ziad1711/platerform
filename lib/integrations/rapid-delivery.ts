@@ -1,3 +1,5 @@
+import { normalizeMoroccanPhone } from '@/lib/utils'
+
 const RAPID_DELIVERY_API_BASE_URL = 'https://www.rapiddelivery.ma/api/v1'
 
 type RapidDeliveryRequestInit = {
@@ -181,7 +183,7 @@ export type RapidDeliveryParcelPayload = {
 }
 
 export function normalizeRapidDeliveryPhone(value: string) {
-  return String(value || '').replace(/\s+/g, '').trim()
+  return normalizeMoroccanPhone(value)
 }
 
 export async function listRapidDeliveryShops(token: string) {

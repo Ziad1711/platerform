@@ -16,6 +16,7 @@ import AmeexConnectWizard from '@/components/dashboard/integrations/ameex-connec
 import SenditConnectWizard from '@/components/dashboard/integrations/sendit-connect-wizard'
 import DigylogConnectWizard from '@/components/dashboard/integrations/digylog-connect-wizard'
 import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
+import VariantStockSetupModal, { type PendingVariantSetupProduct } from '@/components/dashboard/integrations/variant-stock-setup-modal'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store-context'
@@ -58,6 +59,8 @@ export default function IntegrationsPage() {
   const [importProducts, setImportProducts] = useState(true)
   const [importOrders, setImportOrders] = useState(true)
   const [sinceDate, setSinceDate] = useState('2026-01-01')
+  const [variantSetupStoreId, setVariantSetupStoreId] = useState('')
+  const [variantSetupProducts, setVariantSetupProducts] = useState<PendingVariantSetupProduct[]>([])
   const [isStartingImport, setIsStartingImport] = useState(false)
   const [importError, setImportError] = useState('')
   const [isCustomSiteModalOpen, setIsCustomSiteModalOpen] = useState(false)
@@ -318,9 +321,61 @@ export default function IntegrationsPage() {
         throw new Error(errorPayload?.error || 'Lancement import impossible')
       }
 
+      const payload = (await response.json().catch(() => null)) as
+        | { pendingVariantSetup?: PendingVariantSetupProduct[] }
+        | null
+
       setIsImportModalOpen(false)
+
+      if (payload?.pendingVariantSetup?.length) {
+        setVariantSetupStoreId(currentStoreId)
+        setVariantSetupProducts(payload.pendingVariantSetup)
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['products'] })
+      await queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] })
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Erreur import')
+    } finally {
+      setIsStartingImport(false)
+    }
+  }
+
+  /**
+   * Reprend la configuration stock/variantes restée en attente (import "Plus tard"
+   * ou configuration interrompue).
+   */
+  const handleOpenPendingVariantSetup = async () => {
+    if (!currentStoreId) {
+      setImportError('Sélectionnez un store avant de continuer.')
+      return
+    }
+
+    setIsStartingImport(true)
+    setImportError('')
+
+    try {
+      const response = await fetch(
+        `/api/integrations/youcan/variants/configure?storeId=${encodeURIComponent(currentStoreId)}`
+      )
+      const payload = (await response.json().catch(() => null)) as
+        | { pendingVariantSetup?: PendingVariantSetupProduct[]; error?: string }
+        | null
+
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Chargement impossible')
+      }
+
+      if (!payload?.pendingVariantSetup?.length) {
+        setImportError('Aucune configuration de variantes en attente.')
+        return
+      }
+
+      setIsImportModalOpen(false)
+      setVariantSetupStoreId(currentStoreId)
+      setVariantSetupProducts(payload.pendingVariantSetup)
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Chargement impossible')
     } finally {
       setIsStartingImport(false)
     }
@@ -783,10 +838,30 @@ export default function IntegrationsPage() {
               >
                 {isStartingImport ? 'Import en cours...' : 'Démarrer import'}
               </button>
+
+              <button
+                type="button"
+                onClick={() => void handleOpenPendingVariantSetup()}
+                disabled={isStartingImport}
+                className="w-full rounded-xl border border-border py-3 text-sm text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Configurer les variantes en attente
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {variantSetupProducts.length > 0 && variantSetupStoreId ? (
+        <VariantStockSetupModal
+          storeId={variantSetupStoreId}
+          products={variantSetupProducts}
+          onDone={() => {
+            setVariantSetupProducts([])
+            setVariantSetupStoreId('')
+          }}
+        />
+      ) : null}
     </div>
   )
 }

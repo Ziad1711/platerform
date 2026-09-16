@@ -269,6 +269,12 @@ export async function POST(request: Request) {
           trackingNumber = result.trackingNumber
         } catch (error) {
           warning = error instanceof Error ? error.message : 'AUTO_PARCEL_CREATE_FAILED'
+          console.error('Rapid Delivery auto parcel creation failed', {
+            orderId,
+            storeId: order.store_id,
+            integrationId: integration.id,
+            error: warning,
+          })
         }
       }
 

@@ -1,7 +1,7 @@
 import { getAssistantProvider } from '@/lib/assistant/providers'
 import { buildStructuredResponseFromContext } from '@/lib/assistant/response'
-import type { AssistantStructuredResponse } from '@/lib/assistant/types'
-import { buildAgentSystemPrompt, buildAgentUserPrompt } from '@/lib/assistant/prompt'
+import type { AnalyticsRange, AssistantStructuredResponse, ComparisonRange } from '@/lib/assistant/types'
+import { buildAgentSystemPrompt, buildAgentUserPrompt, buildPeriodComparisonUserPrompt } from '@/lib/assistant/prompt'
 import { buildToolPlan, executeAgentTool, type AgentToolName } from '@/lib/assistant/agent/tools'
 import type { AgentStep, RunSecureAgentInput, RunSecureAgentOutput } from '@/lib/assistant/agent/types'
 
@@ -32,38 +32,48 @@ function buildServerTruthMetrics(toolData: Record<string, any>, currency: string
   }
 }
 
+function formatRangeLabel(range: AnalyticsRange): string {
+  if (typeof range === 'object' && 'start' in range && 'end' in range) {
+    const start = new Date(range.start).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    const end = new Date(range.end).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    return `du ${start} au ${end}`
+  }
+  switch (range) {
+    case 'yesterday': return 'hier'
+    case '7d': return 'des 7 derniers jours'
+    case '30d': return 'des 30 derniers jours'
+    case 'month': return 'du mois en cours'
+    case 'last_month': return 'du mois dernier'
+    default: return 'de la période demandée'
+  }
+}
+
 function buildTruthMessageText(input: {
-  range: string
+  range: AnalyticsRange
   metrics: ReturnType<typeof buildServerTruthMetrics>
   llmText?: string
 }) {
   const { range, metrics, llmText } = input
+  const rangeLabel = formatRangeLabel(range)
 
   if (metrics.totalOrders === 0) {
-    if (range === 'yesterday') {
-      return "Hier, vous n'avez réalisé aucune vente."
-    }
-    return "Sur la période demandée, vous n'avez réalisé aucune vente."
+    return `Sur la période ${rangeLabel}, vous n'avez réalisé aucune vente.`
   }
 
-  const intro =
-    range === 'yesterday'
-      ? `Hier, vous avez réalisé ${formatAmount(metrics.revenue, metrics.currency)} sur ${formatCount(metrics.totalOrders)} commande(s), dont ${formatCount(metrics.deliveredOrders)} livrée(s).`
-      : `Sur la période demandée, vous avez réalisé ${formatAmount(metrics.revenue, metrics.currency)} sur ${formatCount(metrics.totalOrders)} commande(s), dont ${formatCount(metrics.deliveredOrders)} livrée(s).`
+  const intro = `Sur la période ${rangeLabel}, vous avez réalisé ${formatAmount(metrics.revenue, metrics.currency)} sur ${formatCount(metrics.totalOrders)} commande(s), dont ${formatCount(metrics.deliveredOrders)} livrée(s).`
 
   const profitLine = `Profit estimé: ${formatAmount(metrics.profit, metrics.currency)}.`
   const adsLine = `Dépenses publicitaires: ${formatAmount(metrics.adsSpend, metrics.currency)}.`
 
-  const safeExplanation = String(llmText || '')
-    .replace(/[0-9]+([.,][0-9]+)?/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  // On ne supprime plus les chiffres du texte LLM
+  // On sépare clairement : faits validés serveur + interprétation LLM
+  const explanation = String(llmText || '').trim()
 
-  if (!safeExplanation) {
+  if (!explanation) {
     return `${intro}\n\n${profitLine} ${adsLine}`
   }
 
-  return `${intro}\n\n${profitLine} ${adsLine}\n\n${safeExplanation}`
+  return `${intro}\n\n${profitLine} ${adsLine}\n\n${explanation}`
 }
 
 function buildTruthMetricsSummary(metrics: ReturnType<typeof buildServerTruthMetrics>) {
@@ -98,6 +108,15 @@ function getToolLabel(toolName: AgentToolName) {
     getSupplierSummary: 'Analyse fournisseurs',
     getOrdersByStatus: 'Analyse statuts commandes',
     getExpensesByCategory: 'Analyse des dépenses',
+    getDailyRevenueTrend: 'Tendance du revenu quotidien',
+    getCityPerformance: 'Analyse performance villes',
+    getConfirmationPerformance: 'Analyse agents confirmation',
+    getDeliveryPerformance: 'Analyse performance livraison',
+    getProductPerformance: 'Analyse détaillée produits',
+    getAdsPerformanceByCampaign: 'Analyse campagnes publicitaires',
+    getStoreComparison: 'Comparaison entre stores',
+    getOrderSearch: 'Recherche de commandes',
+    getCustomerOrderHistory: 'Historique client',
     webSearch: 'Recherche web contextuelle',
   }
 
@@ -122,11 +141,15 @@ function parseProviderStructuredOutput(text: string): Partial<AssistantStructure
 }
 
 export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promise<RunSecureAgentOutput> {
-  const { supabase, storeIds, storeContext, intent, range, userMessage, conversationHistory, providerModel } = input
+  const { supabase, scopeStoreIds, scopeContext, intent, range, userMessage, conversationHistory, providerModel } = input
   const provider = getAssistantProvider()
 
+  const storeLabel = scopeContext.scopeStoreIds.length > 1
+    ? `${scopeContext.scopeStoreIds.length} stores`
+    : scopeContext.displayStoreName
+
   const activitySteps: AgentStep[] = [
-    { label: 'Vérification des accès', detail: `store ${storeContext.storeName} (${storeContext.storeId}) validé` },
+    { label: 'Vérification des accès', detail: `${storeLabel} validé(s)` },
   ]
 
   const plannedTools = buildToolPlan(intent, userMessage)
@@ -138,8 +161,13 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     activitySteps.push({ label: `Plan: ${getToolLabel(planned.toolName)}`, detail: planned.reason })
     const result = await executeAgentTool({
       supabase,
-      storeIds,
-      storeContext,
+      storeIds: scopeStoreIds,
+      storeContext: {
+        storeId: scopeContext.displayStoreId,
+        storeName: scopeContext.displayStoreName,
+        storeCurrency: scopeContext.displayCurrency,
+        userMainCurrency: scopeContext.userMainCurrency,
+      },
       range,
       toolName: planned.toolName,
       userMessage,
@@ -151,13 +179,23 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
 
   activitySteps.push({ label: 'Génération de la réponse' })
 
-  const systemPrompt = buildAgentSystemPrompt(intent, storeContext)
+  const systemPrompt = buildAgentSystemPrompt(intent, {
+    storeId: scopeContext.displayStoreId,
+    storeName: scopeContext.displayStoreName,
+    storeCurrency: scopeContext.displayCurrency,
+    userMainCurrency: scopeContext.userMainCurrency,
+  })
   const userPrompt = buildAgentUserPrompt({
     userMessage,
     range,
     selectedTools: plannedTools.map((x) => x.toolName),
     toolResults,
-    storeContext,
+    storeContext: {
+      storeId: scopeContext.displayStoreId,
+      storeName: scopeContext.displayStoreName,
+      storeCurrency: scopeContext.displayCurrency,
+      userMainCurrency: scopeContext.userMainCurrency,
+    },
   })
 
   const providerResult = await provider.chat({
@@ -178,7 +216,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   }
 
   const fallbackStructured = buildStructuredResponseFromContext(intent, parsed.message_text || providerResult.text, {
-    currency: storeContext.storeCurrency,
+    currency: scopeContext.displayCurrency,
     data: {
       ...toolData,
       kpis: toolData.getDashboardKPIs,
@@ -201,7 +239,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
       toolData.getRecentOrders
   )
 
-  const serverTruthMetrics = buildServerTruthMetrics(toolData, storeContext.storeCurrency)
+  const serverTruthMetrics = buildServerTruthMetrics(toolData, scopeContext.displayCurrency)
   const forcedZeroData = hasSalesToolData && serverTruthMetrics.totalOrders === 0
   const forcedMessage = buildTruthMessageText({
     range,
@@ -211,14 +249,16 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   const forcedSummary = buildTruthMetricsSummary(serverTruthMetrics)
 
   console.info('[assistant:debug:tool_results]', {
-    storeId: storeContext.storeId,
+    storeId: scopeContext.displayStoreId,
+    scopeStoreIds: scopeContext.scopeStoreIds,
     range,
     intent,
     tools: Object.keys(toolData),
     toolData,
   })
   console.info('[assistant:debug:final_metrics]', {
-    storeId: storeContext.storeId,
+    storeId: scopeContext.displayStoreId,
+    scopeStoreIds: scopeContext.scopeStoreIds,
     range,
     intent,
     forcedZeroData,
@@ -249,7 +289,8 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   }
 
   console.info('[assistant:debug:final_response]', {
-    storeId: storeContext.storeId,
+    storeId: scopeContext.displayStoreId,
+    scopeStoreIds: scopeContext.scopeStoreIds,
     range,
     intent,
     structuredResponse,

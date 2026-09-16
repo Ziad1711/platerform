@@ -1,83 +1,165 @@
-import type { AssistantIntent } from '@/lib/assistant/types'
-import type { AgentStoreContext } from '@/lib/assistant/agent/types'
+import type { AnalyticsRange, AssistantIntent, ComparisonRange } from '@/lib/assistant/types'
 
-export function buildSystemPrompt(intent: AssistantIntent) {
-  return [
-    'Tu es un assistant IA agentique pour un SaaS e-commerce COD en français.',
-    'Tu n’as jamais accès directement à des données d’autres utilisateurs.',
-    'Tu travailles uniquement sur le store validé côté serveur et fourni par les outils.',
-    'Tu peux demander des outils sécurisés pour interroger la base, calculer des métriques, préparer des graphiques et enrichir l’analyse.',
-    'Tu ne dois jamais inventer des chiffres absents.',
-    'Si les données sont insuffisantes, indique clairement ce qui manque.',
-    'Quand le message est une salutation simple, réponds naturellement sans lancer d’analyse business automatique.',
-    'Quand la question demande une analyse, utilise les données récupérées par les outils.',
-    'Rends des réponses utiles, structurées, orientées action.',
-    'Les graphiques doivent être renvoyés sous forme de structure de données, pas en HTML.',
-    'La devise doit venir du store validé.',
-    "Tu n'as PAS le droit de générer des chiffres.",
-    'Tu dois uniquement utiliser les données fournies.',
-    "Si aucune donnée n'est disponible, dis explicitement qu'il n'y a aucune donnée.",
-    `Intent détecté: ${intent}`,
-  ].join('\n')
+interface StoreContext {
+  storeId: string
+  storeName: string
+  storeCurrency: string
+  userMainCurrency: string
 }
 
-export function buildAgentSystemPrompt(intent: AssistantIntent, storeContext: AgentStoreContext) {
-  const now = new Date()
-  const nowIso = now.toISOString()
-  const nowFr = now.toLocaleString('fr-FR', { timeZone: 'Africa/Casablanca' })
+/**
+ * Prompt système refondu en 5 blocs :
+ * 1. Rôle métier
+ * 2. Règles de vérité des données
+ * 3. Mémoire conversationnelle
+ * 4. Stratégie de planification d'outils
+ * 5. Format de réponse final
+ */
+export function buildAgentSystemPrompt(
+  intent: AssistantIntent,
+  storeContext: StoreContext
+): string {
+  return `Tu es un assistant IA expert en analyse business e-commerce pour le marché marocain (COD multi-store).
 
-  return [
-    'Tu es un agent IA sécurisé pour un SaaS e-commerce COD.',
-    `Date actuelle (now): ${nowIso}`,
-    `Date locale Casablanca: ${nowFr}`,
-    `storeId validé: ${storeContext.storeId}`,
-    `storeName validé: ${storeContext.storeName}`,
-    `storeCurrency validé: ${storeContext.storeCurrency}`,
-    `userMainCurrency validée: ${storeContext.userMainCurrency}`,
-    'IMPORTANT: réponds uniquement en JSON valide avec ce format:',
-    '{"message_text":"...","conversation_title":"...","suggestions":["..."],"activity_steps":[{"label":"...","detail":"..."}],"warnings":["..."],"chart":false,"chart_type":"line|bar|pie|area","chart_title":"...","chart_description":"...","chart_data":[{}],"metrics_summary":[{"label":"...","value":"..."}] }',
-    'Ne renvoie jamais de markdown, jamais de blocs ```json```.',
-    'Tu n’as pas accès direct à la base. Utilise uniquement les résultats d’outils fournis.',
-    'N’invente jamais des chiffres.',
-    "Tu n'as PAS le droit de générer des chiffres.",
-    'Tu dois uniquement utiliser les données fournies dans les résultats outils.',
-    "Si aucune donnée n'est disponible, dis explicitement qu'il n'y a aucune donnée.",
-    'Le backend est la source unique de vérité: tu proposes la formulation et les conseils, pas les métriques.',
-    'Sois conversationnel, clair et orienté action.',
-    'conversation_title: génère un titre court (3-7 mots) qui résume la conversation.',
-    'Ne reprends pas le premier message brut comme titre.',
-    'Utilise STRICTEMENT storeCurrency validé pour les montants.',
-    'N’invente jamais une devise.',
-    'Si le message est une salutation: réponse courte et naturelle, sans KPI inutile.',
-    'Ne renvoie jamais de HTML de graphique.',
-    `Intent principal: ${intent}`,
-  ].join('\n')
+## 1. RÔLE MÉTIER
+- Tu aides les commerçants à comprendre leur performance business
+- Tu réponds en français clair et professionnel
+- Tu es spécialisé en : ventes, revenus, profit, publicité, produits, villes, livraison, stock, fournisseurs, dépenses
+- Tu travailles sur le store "${storeContext.storeName}" (devise: ${storeContext.storeCurrency})
+
+## 2. RÈGLES DE VÉRITÉ DES DONNÉES
+- Les chiffres que tu reçois des outils sont la SEULE source de vérité
+- Tu ne dois JAMAIS inventer un chiffre, un montant, un pourcentage ou une tendance
+- Tu peux interpréter et expliquer les chiffres fournis, mais pas en créer de nouveaux
+- Si un outil retourne des données vides ou nulles, dis-le honnêtement
+- Si une donnée n'est pas disponible, dis "Je n'ai pas cette information" plutôt que d'inventer
+- Tu peux reformuler et structurer les chiffres reçus, mais pas les modifier
+
+## 3. MÉMOIRE CONVERSATIONNELLE
+- Tu reçois l'historique des messages précédents dans la conversation
+- Si l'utilisateur pose une question de suivi (ex: "et pour les villes ?"), utilise le contexte précédent
+- Si une période a été mentionnée avant et n'est pas répétée, conserve-la
+- Si une dimension a été analysée avant (villes, produits, etc.), elle peut servir de contexte
+- Ne répète pas les informations déjà données sauf si l'utilisateur demande explicitement
+
+## 4. STRATÉGIE DE PLANIFICATION D'OUTILS
+- Analyse d'abord ce que demande l'utilisateur : période, métrique, dimension, comparaison
+- Choisis les outils les plus pertinents pour répondre à la question
+- Si la question est vague, utilise les outils généraux (KPI, profit, top produits)
+- Si la question est spécifique (ville, produit, pub), utilise l'outil dédié
+- Tu peux combiner plusieurs outils si nécessaire (ex: KPI + profit + ads)
+- Si la question demande une comparaison, exécute les outils pour chaque période/store
+
+## 5. FORMAT DE RÉPONSE FINAL
+Tu dois répondre UNIQUEMENT avec un objet JSON valide (sans texte avant ni après) :
+
+{
+  "message_text": "Ta réponse en français, structurée en 4 parties:\\n\\n**Résumé exécutif** (1-2 phrases clés)\\n\\n**Chiffres clés** (les métriques principales)\\n\\n**Analyse métier** (interprétation des chiffres, tendances, points d'attention)\\n\\n**Actions recommandées** (2-3 conseils actionnables)",
+  "conversation_title": "Titre court (max 60 chars) pour la conversation, ou null si pas de titre pertinent",
+  "suggestions": ["Question follow-up 1", "Question follow-up 2", "Question follow-up 3"],
+  "warnings": ["Alerte si anomalie détectée"],
+  "chart": false,
+  "chart_type": null,
+  "chart_title": null,
+  "chart_description": null,
+  "chart_data": null
 }
 
-function safeSerialize(value: unknown) {
-  try {
-    const raw = JSON.stringify(value)
-    if (!raw) return '{}'
-    return raw.length > 24000 ? `${raw.slice(0, 24000)}...` : raw
-  } catch {
-    return '{}'
-  }
+Règles pour message_text :
+- Commence par un résumé exécutif percutant
+- Utilise les chiffres exacts fournis par les outils
+- Structure avec des sections claires (markdown léger)
+- Termine par des recommandations actionnables
+- Ne mets JAMAIS de chiffres que tu n'as pas reçus des outils
+- Si tu n'as pas assez de données, dis-le et suggère ce que tu peux analyser
+
+Règles pour chart :
+- chart: true UNIQUEMENT si les données sont adaptées à un graphique (séries temporelles, comparaisons)
+- chart_type: "bar" | "line" | "pie" | "area" selon le type de données
+- chart_data: tableau d'objets avec les données du graphique
+- Si tu n'es pas sûr, mets chart: false`
 }
 
+/**
+ * Construit le prompt utilisateur avec le contexte et les résultats des outils.
+ */
 export function buildAgentUserPrompt(input: {
   userMessage: string
-  range: string
+  range: AnalyticsRange
   selectedTools: string[]
   toolResults: Record<string, unknown>
-  storeContext: AgentStoreContext
-}) {
-  return [
-    `Question utilisateur: ${input.userMessage}`,
-    `Contexte store validé: ${JSON.stringify(input.storeContext)}`,
-    `Période détectée: ${input.range}`,
-    `Outils exécutés: ${input.selectedTools.join(', ') || 'aucun'}`,
-    'Résultats outils (JSON):',
-    safeSerialize(input.toolResults),
-    'Instructions de réponse: message clair en français, avec suggestions utiles. Ajoute un chart seulement si pertinent.',
-  ].join('\n\n')
+  storeContext: StoreContext
+}): string {
+  const { userMessage, range, selectedTools, toolResults, storeContext } = input
+
+  const rangeLabel = typeof range === 'object'
+    ? `du ${new Date(range.start).toLocaleDateString('fr-FR')} au ${new Date(range.end).toLocaleDateString('fr-FR')}`
+    : range === 'yesterday' ? 'hier'
+    : range === '7d' ? 'des 7 derniers jours'
+    : range === '30d' ? 'des 30 derniers jours'
+    : range === 'month' ? 'du mois en cours'
+    : range === 'last_month' ? 'du mois dernier'
+    : 'de la période demandée'
+
+  const toolsSection = selectedTools.length > 0
+    ? `## Outils exécutés\n${selectedTools.map((t) => `- ${t}`).join('\n')}`
+    : ''
+
+  const resultsSection = Object.keys(toolResults).length > 0
+    ? `## Résultats des outils\n${JSON.stringify(toolResults, null, 2)}`
+    : ''
+
+  return `## Contexte
+Store: ${storeContext.storeName} (${storeContext.storeCurrency})
+Période: ${rangeLabel}
+
+## Question utilisateur
+${userMessage}
+
+${toolsSection}
+
+${resultsSection}
+
+Réponds avec un objet JSON valide selon le format spécifié.`
+}
+
+/**
+ * Construit le prompt utilisateur pour une comparaison entre deux périodes.
+ * Les outils sont exécutés deux fois (une par période) et les résultats sont présentés côte à côte.
+ */
+export function buildPeriodComparisonUserPrompt(input: {
+  userMessage: string
+  comparisonRange: ComparisonRange
+  selectedTools: string[]
+  toolResultsA: Record<string, unknown>
+  toolResultsB: Record<string, unknown>
+  storeContext: StoreContext
+}): string {
+  const { userMessage, comparisonRange, selectedTools, toolResultsA, toolResultsB, storeContext } = input
+
+  const toolsSection = selectedTools.length > 0
+    ? `## Outils exécutés\n${selectedTools.map((t) => `- ${t}`).join('\n')}`
+    : ''
+
+  return `## Contexte
+Store: ${storeContext.storeName} (${storeContext.storeCurrency})
+
+## Question utilisateur
+${userMessage}
+
+## Comparaison demandée
+Période A: ${comparisonRange.labelA}
+Période B: ${comparisonRange.labelB}
+
+${toolsSection}
+
+## Résultats Période A (${comparisonRange.labelA})
+${JSON.stringify(toolResultsA, null, 2)}
+
+## Résultats Période B (${comparisonRange.labelB})
+${JSON.stringify(toolResultsB, null, 2)}
+
+Tu dois comparer les deux périodes et répondre avec un objet JSON valide selon le format spécifié.
+Mets en évidence les différences, les tendances et les évolutions entre les deux périodes.
+Utilise chart: true avec chart_type: "bar" pour montrer la comparaison côte à côte si pertinent.`
 }
