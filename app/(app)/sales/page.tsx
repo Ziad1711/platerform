@@ -453,7 +453,7 @@ export default function VentesPage() {
       createFormScrollRef.current.scrollTo({ top: createFormScrollRef.current.scrollHeight, behavior: 'smooth' })
     }
   }, [formError])
-  const [items, setItems] = useState<Array<{ product_id: string; product_variant_id: string; quantity: number; unit_selling_price: number }>>([
+  const [items, setItems] = useState<Array<{ product_id: string; product_variant_id: string; quantity: number; unit_selling_price: number; product_name_override?: string }>>([
     { product_id: '', product_variant_id: '', quantity: 1, unit_selling_price: 0 },
   ])
   const [productSearchTerms, setProductSearchTerms] = useState<string[]>([''])
@@ -1693,6 +1693,9 @@ export default function VentesPage() {
         // Coût d'UNE UNITÉ VENDUE: coût explicite de la variante, sinon coût physique × multiplicateur du pack.
         const unitPurchaseCost =
           variantCost > 0 ? variantCost : Number(product?.default_purchase_cost || 0) * multiplier
+        // Nom personnalisé : on ne le stocke que s'il diffère du nom catalogue
+        const catalogueName = String(product?.name || '').trim()
+        const overrideName = String(item.product_name_override || '').trim()
         return {
           store_id: selectedCreateStoreId,
           order_id: insertedOrder.id,
@@ -1701,6 +1704,7 @@ export default function VentesPage() {
           quantity: Number(item.quantity || 1),
           unit_selling_price: Number(item.unit_selling_price || 0),
           unit_purchase_cost_snapshot: unitPurchaseCost,
+          product_name_override: overrideName && overrideName !== catalogueName ? overrideName : null,
         }
       })
 
@@ -2101,6 +2105,7 @@ export default function VentesPage() {
               ...item,
               product_id: productId,
               product_variant_id: firstVariant?.id || '',
+              product_name_override: undefined,
               unit_selling_price: Number(firstVariant?.selling_price ?? product?.default_selling_price ?? 0),
             }
           : item
@@ -3221,6 +3226,39 @@ export default function VentesPage() {
                           />
                         </div>
                       </div>
+
+                      {/* Nom affiché dans la commande (produit lié inchangé) */}
+                      <div className="mt-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <label className="block text-[11px] font-medium text-muted-foreground leading-none">
+                            Nom dans la commande
+                          </label>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                            <Pencil className="h-3 w-3" />
+                            Modifiable
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={
+                            item.product_name_override
+                            ?? String((products || []).find((p: any) => p.id === item.product_id)?.name || '')
+                          }
+                          onChange={(e) => {
+                            const value = e.target.value
+                            setItems((prev) =>
+                              prev.map((it, i) => (i === index ? { ...it, product_name_override: value } : it))
+                            )
+                          }}
+                          disabled={!item.product_id}
+                          placeholder="Nom du produit"
+                          className="w-full h-10 bg-background border border-dashed border-primary/50 rounded-lg px-3 text-sm text-foreground transition-colors hover:border-primary focus:border-solid focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:opacity-50"
+                        />
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Cliquez pour renommer. Le produit lié (stock, coûts, variantes) reste inchangé.
+                        </p>
+                      </div>
+
                       {openProductDropdownIndex === index && productDropdownPos && (
                         <>
                           <div className="fixed inset-0 z-[9998]" onClick={() => closeProductDropdown()} />
