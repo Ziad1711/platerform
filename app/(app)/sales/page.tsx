@@ -4104,6 +4104,9 @@ export default function VentesPage() {
                     <div className="flex items-center justify-center text-center">Produit</div>
                   </th>
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="flex items-center justify-center text-center">Variante</div>
+                  </th>
+                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Ville</div>
                   </th>
                   <th rowSpan={2} className="w-auto min-w-[200px] sm:min-w-[280px] px-6 sm:px-12 py-1 sm:py-2 text-center align-middle text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
