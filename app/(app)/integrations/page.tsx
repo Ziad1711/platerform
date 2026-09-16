@@ -575,7 +575,7 @@ export default function IntegrationsPage() {
       ) : null}
 
       {/* YouCan Connect Modal */}
-      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && connectProviderSlug !== 'sendit' && connectProviderSlug !== 'digylog' && (
+      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'maroc-go-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && connectProviderSlug !== 'sendit' && connectProviderSlug !== 'digylog' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"
