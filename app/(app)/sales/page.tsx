@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime, normalizeMoroccanPhone } from '@/lib/utils'
 import { normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
-import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil } from 'lucide-react'
+import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil, AlertTriangle } from 'lucide-react'
 import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
 import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
@@ -447,6 +447,12 @@ export default function VentesPage() {
   const [discountValue, setDiscountValue] = useState('0')
   const [deliveryFee, setDeliveryFee] = useState('0')
   const [formError, setFormError] = useState('')
+  const [stockWarning, setStockWarning] = useState<{
+    productId: string
+    productVariantId: string | null
+    message: string
+  } | null>(null)
+  const allowOutOfStockOrderRef = useRef(false)
   const createFormScrollRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (formError && createFormScrollRef.current) {
@@ -1559,6 +1565,10 @@ export default function VentesPage() {
       const productsMap = new Map<string, any>((products || []).map((p: any) => [String(p.id), p]))
       const stockMap = productStockById || {}
 
+      // Consommé une seule fois : autorise la création malgré une rupture de stock.
+      const allowOutOfStock = allowOutOfStockOrderRef.current
+      allowOutOfStockOrderRef.current = false
+
       if (validItems.length === 0) throw new Error('Ajoutez au moins un produit avec quantité valide.')
       if (!customerName.trim()) throw new Error('Le nom client est obligatoire.')
       if (!phone.trim()) throw new Error('Le numéro de téléphone est obligatoire.')
@@ -1593,10 +1603,16 @@ export default function VentesPage() {
         const requiredQuantity = Number(item.quantity || 0) * multiplier
 
         if (availableStock <= 0) {
-          throw new Error(`Le produit "${productName}" est en rupture de stock.`)
-        }
-
-        if (requiredQuantity > availableStock) {
+          // La rupture ne bloque plus la création : on remonte un avertissement
+          // pour proposer "Créer quand même" ou "Ajouter le stock".
+          if (!allowOutOfStock) {
+            throw Object.assign(new Error(`Le produit "${productName}" est en rupture de stock.`), {
+              isStockShortage: true,
+              productId: String(item.product_id),
+              productVariantId: item.product_variant_id || null,
+            })
+          }
+        } else if (requiredQuantity > availableStock) {
           throw new Error(
             `Stock insuffisant pour "${productName}". Disponible: ${availableStock}, requis: ${requiredQuantity}.`
           )
@@ -1743,6 +1759,14 @@ export default function VentesPage() {
       setFormError('')
     },
     onError: (error: any) => {
+      if (error?.isStockShortage) {
+        setStockWarning({
+          productId: String(error.productId || ''),
+          productVariantId: error.productVariantId ? String(error.productVariantId) : null,
+          message: error.message || 'Produit en rupture de stock.',
+        })
+        return
+      }
       setFormError(error?.message || 'Erreur lors de la création de la commande')
     },
   })
@@ -3417,6 +3441,56 @@ export default function VentesPage() {
                     Créer la commande
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stockWarning && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-border flex items-center gap-3 bg-amber-50">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <div className="font-semibold text-foreground">Attention : rupture de stock</div>
+                <div className="text-xs text-muted-foreground">La commande peut tout de même être créée</div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 space-y-3 text-sm text-foreground">
+              <p>{stockWarning.message}</p>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Créez la commande malgré tout, ou ouvrez la page Stock pour enregistrer une entrée de stock pour ce produit.
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  allowOutOfStockOrderRef.current = true
+                  setStockWarning(null)
+                  createOrderMutation.mutate()
+                }}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium shadow-lg shadow-primary/25 transition-all"
+              >
+                Créer quand même
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const params = new URLSearchParams({ openCreate: '1' })
+                  if (selectedCreateStoreId) params.set('storeId', selectedCreateStoreId)
+                  if (stockWarning.productId) params.set('productId', stockWarning.productId)
+                  if (stockWarning.productVariantId) params.set('variantId', stockWarning.productVariantId)
+                  window.open(`/stock?${params.toString()}`, '_blank', 'noopener,noreferrer')
+                }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-border text-foreground hover:bg-secondary text-sm font-medium transition-colors"
+              >
+                Ajouter le stock
               </button>
             </div>
           </div>

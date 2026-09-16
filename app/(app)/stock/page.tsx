@@ -7,12 +7,14 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { Search, Filter, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info, DollarSign } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 
-export default function StocksPage() {
+function StocksPageContent() {
   const PAGE_SIZE = 10
   const { currentStoreId, accessibleStoreIds, accessibleStores: stores } = useStore()
+  const searchParams = useSearchParams()
   const [search, setSearch] = useState('')
   const [movementType, setMovementType] = useState<string>('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -39,6 +41,10 @@ export default function StocksPage() {
   const [editSupplierId, setEditSupplierId] = useState('')
   const [editInvoiceNumber, setEditInvoiceNumber] = useState('')
   const [editError, setEditError] = useState('')
+  const [hasHandledOpenCreateParam, setHasHandledOpenCreateParam] = useState(false)
+  const [createStoreFromQuery, setCreateStoreFromQuery] = useState('')
+  const [pendingCreateProductId, setPendingCreateProductId] = useState('')
+  const [pendingCreateVariantId, setPendingCreateVariantId] = useState('')
   const supabase = createClient()
   const queryClient = useQueryClient()
 
@@ -145,6 +151,8 @@ export default function StocksPage() {
 
   useEffect(() => {
     if (!isCreateOpen) return
+    // Le store demandé via l'URL (ex: bouton "Ajouter le stock" depuis Ventes) est prioritaire.
+    if (createStoreFromQuery) return
     if (currentStoreId) {
       setSelectedCreateStoreId(currentStoreId)
       return
@@ -152,7 +160,40 @@ export default function StocksPage() {
     if ((stores || []).length === 1) {
       setSelectedCreateStoreId(stores?.[0]?.id || '')
     }
-  }, [isCreateOpen, currentStoreId, stores])
+  }, [isCreateOpen, currentStoreId, stores, createStoreFromQuery])
+
+  // Ouverture automatique du modal "Nouveau mouvement" depuis une URL
+  // (ex: /stock?openCreate=1&storeId=...&productId=...&variantId=...).
+  useEffect(() => {
+    if (hasHandledOpenCreateParam) return
+    if (searchParams.get('openCreate') !== '1') return
+
+    const storeIdFromQuery = searchParams.get('storeId') || ''
+    const productIdFromQuery = searchParams.get('productId') || ''
+    const variantIdFromQuery = searchParams.get('variantId') || ''
+
+    setCreateError('')
+    setNewMovementType('in')
+    setNewAdjustmentDirection('out')
+    setNewQuantity('1')
+    setNewUnitCost('')
+    setNewInvoiceNumber('')
+    setSelectedSupplierId('')
+
+    if (storeIdFromQuery) {
+      setCreateStoreFromQuery(storeIdFromQuery)
+      setSelectedCreateStoreId(storeIdFromQuery)
+    } else if (currentStoreId) {
+      setSelectedCreateStoreId(currentStoreId)
+    }
+
+    // Le produit est résolu après chargement de la liste du store sélectionné.
+    setPendingCreateProductId(productIdFromQuery)
+    setPendingCreateVariantId(variantIdFromQuery)
+
+    setIsCreateOpen(true)
+    setHasHandledOpenCreateParam(true)
+  }, [searchParams, currentStoreId, hasHandledOpenCreateParam])
 
   useEffect(() => {
     if (!productsForCreate?.length) {
@@ -196,6 +237,30 @@ export default function StocksPage() {
       setNewVariantId('')
     }
   }, [newProductId, variantsForSelectedProduct, newVariantId, selectedProductStockMode])
+
+  // Applique le produit/variante demandé via l'URL une fois la liste chargée.
+  useEffect(() => {
+    if (!pendingCreateProductId) return
+    if (!productsForCreate?.length) return
+    if (!productsForCreate.some((p: any) => p.id === pendingCreateProductId)) return
+
+    setNewProductId(pendingCreateProductId)
+    setPendingCreateProductId('')
+  }, [pendingCreateProductId, productsForCreate])
+
+  // Applique la variante demandée via l'URL une fois les variantes chargées.
+  useEffect(() => {
+    if (!pendingCreateVariantId) return
+    if (!variantsForSelectedProduct?.length) return
+
+    if (!variantsForSelectedProduct.some((v: any) => v.id === pendingCreateVariantId)) {
+      setPendingCreateVariantId('')
+      return
+    }
+
+    setNewVariantId(pendingCreateVariantId)
+    setPendingCreateVariantId('')
+  }, [pendingCreateVariantId, variantsForSelectedProduct])
 
   const createMovementMutation = useMutation({
     mutationFn: async () => {
@@ -1321,5 +1386,20 @@ export default function StocksPage() {
         ) : null}
       </div>
     </div>
+  )
+}
+
+export default function StocksPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-8 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="text-muted-foreground mt-2">Chargement...</p>
+        </div>
+      }
+    >
+      <StocksPageContent />
+    </Suspense>
   )
 }
