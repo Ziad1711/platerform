@@ -219,42 +219,77 @@ export async function GET(request: Request) {
 
     const normalizedStoreDomain = `${store}.youcan.shop`
 
-    const { error } = await supabase.from('integrations').upsert(
-      {
-        user_id: userId,
-        provider: 'youcan',
-        provider_id: provider.id,
-        store_domain: normalizedStoreDomain,
-        access_token: encryptedAccessToken,
-        refresh_token: encryptedRefreshToken,
-        status: 'connected',
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: 'user_id,provider',
-      }
-    ).select('id').single()
-
-    if (error) {
-      console.error('[youcan][callback] integration upsert failed', {
-        requestId,
-        error: error.message,
-      })
-      if (isPopup) {
-        return new NextResponse(popupErrorHtml(error.message || 'INTEGRATION_SAVE_FAILED'), {
-          status: 500,
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        })
-      }
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    const integrationPayload = {
+      provider_id: provider.id,
+      store_domain: normalizedStoreDomain,
+      access_token: encryptedAccessToken,
+      refresh_token: encryptedRefreshToken,
+      status: 'connected',
+      updated_at: new Date().toISOString(),
     }
 
-    const { data: savedIntegration } = await supabase
+    // `integrations` n'a pas de contrainte unique sur (user_id, provider):
+    // un upsert avec onConflict échoue ("no unique or exclusion constraint ...").
+    // On fait donc un select → update/insert, ce qui reste idempotent.
+    const { data: existingIntegration, error: existingIntegrationError } = await supabase
       .from('integrations')
       .select('id')
       .eq('user_id', userId)
       .eq('provider', 'youcan')
       .maybeSingle()
+
+    if (existingIntegrationError) throw existingIntegrationError
+
+    let savedIntegrationId = String(existingIntegration?.id || '')
+
+    if (savedIntegrationId) {
+      const { error: updateIntegrationError } = await supabase
+        .from('integrations')
+        .update(integrationPayload)
+        .eq('id', savedIntegrationId)
+
+      if (updateIntegrationError) {
+        console.error('[youcan][callback] integration update failed', {
+          requestId,
+          error: updateIntegrationError.message,
+        })
+        if (isPopup) {
+          return new NextResponse(popupErrorHtml(updateIntegrationError.message || 'INTEGRATION_SAVE_FAILED'), {
+            status: 500,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          })
+        }
+        return NextResponse.json({ error: updateIntegrationError.message }, { status: 500 })
+      }
+    } else {
+      const { data: createdIntegration, error: createIntegrationError } = await supabase
+        .from('integrations')
+        .insert({
+          user_id: userId,
+          provider: 'youcan',
+          ...integrationPayload,
+        })
+        .select('id')
+        .single()
+
+      if (createIntegrationError) {
+        console.error('[youcan][callback] integration insert failed', {
+          requestId,
+          error: createIntegrationError.message,
+        })
+        if (isPopup) {
+          return new NextResponse(popupErrorHtml(createIntegrationError.message || 'INTEGRATION_SAVE_FAILED'), {
+            status: 500,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          })
+        }
+        return NextResponse.json({ error: createIntegrationError.message }, { status: 500 })
+      }
+
+      savedIntegrationId = String(createdIntegration?.id || '')
+    }
+
+    const savedIntegration = { id: savedIntegrationId }
 
     const stateStoreId = (parsedState as any)?.storeId || null
     if (savedIntegration?.id && stateStoreId) {
