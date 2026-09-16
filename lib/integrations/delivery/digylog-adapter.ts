@@ -36,7 +36,7 @@ export async function createDigylogParcelForOrder(params: {
         id, store_id, status, city, address, phone, customer_name, total_selling_price,
         delivery_city_external_id, delivery_note, delivery_company_id,
         tracking_number, external_delivery_id,
-        order_items(quantity, products(name))
+        order_items(quantity, product_name_override, products(name))
       `)
       .eq('id', orderId)
       .maybeSingle()
@@ -95,7 +95,7 @@ export async function createDigylogParcelForOrder(params: {
     // 6. Construire les refs (produits)
     const refs: digylog.DigylogOrderRef[] = (order.order_items || []).map((oi: any) => ({
       ref: oi.products?.name ? undefined : undefined,
-      designation: oi.products?.name || 'Produit',
+      designation: oi.product_name_override || oi.products?.name || 'Produit',
       quantity: Number(oi.quantity) || 1,
     }))
 

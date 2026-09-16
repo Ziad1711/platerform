@@ -199,7 +199,7 @@ export async function createAmeexParcelForOrder(params: {
       id, store_id, status, city, address, phone, customer_name, total_selling_price,
       delivery_city_external_id, delivery_company_id, tracking_number, ameex_parcel_code,
       ameex_city_key,
-      order_items(quantity, products(name))
+      order_items(quantity, product_name_override, products(name))
     `)
     .eq('id', orderId)
     .maybeSingle()
@@ -250,7 +250,7 @@ export async function createAmeexParcelForOrder(params: {
 
   // Preparer le payload
   const orderProductNames = (order.order_items || [])
-    .map((item: any) => String(item?.products?.name || '').trim())
+    .map((item: any) => String(item?.product_name_override || item?.products?.name || '').trim())
     .filter(Boolean)
     .join(', ')
 

@@ -36,7 +36,7 @@ export async function POST(request: Request) {
         .eq('store_id', storeId)
         .maybeSingle(),
       supabase.from('orders')
-        .select('id, customer_name, phone, address, city, total_selling_price, order_items(quantity, products(name))')
+        .select('id, customer_name, phone, address, city, total_selling_price, order_items(quantity, product_name_override, products(name))')
         .eq('id', orderId)
         .eq('store_id', storeId)
         .maybeSingle(),
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     }
 
     const article = (order.order_items || [])
-      .map((item: any) => String(item?.products?.name || '').trim())
+      .map((item: any) => String(item?.product_name_override || item?.products?.name || '').trim())
       .filter(Boolean)
       .join(', ') || 'Commande'
 

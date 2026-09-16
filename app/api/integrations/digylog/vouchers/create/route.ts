@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       .from('orders')
       .select(`
         id, customer_name, phone, city, address, total_selling_price, tracking_number,
-        order_items(quantity, products(name))
+        order_items(quantity, product_name_override, products(name))
       `)
       .in('id', orderIds)
       .eq('store_id', storeId)
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
         const refs = items.length > 0
           ? items.map((oi: any) => ({
               ref: '',
-              designation: oi.products?.name || 'Produit',
+              designation: oi.product_name_override || oi.products?.name || 'Produit',
               quantity: Number(oi.quantity) || 1,
             }))
           : [{ ref: '', designation: 'Produit', quantity: 1 }]

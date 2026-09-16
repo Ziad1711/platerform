@@ -16,7 +16,7 @@ type OrderLike = {
   total_selling_price?: number | string | null
   tracking_number?: string | null
   delivery_city_external_id?: number | string | null
-  order_items?: Array<{ products?: { name?: string | null } | null }> | null
+  order_items?: Array<{ product_name_override?: string | null; products?: { name?: string | null } | null }> | null
 }
 
 export async function autoCreateOzoneParcelForOrder(params: {
@@ -68,7 +68,7 @@ export async function autoCreateOzoneParcelForOrder(params: {
   }
 
   const orderProductNames = (order.order_items || [])
-    .map((item) => String(item?.products?.name || '').trim())
+    .map((item) => String(item?.product_name_override || item?.products?.name || '').trim())
     .filter(Boolean)
     .join(', ')
 

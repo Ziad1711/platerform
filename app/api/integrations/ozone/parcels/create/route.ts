@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     // Récupérer la commande
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id, customer_name, phone, address, city, total_selling_price, store_id, tracking_number, delivery_city_external_id, order_items(quantity, products(name))')
+      .select('id, customer_name, phone, address, city, total_selling_price, store_id, tracking_number, delivery_city_external_id, order_items(quantity, product_name_override, products(name))')
       .eq('id', orderId)
       .eq('store_id', storeId)
       .maybeSingle()
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
         trackingNumber: order.tracking_number,
         deliveryCityKey: cityKey,
         orderItems: (order.order_items || []).map((oi: any) => ({
-          productName: oi.products?.name || null,
+          productName: oi.product_name_override || oi.products?.name || null,
         })),
       },
       defaultShopKey: shopKey,

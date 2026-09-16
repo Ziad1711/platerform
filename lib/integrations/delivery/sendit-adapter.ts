@@ -78,7 +78,7 @@ export async function createSenditParcelForOrder(params: {
   const { admin, orderId, storeId, userId, integrationId } = params
   const now = new Date().toISOString()
   const logger = createDeliveryLogger({ admin, integrationId, storeId, userId })
-  const { data: order, error } = await admin.from('orders').select('id, store_id, city, address, phone, customer_name, total_selling_price, delivery_city_external_id, sendit_parcel_code, tracking_number, order_items(quantity, products(name))').eq('id', orderId).maybeSingle()
+  const { data: order, error } = await admin.from('orders').select('id, store_id, city, address, phone, customer_name, total_selling_price, delivery_city_external_id, sendit_parcel_code, tracking_number, order_items(quantity, product_name_override, products(name))').eq('id', orderId).maybeSingle()
   if (error) throw error
   if (!order) {
     logger.warn('parcel-order-not-found', 'Commande introuvable pour création colis Sendit', { orderId })
@@ -96,7 +96,7 @@ export async function createSenditParcelForOrder(params: {
   logger.info('parcel-creating', 'Création colis Sendit', { orderId, district, amount: order.total_selling_price })
   const credentials = await getSenditCredentials(admin, integrationId)
   const { data: cfg } = await admin.from('sendit_configs').select('*').eq('store_id', storeId).maybeSingle()
-  const products = (order.order_items || []).map((i: any) => `${i?.products?.name || 'Produit'} x${i?.quantity || 1}`).join(', ')
+  const products = (order.order_items || []).map((i: any) => `${i?.product_name_override || i?.products?.name || 'Produit'} x${i?.quantity || 1}`).join(', ')
   const deliveryFee = await resolveDeliveryFee({ supabase: admin, storeId, cityKey: district, integrationId, providerSlug: 'sendit' })
   logger.info('parcel-calling-api', 'Appel API Sendit', { district, amount: order.total_selling_price })
   const raw = await createSenditParcel(credentials.token, {
