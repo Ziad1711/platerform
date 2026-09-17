@@ -150,6 +150,7 @@ type ImportFieldKey =
   | 'total_selling_price'
   | 'status'
   | 'product_name'
+  | 'product_variant'
   | 'confirmation_agent'
   | 'delivery_company'
   | 'tracking_number'
@@ -185,6 +186,7 @@ const importFieldDefinitions: ImportFieldDefinition[] = [
   { key: 'total_selling_price', label: 'Prix de vente', required: true, synonyms: ['price', 'prix', 'montant', 'total', 'total selling price', 'prix de vente'] },
   { key: 'status', label: 'Statut', required: true, synonyms: ['status', 'statut', 'etat', 'etat commande', 'order status'] },
   { key: 'product_name', label: 'Nom produit', required: false, synonyms: ['product name', 'product', 'produit', 'nom produit', 'nom_produit'] },
+  { key: 'product_variant', label: 'Variante', required: false, synonyms: ['variant', 'variante', 'variation', 'product variant', 'nom variante', 'sku variante'] },
   { key: 'confirmation_agent', label: 'Agent de confirmation', required: false, synonyms: ['confirmation agent', 'agent confirmation', 'agent', 'confirmateur'] },
   { key: 'delivery_company', label: 'Société de livraison', required: false, synonyms: ['delivery company', 'company', 'societe livraison', 'société livraison', 'transporteur', 'livreur'] },
   { key: 'tracking_number', label: 'N° tracking', required: false, synonyms: ['tracking', 'tracking number', 'numero suivi', 'suivi'] },
@@ -591,6 +593,7 @@ export default function VentesPage() {
   const [fieldToColumnMap, setFieldToColumnMap] = useState<Record<ImportFieldKey, string>>(createEmptyImportMapping)
   const [statusValueMap, setStatusValueMap] = useState<Record<string, string>>({})
   const [productValueMap, setProductValueMap] = useState<Record<string, string>>({})
+  const [variantValueMap, setVariantValueMap] = useState<Record<string, string>>({})
   const [agentValueMap, setAgentValueMap] = useState<Record<string, string>>({})
   const [deliveryCompanyValueMap, setDeliveryCompanyValueMap] = useState<Record<string, string>>({})
   const [deliveryCompanyOtherNameMap, setDeliveryCompanyOtherNameMap] = useState<Record<string, string>>({})
@@ -601,6 +604,13 @@ export default function VentesPage() {
   const [defaultDeliveryCompanySelection, setDefaultDeliveryCompanySelection] = useState(IMPORT_INTERNAL_DELIVERY)
   const [defaultDeliveryCompanyOtherName, setDefaultDeliveryCompanyOtherName] = useState('')
   const [importError, setImportError] = useState('')
+  const [importProgress, setImportProgress] = useState({
+    percentage: 0,
+    current: 0,
+    total: 0,
+    label: 'Préparation de l’import',
+    status: 'idle' as 'idle' | 'running' | 'success' | 'error',
+  })
   const [importSummary, setImportSummary] = useState<{
     inserted: number
     duplicates: number
@@ -990,6 +1000,23 @@ export default function VentesPage() {
       const { data, error } = await supabase
         .from('products')
         .select('id, name, default_purchase_cost')
+        .eq('store_id', currentStoreId)
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const { data: importStoreVariants = [] } = useQuery({
+    queryKey: ['sales-import-variants-by-store', currentStoreId],
+    enabled: !!currentStoreId,
+    queryFn: async () => {
+      if (!currentStoreId) return []
+
+      const { data, error } = await supabase
+        .from('product_variants')
+        .select('id, product_id, name, sku, purchase_cost')
         .eq('store_id', currentStoreId)
         .order('name', { ascending: true })
 
@@ -2269,6 +2296,28 @@ export default function VentesPage() {
     return productRawValues.some((raw) => !productValueMap[raw])
   }, [linkImportedProducts, productRawValues, productValueMap])
 
+  const variantImportEntries = useMemo(() => {
+    const productColumn = fieldToColumnMap.product_name
+    const variantColumn = fieldToColumnMap.product_variant
+    if (!productColumn || !variantColumn) return [] as Array<{ key: string; productRaw: string; variantRaw: string; productId: string }>
+
+    const entries = new Map<string, { key: string; productRaw: string; variantRaw: string; productId: string }>()
+    importRows.forEach((row) => {
+      const productRaw = String(row?.[productColumn] || '').trim()
+      const variantRaw = String(row?.[variantColumn] || '').trim()
+      const productId = productValueMap[productRaw] || ''
+      if (!productRaw || !variantRaw || !productId) return
+      const key = `${productId}::${variantRaw}`
+      entries.set(key, { key, productRaw, variantRaw, productId })
+    })
+    return Array.from(entries.values())
+  }, [fieldToColumnMap.product_name, fieldToColumnMap.product_variant, importRows, productValueMap])
+
+  const hasUnmappedImportVariants = useMemo(() => {
+    if (!linkImportedProducts || !fieldToColumnMap.product_variant) return false
+    return variantImportEntries.some((entry) => !variantValueMap[entry.key])
+  }, [linkImportedProducts, fieldToColumnMap.product_variant, variantImportEntries, variantValueMap])
+
   const agentRawValues = useMemo(() => {
     const agentColumn = fieldToColumnMap.confirmation_agent
     if (!agentColumn) return [] as string[]
@@ -2384,6 +2433,7 @@ export default function VentesPage() {
     setFieldToColumnMap(createEmptyImportMapping())
     setStatusValueMap({})
     setProductValueMap({})
+    setVariantValueMap({})
     setAgentValueMap({})
     setDeliveryCompanyValueMap({})
     setDeliveryCompanyOtherNameMap({})
@@ -2394,10 +2444,12 @@ export default function VentesPage() {
     setDefaultDeliveryCompanySelection(IMPORT_INTERNAL_DELIVERY)
     setDefaultDeliveryCompanyOtherName('')
     setImportError('')
+    setImportProgress({ percentage: 0, current: 0, total: 0, label: 'Préparation de l’import', status: 'idle' })
     setImportSummary(null)
   }
 
   const closeImportModal = () => {
+    if (importOrdersMutation.isPending) return
     setIsImportOpen(false)
     setImportError('')
   }
@@ -2477,6 +2529,33 @@ export default function VentesPage() {
   }, [linkImportedProducts, fieldToColumnMap.product_name, importRows, importStoreProducts])
 
   useEffect(() => {
+    if (!linkImportedProducts || !fieldToColumnMap.product_variant) return
+
+    const variantsById = new Map<string, any>(
+      (importStoreVariants || []).map((variant: any) => [String(variant.id || ''), variant])
+    )
+    const nextMap: Record<string, string> = {}
+
+    variantImportEntries.forEach((entry) => {
+      const current = variantValueMap[entry.key]
+      if (current && variantsById.has(current) && String(variantsById.get(current)?.product_id || '') === entry.productId) {
+        nextMap[entry.key] = current
+        return
+      }
+
+      const normalizedRaw = normalizeHeader(entry.variantRaw)
+      const matches = (importStoreVariants || []).filter((variant: any) =>
+        String(variant.product_id || '') === entry.productId &&
+        [variant.name, variant.sku].some((value) => normalizeHeader(value) === normalizedRaw)
+      )
+      nextMap[entry.key] = matches.length === 1 ? String(matches[0].id) : ''
+    })
+
+    setVariantValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkImportedProducts, fieldToColumnMap.product_variant, variantImportEntries, importStoreVariants])
+
+  useEffect(() => {
     if (!linkImportedAgents || !fieldToColumnMap.confirmation_agent) return
 
     const agentsById = new Map<string, any>(
@@ -2550,6 +2629,13 @@ export default function VentesPage() {
 
   const importOrdersMutation = useMutation({
     mutationFn: async () => {
+      setImportProgress({
+        percentage: 1,
+        current: 0,
+        total: importRows.length,
+        label: 'Analyse des lignes CSV',
+        status: 'running',
+      })
       if (!currentStoreId) throw new Error('Sélectionnez un store avant import.')
       if (missingRequiredFields.length > 0) throw new Error('Veuillez mapper tous les champs obligatoires.')
       if (hasMissingMandatoryImportStatuses) {
@@ -2562,6 +2648,9 @@ export default function VentesPage() {
       }
       if (hasUnmappedImportProducts) {
         throw new Error('Veuillez mapper tous les produits CSV dans “Correspondance des produits”.')
+      }
+      if (hasUnmappedImportVariants) {
+        throw new Error('Veuillez mapper toutes les variantes CSV dans “Correspondance des variantes”.')
       }
       if (linkImportedAgents && fieldToColumnMap.confirmation_agent && hasUnmappedImportAgents) {
         throw new Error('Veuillez mapper tous les agents CSV dans “Correspondance des agents”.')
@@ -2589,6 +2678,7 @@ export default function VentesPage() {
         rowNumber: number
         payload: Record<string, any>
         linkedProductId: string | null
+        linkedProductVariantId: string | null
         linkedUnitPurchaseCost: number
         productRaw: string
         agentRaw: string
@@ -2606,6 +2696,17 @@ export default function VentesPage() {
       }> = []
       let invalid = 0
 
+      const progressUpdateInterval = Math.max(1, Math.floor(importRows.length / 100))
+      const updateAnalysisProgress = (processedRows: number) => {
+        if (processedRows % progressUpdateInterval !== 0 && processedRows !== importRows.length) return
+        setImportProgress({
+          percentage: Math.max(1, Math.round((processedRows / Math.max(1, importRows.length)) * 70)),
+          current: processedRows,
+          total: importRows.length,
+          label: 'Analyse des lignes CSV',
+          status: 'running',
+        })
+      }
       for (let rowIndex = 0; rowIndex < importRows.length; rowIndex += 1) {
         const row = importRows[rowIndex]
         const rowNumber = rowIndex + 2
@@ -2616,6 +2717,7 @@ export default function VentesPage() {
         const cityValue = String(row[fieldToColumnMap.city] || '').trim()
         const statusRaw = String(row[fieldToColumnMap.status] || '').trim()
         const productRaw = String(row[fieldToColumnMap.product_name] || '').trim()
+        const variantRaw = String(row[fieldToColumnMap.product_variant] || '').trim()
         const agentRaw = String(row[fieldToColumnMap.confirmation_agent] || '').trim()
         const deliveryCompanyRaw = String(row[fieldToColumnMap.delivery_company] || '').trim()
         const totalSellingPrice = parseNumberValue(row[fieldToColumnMap.total_selling_price])
@@ -2633,6 +2735,7 @@ export default function VentesPage() {
         if (!mappedStatus) reasons.push('Statut non mappé')
 
         let linkedProductId: string | null = null
+        let linkedProductVariantId: string | null = null
         let linkedUnitPurchaseCost = 0
         let resolvedConfirmationAgentId: string | null = null
         let resolvedDeliveryCompanyId: string | null = null
@@ -2650,10 +2753,28 @@ export default function VentesPage() {
                 reasons.push('Produit introuvable dans la base')
               } else {
                 linkedProductId = mappedProductId
-                // Coût d'achat: priorité colonne CSV, sinon default_purchase_cost du produit
                 const purchaseCostRaw = fieldToColumnMap.purchase_cost ? row[fieldToColumnMap.purchase_cost] : null
                 const parsedPurchaseCost = purchaseCostRaw !== null ? parseNumberValue(purchaseCostRaw) : null
-                linkedUnitPurchaseCost = parsedPurchaseCost !== null ? parsedPurchaseCost : Number(product.default_purchase_cost || 0)
+
+                if (fieldToColumnMap.product_variant && variantRaw) {
+                  const variantKey = `${mappedProductId}::${variantRaw}`
+                  const mappedVariantId = variantValueMap[variantKey] || ''
+                  const variant = (importStoreVariants || []).find(
+                    (item: any) => String(item.id) === mappedVariantId && String(item.product_id) === mappedProductId
+                  )
+                  if (!mappedVariantId) {
+                    reasons.push('Variante non mappée')
+                  } else if (!variant) {
+                    reasons.push('Variante introuvable pour ce produit')
+                  } else {
+                    linkedProductVariantId = mappedVariantId
+                    linkedUnitPurchaseCost = parsedPurchaseCost !== null
+                      ? parsedPurchaseCost
+                      : Number(variant.purchase_cost ?? product.default_purchase_cost ?? 0)
+                  }
+                } else {
+                  linkedUnitPurchaseCost = parsedPurchaseCost !== null ? parsedPurchaseCost : Number(product.default_purchase_cost || 0)
+                }
               }
             }
           }
@@ -2744,10 +2865,12 @@ export default function VentesPage() {
             customerName,
             phone: phoneValue,
           })
+          updateAnalysisProgress(rowIndex + 1)
           continue
         }
 
         if (!parsedDate) {
+          updateAnalysisProgress(rowIndex + 1)
           continue
         }
         const orderDateIso = parsedDate.toISOString()
@@ -2829,11 +2952,14 @@ export default function VentesPage() {
           rowNumber,
           payload,
           linkedProductId,
+          linkedProductVariantId,
           linkedUnitPurchaseCost,
           productRaw,
           agentRaw,
           deliveryCompanyRaw,
         })
+
+        updateAnalysisProgress(rowIndex + 1)
       }
 
       if (validRows.length === 0) {
@@ -2844,12 +2970,20 @@ export default function VentesPage() {
     rowNumber: number
     payload: Record<string, any>
     linkedProductId: string | null
+    linkedProductVariantId: string | null
     linkedUnitPurchaseCost: number
   }> = validRows
   const duplicates = 0
 
   if (dedupedRows.length > 0) {
     const CHUNK_SIZE = 200
+    setImportProgress({
+      percentage: 70,
+      current: 0,
+      total: dedupedRows.length,
+      label: 'Enregistrement des ventes',
+      status: 'running',
+    })
     for (let i = 0; i < dedupedRows.length; i += CHUNK_SIZE) {
       const chunkRows = dedupedRows.slice(i, i + CHUNK_SIZE)
       const chunk = chunkRows.map((row) => row.payload)
@@ -2885,7 +3019,7 @@ export default function VentesPage() {
               store_id: currentStoreId,
               order_id: orderId,
               product_id: row.linkedProductId,
-              product_variant_id: null,
+              product_variant_id: row.linkedProductVariantId,
               quantity: 1,
               unit_selling_price: Number(row.payload.total_selling_price || 0),
               unit_purchase_cost_snapshot: Number(row.linkedUnitPurchaseCost || 0),
@@ -2898,9 +3032,25 @@ export default function VentesPage() {
           if (orderItemsError) throw orderItemsError
         }
       }
+
+      const uploadedRows = Math.min(i + chunkRows.length, dedupedRows.length)
+      setImportProgress({
+        percentage: 70 + Math.round((uploadedRows / dedupedRows.length) * 25),
+        current: uploadedRows,
+        total: dedupedRows.length,
+        label: 'Enregistrement des ventes',
+        status: 'running',
+      })
     }
   }
 
+      setImportProgress({
+        percentage: 96,
+        current: dedupedRows.length,
+        total: dedupedRows.length,
+        label: 'Actualisation de la liste des ventes',
+        status: 'running',
+      })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses-owner'] })
@@ -2916,10 +3066,22 @@ export default function VentesPage() {
     onSuccess: (summary) => {
       setImportSummary(summary)
       setImportError('')
+      setImportProgress({
+        percentage: 100,
+        current: summary.total,
+        total: summary.total,
+        label: 'Import terminé',
+        status: 'success',
+      })
       setImportStep(3)
     },
     onError: (error: any) => {
       setImportError(error?.message || 'Erreur import CSV')
+      setImportProgress((progress) => ({
+        ...progress,
+        label: 'Import interrompu',
+        status: 'error',
+      }))
     },
   })
 
@@ -3591,7 +3753,8 @@ export default function VentesPage() {
               <button
                 type="button"
                 onClick={closeImportModal}
-                className="text-muted-foreground hover:text-foreground"
+                disabled={importOrdersMutation.isPending}
+                className="text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Fermer
               </button>
@@ -3786,6 +3949,49 @@ export default function VentesPage() {
                     </div>
                   ) : null}
 
+                  {fieldToColumnMap.product_variant && linkImportedProducts ? (
+                    <div className="rounded-lg border border-border p-4 space-y-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-foreground">Correspondance des variantes</h4>
+                        <p className="text-xs text-muted-foreground">Lier chaque variante CSV à la variante du produit correspondant</p>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto space-y-2">
+                        {variantImportEntries.map((entry) => {
+                          const product = importStoreProducts.find((item: any) => String(item.id) === entry.productId)
+                          const availableVariants = importStoreVariants.filter(
+                            (variant: any) => String(variant.product_id) === entry.productId
+                          )
+                          return (
+                            <div key={entry.key} className="grid grid-cols-12 gap-3 items-center">
+                              <div className="col-span-5 text-sm text-foreground min-w-0">
+                                <div className="truncate" title={entry.variantRaw}>{entry.variantRaw}</div>
+                                <div className="truncate text-xs text-muted-foreground" title={String(product?.name || entry.productRaw)}>
+                                  {product?.name || entry.productRaw}
+                                </div>
+                              </div>
+                              <div className="col-span-7">
+                                <select
+                                  value={variantValueMap[entry.key] || ''}
+                                  onChange={(e) =>
+                                    setVariantValueMap((prev) => ({ ...prev, [entry.key]: e.target.value }))
+                                  }
+                                  className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+                                >
+                                  <option value="">-- Choisir une variante --</option>
+                                  {availableVariants.map((variant: any) => (
+                                    <option key={variant.id} value={variant.id}>
+                                      {variant.name}{variant.sku ? ` • ${variant.sku}` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {fieldToColumnMap.confirmation_agent ? (
                     <div className="rounded-lg border border-border p-4 space-y-3">
                       <div className="flex items-center justify-between">
@@ -3920,12 +4126,64 @@ export default function VentesPage() {
 
               {importStep === 3 ? (
                 <div className="space-y-4">
-                  <div className="rounded-lg border border-border p-4">
-                    <h4 className="text-sm font-semibold text-foreground mb-2">Récapitulatif</h4>
-                    <p className="text-sm text-muted-foreground">
-                      {importRows.length} lignes à importer • {Object.keys(fieldToColumnMap).filter((k) => fieldToColumnMap[k as ImportFieldKey]).length} champs mappés
-                    </p>
+                  <div className="rounded-xl border border-border bg-secondary/20 p-5 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h4 className="text-sm font-semibold text-foreground">
+                          {importProgress.status === 'success' ? 'Import terminé' : 'Importation des ventes'}
+                        </h4>
+                        <p className="mt-1 text-xs text-muted-foreground">{importProgress.label}</p>
+                      </div>
+                      <span className={`text-sm font-semibold tabular-nums ${
+                        importProgress.status === 'error' ? 'text-red-600' :
+                        importProgress.status === 'success' ? 'text-green-600' : 'text-primary'
+                      }`}>
+                        {importProgress.percentage}%
+                      </span>
+                    </div>
+
+                    <div
+                      className="h-2.5 w-full overflow-hidden rounded-full bg-muted"
+                      role="progressbar"
+                      aria-label="Progression de l’import CSV"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={importProgress.percentage}
+                    >
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-300 ease-out ${
+                          importProgress.status === 'error' ? 'bg-red-500' :
+                          importProgress.status === 'success' ? 'bg-green-500' : 'bg-primary'
+                        }`}
+                        style={{ width: `${importProgress.percentage}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span>
+                        {importProgress.status === 'running' && importProgress.total > 0
+                          ? `${importProgress.current} sur ${importProgress.total} lignes`
+                          : importProgress.status === 'success'
+                            ? `${importSummary?.inserted || 0} ventes importées`
+                            : `${importRows.length} lignes prêtes`}
+                      </span>
+                      {importOrdersMutation.isPending ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          Ne fermez pas cette fenêtre
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
+
+                  {!importOrdersMutation.isPending && importProgress.status === 'idle' ? (
+                    <div className="rounded-lg border border-border p-4">
+                      <h4 className="text-sm font-semibold text-foreground mb-2">Récapitulatif</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {importRows.length} lignes à importer • {Object.keys(fieldToColumnMap).filter((k) => fieldToColumnMap[k as ImportFieldKey]).length} champs mappés
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -3934,16 +4192,18 @@ export default function VentesPage() {
               <button
                 type="button"
                 onClick={closeImportModal}
-                className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary"
+                disabled={importOrdersMutation.isPending}
+                className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Annuler
+                {importOrdersMutation.isPending ? 'Import en cours' : 'Annuler'}
               </button>
               <div className="flex items-center gap-3">
                 {importStep > 1 ? (
                   <button
                     type="button"
                     onClick={() => setImportStep((s) => (s - 1) as 1 | 2 | 3)}
-                    className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary"
+                    disabled={importOrdersMutation.isPending}
+                    className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Retour
                   </button>
@@ -3960,10 +4220,12 @@ export default function VentesPage() {
                   <button
                     type="button"
                     onClick={() => importOrdersMutation.mutate()}
-                    disabled={importOrdersMutation.isPending}
-                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
+                    disabled={importOrdersMutation.isPending || importProgress.status === 'success'}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {importOrdersMutation.isPending ? 'Import...' : 'Lancer import'}
+                    {importOrdersMutation.isPending ? (
+                      <><RefreshCw className="h-4 w-4 animate-spin" /> Import en cours</>
+                    ) : importProgress.status === 'success' ? 'Import terminé' : 'Lancer import'}
                   </button>
                 )}
               </div>
