@@ -584,6 +584,7 @@ export default function VentesPage() {
   const [deliveryNoteDigylogPort, setDeliveryNoteDigylogPort] = useState<1 | 2>(2)
   const [deliveryNoteDigylogConfigLoaded, setDeliveryNoteDigylogConfigLoaded] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [importDragActive, setImportDragActive] = useState(false)
   const [importStep, setImportStep] = useState<1 | 2 | 3>(1)
   const [importFileName, setImportFileName] = useState('')
   const [importRows, setImportRows] = useState<Array<Record<string, string>>>([])
@@ -2444,6 +2445,7 @@ export default function VentesPage() {
     setDefaultDeliveryCompanySelection(IMPORT_INTERNAL_DELIVERY)
     setDefaultDeliveryCompanyOtherName('')
     setImportError('')
+    setImportDragActive(false)
     setImportProgress({ percentage: 0, current: 0, total: 0, label: 'Préparation de l’import', status: 'idle' })
     setImportSummary(null)
   }
@@ -2452,6 +2454,38 @@ export default function VentesPage() {
     if (importOrdersMutation.isPending) return
     setIsImportOpen(false)
     setImportError('')
+    setImportDragActive(false)
+  }
+
+  const isCsvFile = (file: File) =>
+    file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv' || file.type === 'application/vnd.ms-excel'
+
+  const handleCsvFileSelection = (file: File | null | undefined) => {
+    if (!file) return
+    if (!isCsvFile(file)) {
+      setImportError('Fichier non supporté. Choisissez un fichier CSV.')
+      return
+    }
+    void handleCsvUpload(file)
+  }
+
+  const handleCsvDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!currentStoreId) return
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+    setImportDragActive(true)
+  }
+
+  const handleCsvDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setImportDragActive(false)
+  }
+
+  const handleCsvDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setImportDragActive(false)
+    if (!currentStoreId) return
+    handleCsvFileSelection(event.dataTransfer?.files?.[0])
   }
 
   const handleCsvUpload = async (file: File) => {
@@ -3769,11 +3803,40 @@ export default function VentesPage() {
                     </div>
                   ) : null}
 
-                  <div className="rounded-lg border border-dashed p-6 text-center space-y-3">
-                    <p className="text-sm text-muted-foreground">Import CSV uniquement</p>
+                  <div
+                    onDragOver={handleCsvDragOver}
+                    onDragEnter={handleCsvDragOver}
+                    onDragLeave={handleCsvDragLeave}
+                    onDrop={handleCsvDrop}
+                    onClick={() => {
+                      if (!currentStoreId) return
+                      fileInputRef.current?.click()
+                    }}
+                    className={`rounded-lg border-2 border-dashed p-8 text-center space-y-3 transition-colors ${
+                      !currentStoreId
+                        ? 'border-border opacity-60 cursor-not-allowed'
+                        : importDragActive
+                          ? 'border-primary bg-primary/5 cursor-copy'
+                          : 'border-border hover:border-primary/60 hover:bg-secondary/40 cursor-pointer'
+                    }`}
+                  >
+                    <div
+                      className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full transition-colors ${
+                        importDragActive ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
+                      }`}
+                    >
+                      <Upload className="h-5 w-5" />
+                    </div>
+                    <p className="text-sm font-medium text-foreground">
+                      {importDragActive ? 'Déposez le fichier CSV ici' : 'Glissez-déposez votre fichier CSV ici'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Import CSV uniquement</p>
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        fileInputRef.current?.click()
+                      }}
                       disabled={!currentStoreId}
                       className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
                     >
@@ -3787,9 +3850,8 @@ export default function VentesPage() {
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0]
-                        if (!file) return
-                        void handleCsvUpload(file)
                         e.currentTarget.value = ''
+                        handleCsvFileSelection(file)
                       }}
                     />
                   </div>
