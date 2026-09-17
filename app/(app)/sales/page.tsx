@@ -10,8 +10,10 @@ import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
 import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
 import InlineEditProducts from '@/components/dashboard/sales/inline-edit-products'
+import ExchangeRequestModal from '@/components/dashboard/sales/exchange-request-modal'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
+import { hasPermission } from '@/lib/auth/permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 
@@ -63,6 +65,14 @@ const statusConfig = {
   dl_follow_up_request: { label: 'Demande de suivie', color: 'bg-cyan-100 text-cyan-800', icon: Clock },
   dl_billing_error: { label: 'Facturé par erreur', color: 'bg-rose-100 text-rose-800', icon: XCircle },
   dl_out_for_delivery: { label: 'Sortie pour livraison', color: 'bg-purple-100 text-purple-800', icon: Truck },
+}
+
+// Libellés des états d'échange (colonne orders.exchange_status).
+const EXCHANGE_STATUS_LABELS: Record<string, string> = {
+  requested: 'Échange enregistré — remplacement à créer',
+  linked: 'Échange en cours',
+  completed: 'Échange terminé',
+  cancelled: 'Échange annulé',
 }
 
 const USER_EDITABLE_STATUSES = [
@@ -422,6 +432,10 @@ export default function VentesPage() {
   const { currentStoreId, accessibleStoreIds, accessibleStores } = useStore()
   const { role } = usePermissions(currentStoreId)
   const isConfirmationRole = role === 'confirmation'
+  // Un échange crée une commande de remplacement : réservé aux rôles autorisés
+  // à écrire sur les ventes ou à gérer la livraison.
+  const canManageExchange =
+    hasPermission(role ?? null, 'sales.write') || hasPermission(role ?? null, 'delivery.manage')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [blacklistFilter, setBlacklistFilter] = useState<'all' | 'blacklisted' | 'not_blacklisted'>('all')
@@ -507,6 +521,7 @@ export default function VentesPage() {
   }, [openProductDropdownIndex])
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null)
+  const [exchangeOrder, setExchangeOrder] = useState<any | null>(null)
   const [isRapidDeliveryModalOpen, setIsRapidDeliveryModalOpen] = useState(false)
   const [rapidDeliveryOrder, setRapidDeliveryOrder] = useState<any | null>(null)
   const [rapidDeliveryCityKey, setRapidDeliveryCityKey] = useState('')
@@ -1777,11 +1792,11 @@ export default function VentesPage() {
   })
 
   const updateOrderStatusMutation = useMutation({
-    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean; senditCityKey?: string; senditCityName?: string; senditAllowOpen?: boolean; senditAllowTry?: boolean; senditProductsFromStock?: boolean; senditPackagingId?: string; senditOptionExchange?: boolean; senditDeliveryExchangeId?: string; senditPickupDistrictId?: string; digylogNetworkId?: number; digylogExternalStore?: string; digylogOrderMode?: 1 | 2; digylogSendStatus?: 0 | 1; digylogCheckDuplicate?: 0 | 1; digylogOpenProduct?: 1 | 2; digylogPort?: 1 | 2 }) => {
+    mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, deliveryMode, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; deliveryMode?: 'internal' | 'shipping'; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean; senditCityKey?: string; senditCityName?: string; senditAllowOpen?: boolean; senditAllowTry?: boolean; senditProductsFromStock?: boolean; senditPackagingId?: string; senditOptionExchange?: boolean; senditDeliveryExchangeId?: string; senditPickupDistrictId?: string; digylogNetworkId?: number; digylogExternalStore?: string; digylogOrderMode?: 1 | 2; digylogSendStatus?: 0 | 1; digylogCheckDuplicate?: 0 | 1; digylogOpenProduct?: 1 | 2; digylogPort?: 1 | 2 }) => {
       const response = await fetch('/api/orders/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }),
+        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, deliveryMode, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }),
       })
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
@@ -2122,6 +2137,17 @@ export default function VentesPage() {
 
   const isStatusCarrierLocked = (order: any) =>
     order?.delivery_status_source === 'delivery_company' || isOrderLinkedToApiProvider(order)
+
+  // Échange possible uniquement pour un colis livré chez un transporteur qui
+  // gère la demande d'échange manuellement (Rapid Delivery / Maroc Go Delivery).
+  // Un échange resté en « requested » (remplacement non créé) peut être relancé.
+  const isExchangeEligible = (order: any) => {
+    const provider = String(order?.delivery_companies?.api_provider || '').trim()
+    if (provider !== 'rapid-delivery' && provider !== 'maroc-go-delivery') return false
+    if (order?.exchange_original_order_id) return false
+    if (order?.exchange_status === 'requested') return true
+    return String(order?.status || '') === 'delivered' && !order?.exchange_status
+  }
 
   const onChangeProduct = (index: number, productId: string) => {
     const product = (products || []).find((p: any) => p.id === productId)
@@ -4003,7 +4029,7 @@ export default function VentesPage() {
                 <div className="text-sm text-foreground">ID: #{String(selectedOrderForDetails.id || '').slice(0, 8)}</div>
                 <div className="text-sm text-foreground">Date commande: {formatDateTime(selectedOrderForDetails.order_date)}</div>
                 <div className="text-sm text-foreground">
-                  Source: {selectedOrderForDetails.source === 'ads' ? 'ADS' : selectedOrderForDetails.source === 'recommendation' ? 'Recommendation' : 'Organique'}
+                  Source: {selectedOrderForDetails.source === 'ads' ? 'ADS' : selectedOrderForDetails.source === 'recommendation' ? 'Recommendation' : selectedOrderForDetails.source === 'exchange' ? 'Échange' : 'Organique'}
                 </div>
                 <div className="text-sm text-foreground">
                   Produits: {(selectedOrderForDetails.order_items || [])
@@ -4082,6 +4108,27 @@ export default function VentesPage() {
                       ) : null}
                     </>
                   ) : null}
+
+                  {isExchangeEligible(selectedOrderForDetails) ? (
+                    <button
+                      type="button"
+                      onClick={() => setExchangeOrder(selectedOrderForDetails)}
+                      className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                    >
+                      {selectedOrderForDetails.exchange_status === 'requested'
+                        ? "Terminer l'échange"
+                        : 'Demander un échange'}
+                    </button>
+                  ) : null}
+
+                  {selectedOrderForDetails.exchange_status ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+                      {EXCHANGE_STATUS_LABELS[selectedOrderForDetails.exchange_status] || 'Échange enregistré'}
+                      {selectedOrderForDetails.exchange_new_parcel_key
+                        ? ` — nouveau colis ${selectedOrderForDetails.exchange_new_parcel_key}`
+                        : ''}
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
@@ -4109,6 +4156,12 @@ export default function VentesPage() {
           </div>
         </div>
       ) : null}
+
+      <ExchangeRequestModal
+        order={exchangeOrder}
+        canManage={canManageExchange}
+        onClose={() => setExchangeOrder(null)}
+      />
 
       {/* Filters */}
       <div className="bg-card rounded-xl shadow p-4">
@@ -5402,13 +5455,14 @@ export default function VentesPage() {
                     }
                     setDeliveryNoteModalOrder(null)
                     setUpdatingOrderId(order.id)
-                    const resolvedCompanyId = deliveryNoteSelectedCompanyId === 'internal' ? undefined : deliveryNoteSelectedCompanyId
+                    const isInternalDelivery = deliveryNoteSelectedCompanyId === 'internal'
                     updateOrderStatusMutation.mutate(
                       {
                         orderId: order.id,
                         status: 'confirmed',
                         deliveryNote: deliveryNoteText.trim() || undefined,
-                        deliveryCompanyId: resolvedCompanyId,
+                        deliveryCompanyId: isInternalDelivery ? undefined : deliveryNoteSelectedCompanyId,
+                        deliveryMode: isInternalDelivery ? 'internal' : 'shipping',
                         ozoneCityKey: selectedOzoneCity ? Number(selectedOzoneCity.city_key) : undefined,
                         ozoneCityName: selectedOzoneCity ? String(selectedOzoneCity.city_name || '') : undefined,
                         ozoneParcelOpen: isDeliveryNoteOzone ? (deliveryNoteOzoneOpen ? 1 : 2) : undefined,

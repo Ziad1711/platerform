@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       status?: string
       deliveryNote?: string
       deliveryCompanyId?: string
+      deliveryMode?: 'internal' | 'shipping'
       ozoneCityKey?: string | number
       ozoneCityName?: string
       ozoneParcelOpen?: 1 | 2
@@ -83,6 +84,9 @@ export async function POST(request: Request) {
     const status = String(body.status || '').trim()
     const deliveryNote = typeof body.deliveryNote === 'string' ? body.deliveryNote.trim() : ''
     const deliveryCompanyId = typeof body.deliveryCompanyId === 'string' ? body.deliveryCompanyId.trim() : ''
+    // « Livraison interne » : aucun transporteur externe ne doit être utilisé et
+    // aucun colis ne doit être créé automatiquement.
+    const isInternalDelivery = body.deliveryMode === 'internal'
     const ozoneCityKey = Number(body.ozoneCityKey || 0) || 0
     const ozoneCityName = typeof body.ozoneCityName === 'string' ? body.ozoneCityName.trim() : ''
     const ozoneParcelOptions = {
@@ -130,7 +134,10 @@ export async function POST(request: Request) {
       updatePayload.delivery_note = deliveryNote
     }
 
-    if (deliveryCompanyId) {
+    if (isInternalDelivery) {
+      // Livraison assurée en interne : on détache toute société externe.
+      updatePayload.delivery_company_id = null
+    } else if (deliveryCompanyId) {
       updatePayload.delivery_company_id = deliveryCompanyId
     }
 
@@ -145,7 +152,10 @@ export async function POST(request: Request) {
     let warning = ''
     let trackingNumber = String(order.tracking_number || '')
 
-    const resolvedDeliveryCompanyId = deliveryCompanyId || order.delivery_company_id
+    // En livraison interne, on ne retombe jamais sur l'ancienne société.
+    const resolvedDeliveryCompanyId = isInternalDelivery
+      ? null
+      : (deliveryCompanyId || order.delivery_company_id)
 
     if (status === 'confirmed' && !trackingNumber && resolvedDeliveryCompanyId) {
       const admin = createAdminClient()

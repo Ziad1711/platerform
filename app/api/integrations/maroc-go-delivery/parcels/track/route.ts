@@ -3,6 +3,12 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { getMarocGoDeliveryStateName, mapMarocGoDeliveryStateToOrderStatus, trackMarocGoDeliveryParcel } from '@/lib/integrations/maroc-go-delivery'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/maroc-go-delivery-connect'
+import {
+  EXCHANGE_RETURN_ORDER_STATUS,
+  EXCHANGE_STATUS_COMPLETED,
+  isExchangeActive,
+  isExchangeFollowUpOrder,
+} from '@/lib/integrations/delivery/exchange-providers'
 
 export async function GET(request: Request) {
   try {
@@ -33,10 +39,18 @@ export async function GET(request: Request) {
 
     if (orderId) {
       // Ne pas synchroniser si la commande est déjà dans un état final ou confirmée
-      const { data: currentOrder } = await admin.from('orders').select('status').eq('id', orderId).single()
+      const { data: currentOrder } = await admin
+        .from('orders')
+        .select('status, exchange_status, exchange_original_order_id')
+        .eq('id', orderId)
+        .single()
       const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
 
-      if (currentOrder && FINAL_ORDER_STATUSES.includes(currentOrder.status)) {
+      // Une commande engagée dans un échange (ou sa commande de remplacement)
+      // reste suivie : le transporteur doit pouvoir la faire basculer sur
+      // « Retour/Echange » (retour non stocké).
+      if (currentOrder && FINAL_ORDER_STATUSES.includes(currentOrder.status) && !isExchangeFollowUpOrder(currentOrder)) {
+
         return NextResponse.json({ ok: true, tracking: payload, mapped, skipped: true })
       }
 
@@ -51,6 +65,12 @@ export async function GET(request: Request) {
       if (mapped.orderStatus) updatePayload.status = mapped.orderStatus
       if (mapped.orderStatus) updatePayload.last_status_update_at = now
       if (mapped.statusDateField) updatePayload[mapped.statusDateField] = now
+
+      // Le retour est confirmé : l'échange n'a plus besoin d'être suivi.
+      if (mapped.orderStatus === EXCHANGE_RETURN_ORDER_STATUS && isExchangeActive(currentOrder?.exchange_status)) {
+        updatePayload.exchange_status = EXCHANGE_STATUS_COMPLETED
+        updatePayload.exchange_completed_at = now
+      }
 
       const { error } = await supabase.from('orders').update(updatePayload).eq('id', orderId)
       if (error) throw error

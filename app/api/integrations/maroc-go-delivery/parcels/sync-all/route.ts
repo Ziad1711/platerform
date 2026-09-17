@@ -3,6 +3,13 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/maroc-go-delivery-connect'
 import { getMarocGoDeliveryStateName, mapMarocGoDeliveryStateToOrderStatus, trackMarocGoDeliveryParcel } from '@/lib/integrations/maroc-go-delivery'
+import {
+  EXCHANGE_ACTIVE_STATUSES,
+  EXCHANGE_RETURN_ORDER_STATUS,
+  EXCHANGE_STATUS_COMPLETED,
+  isExchangeActive,
+  isExchangeFollowUpOrder,
+} from '@/lib/integrations/delivery/exchange-providers'
 
 const EXCLUDED_ORDER_STATUSES = ['new', 'delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
 
@@ -51,21 +58,48 @@ export async function POST(request: NextRequest) {
     const deliveryCompanyIds = (deliveryCompanies || []).map((company) => company.id).filter(Boolean)
     if (deliveryCompanyIds.length === 0) return NextResponse.json({ synced: 0, errors: 0 })
 
-    const { data: orders, error: ordersError } = await admin
-      .from('orders')
-      .select('id, maroc_go_delivery_parcel_key, status')
-      .eq('store_id', storeId)
-      .in('delivery_company_id', deliveryCompanyIds)
-      .not('maroc_go_delivery_parcel_key', 'is', null)
+    // Les commandes habituellement exclues restent exclues, sauf si elles sont
+    // engagées dans un échange ou en sont la commande de remplacement.
+    const excludedList = EXCLUDED_ORDER_STATUSES.map((status) => `"${status}"`).join(',')
+    const activeExchangeList = EXCHANGE_ACTIVE_STATUSES.map((status) => `"${status}"`).join(',')
+    const syncFilter = [
+      `status.not.in.(${excludedList})`,
+      `exchange_status.in.(${activeExchangeList})`,
+      'exchange_original_order_id.not.is.null',
+    ].join(',')
 
-    if (ordersError) throw ordersError
+    const buildOrdersQuery = (withFilter: boolean) => {
+      let query = admin
+        .from('orders')
+        .select('id, maroc_go_delivery_parcel_key, status, exchange_status, exchange_original_order_id')
+        .eq('store_id', storeId)
+        .in('delivery_company_id', deliveryCompanyIds)
+        .not('maroc_go_delivery_parcel_key', 'is', null)
+
+      if (withFilter) query = query.or(syncFilter)
+      return query
+    }
+
+    let ordersResult = await buildOrdersQuery(true)
+
+    // Filet de sécurité : si le filtre PostgREST est refusé, on retombe sur un
+    // filtrage JavaScript (le garde-fou dans la boucle reste actif).
+    if (ordersResult.error) {
+      console.warn('Maroc Go Delivery sync-all: filtre SQL indisponible, repli JS', ordersResult.error.message)
+      ordersResult = await buildOrdersQuery(false)
+    }
+
+    if (ordersResult.error) throw ordersResult.error
+    const orders = ordersResult.data
 
     let synced = 0
     let errors = 0
 
     for (const order of orders || []) {
       try {
-        if (EXCLUDED_ORDER_STATUSES.includes(String(order.status || ''))) continue
+        // Une commande engagée dans un échange (ou sa commande de remplacement)
+        // doit rester suivie pour récupérer l'état « Retour/Echange ».
+        if (EXCLUDED_ORDER_STATUSES.includes(String(order.status || '')) && !isExchangeFollowUpOrder(order)) continue
 
         const trackingNumber = String(order.maroc_go_delivery_parcel_key || '').trim()
         if (!trackingNumber) continue
@@ -88,6 +122,12 @@ export async function POST(request: NextRequest) {
 
         if (mapped.statusDateField) {
           updatePayload[mapped.statusDateField] = now
+        }
+
+        // Le retour est confirmé : l'échange n'a plus besoin d'être suivi.
+        if (mapped.orderStatus === EXCHANGE_RETURN_ORDER_STATUS && isExchangeActive(order.exchange_status)) {
+          updatePayload.exchange_status = EXCHANGE_STATUS_COMPLETED
+          updatePayload.exchange_completed_at = now
         }
 
         const { error: updateError } = await admin.from('orders').update(updatePayload).eq('id', order.id)
