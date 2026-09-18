@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
-import { processPendingFacebookSyncJobs } from '@/lib/integrations/facebook-ads-connect'
+import { assertTrustedOrigin, getErrorStatus, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { getFacebookFinalizedThrough, processPendingFacebookSyncJobs } from '@/lib/integrations/facebook-ads-sync'
+
+export const maxDuration = 300
 
 export async function POST(request: Request) {
   try {
@@ -23,10 +25,8 @@ export async function POST(request: Request) {
     if (integrationError) throw integrationError
     if (!integration?.id) return NextResponse.json({ error: 'FACEBOOK_INTEGRATION_NOT_FOUND' }, { status: 404 })
 
-    const today = new Date()
-    const j0 = today.toISOString().slice(0, 10)
-    const currentYear = today.getFullYear()
-    const syncFrom = `${currentYear}-01-01`
+    const syncTo = getFacebookFinalizedThrough()
+    const syncFrom = `${syncTo.slice(0, 4)}-01-01`
 
     const { data: job, error } = await admin.from('facebook_sync_jobs').insert({
       integration_id: integration.id,
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       store_id: storeId,
       job_type: 'manual',
       sync_from: syncFrom,
-      sync_to: j0,
+      sync_to: syncTo,
       status: 'pending',
     })
     .select('id')
@@ -46,6 +46,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, results })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'FACEBOOK_MANUAL_SYNC_FAILED'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: getErrorStatus(error) })
   }
 }

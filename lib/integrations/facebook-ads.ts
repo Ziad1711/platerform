@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 
-const FACEBOOK_GRAPH_API_BASE = 'https://graph.facebook.com/v23.0'
+const FACEBOOK_GRAPH_API_BASE = 'https://graph.facebook.com/v25.0'
 const FACEBOOK_SCOPES = ['ads_read', 'business_management']
 
 type FacebookOAuthStatePayload = {
@@ -49,7 +49,7 @@ export function buildFacebookAdsAuthorizeUrl(params: {
   redirectUri: string
   state: string
 }) {
-  const url = new URL('https://www.facebook.com/v23.0/dialog/oauth')
+  const url = new URL('https://www.facebook.com/v25.0/dialog/oauth')
   url.searchParams.set('client_id', params.clientId)
   url.searchParams.set('redirect_uri', params.redirectUri)
   url.searchParams.set('state', params.state)
@@ -102,6 +102,12 @@ export async function fetchFacebookGraph<T>(params: {
   url.searchParams.set('access_token', params.accessToken)
 
   const response = await fetch(url.toString(), { method: 'GET' })
+  if (!response.ok) throw new Error(`FACEBOOK_GRAPH_REQUEST_FAILED:${await response.text()}`)
+  return response.json() as Promise<T>
+}
+
+export async function fetchFacebookGraphUrl<T>(url: string) {
+  const response = await fetch(url, { method: 'GET' })
   if (!response.ok) throw new Error(`FACEBOOK_GRAPH_REQUEST_FAILED:${await response.text()}`)
   return response.json() as Promise<T>
 }
@@ -174,7 +180,7 @@ export async function getFacebookCampaignInsights(params: {
       ])
     : undefined
 
-  const payload = await fetchFacebookGraph<{ data?: Array<any> }>({
+  const firstPage = await fetchFacebookGraph<{ data?: Array<any>; paging?: { next?: string } }>({
     path: `/act_${params.accountId}/insights`,
     accessToken: params.accessToken,
     searchParams: {
@@ -209,7 +215,20 @@ export async function getFacebookCampaignInsights(params: {
     },
   })
 
-  return (payload.data || []).map((row) => ({
+  const rows: Array<any> = []
+  let payload: { data?: Array<any>; paging?: { next?: string } } | null = firstPage
+  let page = 0
+  const MAX_PAGES = 40
+
+  while (payload) {
+    rows.push(...(payload.data || []))
+    const next = payload.paging?.next
+    if (!next || page >= MAX_PAGES) break
+    page += 1
+    payload = await fetchFacebookGraphUrl<{ data?: Array<any>; paging?: { next?: string } }>(next)
+  }
+
+  return rows.map((row) => ({
     accountId: String(row.account_id || params.accountId).replace(/^act_/, ''),
     campaignId: String(row.campaign_id || ''),
     campaignName: String(row.campaign_name || 'Campaign'),

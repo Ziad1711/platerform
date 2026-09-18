@@ -185,6 +185,11 @@
 - [x] Add dashboard fallback from `ad_spend_daily` to `orders.ads_cost_allocated`
 - [x] Ajouter la base Facebook Ads MVP: migration SQL `ad_spend_daily` (spend/spend_converted/devise/product), tables `facebook_*`, OAuth backend, listing ad accounts/campaigns, mapping campagne→produit, job manuel de sync
 - [x] Corriger Facebook Ads MVP pour que le sync manuel traite réellement les jobs et écrive les dépenses dans `ad_spend_daily`
+- [x] Ajouter les deux modes Facebook Ads (Simple sans produit / Par produit) avec la liaison multi-store `facebook_ad_account_store_configs` et `facebook_campaign_mappings.product_id` nullable
+- [x] Extraire le worker de sync dans `lib/integrations/facebook-ads-sync.ts`, ajouter la pagination Meta Insights et la dé-duplication par campagne/jour
+- [x] Ajouter la synchronisation automatique quotidienne Vercel (`/api/cron/facebook-ads-sync` + `vercel.json`)
+- [x] Auditer et durcir le flux Facebook Ads: isolation multi-store, RLS/CSRF, jobs atomiques, multi-devise, déduplication sûre et validation des mappings
+- [x] Finaliser la stratégie de fraîcheur Facebook Ads: synchronisation nocturne jusqu’à hier, correction glissante sur 7 jours et information client en cas de dépense à zéro
 
 ### 📋 Phase 4 (Future)
 
@@ -287,6 +292,7 @@
 - Build global bloqué par une erreur hors scope Rapid Delivery sur `/dashboard/fournisseurs` (`useSearchParams()` sans suspense boundary)
 
 ### Medium
+- `CRON_SECRET` doit être défini dans Vercel pour activer la synchronisation Facebook Ads automatique (sinon `/api/cron/facebook-ads-sync` répond 503)
 - No error boundaries implemented
 - No loading states on pages
 - No form validation feedback

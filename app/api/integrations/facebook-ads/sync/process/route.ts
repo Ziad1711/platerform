@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { assertTrustedOrigin, requireAuthenticatedUser } from '@/lib/assistant/security'
-import { processPendingFacebookSyncJobs } from '@/lib/integrations/facebook-ads-connect'
+import { assertTrustedOrigin, getErrorStatus, requireAuthenticatedUser } from '@/lib/assistant/security'
+import { processPendingFacebookSyncJobs } from '@/lib/integrations/facebook-ads-sync'
+
+export const maxDuration = 300
 
 export async function POST(request: Request) {
   try {
@@ -16,6 +18,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, results })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'FACEBOOK_SYNC_PROCESS_FAILED'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: getErrorStatus(error) })
   }
 }

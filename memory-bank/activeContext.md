@@ -43,6 +43,9 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Ajout du téléchargement des étiquettes Rapid Delivery (`v3` par défaut) depuis la liste des bons via `/api/integrations/rapid-delivery/vouchers/[key]/labels`
 - ✅ Démarrage de l'intégration Facebook Ads MVP: migration Supabase `20260426_facebook_ads_mvp.sql`, nouvelles tables `facebook_*`, support devise convertie dans `ad_spend_daily`, endpoints OAuth/campaign mapping/manual sync, et modal frontend de connexion/mapping Facebook Ads
 - ✅ Correction Facebook Ads MVP: migration `ad_spend_daily` effectivement appliquée en base après déduplication legacy, ajout du fetch Insights Facebook, traitement réel des jobs `facebook_sync_jobs`, insertion/update des dépenses dans `ad_spend_daily`
+- ✅ Facebook Ads — modes de suivi: après connexion, choix « Simple » (dépenses enregistrées dans `ad_spend_daily` sans produit) ou « Par produit » (mapping campagne → produit). table de liaison multi-store `facebook_ad_account_store_configs`, `facebook_campaign_mappings.product_id` désormais nullable, worker extrait dans `lib/integrations/facebook-ads-sync.ts`, Meta Graph API v25.0 avec pagination Insights, taux multi-devise, déduplication exacte sans suppression avant succès Meta et cron Vercel quotidien `/api/cron/facebook-ads-sync`
+- ✅ Audit Facebook Ads: isolation ad account ↔ store via table de liaison, validation stricte comptes/produits, CSRF, RLS renforcée, claim atomique des jobs, reprise cron, aucune suppression avant succès Meta, déduplication exacte, recalcul des allocations commandes, taux multi-devise couvrant l’historique et statuts HTTP 401/403 corrects
+- ✅ Synchronisation Facebook Ads finalisée: cron quotidien Vercel Hobby à `01:00 UTC` (fenêtre réelle variable), import uniquement jusqu’à hier, resynchronisation glissante des 7 derniers jours, bandeau de fraîcheur des données et explication détaillée lorsque la dépense affichée est à zéro
 - ✅ Refonte de la page Paramètres: sections Informations personnelles, Sécurité, Préférences, Taux de change, Blacklist configuration
 - ✅ Nouvelles routes settings ajoutées: `/api/settings/profile`, `/api/settings/preferences`, `/api/settings/security/reset-password`, `/api/settings/blacklist-rule`, `/api/settings/exchange-rates`
 - ✅ Migration Supabase appliquée pour `profiles.preferred_currency` et `blacklist_rules.is_enabled`
@@ -107,10 +110,10 @@ Refonte complète de l'assistant IA terminée :
 - ✅ OAuth Facebook avec échange short-lived → long-lived token
 - ✅ Chiffrement AES-256-GCM des tokens
 - ✅ Listing des ad accounts et campagnes
-- ✅ Mapping campagne → produit
-- ✅ Sync automatique des dépenses via worker `processFacebookSyncJob()`
-- ✅ Saisie manuelle du taux de change dans le wizard (5 étapes)
-- ✅ Conversion automatique des devises via `exchange_rates`
+- ✅ Deux modes de suivi après connexion: « Simple » (dépenses dans `ad_spend_daily` sans produit) et « Par produit » (mapping campagne → produit)
+- ✅ Sync automatique des dépenses via worker `processFacebookSyncJob()` (`lib/integrations/facebook-ads-sync.ts`) + cron Vercel quotidien `/api/cron/facebook-ads-sync`
+- ✅ Saisie manuelle du taux de change dans le wizard (6 étapes avec choix du mode)
+- ✅ Conversion automatique des devises via `exchange_rates` (devise réelle de chaque ad account)
 - ✅ Répartition automatique des coûts pub sur `orders.ads_cost_allocated`
 - ✅ Dashboard KPI et charts corrigés (3 fonctions RPC)
 

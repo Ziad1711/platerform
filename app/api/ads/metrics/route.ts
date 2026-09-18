@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
+import { getFacebookFinalizedThrough } from '@/lib/integrations/facebook-ads-sync'
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     // Date par défaut : 1er janvier de l'année en cours
     const currentYear = new Date().getFullYear()
     const defaultFrom = `${currentYear}-01-01`
-    const defaultTo = new Date().toISOString().split('T')[0]
+    const defaultTo = getFacebookFinalizedThrough()
 
     const dateFrom = from || defaultFrom
     const dateTo = to || defaultTo
@@ -37,6 +38,45 @@ export async function GET(request: NextRequest) {
 
     if (!member) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
+    const { data: integration } = await admin
+      .from('integrations')
+      .select('id, status')
+      .eq('user_id', user.id)
+      .eq('provider', 'facebook-ads')
+      .maybeSingle()
+
+    let activeAccountCount = 0
+    let lastSuccessfulSyncAt: string | null = null
+    let lastSyncedThrough: string | null = null
+    let lastSyncError: string | null = null
+
+    if (integration?.id) {
+      const [{ count }, { data: latestJob }] = await Promise.all([
+        admin
+          .from('facebook_ad_account_store_configs')
+          .select('id', { count: 'exact', head: true })
+          .eq('integration_id', integration.id)
+          .eq('store_id', storeId)
+          .eq('is_active', true),
+        admin
+          .from('facebook_sync_jobs')
+          .select('status, sync_to, finished_at, error_message')
+          .eq('integration_id', integration.id)
+          .eq('store_id', storeId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ])
+
+      activeAccountCount = count || 0
+      if (latestJob?.status === 'completed') {
+        lastSuccessfulSyncAt = latestJob.finished_at
+        lastSyncedThrough = latestJob.sync_to
+      } else if (latestJob?.status === 'failed') {
+        lastSyncError = latestJob.error_message || 'FACEBOOK_SYNC_FAILED'
+      }
     }
 
     // Requête de base
@@ -297,6 +337,15 @@ export async function GET(request: NextRequest) {
           roas: p.spend > 0 ? +(p.conversionValue / p.spend).toFixed(2) : 0,
           cpc: p.clicks > 0 ? +(p.spend / p.clicks).toFixed(4) : 0,
         })),
+      syncInfo: {
+        finalizedThrough: getFacebookFinalizedThrough(),
+        nextAutomaticSyncLabel: 'Synchronisation nocturne, généralement disponible avant 03:00 (heure du Maroc)',
+        isConnected: integration?.status === 'connected',
+        activeAccountCount,
+        lastSuccessfulSyncAt,
+        lastSyncedThrough,
+        lastSyncError,
+      },
       byCampaign: Array.from(byCampaign.values())
         .sort((a, b) => b.spend - a.spend)
         .map((c) => ({

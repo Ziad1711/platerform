@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { assertTrustedOrigin, getErrorStatus, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 
 export async function POST(request: Request) {
   try {
+    assertTrustedOrigin(request)
     const { supabase, user } = await requireAuthenticatedUser()
     const body = (await request.json().catch(() => ({}))) as {
       storeId?: string
@@ -23,14 +24,22 @@ export async function POST(request: Request) {
     await verifyStoreAccess(supabase, user.id, storeId)
 
     const admin = createAdminClient()
+    const { data: store, error: storeError } = await admin
+      .from('stores')
+      .select('owner_user_id')
+      .eq('id', storeId)
+      .single()
 
-    // Upsert le taux de change manuel
+    if (storeError) throw storeError
+
+    // Le taux est global au propriétaire du store, y compris si un membre autorisé le configure.
     const { error } = await admin.from('exchange_rates').upsert({
-      owner_user_id: user.id,
+      owner_user_id: store.owner_user_id,
       base_currency: baseCurrency,
       target_currency: targetCurrency,
       rate,
-      rate_date: new Date().toISOString().slice(0, 10),
+      // La première sync remonte au 1er janvier: le taux doit couvrir toute la période importée.
+      rate_date: `${new Date().getUTCFullYear() - 1}-01-01`,
       source_type: 'manual',
     }, {
       onConflict: 'owner_user_id,base_currency,target_currency,rate_date',
@@ -42,6 +51,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'EXCHANGE_RATE_SAVE_FAILED'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: getErrorStatus(error) })
   }
 }

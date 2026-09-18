@@ -15,6 +15,8 @@ type AccountRow = {
   timezone_name: string | null
   timezone_offset_hours: number | null
   is_active: boolean
+  store_id: string | null
+  sync_mode: string | null
 }
 
 type ProductRow = { id: string; name: string }
@@ -29,9 +31,12 @@ type MappingRow = {
 }
 type CampaignRow = { id: string; name: string; effectiveStatus: string }
 
+type WizardStep = 'connect' | 'accounts' | 'mode' | 'mapping' | 'rate' | 'sync'
+
 const steps = [
   { key: 'connect', label: 'Connecter Facebook' },
   { key: 'accounts', label: 'Choisir les ad accounts' },
+  { key: 'mode', label: 'Mode de suivi' },
   { key: 'mapping', label: 'Mapper les campagnes' },
   { key: 'rate', label: 'Taux de change' },
   { key: 'sync', label: 'Synchronisation' },
@@ -41,7 +46,9 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
   const supabase = createClient()
   const queryClient = useQueryClient()
   const { currentStoreId, setCurrentStoreId } = useStore()
-  const [currentStep, setCurrentStep] = useState<'connect' | 'accounts' | 'mapping' | 'rate' | 'sync'>('connect')
+  const [currentStep, setCurrentStep] = useState<WizardStep>('connect')
+  const [syncMode, setSyncMode] = useState<'simple' | 'product'>('product')
+  const [isSavingMode, setIsSavingMode] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSavingAccounts, setIsSavingAccounts] = useState(false)
   const [isSavingMappings, setIsSavingMappings] = useState(false)
@@ -56,9 +63,10 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
   const [selectedProducts, setSelectedProducts] = useState<Record<string, string>>({})
 
   const { data: accountsPayload, refetch: refetchAccounts } = useQuery({
-    queryKey: ['facebook-ads-accounts'],
+    queryKey: ['facebook-ads-accounts', currentStoreId],
     queryFn: async () => {
-      const response = await fetch('/api/integrations/facebook-ads/accounts')
+      const params = currentStoreId ? `?storeId=${encodeURIComponent(currentStoreId)}` : ''
+      const response = await fetch(`/api/integrations/facebook-ads/accounts${params}`)
       const payload = await response.json().catch(() => null)
       if (!response.ok) throw new Error(payload?.error || 'FACEBOOK_ACCOUNTS_FETCH_FAILED')
       return payload as { connected: boolean; accounts: AccountRow[] }
@@ -87,7 +95,14 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
 
   const connected = accountsPayload?.connected || false
   const accounts = accountsPayload?.accounts || []
-  const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts])
+  const activeAccounts = useMemo(
+    () => accounts.filter((account) => selectedAccountIds.includes(account.id)),
+    [accounts, selectedAccountIds]
+  )
+  const currentStoreName = useMemo(
+    () => stores.find((store) => store.id === currentStoreId)?.name || '',
+    [stores, currentStoreId]
+  )
   const products = mappingsPayload?.products || []
   const existingMappings = mappingsPayload?.mappings || []
 
@@ -97,7 +112,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
       if (current.length === nextIds.length && current.every((id, index) => id === nextIds[index])) return current
       return nextIds
     })
-  }, [accounts])
+  }, [accounts, currentStoreId])
 
   useEffect(() => {
     const next: Record<string, string> = {}
@@ -108,8 +123,15 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
   }, [existingMappings])
 
   useEffect(() => {
+    if (!currentStoreId) return
+    const scoped = accounts.filter((account) => account.store_id === currentStoreId)
+    if (scoped.length === 0) return
+    setSyncMode(scoped.every((account) => account.sync_mode === 'simple') ? 'simple' : 'product')
+  }, [accounts, currentStoreId])
+
+  useEffect(() => {
     async function loadCampaigns() {
-      if (!connected || activeAccounts.length === 0) {
+      if (!connected || activeAccounts.length === 0 || syncMode !== 'product') {
         setCampaignsByAccount({})
         return
       }
@@ -129,7 +151,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
     }
 
     void loadCampaigns()
-  }, [connected, activeAccounts])
+  }, [connected, activeAccounts, syncMode])
 
   const flattenedCampaigns = useMemo(
     () => activeAccounts.flatMap((account) => (campaignsByAccount[account.id] || []).map((campaign) => ({ account, campaign }))),
@@ -140,9 +162,11 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
     if (!connected && currentStep !== 'connect') setCurrentStep('connect')
   }, [connected, currentStep])
 
+  const visibleSteps = syncMode === 'simple' ? steps.filter((step) => step.key !== 'mapping') : steps
   const canAccessAccountsStep = connected
-  const canAccessMappingStep = connected
-  const canAccessSyncStep = canAccessMappingStep && !!currentStoreId && flattenedCampaigns.length > 0
+  const canAccessModeStep = connected && selectedAccountIds.length > 0
+  const canAccessMappingStep = canAccessModeStep && syncMode === 'product'
+  const canAccessSyncStep = canAccessModeStep && !!currentStoreId
 
   const toggleAccount = (accountId: string) => {
     setSelectedAccountIds((current) =>
@@ -190,19 +214,46 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
     setIsSavingAccounts(true)
     setError('')
     try {
+      if (!currentStoreId) throw new Error('Sélectionnez un store avant de continuer.')
       const response = await fetch('/api/integrations/facebook-ads/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selectedAccountIds }),
+        body: JSON.stringify({ selectedAccountIds, storeId: currentStoreId, syncMode }),
       })
       const payload = await response.json().catch(() => null)
       if (!response.ok) throw new Error(payload?.error || 'FACEBOOK_ACCOUNTS_SAVE_FAILED')
       await refetchAccounts()
-      setCurrentStep('mapping')
+      setCurrentStep('mode')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'FACEBOOK_ACCOUNTS_SAVE_FAILED')
     } finally {
       setIsSavingAccounts(false)
+    }
+  }
+
+  const saveSyncMode = async (mode: 'simple' | 'product') => {
+    if (!currentStoreId) {
+      setError('Sélectionnez un store avant de continuer.')
+      return
+    }
+
+    setIsSavingMode(true)
+    setError('')
+    try {
+      const response = await fetch('/api/integrations/facebook-ads/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedAccountIds, storeId: currentStoreId, syncMode: mode }),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(payload?.error || 'FACEBOOK_ACCOUNTS_SAVE_FAILED')
+      setSyncMode(mode)
+      await refetchAccounts()
+      setCurrentStep(mode === 'simple' ? 'rate' : 'mapping')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'FACEBOOK_ACCOUNTS_SAVE_FAILED')
+    } finally {
+      setIsSavingMode(false)
     }
   }
 
@@ -223,6 +274,8 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
           productId: selectedProducts[`${account.id}:${campaign.id}`] || '',
         }))
         .filter((item) => item.productId)
+
+      if (mappings.length === 0) throw new Error('Mappez au moins une campagne à un produit.')
 
       const response = await fetch('/api/integrations/facebook-ads/mappings', {
         method: 'POST',
@@ -256,6 +309,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
       const payload = await response.json().catch(() => null)
       if (!response.ok) throw new Error(payload?.error || 'FACEBOOK_MANUAL_SYNC_FAILED')
       const results = payload?.results?.[0]
+      if (results?.error) throw new Error(results.error)
       if (results) setSyncProgress({ inserted: results.inserted, updated: results.updated })
       setSyncDone(true)
     } catch (err) {
@@ -303,7 +357,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
 
         <div className="grid gap-6 p-6 lg:grid-cols-[260px_1fr]">
           <aside className="rounded-2xl border border-border bg-muted/20 p-4">
-            <ProgressSteps steps={steps} currentStep={currentStep} />
+            <ProgressSteps steps={visibleSteps} currentStep={currentStep} />
           </aside>
 
           <div className="space-y-6">
@@ -333,7 +387,17 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
             <section className="rounded-2xl border border-border p-5">
               <div className="mb-4">
                 <h4 className="font-semibold text-foreground">Étape 2 — Ad accounts à utiliser</h4>
-                <p className="text-sm text-muted-foreground">Choisissez seulement les comptes publicitaires à intégrer pour éviter d’avoir trop de campagnes inutiles.</p>
+                <p className="text-sm text-muted-foreground">Choisissez le store cible puis les comptes publicitaires à intégrer pour éviter d’avoir trop de campagnes inutiles.</p>
+              </div>
+
+              <div className="mb-4 space-y-2">
+                <label className="text-sm font-medium text-foreground">Store cible</label>
+                <select value={currentStoreId || ''} onChange={(e) => setCurrentStoreId(e.target.value || null)} className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm">
+                  <option value="">Sélectionnez un store</option>
+                  {stores.map((store) => (
+                    <option key={store.id} value={store.id}>{store.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -371,23 +435,61 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
             </section>
             ) : null}
 
+            {currentStep === 'mode' ? (
+            <section className="rounded-2xl border border-border p-5">
+              <div className="mb-4">
+                <h4 className="font-semibold text-foreground">Étape 3 — Mode de suivi</h4>
+                <p className="text-sm text-muted-foreground">Choisissez comment rattacher les dépenses de vos campagnes.</p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void saveSyncMode('simple')}
+                  disabled={isSavingMode}
+                  className={`rounded-2xl border p-5 text-left transition disabled:opacity-50 ${syncMode === 'simple' ? 'border-primary bg-primary/5' : 'border-border'}`}
+                >
+                  <div className="text-sm font-semibold text-foreground">Simple</div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Les dépenses de toutes les campagnes des ad accounts sélectionnés sont enregistrées dans la table des dépenses publicitaires, sans préciser de produit.
+                  </p>
+                  <p className="mt-3 text-xs text-muted-foreground">Recommandé si vous analysez la publicité globalement.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void saveSyncMode('product')}
+                  disabled={isSavingMode}
+                  className={`rounded-2xl border p-5 text-left transition disabled:opacity-50 ${syncMode === 'product' ? 'border-primary bg-primary/5' : 'border-border'}`}
+                >
+                  <div className="text-sm font-semibold text-foreground">Par produit</div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Vous associez chaque campagne à un produit. Les dépenses sont enregistrées par produit pour calculer la rentabilité réelle.
+                  </p>
+                  <p className="mt-3 text-xs text-muted-foreground">Recommandé si vous avez plusieurs produits avec une campagne par produit.</p>
+                </button>
+              </div>
+
+              {isSavingMode ? (
+                <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span>Enregistrement du mode...</span>
+                </div>
+              ) : null}
+            </section>
+            ) : null}
+
             {currentStep === 'mapping' ? (
             <section className="rounded-2xl border border-border p-5">
               <div className="mb-4 space-y-3">
                 <div>
-                  <h4 className="font-semibold text-foreground">Étape 3 — Mapping campagnes → produits</h4>
+                  <h4 className="font-semibold text-foreground">Étape 4 — Mapping campagnes → produits</h4>
                   <p className="text-sm text-muted-foreground">Seules les campagnes des ad accounts sélectionnés sont affichées.</p>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Choisir un store</label>
-                  <select value={currentStoreId || ''} onChange={(e) => setCurrentStoreId(e.target.value || null)} className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm">
-                    <option value="">Sélectionnez un store</option>
-                    {stores.map((store) => (
-                      <option key={store.id} value={store.id}>{store.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <p className="text-sm text-muted-foreground">
+                  Store cible : <strong className="text-foreground">{currentStoreName || 'aucun'}</strong>
+                </p>
               </div>
 
               <div className="rounded-2xl border overflow-hidden">
@@ -422,7 +524,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
               </div>
 
               <div className="mt-4 flex gap-3">
-                <button type="button" onClick={() => void saveMappings()} disabled={!currentStoreId || isSavingMappings} className="rounded-xl border px-4 py-3 text-sm font-medium disabled:opacity-50">
+                <button type="button" onClick={() => void saveMappings()} disabled={!canAccessMappingStep || isSavingMappings} className="rounded-xl border px-4 py-3 text-sm font-medium disabled:opacity-50">
                   {isSavingMappings ? 'Enregistrement...' : 'Enregistrer le mapping'}
                 </button>
               </div>
@@ -432,7 +534,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
             {currentStep === 'rate' ? (
             <section className="rounded-2xl border border-border p-5">
               <div className="mb-4">
-                <h4 className="font-semibold text-foreground">Étape 4 — Taux de change</h4>
+                <h4 className="font-semibold text-foreground">Étape 5 — Taux de change</h4>
                 <p className="text-sm text-muted-foreground">Saisissez le taux de change entre la devise de vos comptes publicitaires et celle de votre store.</p>
               </div>
 
@@ -448,8 +550,10 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
             {currentStep === 'sync' ? (
             <section className="rounded-2xl border border-border p-5">
               <div className="mb-4">
-                <h4 className="font-semibold text-foreground">Étape 4 — Synchronisation</h4>
-                <p className="text-sm text-muted-foreground">Récupération automatique des données publicitaires depuis le 1er janvier {new Date().getFullYear()}.</p>
+                <h4 className="font-semibold text-foreground">Étape 6 — Synchronisation</h4>
+                <p className="text-sm text-muted-foreground">
+                  Mode {syncMode === 'simple' ? 'Simple (sans produit)' : 'Par produit'} — import jusqu’à hier inclus. La dépense d’aujourd’hui sera synchronisée pendant la nuit et généralement disponible avant 03:00, heure du Maroc.
+                </p>
               </div>
 
               {isRefreshing ? (
@@ -472,7 +576,7 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
                 </div>
               ) : syncDone && !syncProgress ? (
                 <div className="rounded-xl bg-amber-500/10 px-4 py-4 text-sm text-amber-700">
-                  Synchronisation terminée, mais aucune donnée retournée. Vérifiez que vos campagnes ont des dépenses sur la période.
+                  Synchronisation terminée sans dépense finalisée. Les dépenses d’aujourd’hui ne sont pas encore incluses et seront généralement disponibles demain avant 03:00, heure du Maroc.
                 </div>
               ) : null}
             </section>
@@ -486,7 +590,13 @@ export default function FacebookAdsConnectWizard({ onClose }: { onClose: () => v
 
             {currentStep === 'accounts' && selectedAccountIds.length > 0 ? (
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-                Ad accounts enregistrés. Passez maintenant au mapping des campagnes.
+                Ad accounts enregistrés. Validez pour choisir le mode de suivi.
+              </div>
+            ) : null}
+
+            {currentStep === 'mode' && canAccessModeStep ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                Mode {syncMode === 'simple' ? 'Simple' : 'Par produit'} sélectionné. Les dépenses seront synchronisées chaque jour après validation du taux de change.
               </div>
             ) : null}
 
@@ -515,25 +625,24 @@ function ExchangeRateForm({
   onSaved: () => void
   onError: (msg: string) => void
 }) {
-  const [baseCurrency, setBaseCurrency] = useState('')
+  const currencies = useMemo(
+    () => Array.from(new Set(accounts.map((account) => account.account_currency).filter(Boolean))),
+    [accounts]
+  )
+  const [rates, setRates] = useState<Record<string, string>>({})
   const [targetCurrency, setTargetCurrency] = useState('')
-  const [rate, setRate] = useState('')
   const [isSaving, setIsSaving] = useState(false)
-  const [storeCurrency, setStoreCurrency] = useState<string | null>(null)
   const [loadingStore, setLoadingStore] = useState(true)
   const supabase = createClient()
 
-  // Détecter la devise des ad accounts
   useEffect(() => {
-    const currencies = [...new Set(accounts.map((a) => a.account_currency).filter(Boolean))]
-    if (currencies.length === 1) {
-      setBaseCurrency(currencies[0])
-    } else if (currencies.length > 1) {
-      setBaseCurrency(currencies[0])
-    }
-  }, [accounts])
+    setRates((current) => {
+      const next: Record<string, string> = {}
+      currencies.forEach((currency) => { next[currency] = current[currency] || '' })
+      return next
+    })
+  }, [currencies])
 
-  // Charger la devise du store
   useEffect(() => {
     async function load() {
       if (!storeId) {
@@ -541,45 +650,39 @@ function ExchangeRateForm({
         return
       }
       setLoadingStore(true)
-      const { data, error } = await supabase
-        .from('stores')
-        .select('currency')
-        .eq('id', storeId)
-        .single()
-      if (!error && data?.currency) {
-        setStoreCurrency(data.currency)
-        setTargetCurrency(data.currency)
-      }
+      const { data, error } = await supabase.from('stores').select('currency').eq('id', storeId).single()
+      if (!error && data?.currency) setTargetCurrency(String(data.currency).toUpperCase())
       setLoadingStore(false)
     }
     void load()
   }, [storeId, supabase])
 
   const handleSave = async () => {
-    if (!storeId) {
-      onError('Aucun store sélectionné.')
+    if (!storeId || !targetCurrency || currencies.length === 0) {
+      onError('Store ou devises manquants.')
       return
     }
-    if (!baseCurrency || !targetCurrency) {
-      onError('Devises manquantes.')
-      return
-    }
-    const rateNum = parseFloat(rate)
-    if (isNaN(rateNum) || rateNum <= 0) {
-      onError('Taux de change invalide.')
-      return
+
+    for (const currency of currencies) {
+      if (currency !== targetCurrency && (!rates[currency] || Number(rates[currency]) <= 0)) {
+        onError(`Taux de change invalide pour ${currency} → ${targetCurrency}.`)
+        return
+      }
     }
 
     setIsSaving(true)
     onError('')
     try {
-      const response = await fetch('/api/integrations/facebook-ads/exchange-rate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId, baseCurrency, targetCurrency, rate: rateNum }),
-      })
-      const payload = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(payload?.error || 'EXCHANGE_RATE_SAVE_FAILED')
+      for (const baseCurrency of currencies) {
+        const rate = baseCurrency === targetCurrency ? 1 : Number(rates[baseCurrency])
+        const response = await fetch('/api/integrations/facebook-ads/exchange-rate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storeId, baseCurrency, targetCurrency, rate }),
+        })
+        const payload = await response.json().catch(() => null)
+        if (!response.ok) throw new Error(payload?.error || 'EXCHANGE_RATE_SAVE_FAILED')
+      }
       onSaved()
     } catch (err) {
       onError(err instanceof Error ? err.message : 'EXCHANGE_RATE_SAVE_FAILED')
@@ -600,54 +703,37 @@ function ExchangeRateForm({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-muted/20 p-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-foreground">Devise des ad accounts</label>
-            <input
-              type="text"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value.toUpperCase())}
-              className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm"
-              placeholder="ex: USD"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-foreground">Devise du store</label>
-            <input
-              type="text"
-              value={targetCurrency}
-              onChange={(e) => setTargetCurrency(e.target.value.toUpperCase())}
-              className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm"
-              placeholder="ex: MAD"
-            />
-            {storeCurrency && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Devise détectée du store : <strong>{storeCurrency}</strong>
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <label className="mb-1 block text-sm font-medium text-foreground">
-            Taux de change (1 {baseCurrency || '?'} = X {targetCurrency || '?'})
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            min="0.01"
-            value={rate}
-            onChange={(e) => setRate(e.target.value)}
-            className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm"
-            placeholder="ex: 10.50"
-          />
+        <p className="mb-4 text-sm text-muted-foreground">
+          Devise du store : <strong className="text-foreground">{targetCurrency || 'Inconnue'}</strong>
+        </p>
+        <div className="space-y-4">
+          {currencies.map((currency) => (
+            <div key={currency}>
+              <label className="mb-1 block text-sm font-medium text-foreground">
+                1 {currency} = X {targetCurrency || '?'}
+              </label>
+              <input
+                type="number"
+                step="0.0001"
+                min="0.0001"
+                value={currency === targetCurrency ? '1' : rates[currency] || ''}
+                onChange={(event) => setRates((current) => ({ ...current, [currency]: event.target.value }))}
+                disabled={currency === targetCurrency}
+                className="w-full rounded-xl border border-border bg-background px-3 py-3 text-sm disabled:opacity-60"
+                placeholder="ex: 10.50"
+              />
+            </div>
+          ))}
+          {currencies.length === 0 ? (
+            <p className="text-sm text-red-500">Aucune devise détectée sur les ad accounts sélectionnés.</p>
+          ) : null}
         </div>
       </div>
 
       <button
         type="button"
         onClick={() => void handleSave()}
-        disabled={isSaving || !rate || !baseCurrency || !targetCurrency}
+        disabled={isSaving || currencies.length === 0 || !targetCurrency}
         className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
         {isSaving ? (
@@ -658,7 +744,7 @@ function ExchangeRateForm({
         ) : (
           <>
             <Save className="h-4 w-4" />
-            Valider le taux de change
+            Valider les taux de change
           </>
         )}
       </button>

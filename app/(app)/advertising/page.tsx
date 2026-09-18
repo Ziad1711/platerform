@@ -10,10 +10,26 @@ import AdsKpiGrid from '@/components/advertising/ads-kpi-grid'
 import AdsTimeSeries from '@/components/advertising/ads-time-series'
 import { JisraMark } from '@/components/logo'
 import {
+  AlertTriangle,
   BarChart3,
+  Clock3,
   Download,
   Loader2,
 } from 'lucide-react'
+
+
+function getCasablancaYesterday() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Casablanca',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  const date = new Date(`${values.year}-${values.month}-${values.day}T12:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() - 1)
+  return date.toISOString().slice(0, 10)
+}
 
 type AdsMetrics = {
   summary: {
@@ -60,6 +76,15 @@ type AdsMetrics = {
     roas: number
     cpc: number
   }>
+  syncInfo: {
+    finalizedThrough: string
+    nextAutomaticSyncLabel: string
+    isConnected: boolean
+    activeAccountCount: number
+    lastSuccessfulSyncAt: string | null
+    lastSyncedThrough: string | null
+    lastSyncError: string | null
+  }
   byCampaign: Array<{
     campaignId: string
     campaignName: string
@@ -86,7 +111,7 @@ export default function AdvertisingPage() {
     const d = new Date()
     return `${d.getFullYear()}-01-01`
   })
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0])
+  const [dateTo, setDateTo] = useState(() => getCasablancaYesterday())
   const [sortBy, setSortBy] = useState<'spend' | 'roas' | 'conversions'>('spend')
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month'>('day')
 
@@ -121,6 +146,29 @@ export default function AdvertisingPage() {
       return data || []
     },
   })
+
+  const formatSyncDate = (value: string | null | undefined) => {
+    if (!value) return 'inconnue'
+    return new Date(`${value}T12:00:00`).toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  }
+
+  const zeroSpendMessage = useMemo(() => {
+    if (!metrics || metrics.summary.totalSpendConverted > 0) return null
+    if (!metrics.syncInfo.isConnected) {
+      return 'Aucune dépense affichée : Facebook Ads n’est pas encore connecté à ce store.'
+    }
+    if (metrics.syncInfo.activeAccountCount === 0) {
+      return 'Aucune dépense affichée : aucun ad account actif n’est configuré pour ce store.'
+    }
+    if (metrics.syncInfo.lastSyncError) {
+      return 'Aucune dépense affichée car la dernière synchronisation Facebook Ads a échoué. Vérifiez l’intégration puis relancez la synchronisation.'
+    }
+    return `Aucune dépense finalisée sur cette période. Les dépenses d’aujourd’hui ne sont pas incluses : elles seront synchronisées pendant la nuit et généralement disponibles avant 03:00, heure du Maroc.`
+  }, [metrics])
 
   const sortedCampaigns = useMemo(() => {
     if (!metrics?.byCampaign) return []
@@ -200,7 +248,35 @@ export default function AdvertisingPage() {
         </div>
       </div>
 
-      {/* Filters */}
+
+      {metrics ? (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
+          <div className="flex items-start gap-3">
+            <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-medium">
+                {metrics.syncInfo.lastSyncedThrough
+                  ? `Données Facebook Ads synchronisées jusqu’au ${formatSyncDate(metrics.syncInfo.lastSyncedThrough)}`
+                  : `Synchronisation prévue jusqu’au ${formatSyncDate(metrics.syncInfo.finalizedThrough)}`}
+              </div>
+              <p className="mt-1 text-xs opacity-80">
+                La journée en cours n’est pas incluse. Elle sera importée pendant la nuit et généralement disponible avant 03:00, heure du Maroc. Les 7 derniers jours sont revérifiés pour intégrer les corrections tardives de Meta.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {zeroSpendMessage ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{zeroSpendMessage}</p>
+          </div>
+        </div>
+      ) : null}
+
+            {/* Filters */}
       <div className="flex flex-wrap items-center gap-4 bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Du</label>

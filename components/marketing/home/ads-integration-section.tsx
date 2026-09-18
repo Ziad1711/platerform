@@ -30,13 +30,13 @@ export function AdsIntegrationSection() {
             >
               <div className="inline-flex items-center gap-2 rounded-full border border-jisra-green/20 bg-jisra-green/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-jisra-green-light">
                 <Target className="h-3.5 w-3.5" />
-                Data Ads Temps Réel
+                Données Ads finalisées
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
                 Le ROAS réel, pas celui du Manager.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                jisra importe vos dépenses publicitaires toutes les 15 minutes. En croisant ces données avec vos ventes confirmées et livrées, nous calculons le ROAS net et le profit exact pour chaque campagne, chaque adset et chaque commande.
+                jisra importe chaque nuit vos dépenses publicitaires finalisées, puis revérifie les 7 derniers jours pour intégrer les corrections tardives de Meta. En croisant ces données avec vos ventes confirmées et livrées, nous calculons le ROAS net et le profit exact pour chaque campagne, chaque adset et chaque commande.
               </p>
             </motion.div>
 
