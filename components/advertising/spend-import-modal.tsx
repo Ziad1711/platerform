@@ -61,6 +61,24 @@ export default function SpendImportModal({
     [activeFields, mapping]
   )
 
+  const samplePreview = useMemo(() => {
+    const formatDay = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString('fr-FR')
+    const samples: string[] = []
+
+    for (const row of preview.rows.slice(0, 3)) {
+      const amount = row.spend.toLocaleString('fr-FR', { maximumFractionDigits: 2 })
+      samples.push(`${formatDay(row.date)} → ${amount} ${fileCurrency}${row.campaignName ? ` (${row.campaignName})` : ''}`)
+    }
+
+    if (samples.length === 0) {
+      for (const row of preview.invalidRows.slice(0, 3)) {
+        samples.push(`ligne ${row.rowNumber} : ${row.reason}`)
+      }
+    }
+
+    return samples
+  }, [preview, fileCurrency])
+
   const labelFor = (field: (typeof spendFieldDefinitions)[number]) => {
     if (mode !== 'simple') return field.label
     if (field.key === 'date') return 'Date de dépense'
@@ -292,6 +310,45 @@ export default function SpendImportModal({
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="rounded-xl border border-border p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-foreground">Diagnostic du fichier</h4>
+          <span className="text-xs text-muted-foreground">
+            {rows.length} ligne(s) • séparateur : {delimiter ? delimiterLabels[delimiter] || delimiter : 'inconnu'} •
+            colonnes : {columns.length}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {columns.map((column, index) => {
+            const usedBy = activeFields.find((field) => mapping[field.key] === column)
+            return (
+              <span
+                key={`${column}-${index}`}
+                className={`rounded-full border px-2 py-1 text-xs ${
+                  usedBy
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-border text-muted-foreground'
+                }`}
+              >
+                {column}
+                {usedBy ? ` → ${labelFor(usedBy)}` : ''}
+              </span>
+            )
+          })}
+        </div>
+
+        {samplePreview.length > 0 ? (
+          <p className="text-xs text-muted-foreground">Aperçu : {samplePreview.join('  |  ')}</p>
+        ) : null}
+
+        {missingRequired.length > 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+            Champs obligatoires à mapper : {missingRequired.map((field) => labelFor(field)).join(', ')}.
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-4">

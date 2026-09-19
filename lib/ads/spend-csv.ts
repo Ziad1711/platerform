@@ -166,35 +166,67 @@ function buildUtcDateKey(year: number, month: number, day: number) {
 
 const MONTHS: Record<string, number> = {
   jan: 1,
-  feb: 2,
-  mar: 3,
-  apr: 4,
-  may: 5,
-  jun: 6,
-  jul: 7,
-  aug: 8,
-  sep: 9,
-  oct: 10,
-  nov: 11,
-  dec: 12,
   janv: 1,
+  janvier: 1,
+  feb: 2,
+  fev: 2,
   fevr: 2,
+  fevrier: 2,
+  february: 2,
+  mar: 3,
   mars: 3,
+  march: 3,
+  apr: 4,
   avr: 4,
+  avril: 4,
+  april: 4,
+  may: 5,
   mai: 5,
+  jun: 6,
   juin: 6,
+  june: 6,
+  jul: 7,
   juil: 7,
+  juillet: 7,
+  july: 7,
+  aug: 8,
   aout: 8,
+  august: 8,
+  sep: 9,
   sept: 9,
+  septembre: 9,
+  september: 9,
+  oct: 10,
+  octobre: 10,
+  october: 10,
+  nov: 11,
+  novembre: 11,
+  november: 11,
+  dec: 12,
+  déc: 12,
+  decembre: 12,
+  décembre: 12,
+  december: 12,
+}
+
+const WEEKDAY_PREFIX =
+  /^(?:lun|lundi|mar|mardi|mer|mercredi|jeu|jeudi|ven|vendredi|sam|samedi|dim|dimanche|mon|monday|tue|tues|tuesday|wed|weds|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\.?,?\s+/i
+
+function monthFromName(rawName: string) {
+  const name = normalizeCsvHeader(rawName)
+  if (!name) return null
+  if (MONTHS[name]) return MONTHS[name]
+  const short = name.slice(0, 4)
+  if (MONTHS[short]) return MONTHS[short]
+  return MONTHS[name.slice(0, 3)] ?? null
 }
 
 function parseNamedMonthDate(value: string) {
-  const match = value.match(/^(\d{1,2})?\s*([a-zA-Zéûôà]{3,5})\.?\s*(\d{1,2})?,?\s*(\d{4})$/)
+  const match = value.match(/^(\d{1,2})?\s*([a-zA-Zéûôàç]{3,12})\.?,?\s*(\d{1,2})?,?\s*(\d{4})/)
   if (!match) return null
 
+  const month = monthFromName(match[2])
   const first = match[1] ? Number(match[1]) : null
-  const rawMonth = normalizeCsvHeader(match[2]).slice(0, 4)
-  const month = MONTHS[rawMonth] ?? MONTHS[rawMonth.slice(0, 3)]
   const second = match[3] ? Number(match[3]) : null
   const year = Number(match[4])
 
@@ -207,7 +239,7 @@ function parseNamedMonthDate(value: string) {
 }
 
 export function parseSpendDate(value: unknown, format: SpendDateInputFormat = 'auto'): string | null {
-  const raw = String(value || '').trim()
+  const raw = String(value || '').replace(WEEKDAY_PREFIX, '').trim()
   if (!raw) return null
 
   const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
