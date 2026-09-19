@@ -395,13 +395,16 @@ export async function processFacebookSyncJob(client: AdminClient, jobId: string)
     const obsoleteIds = (existingRows || [])
       .filter((row: any) => {
         const accountId = String(row.external_account_id || '')
+        const spendDate = String(row.spend_date).slice(0, 10)
+        // Une donnée Meta finalisée remplace la saisie manuelle du même jour.
+        if (accountId === '__manual__') return affectedDates.has(spendDate)
         if (!targetAccountIds.has(accountId)) return false
         const key = buildSpendKey({
           storeId: String(row.store_id),
           accountId,
           campaignId: String(row.external_campaign_id || ''),
           productId: String(row.product_id || ''),
-          spendDate: String(row.spend_date).slice(0, 10),
+          spendDate,
         })
         return !syncedKeys.has(key)
       })

@@ -141,6 +141,34 @@ type CsvDateFormat =
   | 'yyyy-mm-dd'
   | 'yyyy-mm-dd hh:mm'
 
+type ImportSourceMode = 'all_ads' | 'all_organic' | 'from_column'
+
+type OrderSourceValue = 'ads' | 'organic' | 'recommendation'
+
+const orderSourceLabels: Record<OrderSourceValue, string> = {
+  ads: 'Ads',
+  organic: 'Organique',
+  recommendation: 'Recommandation',
+}
+
+const importSourceModeOptions: Array<{ value: ImportSourceMode; label: string; hint: string }> = [
+  {
+    value: 'all_ads',
+    label: 'Toutes les commandes sont Ads',
+    hint: 'Les dépenses publicitaires du jour seront réparties sur ces ventes.',
+  },
+  {
+    value: 'all_organic',
+    label: 'Toutes les commandes sont organiques',
+    hint: 'Aucune dépense publicitaire ne sera répartie sur ces ventes.',
+  },
+  {
+    value: 'from_column',
+    label: 'Utiliser une colonne du fichier',
+    hint: 'La source est lue et mappée pour chaque ligne.',
+  },
+]
+
 type ImportFieldKey =
   | 'order_date'
   | 'customer_name'
@@ -406,6 +434,47 @@ const autoMapSingleStatusValue = (rawStatus: string) => {
   return ''
 }
 
+const sourceValueHints: Array<{ source: OrderSourceValue; hints: string[] }> = [
+  {
+    source: 'recommendation',
+    hints: ['recommendation', 'recommandation', 'referral', 'parrainage', 'bouche a oreille'],
+  },
+  {
+    source: 'organic',
+    hints: ['organic', 'organique', 'direct', 'seo', 'naturel', 'sans publicite', 'sans pub'],
+  },
+  {
+    source: 'ads',
+    hints: [
+      'ads',
+      'facebook',
+      'fb',
+      'meta',
+      'instagram',
+      'google',
+      'tiktok',
+      'snapchat',
+      'paid',
+      'sponsored',
+      'publicite',
+      'pub',
+      'campagne',
+      'acquisition',
+    ],
+  },
+]
+
+const autoMapSingleSourceValue = (rawSource: string): OrderSourceValue | '' => {
+  const value = normalizeHeader(rawSource)
+  if (!value) return ''
+
+  for (const entry of sourceValueHints) {
+    if (entry.hints.some((hint) => value === hint || value.includes(hint))) return entry.source
+  }
+
+  return ''
+}
+
 const buildDedupeKey = (phone: string, isoDate: string, totalSellingPrice: number) => {
   const phoneKey = normalizePhoneForBlacklist(phone)
   const dateKey = new Date(isoDate).toISOString().slice(0, 19)
@@ -593,6 +662,15 @@ export default function VentesPage() {
   const [suggestedDateFormat, setSuggestedDateFormat] = useState<CsvDateFormat>('dd/mm/yyyy hh:mm')
   const [fieldToColumnMap, setFieldToColumnMap] = useState<Record<ImportFieldKey, string>>(createEmptyImportMapping)
   const [statusValueMap, setStatusValueMap] = useState<Record<string, string>>({})
+  const [importSourceMode, setImportSourceMode] = useState<ImportSourceMode>('all_ads')
+  const [sourceValueMap, setSourceValueMap] = useState<Record<string, string>>({})
+  const [sourceFixFrom, setSourceFixFrom] = useState('')
+  const [sourceFixTo, setSourceFixTo] = useState('')
+  const [sourceFixCurrent, setSourceFixCurrent] = useState<OrderSourceValue>('organic')
+  const [sourceFixTarget, setSourceFixTarget] = useState<OrderSourceValue>('ads')
+  const [sourceFixBusy, setSourceFixBusy] = useState(false)
+  const [sourceFixMessage, setSourceFixMessage] = useState('')
+  const [sourceFixError, setSourceFixError] = useState('')
   const [productValueMap, setProductValueMap] = useState<Record<string, string>>({})
   const [variantValueMap, setVariantValueMap] = useState<Record<string, string>>({})
   const [agentValueMap, setAgentValueMap] = useState<Record<string, string>>({})
@@ -2279,6 +2357,51 @@ export default function VentesPage() {
     [statusRawValues, statusValueMap]
   )
 
+  const sourceRawValues = useMemo(() => {
+    const sourceColumn = fieldToColumnMap.source
+    if (!sourceColumn) return [] as string[]
+    return Array.from(
+      new Set(
+        importRows
+          .map((row) => String(row?.[sourceColumn] || '').trim())
+          .filter(Boolean)
+      )
+    )
+  }, [fieldToColumnMap.source, importRows])
+
+  const hasUnmappedImportSources = useMemo(() => {
+    if (importSourceMode !== 'from_column') return false
+    if (!fieldToColumnMap.source) return true
+    return sourceRawValues.some((raw) => !sourceValueMap[raw])
+  }, [importSourceMode, fieldToColumnMap.source, sourceRawValues, sourceValueMap])
+
+  const importSourceSummary = useMemo(() => {
+    if (importSourceMode === 'all_ads') {
+      return { label: 'Toutes les commandes sont Ads', ads: importRows.length, organic: 0, recommendation: 0 }
+    }
+    if (importSourceMode === 'all_organic') {
+      return { label: 'Toutes les commandes sont organiques', ads: 0, organic: importRows.length, recommendation: 0 }
+    }
+
+    const sourceColumn = fieldToColumnMap.source
+    if (!sourceColumn) {
+      return { label: 'Colonne Source non sélectionnée', ads: 0, organic: 0, recommendation: 0 }
+    }
+
+    let ads = 0
+    let organic = 0
+    let recommendation = 0
+    importRows.forEach((row) => {
+      const raw = String(row?.[sourceColumn] || '').trim()
+      const mapped = sourceValueMap[raw] as OrderSourceValue | undefined
+      if (mapped === 'ads') ads += 1
+      else if (mapped === 'organic') organic += 1
+      else if (mapped === 'recommendation') recommendation += 1
+    })
+
+    return { label: `Source lue depuis « ${sourceColumn} »`, ads, organic, recommendation }
+  }, [importSourceMode, importRows, fieldToColumnMap.source, sourceValueMap])
+
   const productRawValues = useMemo(() => {
     const productColumn = fieldToColumnMap.product_name
     if (!productColumn) return [] as string[]
@@ -2423,6 +2546,64 @@ export default function VentesPage() {
     setIsCreateOpen(true)
   }
 
+  const applyBulkSourceFix = async () => {
+    if (!currentStoreId) {
+      setSourceFixError('Sélectionnez un store avant de corriger les sources.')
+      return
+    }
+    if (!sourceFixFrom || !sourceFixTo) {
+      setSourceFixError('Renseignez la période à corriger.')
+      return
+    }
+    if (sourceFixFrom > sourceFixTo) {
+      setSourceFixError('La date de début doit précéder la date de fin.')
+      return
+    }
+    if (sourceFixCurrent === sourceFixTarget) {
+      setSourceFixError('La source actuelle et la nouvelle source sont identiques.')
+      return
+    }
+    if (
+      !window.confirm(
+        `Convertir les ventes « ${orderSourceLabels[sourceFixCurrent]} » en « ${orderSourceLabels[sourceFixTarget]} » du ${sourceFixFrom} au ${sourceFixTo} ?\nLes dépenses publicitaires de ces journées seront recalculées.`
+      )
+    ) {
+      return
+    }
+
+    setSourceFixBusy(true)
+    setSourceFixError('')
+    setSourceFixMessage('')
+
+    try {
+      const response = await fetch('/api/orders/bulk-source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: currentStoreId,
+          dateFrom: sourceFixFrom,
+          dateTo: sourceFixTo,
+          currentSource: sourceFixCurrent,
+          newSource: sourceFixTarget,
+        }),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(payload?.error || 'BULK_SOURCE_FAILED')
+
+      setSourceFixMessage(
+        `${payload?.updatedOrders || 0} ventes mises à jour • ${payload?.recalculatedDays || 0} journées recalculées.`
+      )
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['ads-metrics'] }),
+      ])
+    } catch (error) {
+      setSourceFixError(error instanceof Error ? error.message : 'Correction impossible.')
+    } finally {
+      setSourceFixBusy(false)
+    }
+  }
+
   const openImportModal = () => {
     setIsImportOpen(true)
     setImportStep(1)
@@ -2433,6 +2614,8 @@ export default function VentesPage() {
     setSuggestedDateFormat('dd/mm/yyyy hh:mm')
     setFieldToColumnMap(createEmptyImportMapping())
     setStatusValueMap({})
+    setImportSourceMode('all_ads')
+    setSourceValueMap({})
     setProductValueMap({})
     setVariantValueMap({})
     setAgentValueMap({})
@@ -2527,6 +2710,17 @@ export default function VentesPage() {
     setStatusValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldToColumnMap.status, importRows])
+
+  useEffect(() => {
+    if (importSourceMode !== 'from_column') return
+
+    const nextMap: Record<string, string> = {}
+    sourceRawValues.forEach((raw) => {
+      nextMap[raw] = sourceValueMap[raw] || autoMapSingleSourceValue(raw)
+    })
+    setSourceValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importSourceMode, fieldToColumnMap.source, importRows, sourceRawValues])
 
   useEffect(() => {
     if (!linkImportedProducts) return
@@ -2677,6 +2871,14 @@ export default function VentesPage() {
           `Veuillez mapper les statuts obligatoires: ${missingMandatoryImportStatuses.join(', ')}`
         )
       }
+      if (importSourceMode === 'from_column') {
+        if (!fieldToColumnMap.source) {
+          throw new Error('Veuillez sélectionner la colonne « Source » ou choisir une source globale.')
+        }
+        if (hasUnmappedImportSources) {
+          throw new Error('Veuillez mapper toutes les valeurs de source du fichier.')
+        }
+      }
       if (linkImportedProducts && !fieldToColumnMap.product_name) {
         throw new Error('Veuillez mapper la colonne produit pour la liaison produits.')
       }
@@ -2730,6 +2932,58 @@ export default function VentesPage() {
       }> = []
       let invalid = 0
 
+      const shouldNormalizeImportCity = importRapidDeliveryConfig?.enable_city_normalization !== false
+      const uniqueImportCities = Array.from(
+        new Set(
+          importRows
+            .map((row) => String(row?.[fieldToColumnMap.city] || '').trim())
+            .filter(Boolean)
+        )
+      )
+      const normalizedCityCache = new Map<string, { cityName: string; cityKey: number | null }>()
+
+      if (shouldNormalizeImportCity && uniqueImportCities.length > 0) {
+        setImportProgress({
+          percentage: 3,
+          current: 0,
+          total: uniqueImportCities.length,
+          label: `Normalisation de ${uniqueImportCities.length} villes`,
+          status: 'running',
+        })
+
+        let cityCursor = 0
+        let normalizedCities = 0
+        const cityWorkers = Array.from({ length: Math.min(8, uniqueImportCities.length) }, async () => {
+          while (cityCursor < uniqueImportCities.length) {
+            const currentCity = uniqueImportCities[cityCursor]
+            cityCursor += 1
+
+            try {
+              const result = await normalizeOrderCityRequest(currentCity)
+              normalizedCityCache.set(currentCity, {
+                cityName: String(result.cityName || currentCity).trim(),
+                cityKey: Number(result.cityKey || 0) || null,
+              })
+            } catch {
+              normalizedCityCache.set(currentCity, { cityName: currentCity, cityKey: null })
+            }
+
+            normalizedCities += 1
+            if (normalizedCities % 5 === 0 || normalizedCities === uniqueImportCities.length) {
+              setImportProgress({
+                percentage: Math.min(15, 3 + Math.round((normalizedCities / uniqueImportCities.length) * 12)),
+                current: normalizedCities,
+                total: uniqueImportCities.length,
+                label: `Normalisation de ${uniqueImportCities.length} villes`,
+                status: 'running',
+              })
+            }
+          }
+        })
+
+        await Promise.all(cityWorkers)
+      }
+
       const progressUpdateInterval = Math.max(1, Math.floor(importRows.length / 100))
       const updateAnalysisProgress = (processedRows: number) => {
         if (processedRows % progressUpdateInterval !== 0 && processedRows !== importRows.length) return
@@ -2758,6 +3012,14 @@ export default function VentesPage() {
 
         const parsedDate = parseDateWithFormat(dateRaw, effectiveDateFormat)
         const mappedStatus = statusValueMap[statusRaw] || ''
+        const sourceRawValue = fieldToColumnMap.source ? String(row[fieldToColumnMap.source] || '').trim() : ''
+        let resolvedSource: OrderSourceValue | null = null
+        if (importSourceMode === 'all_ads') resolvedSource = 'ads'
+        else if (importSourceMode === 'all_organic') resolvedSource = 'organic'
+        else {
+          const mappedSource = sourceValueMap[sourceRawValue]
+          resolvedSource = (mappedSource as OrderSourceValue | undefined) || null
+        }
 
         const reasons: string[] = []
         if (!parsedDate) reasons.push('Date invalide')
@@ -2767,6 +3029,7 @@ export default function VentesPage() {
         if (!cityValue) reasons.push('Ville manquante')
         if (totalSellingPrice === null) reasons.push('Prix de vente invalide')
         if (!mappedStatus) reasons.push('Statut non mappé')
+        if (!resolvedSource) reasons.push('Source manquante ou non mappée')
 
         let linkedProductId: string | null = null
         let linkedProductVariantId: string | null = null
@@ -2908,10 +3171,7 @@ export default function VentesPage() {
           continue
         }
         const orderDateIso = parsedDate.toISOString()
-        const shouldNormalizeImportCity = importRapidDeliveryConfig?.enable_city_normalization !== false
-        const normalizedCityPayload = shouldNormalizeImportCity
-          ? await normalizeOrderCityRequest(cityValue)
-          : { cityName: cityValue }
+        const normalizedCityPayload = normalizedCityCache.get(cityValue) || { cityName: cityValue, cityKey: null }
         const normalizedCityKey = Number(normalizedCityPayload.cityKey || 0) || null
         const payload: Record<string, any> = {
           store_id: currentStoreId,
@@ -2923,7 +3183,7 @@ export default function VentesPage() {
           delivery_city_external_id: normalizedCityKey,
           total_selling_price: totalSellingPrice,
           status: mappedStatus,
-          source: 'organic',
+          source: resolvedSource || 'organic',
           subtotal_amount: totalSellingPrice,
           delivery_fee: normalizedCityKey
             ? Number(rapidDeliveryCityCostByKey.get(normalizedCityKey) ?? 0)
@@ -3855,6 +4115,73 @@ export default function VentesPage() {
                       }}
                     />
                   </div>
+
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">Corriger la source des ventes existantes</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Utile lorsque d’anciennes ventes ont été importées en « Organique » alors qu’elles provenaient de campagnes Ads. Les dépenses publicitaires de la période seront recalculées.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-1">Du</label>
+                        <input
+                          type="date"
+                          value={sourceFixFrom}
+                          onChange={(e) => setSourceFixFrom(e.target.value)}
+                          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-1">Au</label>
+                        <input
+                          type="date"
+                          value={sourceFixTo}
+                          onChange={(e) => setSourceFixTo(e.target.value)}
+                          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-1">Source actuelle</label>
+                        <select
+                          value={sourceFixCurrent}
+                          onChange={(e) => setSourceFixCurrent(e.target.value as OrderSourceValue)}
+                          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+                        >
+                          <option value="organic">{orderSourceLabels.organic}</option>
+                          <option value="ads">{orderSourceLabels.ads}</option>
+                          <option value="recommendation">{orderSourceLabels.recommendation}</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-1">Nouvelle source</label>
+                        <select
+                          value={sourceFixTarget}
+                          onChange={(e) => setSourceFixTarget(e.target.value as OrderSourceValue)}
+                          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+                        >
+                          <option value="ads">{orderSourceLabels.ads}</option>
+                          <option value="organic">{orderSourceLabels.organic}</option>
+                          <option value="recommendation">{orderSourceLabels.recommendation}</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void applyBulkSourceFix()}
+                      disabled={!currentStoreId || sourceFixBusy}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary disabled:opacity-50"
+                    >
+                      {sourceFixBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                      {sourceFixBusy ? 'Correction en cours' : 'Corriger ces ventes'}
+                    </button>
+
+                    {sourceFixMessage ? <p className="text-xs text-green-600">{sourceFixMessage}</p> : null}
+                    {sourceFixError ? <p className="text-xs text-red-600">{sourceFixError}</p> : null}
+                  </div>
                 </div>
               ) : null}
 
@@ -3881,6 +4208,70 @@ export default function VentesPage() {
                     <div className="text-sm text-foreground flex items-end">
                       Lignes détectées: <span className="font-semibold ml-1">{importRows.length}</span>
                     </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">Source des commandes</h4>
+                      <p className="text-xs text-muted-foreground">
+                        La source détermine si les dépenses publicitaires sont réparties sur la commande. Les dépenses Ads sont réparties uniquement sur les commandes marquées « Ads ».
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {importSourceModeOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setImportSourceMode(option.value)}
+                          className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                            importSourceMode === option.value
+                              ? 'border-primary bg-primary/5 text-foreground'
+                              : 'border-border text-muted-foreground hover:bg-secondary/40'
+                          }`}
+                        >
+                          <span className="block font-medium">{option.label}</span>
+                          <span className="mt-1 block text-xs">{option.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {importSourceMode === 'from_column' ? (
+                      !fieldToColumnMap.source ? (
+                        <p className="text-xs text-red-600">
+                          Sélectionnez la colonne « Source » dans le mapping des champs ci-dessous.
+                        </p>
+                      ) : sourceRawValues.length === 0 ? (
+                        <p className="text-xs text-amber-600">Aucune valeur détectée dans la colonne Source.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="text-xs font-medium text-muted-foreground">Correspondance des sources</div>
+                          <div className="max-h-56 overflow-y-auto space-y-2">
+                            {sourceRawValues.map((rawSource) => (
+                              <div key={rawSource} className="grid grid-cols-12 gap-3 items-center">
+                                <div className="col-span-6 text-sm text-foreground truncate" title={rawSource}>
+                                  {rawSource}
+                                </div>
+                                <div className="col-span-6">
+                                  <select
+                                    value={sourceValueMap[rawSource] || ''}
+                                    onChange={(e) =>
+                                      setSourceValueMap((prev) => ({ ...prev, [rawSource]: e.target.value }))
+                                    }
+                                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+                                  >
+                                    <option value="">-- Choisir une source --</option>
+                                    <option value="ads">Ads</option>
+                                    <option value="organic">Organique</option>
+                                    <option value="recommendation">Recommandation</option>
+                                  </select>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    ) : null}
                   </div>
 
                   <div className="rounded-lg border border-border">
@@ -4244,6 +4635,12 @@ export default function VentesPage() {
                       <p className="text-sm text-muted-foreground">
                         {importRows.length} lignes à importer • {Object.keys(fieldToColumnMap).filter((k) => fieldToColumnMap[k as ImportFieldKey]).length} champs mappés
                       </p>
+                      <p className="text-sm text-muted-foreground">Source : {importSourceSummary.label}</p>
+                      {importSourceMode === 'from_column' ? (
+                        <p className="text-xs text-muted-foreground">
+                          Ads : {importSourceSummary.ads} • Organique : {importSourceSummary.organic} • Recommandation : {importSourceSummary.recommendation}
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

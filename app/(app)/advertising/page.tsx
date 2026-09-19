@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import AdsKpiGrid from '@/components/advertising/ads-kpi-grid'
 import AdsTimeSeries from '@/components/advertising/ads-time-series'
+import ManualDailySpend from '@/components/advertising/manual-daily-spend'
 import { JisraMark } from '@/components/logo'
 import {
   AlertTriangle,
@@ -159,10 +160,10 @@ export default function AdvertisingPage() {
   const zeroSpendMessage = useMemo(() => {
     if (!metrics || metrics.summary.totalSpendConverted > 0) return null
     if (!metrics.syncInfo.isConnected) {
-      return 'Aucune dépense affichée : Facebook Ads n’est pas encore connecté à ce store.'
+      return 'Aucune dépense automatique affichée : Facebook Ads n’est pas connecté. Vous pouvez utiliser la saisie manuelle ci-dessous.'
     }
     if (metrics.syncInfo.activeAccountCount === 0) {
-      return 'Aucune dépense affichée : aucun ad account actif n’est configuré pour ce store.'
+      return 'Aucune dépense automatique affichée : aucun ad account actif n’est configuré. Vous pouvez utiliser la saisie manuelle ci-dessous.'
     }
     if (metrics.syncInfo.lastSyncError) {
       return 'Aucune dépense affichée car la dernière synchronisation Facebook Ads a échoué. Vérifiez l’intégration puis relancez la synchronisation.'
@@ -255,12 +256,16 @@ export default function AdvertisingPage() {
             <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <div className="font-medium">
-                {metrics.syncInfo.lastSyncedThrough
-                  ? `Données Facebook Ads synchronisées jusqu’au ${formatSyncDate(metrics.syncInfo.lastSyncedThrough)}`
-                  : `Synchronisation prévue jusqu’au ${formatSyncDate(metrics.syncInfo.finalizedThrough)}`}
+                {!metrics.syncInfo.isConnected
+                  ? 'Saisie manuelle des dépenses activée'
+                  : metrics.syncInfo.lastSyncedThrough
+                    ? `Données Facebook Ads synchronisées jusqu’au ${formatSyncDate(metrics.syncInfo.lastSyncedThrough)}`
+                    : `Synchronisation prévue jusqu’au ${formatSyncDate(metrics.syncInfo.finalizedThrough)}`}
               </div>
               <p className="mt-1 text-xs opacity-80">
-                La journée en cours n’est pas incluse. Elle sera importée pendant la nuit et généralement disponible avant 03:00, heure du Maroc. Les 7 derniers jours sont revérifiés pour intégrer les corrections tardives de Meta.
+                {!metrics.syncInfo.isConnected
+                  ? 'Ajoutez ci-dessous le montant dépensé chaque jour. Il sera automatiquement réparti sur les commandes publicitaires livrées.'
+                  : 'La journée en cours n’est pas incluse. Elle sera importée pendant la nuit et généralement disponible avant 03:00, heure du Maroc. Les 7 derniers jours sont revérifiés pour intégrer les corrections tardives de Meta.'}
               </p>
             </div>
           </div>
@@ -334,6 +339,8 @@ export default function AdvertisingPage() {
           </select>
         </div>
       </div>
+
+      <ManualDailySpend storeId={currentStoreId} />
 
       {isLoading ? (
         <div className="flex items-center justify-center py-20">

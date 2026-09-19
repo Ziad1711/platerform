@@ -190,6 +190,12 @@
 - [x] Ajouter la synchronisation automatique quotidienne Vercel (`/api/cron/facebook-ads-sync` + `vercel.json`)
 - [x] Auditer et durcir le flux Facebook Ads: isolation multi-store, RLS/CSRF, jobs atomiques, multi-devise, déduplication sûre et validation des mappings
 - [x] Finaliser la stratégie de fraîcheur Facebook Ads: synchronisation nocturne jusqu’à hier, correction glissante sur 7 jours et information client en cas de dépense à zéro
+- [x] Ajouter la saisie manuelle quotidienne des dépenses publicitaires avec modification/suppression, permissions et allocation automatique sur les commandes livrées
+- [x] Corriger l’import CSV des ventes: choix global de la source (Ads / Organic / colonne), mapping et auto-détection des valeurs, suppression du fallback `organic`, validation bloquante
+- [x] Ajouter la correction en masse de la source des ventes existantes (`/api/orders/bulk-source`) avec recalcul de l’allocation publicitaire
+- [x] Accélérer l’import CSV: normalisation des villes uniques avec concurrence limitée
+- [x] Unifier l’allocation publicitaire (trigger legacy aligné) et recalculer sur changement de `source`
+- [x] Garantir la préservation des alias de villes (`ON DELETE SET NULL`) lors de la suppression des ventes
 
 ### 📋 Phase 4 (Future)
 
