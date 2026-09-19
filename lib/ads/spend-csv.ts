@@ -1,4 +1,4 @@
-import { normalizeCsvHeader, parseCsvNumber } from '@/lib/imports/csv'
+import { detectNumberLocale, normalizeCsvHeader, parseCsvNumber } from '@/lib/imports/csv'
 
 export type SpendImportMode = 'simple' | 'advanced'
 
@@ -34,7 +34,7 @@ export const spendFieldDefinitions: SpendFieldDefinition[] = [
     hint: 'Jour de la dépense',
     required: true,
     modes: ['simple', 'advanced'],
-    synonyms: ['date', 'day', 'jour', 'reporting starts', 'reporting start', 'date start', 'date de debut', 'date debut'],
+    synonyms: ['date', 'day', 'jour', 'reporting starts', 'reporting start', 'date start', 'date de debut', 'date debut', 'date de depense', 'date depense'],
   },
   {
     key: 'spend',
@@ -51,6 +51,10 @@ export const spendFieldDefinitions: SpendFieldDefinition[] = [
       'depense',
       'depenses',
       'montant depense',
+      'montant de depense',
+      'depense publicitaire',
+      'depenses publicitaires',
+      'ad spend',
       'cout',
       'budget consomme',
     ],
@@ -231,18 +235,31 @@ export function parseSpendDate(value: unknown, format: SpendDateInputFormat = 'a
 export function autoMapSpendColumns(columns: string[], mode: SpendImportMode) {
   const mapping = {} as Record<SpendFieldKey, string>
   const normalizedColumns = columns.map((column) => ({ original: column, normalized: normalizeCsvHeader(column) }))
+  const usedColumns = new Set<string>()
+  const fields = spendFieldDefinitions.filter((field) => field.modes.includes(mode))
 
-  spendFieldDefinitions
-    .filter((field) => field.modes.includes(mode))
-    .forEach((field) => {
-      const synonyms = field.synonyms.map((synonym) => normalizeCsvHeader(synonym))
-      const match = normalizedColumns.find((column) =>
-        synonyms.some(
-          (synonym) => column.normalized === synonym || column.normalized.includes(synonym) || synonym.includes(column.normalized)
-        )
-      )
-      mapping[field.key] = match?.original || ''
-    })
+  // 1) Correspondances exactes d'abord (évite les faux positifs du type CPM → Impressions).
+  for (const field of fields) {
+    const synonyms = field.synonyms.map((synonym) => normalizeCsvHeader(synonym))
+    const exact = normalizedColumns.find(
+      (column) => !usedColumns.has(column.original) && synonyms.includes(column.normalized)
+    )
+    mapping[field.key] = exact?.original || ''
+    if (exact) usedColumns.add(exact.original)
+  }
+
+  // 2) Correspondances partielles, chaque colonne ne pouvant servir qu'à un seul champ.
+  for (const field of fields) {
+    if (mapping[field.key]) continue
+    const synonyms = field.synonyms.map((synonym) => normalizeCsvHeader(synonym))
+    const partial = normalizedColumns.find(
+      (column) => !usedColumns.has(column.original) && synonyms.some((synonym) => column.normalized.includes(synonym))
+    )
+    if (partial) {
+      mapping[field.key] = partial.original
+      usedColumns.add(partial.original)
+    }
+  }
 
   return mapping
 }
@@ -307,10 +324,15 @@ export function buildSpendImportRows(params: {
   let minDate: string | null = null
   let maxDate: string | null = null
 
+  const numericKeys = (Object.keys(mapping) as SpendFieldKey[]).filter(
+    (key) => key !== 'date' && key !== 'campaign_name' && mapping[key]
+  )
+  const numberLocale = detectNumberLocale(params.rows.flatMap((row) => numericKeys.map((key) => row[mapping[key]])))
+
   const readNumber = (row: Record<string, string>, key: SpendFieldKey) => {
     const column = mapping[key]
     if (!column) return null
-    return parseCsvNumber(row[column])
+    return parseCsvNumber(row[column], numberLocale)
   }
 
   params.rows.forEach((row, index) => {

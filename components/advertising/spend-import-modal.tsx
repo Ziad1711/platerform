@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { CheckCircle2, Loader2, RefreshCw, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { parseCsvText } from '@/lib/imports/csv'
+import { delimiterLabels, parseCsvText } from '@/lib/imports/csv'
 import {
   autoMapSpendColumns,
   buildSpendImportRows,
@@ -37,6 +37,7 @@ export default function SpendImportModal({
   const [mode, setMode] = useState<SpendImportMode>('simple')
   const [step, setStep] = useState<1 | 2>(1)
   const [fileName, setFileName] = useState('')
+  const [delimiter, setDelimiter] = useState<string | null>(null)
   const [columns, setColumns] = useState<string[]>([])
   const [rows, setRows] = useState<Array<Record<string, string>>>([])
   const [mapping, setMapping] = useState<Record<SpendFieldKey, string>>(createEmptySpendMapping)
@@ -60,8 +61,16 @@ export default function SpendImportModal({
     [activeFields, mapping]
   )
 
+  const labelFor = (field: (typeof spendFieldDefinitions)[number]) => {
+    if (mode !== 'simple') return field.label
+    if (field.key === 'date') return 'Date de dépense'
+    if (field.key === 'spend') return `Montant de dépense (${storeCurrency})`
+    return field.label
+  }
+
   const resetFile = () => {
     setFileName('')
+    setDelimiter(null)
     setColumns([])
     setRows([])
     setMapping(createEmptySpendMapping())
@@ -87,11 +96,18 @@ export default function SpendImportModal({
     try {
       const parsed = parseCsvText(await file.text())
       if (parsed.columns.length === 0) {
-        setError('Fichier CSV vide ou invalide.')
+        setError(
+          'Impossible de lire ce fichier. Séparateurs acceptés : virgule, point-virgule et tabulation.'
+        )
+        return
+      }
+      if (parsed.rows.length === 0) {
+        setError('Le fichier contient des colonnes, mais aucune ligne de données détectée.')
         return
       }
 
       setFileName(file.name)
+      setDelimiter(parsed.delimiter)
       setColumns(parsed.columns)
       setRows(parsed.rows)
       setMapping(autoMapSpendColumns(parsed.columns, mode))
@@ -180,29 +196,52 @@ export default function SpendImportModal({
             className="mt-1 w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
           />
         </label>
-        <label className="text-sm font-medium text-foreground">
-          Devise du fichier
-          <input
-            value={fileCurrency}
-            onChange={(event) => setFileCurrency(event.target.value.toUpperCase())}
-            maxLength={3}
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="text-sm font-medium text-foreground">
-          Format de date
-          <select
-            value={dateFormat}
-            onChange={(event) => setDateFormat(event.target.value as SpendDateInputFormat)}
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-          >
-            {spendDateInputFormats.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+
+        {mode === 'simple' ? (
+          <label className="text-sm font-medium text-foreground">
+            Devise du store
+            <input
+              value={storeCurrency}
+              readOnly
+              className="mt-1 w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+            />
+          </label>
+        ) : (
+          <label className="text-sm font-medium text-foreground">
+            Devise du fichier
+            <input
+              value={fileCurrency}
+              onChange={(event) => setFileCurrency(event.target.value.toUpperCase())}
+              maxLength={3}
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            />
+          </label>
+        )}
+
+        {mode === 'simple' ? (
+          <div className="text-sm font-medium text-foreground">
+            Détection automatique
+            <p className="mt-1 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              {rows.length} ligne(s) • séparateur : {delimiter ? delimiterLabels[delimiter] || delimiter : 'inconnu'} • date
+              lue automatiquement
+            </p>
+          </div>
+        ) : (
+          <label className="text-sm font-medium text-foreground">
+            Format de date
+            <select
+              value={dateFormat}
+              onChange={(event) => setDateFormat(event.target.value as SpendDateInputFormat)}
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            >
+              {spendDateInputFormats.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <div className="rounded-xl border border-border">
@@ -214,7 +253,7 @@ export default function SpendImportModal({
           {activeFields.map((field) => (
             <div key={field.key} className="grid grid-cols-12 items-center gap-3 border-b border-border px-4 py-2 last:border-b-0">
               <div className="col-span-5 text-sm text-foreground">
-                {field.label}
+                {labelFor(field)}
                 {field.required ? <span className="ml-1 text-red-600">*</span> : null}
                 <span className="mt-0.5 block text-xs text-muted-foreground">{field.hint}</span>
               </div>
@@ -346,7 +385,7 @@ export default function SpendImportModal({
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {mode === 'simple'
-                    ? `Colonnes attendues : date, dépense (${storeCurrency})`
+                    ? `Colonnes attendues : date, dépense (${storeCurrency}) — séparateur virgule, point-virgule ou tabulation`
                     : 'Export Ads Manager, colonnes françaises ou anglaises'}
                 </p>
                 <input

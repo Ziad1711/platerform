@@ -1,9 +1,86 @@
 export type ParsedCsv = {
   columns: string[]
   rows: Array<Record<string, string>>
+  delimiter: string | null
+}
+
+export type NumberLocale = 'eu' | 'us'
+
+const CANDIDATE_DELIMITERS = [',', ';', '\t', '|']
+
+export const delimiterLabels: Record<string, string> = {
+  ',': 'virgule',
+  ';': 'point-virgule',
+  '\t': 'tabulation',
+  '|': 'barre verticale',
+}
+
+function countOutsideQuotes(line: string, delimiter: string) {
+  let count = 0
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        i += 1
+        continue
+      }
+      inQuotes = !inQuotes
+      continue
+    }
+    if (!inQuotes && char === delimiter) count += 1
+  }
+
+  return count
+}
+
+export function detectCsvDelimiter(text: string): string | null {
+  const sampleLines = text
+    .split(/\r\n|\r|\n/)
+    .filter((line) => line.trim() !== '')
+    .slice(0, 10)
+
+  if (sampleLines.length === 0) return null
+
+  let bestDelimiter: string | null = null
+  let bestScore = -1
+
+  for (const delimiter of CANDIDATE_DELIMITERS) {
+    const counts = sampleLines.map((line) => countOutsideQuotes(line, delimiter))
+    const linesWithDelimiter = counts.filter((count) => count > 0).length
+    if (linesWithDelimiter === 0) continue
+
+    const total = counts.reduce((sum, count) => sum + count, 0)
+    const consistent = counts.every((count) => count === counts[0]) ? 1 : 0
+    const score = consistent * 100000 + linesWithDelimiter * 1000 + total
+
+    if (score > bestScore) {
+      bestScore = score
+      bestDelimiter = delimiter
+    }
+  }
+
+  return bestDelimiter
+}
+
+function normalizeCsvContent(text: string) {
+  let content = text.replace(/^\uFEFF/, '')
+
+  // Excel peut ajouter une ligne de configuration du séparateur.
+  const sepMatch = content.match(/^sep=(.)\r?\n?/i)
+  if (sepMatch) {
+    content = content.slice(sepMatch[0].length)
+    return { content, forcedDelimiter: sepMatch[1] }
+  }
+
+  return { content, forcedDelimiter: null as string | null }
 }
 
 export function parseCsvText(text: string): ParsedCsv {
+  const { content, forcedDelimiter } = normalizeCsvContent(text)
+  const delimiter = forcedDelimiter || detectCsvDelimiter(content) || ','
+
   const rows: string[][] = []
   let currentCell = ''
   let currentRow: string[] = []
@@ -24,9 +101,9 @@ export function parseCsvText(text: string): ParsedCsv {
     currentRow = []
   }
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i]
-    const nextChar = text[i + 1]
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i]
+    const nextChar = content[i + 1]
 
     if (char === '"') {
       if (inQuotes && nextChar === '"') {
@@ -38,7 +115,7 @@ export function parseCsvText(text: string): ParsedCsv {
       continue
     }
 
-    if (char === ',' && !inQuotes) {
+    if (char === delimiter && !inQuotes) {
       pushCell()
       continue
     }
@@ -57,7 +134,7 @@ export function parseCsvText(text: string): ParsedCsv {
   pushRow()
 
   if (rows.length === 0) {
-    return { columns: [] as string[], rows: [] as Array<Record<string, string>> }
+    return { columns: [] as string[], rows: [] as Array<Record<string, string>>, delimiter: null }
   }
 
   const columns = rows[0].map((col) => String(col || '').trim())
@@ -69,7 +146,7 @@ export function parseCsvText(text: string): ParsedCsv {
     return record
   })
 
-  return { columns, rows: dataRows }
+  return { columns, rows: dataRows, delimiter }
 }
 
 export function normalizeCsvHeader(value: unknown) {
@@ -81,19 +158,68 @@ export function normalizeCsvHeader(value: unknown) {
     .trim()
 }
 
-export function parseCsvNumber(value: unknown): number | null {
-  const raw = String(value ?? '').trim()
+export function detectNumberLocale(values: Array<unknown>): NumberLocale {
+  let euThousands = 0
+  let usThousands = 0
+  let euDecimal = 0
+  let usDecimal = 0
+
+  for (const value of values) {
+    const raw = String(value ?? '').trim()
+    if (!raw || !/\d/.test(raw)) continue
+
+    if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(raw)) euThousands += 1
+    else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(raw)) usThousands += 1
+    else if (/^\d+,\d{1,2}$/.test(raw)) euDecimal += 1
+    else if (/^\d+\.\d{1,2}$/.test(raw)) usDecimal += 1
+  }
+
+  if (euThousands > usThousands) return 'eu'
+  if (usThousands > euThousands) return 'us'
+  if (euDecimal > usDecimal) return 'eu'
+  if (usDecimal > euDecimal) return 'us'
+
+  return 'eu'
+}
+
+export function parseCsvNumber(value: unknown, locale: NumberLocale = 'eu'): number | null {
+  let raw = String(value ?? '').trim()
   if (!raw) return null
 
-  const cleaned = raw
-    .replace(/\u00a0/g, '')
-    .replace(/\s+/g, '')
+  raw = raw
+    .replace(/[\u00a0\u202f\u2009]/g, ' ')
     .replace(/[€$£]/g, '')
-    .replace(/(mad|usd|eur|dh|dhs)$/i, '')
-    .replace(/,/g, '.')
-    .replace(/[^0-9.-]/g, '')
+    .replace(/\b(mad|usd|eur|dh|dhs|dirhams?|dollars?|euros?)\b/gi, '')
+    .trim()
 
-  if (!cleaned) return null
-  const parsed = Number(cleaned)
-  return Number.isFinite(parsed) ? parsed : null
+  if (!raw || !/\d/.test(raw)) return null
+
+  const negative = raw.startsWith('-') || /^\(.*\)$/.test(raw)
+  const digits = raw.replace(/[^0-9.,]/g, '')
+  if (!digits) return null
+
+  const hasDot = digits.includes('.')
+  const hasComma = digits.includes(',')
+  let normalized = digits
+
+  if (hasDot && hasComma) {
+    normalized =
+      locale === 'eu'
+        ? digits.replace(/\./g, '').replace(/,/g, '.')
+        : digits.replace(/,/g, '')
+  } else if (hasComma) {
+    normalized = locale === 'us' && /^\d{1,3}(,\d{3})+$/.test(digits) ? digits.replace(/,/g, '') : digits.replace(/,/g, '.')
+  } else if (hasDot) {
+    normalized = locale === 'eu' && /^\d{1,3}(\.\d{3})+$/.test(digits) ? digits.replace(/\./g, '') : digits
+  }
+
+  const firstDot = normalized.indexOf('.')
+  if (firstDot !== -1) {
+    normalized = normalized.slice(0, firstDot + 1) + normalized.slice(firstDot + 1).replace(/\./g, '')
+  }
+
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) return null
+
+  return negative ? -Math.abs(parsed) : parsed
 }
