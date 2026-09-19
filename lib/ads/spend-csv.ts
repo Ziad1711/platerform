@@ -349,6 +349,26 @@ export function buildSpendImportRows(params: {
       return
     }
 
+    const impressionsValue = readNumber(row, 'impressions') || 0
+    const clicksValue = readNumber(row, 'clicks') || 0
+    const reachValue = readNumber(row, 'reach') || 0
+    const purchasesValue = Math.round(readNumber(row, 'purchases') || 0)
+    const conversionValueValue = readNumber(row, 'conversion_value') || 0
+
+    // Une ligne sans dépense et sans aucune métrique n'apporte rien : elle est ignorée automatiquement.
+    const hasAnyValue =
+      spend > 0 ||
+      impressionsValue > 0 ||
+      clicksValue > 0 ||
+      reachValue > 0 ||
+      purchasesValue > 0 ||
+      conversionValueValue > 0
+
+    if (!hasAnyValue) {
+      invalidRows.push({ rowNumber, reason: 'Aucune dépense ni métrique sur cette ligne' })
+      return
+    }
+
     const campaignRaw = mode === 'advanced' && mapping.campaign_name ? String(row[mapping.campaign_name] || '').trim() : ''
     const campaignKey = campaignRaw || 'csv_daily'
     const key = `${date}::${campaignKey.toLowerCase()}`
@@ -371,11 +391,11 @@ export function buildSpendImportRows(params: {
       }
 
     current.spend += spend
-    current.impressions += readNumber(row, 'impressions') || 0
-    current.clicks += readNumber(row, 'clicks') || 0
-    current.reach += readNumber(row, 'reach') || 0
-    current.purchases += Math.round(readNumber(row, 'purchases') || 0)
-    current.conversionValue += readNumber(row, 'conversion_value') || 0
+    current.impressions += impressionsValue
+    current.clicks += clicksValue
+    current.reach += reachValue
+    current.purchases += purchasesValue
+    current.conversionValue += conversionValueValue
 
     const providedFrequency = readNumber(row, 'frequency')
     if (providedFrequency !== null) current.frequency = providedFrequency

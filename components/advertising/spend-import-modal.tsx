@@ -68,6 +68,24 @@ export default function SpendImportModal({
     return field.label
   }
 
+  const importErrorMessage = (raw: string) => {
+    if (!raw) return 'Import impossible.'
+    const rowMatch = raw.match(/_ROW_(\d+)$/)
+    const rowNumber = rowMatch ? rowMatch[1] : null
+
+    if (raw.startsWith('INVALID_DATE_ROW_')) return `Date invalide à la ligne ${rowNumber}.`
+    if (raw.startsWith('FUTURE_DATE_ROW_')) return `La ligne ${rowNumber} contient une date future.`
+    if (raw.startsWith('INVALID_SPEND_ROW_')) return `Montant de dépense invalide à la ligne ${rowNumber}.`
+    if (raw.startsWith('EXCHANGE_RATE_NOT_FOUND')) {
+      return 'Taux de change manquant : ajoutez-le dans Paramètres → Taux de change.'
+    }
+    if (raw === 'FORBIDDEN') return 'Vous n’avez pas la permission de gérer la publicité sur ce store.'
+    if (raw === 'NO_ROWS_TO_IMPORT') return 'Aucune ligne de dépense à importer.'
+    if (raw === 'TOO_MANY_ROWS') return 'Trop de lignes : limitez le fichier à 20 000 lignes.'
+    if (raw === 'MISSING_STORE_ID') return 'Sélectionnez un store avant l’import.'
+    return raw
+  }
+
   const resetFile = () => {
     setFileName('')
     setDelimiter(null)
@@ -158,7 +176,7 @@ export default function SpendImportModal({
       toast.success(`${importResult.inserted} ligne(s) de dépenses importées`)
       onImported(importResult)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Import impossible.'
+      const message = importErrorMessage(err instanceof Error ? err.message : '')
       setError(message)
       toast.error(message)
     } finally {
@@ -301,12 +319,19 @@ export default function SpendImportModal({
 
       {preview.invalidRows.length > 0 ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
-          {preview.invalidRows.length} ligne(s) ignorée(s) :{' '}
+          {preview.invalidRows.length} ligne(s) ignorée(s) automatiquement :{' '}
           {preview.invalidRows
             .slice(0, 5)
             .map((row) => `ligne ${row.rowNumber} (${row.reason})`)
             .join(', ')}
           {preview.invalidRows.length > 5 ? '…' : ''}
+        </div>
+      ) : null}
+
+      {rows.length > 0 && preview.rows.length === 0 ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          Aucune ligne exploitable. Vérifiez le mapping des champs obligatoires et que le fichier contient des montants
+          supérieurs à zéro.
         </div>
       ) : null}
     </>

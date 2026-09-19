@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       }
 
       const spend = toNonNegative(row.spend)
-      if (spend <= 0) {
+      if (!Number.isFinite(Number(row.spend)) || spend < 0) {
         return NextResponse.json({ error: `INVALID_SPEND_ROW_${index + 2}` }, { status: 400 })
       }
 

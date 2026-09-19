@@ -58,6 +58,7 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Durcissement du parser CSV: détection automatique du séparateur (virgule, point-virgule, tabulation, barre verticale), support de `sep=;`, suppression du BOM UTF-8, et gestion des formats de nombres français (`1 250,50`) et US (`1,250.50`) via détection de locale par fichier
 - ✅ Auto-mapping des colonnes rendu fiable: correspondances exactes prioritaires et colonne unique par champ (corrige CPM → Impressions et Achats → Valeur de conversion)
 - ✅ Import des dépenses en mode Simple épuré: libellés « Date de dépense » et « Montant de dépense (devise du store) », devise lue depuis `stores.currency`, affichage du séparateur détecté et du nombre de lignes
+- ✅ Gestion automatique des lignes à dépense nulle: une ligne sans dépense ni métrique est ignorée (motif affiché), une ligne avec métriques mais 0 dépense est conservée, et l’API n’échoue plus sur un montant à zéro. Messages d’erreur d’import rendus lisibles (ligne concernée, taux de change manquant, permissions)
 - ✅ Refonte de la page Paramètres: sections Informations personnelles, Sécurité, Préférences, Taux de change, Blacklist configuration
 - ✅ Nouvelles routes settings ajoutées: `/api/settings/profile`, `/api/settings/preferences`, `/api/settings/security/reset-password`, `/api/settings/blacklist-rule`, `/api/settings/exchange-rates`
 - ✅ Migration Supabase appliquée pour `profiles.preferred_currency` et `blacklist_rules.is_enabled`
