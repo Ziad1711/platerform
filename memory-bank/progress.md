@@ -196,6 +196,8 @@
 - [x] Accélérer l’import CSV: normalisation des villes uniques avec concurrence limitée
 - [x] Unifier l’allocation publicitaire (trigger legacy aligné) et recalculer sur changement de `source`
 - [x] Garantir la préservation des alias de villes (`ON DELETE SET NULL`) lors de la suppression des ventes
+- [x] Ajouter l’import CSV des dépenses publicitaires sur la page Publicité (mode Simple date + dépense en devise du store, et mode Avancé avec les colonnes Ads Manager)
+- [x] Extraire le parser CSV partagé dans `lib/imports/csv.ts` et remplacer les lignes internes (`__manual__`, `__csv__`) lors d’une synchronisation Meta finalisée
 
 ### 📋 Phase 4 (Future)
 

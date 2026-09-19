@@ -396,8 +396,8 @@ export async function processFacebookSyncJob(client: AdminClient, jobId: string)
       .filter((row: any) => {
         const accountId = String(row.external_account_id || '')
         const spendDate = String(row.spend_date).slice(0, 10)
-        // Une donnée Meta finalisée remplace la saisie manuelle du même jour.
-        if (accountId === '__manual__') return affectedDates.has(spendDate)
+        // Une donnée Meta finalisée remplace toute ligne interne (saisie manuelle ou import CSV) du même jour.
+        if (accountId.startsWith('__')) return affectedDates.has(spendDate)
         if (!targetAccountIds.has(accountId)) return false
         const key = buildSpendKey({
           storeId: String(row.store_id),

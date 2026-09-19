@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime, normalizeMoroccanPhone } from '@/lib/utils'
 import { normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
+import { parseCsvText } from '@/lib/imports/csv'
 import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil, AlertTriangle } from 'lucide-react'
 import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
@@ -236,75 +237,6 @@ const normalizeHeader = (value: any) =>
     .trim()
 
 const normalizeProductName = (value: any) => normalizeHeader(value)
-
-const parseCsvText = (text: string) => {
-  const rows: string[][] = []
-  let currentCell = ''
-  let currentRow: string[] = []
-  let inQuotes = false
-
-  const pushCell = () => {
-    currentRow.push(currentCell)
-    currentCell = ''
-  }
-
-  const pushRow = () => {
-    if (currentRow.length === 0) return
-    if (currentRow.every((cell) => String(cell || '').trim() === '')) {
-      currentRow = []
-      return
-    }
-    rows.push(currentRow)
-    currentRow = []
-  }
-
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i]
-    const nextChar = text[i + 1]
-
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        currentCell += '"'
-        i += 1
-      } else {
-        inQuotes = !inQuotes
-      }
-      continue
-    }
-
-    if (char === ',' && !inQuotes) {
-      pushCell()
-      continue
-    }
-
-    if ((char === '\n' || char === '\r') && !inQuotes) {
-      if (char === '\r' && nextChar === '\n') i += 1
-      pushCell()
-      pushRow()
-      continue
-    }
-
-    currentCell += char
-  }
-
-  pushCell()
-  pushRow()
-
-  if (rows.length === 0) {
-    return { columns: [] as string[], rows: [] as Array<Record<string, string>> }
-  }
-
-  const columns = rows[0].map((col) => String(col || '').trim())
-  const dataRows = rows.slice(1).map((row) => {
-    const record: Record<string, string> = {}
-    columns.forEach((col, index) => {
-      record[col] = String(row[index] || '').trim()
-    })
-    return record
-  })
-
-  return { columns, rows: dataRows }
-}
 
 const parseNumberValue = (value: any) => {
   const raw = String(value || '').trim()

@@ -52,6 +52,9 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Allocation publicitaire unifiée: le trigger legacy `trigger_allocate_ad_spend` délègue désormais à `allocate_ads_cost_for_day`, et `trigger_allocate_ads_from_orders` recalcule aussi lors d’un changement de `source`
 - ✅ Alias de villes préservés: migration `20260919_preserve_city_alias_learning.sql` garantit `ON DELETE SET NULL` sur `learned_from_order_id` pour toutes les tables d’alias (l’apprentissage survit à la suppression d’une vente)
 - ✅ Correction de données ziilart: les 4 ventes livrées du 25/06/2026 passées en `ads`, allocation recalculée à 55 MAD par vente (220 MAD au total)
+- ✅ Import CSV des dépenses publicitaires directement depuis la page Publicité: mode **Simple** (date + dépense dans la devise du store) et mode **Avancé** (colonnes Ads Manager: campagne, impressions, clics, portée, fréquence, CTR, CPC, CPM, achats, valeur de conversion). Parsing/mapping/agrégation dans `lib/ads/spend-csv.ts`, route `POST /api/ads/spend-import` (permission `advertising.manage`), lignes marquées `__csv__` et remplacées à chaque réimport, recalcul automatique de l’allocation
+- ✅ Parser CSV partagé extrait dans `lib/imports/csv.ts` (utilisé par l’import des ventes et celui des dépenses publicitaires)
+- ✅ Les lignes internes (`__manual__`, `__csv__`) sont remplacées automatiquement lorsqu’une synchronisation Meta finalisée couvre le même jour
 - ✅ Refonte de la page Paramètres: sections Informations personnelles, Sécurité, Préférences, Taux de change, Blacklist configuration
 - ✅ Nouvelles routes settings ajoutées: `/api/settings/profile`, `/api/settings/preferences`, `/api/settings/security/reset-password`, `/api/settings/blacklist-rule`, `/api/settings/exchange-rates`
 - ✅ Migration Supabase appliquée pour `profiles.preferred_currency` et `blacklist_rules.is_enabled`

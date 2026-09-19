@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
 import { formatCurrency } from '@/lib/utils'
@@ -9,6 +9,7 @@ import StoreSelector from '@/components/dashboard/store-selector'
 import AdsKpiGrid from '@/components/advertising/ads-kpi-grid'
 import AdsTimeSeries from '@/components/advertising/ads-time-series'
 import ManualDailySpend from '@/components/advertising/manual-daily-spend'
+import SpendImportModal from '@/components/advertising/spend-import-modal'
 import { JisraMark } from '@/components/logo'
 import {
   AlertTriangle,
@@ -16,6 +17,7 @@ import {
   Clock3,
   Download,
   Loader2,
+  Upload,
 } from 'lucide-react'
 
 
@@ -80,6 +82,7 @@ type AdsMetrics = {
   syncInfo: {
     finalizedThrough: string
     nextAutomaticSyncLabel: string
+    storeCurrency: string
     isConnected: boolean
     activeAccountCount: number
     lastSuccessfulSyncAt: string | null
@@ -115,6 +118,8 @@ export default function AdvertisingPage() {
   const [dateTo, setDateTo] = useState(() => getCasablancaYesterday())
   const [sortBy, setSortBy] = useState<'spend' | 'roas' | 'conversions'>('spend')
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month'>('day')
+  const [isSpendImportOpen, setIsSpendImportOpen] = useState(false)
+  const queryClient = useQueryClient()
 
   const { data: metrics, isLoading } = useQuery<AdsMetrics>({
     queryKey: ['ads-metrics', currentStoreId, selectedProductId, dateFrom, dateTo, groupBy],
@@ -238,6 +243,14 @@ export default function AdvertisingPage() {
         </div>
         <div className="flex items-center gap-3">
           <StoreSelector />
+          <button
+            onClick={() => setIsSpendImportOpen(true)}
+            disabled={!currentStoreId}
+            className="flex items-center gap-2 px-4 py-2 bg-[#1fa971] text-white rounded-lg hover:bg-[#198f60] disabled:opacity-50"
+          >
+            <Upload className="w-4 h-4" />
+            Importer CSV
+          </button>
           <button
             onClick={exportCSV}
             disabled={!metrics}
@@ -436,6 +449,18 @@ export default function AdvertisingPage() {
           </div>
         </>
       )}
+
+      {isSpendImportOpen && currentStoreId ? (
+        <SpendImportModal
+          storeId={currentStoreId}
+          storeCurrency={metrics?.syncInfo?.storeCurrency || 'MAD'}
+          onClose={() => setIsSpendImportOpen(false)}
+          onImported={async (result) => {
+            await queryClient.invalidateQueries({ queryKey: ['ads-metrics'] })
+            if (result.dateTo && result.dateTo > dateTo) setDateTo(result.dateTo)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

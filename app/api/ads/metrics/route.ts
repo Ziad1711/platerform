@@ -47,6 +47,9 @@ export async function GET(request: NextRequest) {
       .eq('provider', 'facebook-ads')
       .maybeSingle()
 
+    const { data: storeRow } = await admin.from('stores').select('currency').eq('id', storeId).maybeSingle()
+    const storeCurrency = String(storeRow?.currency || 'MAD').toUpperCase()
+
     let activeAccountCount = 0
     let lastSuccessfulSyncAt: string | null = null
     let lastSyncedThrough: string | null = null
@@ -340,6 +343,7 @@ export async function GET(request: NextRequest) {
       syncInfo: {
         finalizedThrough: getFacebookFinalizedThrough(),
         nextAutomaticSyncLabel: 'Synchronisation nocturne, généralement disponible avant 03:00 (heure du Maroc)',
+        storeCurrency,
         isConnected: integration?.status === 'connected',
         activeAccountCount,
         lastSuccessfulSyncAt,
