@@ -359,62 +359,8 @@ export default function AdsCostChart() {
                   />
                 )}
 
-                {/* ── Value labels on peaks ── */}
-                {valueLabels.map((vl) => (
-                  <text
-                    key={vl.key}
-                    x={vl.x}
-                    y={vl.y}
-                    fill={vl.color}
-                    opacity="0.45"
-                    fontSize="2.4"
-                    fontWeight="400"
-                    textAnchor="middle"
-                    fontFamily="inherit"
-                    letterSpacing="0.3"
-                  >
-                    {vl.text}
-                  </text>
-                ))}
-
-                {/* ── Badges (Max CPL / Max CPA) ── */}
-                {badgePositions.map((bp) => (
-                  <g key={bp.key}>
-                    <rect
-                      x={bp.x - 6}
-                      y={bp.y - 3 + bp.offsetY}
-                      width="12"
-                      height="3.5"
-                      rx="0.8"
-                      fill={bp.color}
-                      opacity="0.06"
-                    />
-                    <rect
-                      x={bp.x - 6}
-                      y={bp.y - 3 + bp.offsetY}
-                      width="12"
-                      height="3.5"
-                      rx="0.8"
-                      fill="none"
-                      stroke={bp.color}
-                      strokeWidth="0.2"
-                      opacity="0.15"
-                    />
-                    <text
-                      x={bp.x}
-                      y={bp.y - 0.4 + bp.offsetY}
-                      fill={bp.color}
-                      opacity="0.55"
-                      fontSize="1.9"
-                      fontWeight="400"
-                      textAnchor="middle"
-                      fontFamily="inherit"
-                      letterSpacing="0.2"
-                    >
-                      {bp.label} • {formatShortCurrency(bp.value)} MAD
-                    </text>
-                  </g>
-                ))}
+                {/* Les labels des sommets sont rendus en HTML hors du SVG
+                    pour éviter l'étirement horizontal (preserveAspectRatio="none") */}
 
                 {/* ── Vertical line (default last point, hover override) ── */}
                 {(hoveredIndex !== null ? hoveredIndex : points.length - 1) >= 0 && (
@@ -431,6 +377,36 @@ export default function AdsCostChart() {
                   />
                 )}
               </svg>
+
+              {/* ── Sommets (labels + badges) rendus en HTML pour rester nets
+                  malgré l'étirement horizontal du SVG ── */}
+              <div className="pointer-events-none absolute inset-y-0 right-0 left-10 z-[5]">
+                {valueLabels.map((vl) => (
+                  <span
+                    key={`peak-${vl.key}`}
+                    className="absolute -translate-x-1/2 -translate-y-full whitespace-nowrap text-[10px] tabular-nums"
+                    style={{ left: `${vl.x}%`, top: `${vl.y}%`, color: vl.color, opacity: 0.7 }}
+                  >
+                    {vl.text}
+                  </span>
+                ))}
+
+                {badgePositions.map((bp) => (
+                  <span
+                    key={`badge-${bp.key}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+                    style={{
+                      left: `${bp.x}%`,
+                      top: `${bp.y + bp.offsetY}%`,
+                      color: bp.color,
+                      borderColor: `${bp.color}33`,
+                      backgroundColor: `${bp.color}14`,
+                    }}
+                  >
+                    {bp.label} • {formatShortCurrency(bp.value)} MAD
+                  </span>
+                ))}
+              </div>
 
               <div
                 className="absolute inset-0 z-10"
