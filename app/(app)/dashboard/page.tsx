@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import KpiCards from '@/components/dashboard/kpi-cards'
 import RevenueChart from '@/components/dashboard/revenue-chart'
 import TopProducts from '@/components/dashboard/top-products'
+import OrderTimePerformance from '@/components/dashboard/order-time-performance'
 import RecentOrders from '@/components/dashboard/recent-orders'
 import CityPerformance from '@/components/dashboard/city-performance'
 import ConfirmationPerformance from '@/components/dashboard/confirmation-performance'
@@ -59,6 +60,11 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 xl:grid-cols-[3fr_1fr] gap-6 animate-fade-in-up animate-delay-400">
         <TopProducts />
         <CityPerformance />
+      </div>
+
+      {/* Order time performance (best days & hours) */}
+      <div className="animate-fade-in-up animate-delay-400">
+        <OrderTimePerformance />
       </div>
 
       {/* Confirmation Performance */}
