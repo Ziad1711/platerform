@@ -292,6 +292,122 @@ export async function GET(request: NextRequest) {
       camp.days++
     }
 
+    // Fallback historique : les dépenses publicitaires importées (CSV ventes) sont stockées dans
+    // orders.ads_cost_allocated. On les affiche pour les journées sans ligne dans ad_spend_daily,
+    // comme le fait déjà le dashboard, afin de garder des chiffres cohérents.
+    const HISTORICAL_KEY = 'historical'
+    const daysWithDailySpend = new Set(
+      rowsArray.map((row) => String(row.spend_date || '').slice(0, 10)).filter(Boolean)
+    )
+    const historicalByDay = new Map<string, number>()
+
+    if (!productId) {
+      const { data: historicalOrders } = await admin
+        .from('orders')
+        .select('order_date, ads_cost_allocated')
+        .eq('store_id', storeId)
+        .eq('status', 'delivered')
+        .gt('ads_cost_allocated', 0)
+        .gte('order_date', `${dateFrom}T00:00:00.000Z`)
+        .lte('order_date', `${dateTo}T23:59:59.999Z`)
+        .limit(20000)
+
+      for (const order of (historicalOrders || []) as any[]) {
+        const day = String(order.order_date || '').slice(0, 10)
+        if (!day || daysWithDailySpend.has(day)) continue
+        historicalByDay.set(day, (historicalByDay.get(day) || 0) + Number(order.ads_cost_allocated || 0))
+      }
+    }
+
+    for (const [day, amount] of historicalByDay) {
+      summary.totalSpendConverted += amount
+
+      const historicalGroupKey = getGroupKey(day)
+      const bucket = timeSeries.get(historicalGroupKey) || {
+        date: historicalGroupKey,
+        spend: 0,
+        impressions: 0,
+        clicks: 0,
+        reach: 0,
+        conversions: 0,
+        conversionValue: 0,
+        purchases: 0,
+        ctr: 0,
+        cpc: 0,
+        cpm: 0,
+      }
+      bucket.spend += amount
+      timeSeries.set(historicalGroupKey, bucket)
+
+      if (!byProduct.has(HISTORICAL_KEY)) {
+        byProduct.set(HISTORICAL_KEY, {
+          productId: HISTORICAL_KEY,
+          productName: 'Historique importé (sans détail produit)',
+          spend: 0,
+          impressions: 0,
+          clicks: 0,
+          conversions: 0,
+          conversionValue: 0,
+          purchases: 0,
+        })
+      }
+      byProduct.get(HISTORICAL_KEY)!.spend += amount
+
+      if (!byCampaign.has(HISTORICAL_KEY)) {
+        byCampaign.set(HISTORICAL_KEY, {
+          campaignId: HISTORICAL_KEY,
+          campaignName: 'Historique importé (sans détail campagne)',
+          productId: HISTORICAL_KEY,
+          productName: 'Historique importé (sans détail produit)',
+          spend: 0,
+          impressions: 0,
+          clicks: 0,
+          ctr: 0,
+          conversions: 0,
+          conversionValue: 0,
+          purchases: 0,
+          cpc: 0,
+          cpm: 0,
+          days: 0,
+        })
+      }
+      const historicalCampaign = byCampaign.get(HISTORICAL_KEY)!
+      historicalCampaign.spend += amount
+      historicalCampaign.days += 1
+    }
+
+    const historicalFallbackTotal = Number(
+      Array.from(historicalByDay.values()).reduce((sum, value) => sum + value, 0).toFixed(2)
+    )
+
+    // Première date connue (Meta ou historique importé) pour proposer une période pertinente.
+    const [{ data: earliestDaily }, { data: earliestHistoricalOrder }] = await Promise.all([
+      admin
+        .from('ad_spend_daily')
+        .select('spend_date')
+        .eq('store_id', storeId)
+        .eq('platform', 'facebook')
+        .order('spend_date', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      admin
+        .from('orders')
+        .select('order_date')
+        .eq('store_id', storeId)
+        .gt('ads_cost_allocated', 0)
+        .order('order_date', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    const earliestDataDate =
+      [
+        earliestDaily?.spend_date ? String(earliestDaily.spend_date).slice(0, 10) : null,
+        earliestHistoricalOrder?.order_date ? String(earliestHistoricalOrder.order_date).slice(0, 10) : null,
+      ]
+        .filter(Boolean)
+        .sort()[0] || null
+
     // Calcul des moyennes (basé sur les valeurs converties en MAD)
     summary.avgCTR = ctrCount > 0 ? +(ctrSum / ctrCount).toFixed(4) : 0
     summary.avgCPC = summary.totalClicks > 0 ? +(summary.totalSpendConverted / summary.totalClicks).toFixed(4) : 0
@@ -302,7 +418,7 @@ export async function GET(request: NextRequest) {
     summary.daysWithData = timeSeries.size
 
     // Récupérer les noms des produits
-    const productIds = Array.from(byProduct.keys()).filter((id) => id !== 'unknown')
+    const productIds = Array.from(byProduct.keys()).filter((id) => id !== 'unknown' && id !== 'historical')
     if (productIds.length > 0) {
       const { data: products } = await admin
         .from('products')
@@ -344,6 +460,9 @@ export async function GET(request: NextRequest) {
         finalizedThrough: getFacebookFinalizedThrough(),
         nextAutomaticSyncLabel: 'Synchronisation nocturne, généralement disponible avant 03:00 (heure du Maroc)',
         storeCurrency,
+        historicalFallbackTotal,
+        historicalFallbackDays: historicalByDay.size,
+        earliestDataDate,
         isConnected: integration?.status === 'connected',
         activeAccountCount,
         lastSuccessfulSyncAt,

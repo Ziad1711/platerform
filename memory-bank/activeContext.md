@@ -59,6 +59,7 @@ Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 - ✅ Auto-mapping des colonnes rendu fiable: correspondances exactes prioritaires et colonne unique par champ (corrige CPM → Impressions et Achats → Valeur de conversion)
 - ✅ Import des dépenses en mode Simple épuré: libellés « Date de dépense » et « Montant de dépense (devise du store) », devise lue depuis `stores.currency`, affichage du séparateur détecté et du nombre de lignes
 - ✅ Gestion automatique des lignes à dépense nulle: une ligne sans dépense ni métrique est ignorée (motif affiché), une ligne avec métriques mais 0 dépense est conservée, et l’API n’échoue plus sur un montant à zéro. Messages d’erreur d’import rendus lisibles (ligne concernée, taux de change manquant, permissions)
+- ✅ Cohérence dashboard ↔ page Publicité: `/api/ads/metrics` applique désormais le même fallback historique que le dashboard (`orders.ads_cost_allocated` pour les journées sans ligne `ad_spend_daily`), affiche les dépenses importées sous « Historique importé », et élargit automatiquement la période au premier chargement jusqu’à la première date connue (`earliestDataDate`)
 - ✅ Refonte de la page Paramètres: sections Informations personnelles, Sécurité, Préférences, Taux de change, Blacklist configuration
 - ✅ Nouvelles routes settings ajoutées: `/api/settings/profile`, `/api/settings/preferences`, `/api/settings/security/reset-password`, `/api/settings/blacklist-rule`, `/api/settings/exchange-rates`
 - ✅ Migration Supabase appliquée pour `profiles.preferred_currency` et `blacklist_rules.is_enabled`

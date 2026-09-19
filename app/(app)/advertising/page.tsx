@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
@@ -16,6 +16,7 @@ import {
   BarChart3,
   Clock3,
   Download,
+  Info,
   Loader2,
   Upload,
 } from 'lucide-react'
@@ -83,6 +84,9 @@ type AdsMetrics = {
     finalizedThrough: string
     nextAutomaticSyncLabel: string
     storeCurrency: string
+    historicalFallbackTotal: number
+    historicalFallbackDays: number
+    earliestDataDate: string | null
     isConnected: boolean
     activeAccountCount: number
     lastSuccessfulSyncAt: string | null
@@ -138,6 +142,25 @@ export default function AdvertisingPage() {
       return res.json()
     },
   })
+
+  const initialDateFromRef = useRef(dateFrom)
+  const hasAdjustedRangeRef = useRef(false)
+
+  // Élargit automatiquement la période au premier chargement pour inclure l'historique importé.
+  useEffect(() => {
+    const earliest = metrics?.syncInfo?.earliestDataDate
+    if (!earliest || hasAdjustedRangeRef.current) return
+
+    if (dateFrom !== initialDateFromRef.current) {
+      hasAdjustedRangeRef.current = true
+      return
+    }
+
+    if (earliest < dateFrom) {
+      setDateFrom(earliest)
+      hasAdjustedRangeRef.current = true
+    }
+  }, [metrics?.syncInfo?.earliestDataDate, dateFrom])
 
   const { data: products } = useQuery({
     queryKey: ['ads-products', currentStoreId],
@@ -290,6 +313,19 @@ export default function AdvertisingPage() {
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <p>{zeroSpendMessage}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {metrics && metrics.syncInfo.historicalFallbackTotal > 0 ? (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+          <div className="flex items-start gap-3">
+            <Info className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              {formatCurrency(metrics.syncInfo.historicalFallbackTotal)} de dépenses publicitaires historiques importées
+              sont incluses sur {metrics.syncInfo.historicalFallbackDays} journée(s), sans détail par produit ni campagne.
+              Les journées couvertes par une synchronisation Facebook Ads utilisent les données Meta détaillées.
+            </p>
           </div>
         </div>
       ) : null}
