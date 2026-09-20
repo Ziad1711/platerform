@@ -5,7 +5,7 @@ import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
 import { Info } from 'lucide-react'
-import { formatCurrency, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber, buildRoundedPath, getPeriodRange } from '@/lib/utils'
 
 type SeriesKey = 'revenue' | 'profit' | 'ads' | 'purchase'
 
@@ -397,21 +397,19 @@ export default function RevenueChart() {
 
   const buildPath = (key: SeriesKey) => {
     if (points.length === 0) return ''
-    return points
-      .map((point, index) => {
-        const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 100
-        const raw =
-          key === 'revenue'
-            ? point.revenue
-            : key === 'profit'
-            ? point.profit
-            : key === 'ads'
-            ? point.ads
-            : point.purchase
-        const y = valueToY(raw)
-        return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
-      })
-      .join(' ')
+    const coordinates = points.map((point, index) => {
+      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 100
+      const raw =
+        key === 'revenue'
+          ? point.revenue
+          : key === 'profit'
+          ? point.profit
+          : key === 'ads'
+          ? point.ads
+          : point.purchase
+      return { x, y: valueToY(raw) }
+    })
+    return buildRoundedPath(coordinates, 1)
   }
 
   const seriesConfig: Record<SeriesKey, { label: string; color: string }> = {
@@ -512,43 +510,6 @@ export default function RevenueChart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxRevenuePoint, maxProfitPoint, visibleSeries, points])
 
-  // Determine value label positions (on the peaks)
-  const valueLabels = useMemo(() => {
-    const labels: { key: string; x: number; y: number; text: string; color: string }[] = []
-
-    if (maxRevenuePoint && visibleSeries.revenue) {
-      const x = pointToX(maxRevenuePoint.index)
-      const y = valueToY(maxRevenuePoint.value)
-      labels.push({
-        key: 'revenue',
-        x,
-        y: y - 5,
-        text: `${formatShortCurrency(maxRevenuePoint.value)} MAD`,
-        color: seriesConfig.revenue.color,
-      })
-    }
-
-    if (maxProfitPoint && visibleSeries.profit) {
-      const x = pointToX(maxProfitPoint.index)
-      const y = valueToY(maxProfitPoint.value)
-      // Avoid overlap with revenue label
-      let labelY = y - 5
-      if (labels.length > 0 && isCollision(x, labels[0].x, 22)) {
-        labelY = labels[0].y < y ? y - 12 : y + 2
-      }
-      labels.push({
-        key: 'profit',
-        x,
-        y: labelY,
-        text: `${formatShortCurrency(maxProfitPoint.value)} MAD`,
-        color: seriesConfig.profit.color,
-      })
-    }
-
-    return labels
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxRevenuePoint, maxProfitPoint, visibleSeries, points])
-
   return (
     <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
 
@@ -614,33 +575,16 @@ export default function RevenueChart() {
                       fill="none"
                       stroke={seriesConfig[key].color}
                       strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                       vectorEffect="non-scaling-stroke"
                     />
                   ) : null
                 )}
 
-                {/* ── Max point dots ── */}
-                {maxRevenuePoint && visibleSeries.revenue && (
-                  <circle
-                    cx={pointToX(maxRevenuePoint.index)}
-                    cy={valueToY(maxRevenuePoint.value)}
-                    r="1"
-                    fill={seriesConfig.revenue.color}
-                    opacity="0.7"
-                  />
-                )}
-                {maxProfitPoint && visibleSeries.profit && (
-                  <circle
-                    cx={pointToX(maxProfitPoint.index)}
-                    cy={valueToY(maxProfitPoint.value)}
-                    r="1"
-                    fill={seriesConfig.profit.color}
-                    opacity="0.7"
-                  />
-                )}
-
-                {/* Les labels des sommets sont rendus en HTML hors du SVG
-                    pour éviter l'étirement horizontal (preserveAspectRatio="none") */}
+                {/* Les points des sommets et leurs labels sont rendus en HTML
+                    hors du SVG pour éviter l'étirement horizontal
+                    (preserveAspectRatio="none"). */}
 
                 {/* ── Vertical line (default last point, hover override) ── */}
                 {(hoveredIndex !== null ? hoveredIndex : points.length - 1) >= 0 && (
@@ -661,15 +605,26 @@ export default function RevenueChart() {
               {/* ── Sommets (labels + badges) rendus en HTML pour rester nets
                   malgré l'étirement horizontal du SVG ── */}
               <div className="pointer-events-none absolute inset-y-0 right-0 left-10 z-[5]">
-                {valueLabels.map((vl) => (
+                {maxRevenuePoint && visibleSeries.revenue && (
                   <span
-                    key={`peak-${vl.key}`}
-                    className="absolute -translate-x-1/2 -translate-y-full whitespace-nowrap text-[10px] tabular-nums"
-                    style={{ left: `${vl.x}%`, top: `${vl.y}%`, color: vl.color, opacity: 0.7 }}
-                  >
-                    {vl.text}
-                  </span>
-                ))}
+                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
+                    style={{
+                      left: `${pointToX(maxRevenuePoint.index)}%`,
+                      top: `${valueToY(maxRevenuePoint.value)}%`,
+                      backgroundColor: seriesConfig.revenue.color,
+                    }}
+                  />
+                )}
+                {maxProfitPoint && visibleSeries.profit && (
+                  <span
+                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
+                    style={{
+                      left: `${pointToX(maxProfitPoint.index)}%`,
+                      top: `${valueToY(maxProfitPoint.value)}%`,
+                      backgroundColor: seriesConfig.profit.color,
+                    }}
+                  />
+                )}
 
                 {badgePositions.map((bp) => (
                   <span
@@ -804,21 +759,21 @@ export default function RevenueChart() {
               </div>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-1">Base: {baseOrders} commandes</p>
+          <p className="text-xs text-muted-foreground mt-1">Base: {formatNumber(baseOrders)} commandes</p>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           {conversionStages.map((stage) => (
             <div key={stage.key} className="rounded-lg border border-border p-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-foreground">{stage.label}</span>
-                <span className="text-sm font-semibold text-foreground">{stage.rate.toFixed(1)}%</span>
+                <span className="text-xs font-medium text-foreground">{stage.label}</span>
+                <span className="text-xs font-semibold text-foreground">{stage.rate.toFixed(1)}%</span>
               </div>
               <div className="h-2 rounded-full bg-muted overflow-hidden">
                 <div className={`${stage.color} h-2 rounded-full`} style={{ width: `${Math.min(stage.rate, 100)}%` }} />
               </div>
-              <div className={`mt-3 inline-flex px-2 py-1 rounded text-xs font-medium ${stage.soft}`}>
-                {stage.count} commandes
+              <div className={`mt-3 inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${stage.soft}`}>
+                {formatNumber(stage.count)} commandes
               </div>
             </div>
           ))}

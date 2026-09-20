@@ -4,7 +4,7 @@ import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, Target, Package, Tr
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber, getPeriodRange } from '@/lib/utils'
 import AdsCostChart from '@/components/dashboard/ads-cost-chart'
 
 interface KpiData {
@@ -329,7 +329,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
   const primaryKpis = [
     {
       title: 'Commandes',
-      value: kpiData ? kpiData.orders.toLocaleString() : '0',
+      value: kpiData ? formatNumber(kpiData.orders) : '0',
       rawChange: kpiData?.changes?.orders || 0,
       change: formatChange(kpiData?.changes?.orders || 0),
       trend: (kpiData?.changes?.orders || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -338,7 +338,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
     },
     {
       title: 'Commandes livrées',
-      value: kpiData ? kpiData.deliveredOrders.toLocaleString() : '0',
+      value: kpiData ? formatNumber(kpiData.deliveredOrders) : '0',
       rawChange: kpiData?.changes?.deliveredOrders || 0,
       change: formatChange(kpiData?.changes?.deliveredOrders || 0),
       trend: (kpiData?.changes?.deliveredOrders || 0) >= 0 ? 'up' as const : 'down' as const,

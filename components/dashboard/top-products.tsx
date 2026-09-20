@@ -5,7 +5,7 @@ import { TrendingUp } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber, getPeriodRange } from '@/lib/utils'
 
 type SortBy = 'revenue' | 'profit'
 
@@ -144,7 +144,7 @@ export default function TopProducts() {
                       />
                       <div className="min-w-0">
                         <div className="font-medium text-foreground break-words whitespace-normal leading-5">{product.name}</div>
-                        <div className="text-xs text-muted-foreground">{product.sales} ventes</div>
+                        <div className="text-xs text-muted-foreground">{formatNumber(product.sales)} ventes</div>
                       </div>
                     </div>
                     <div className="text-right shrink-0">

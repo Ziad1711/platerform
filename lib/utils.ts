@@ -116,13 +116,26 @@ export function getPreviousPeriodRange(period: DashboardPeriod): { start: Date |
   return { start: previousStart, end: previousEnd }
 }
 
+// Intl « fr-FR » utilise l'espace fine insécable (U+202F) comme séparateur de milliers :
+// trop discrète à l'écran, on la remplace par une espace insécable normale bien visible.
+function withVisibleGroupSeparator(value: string): string {
+  return value.replace(/\u202f/g, '\u00a0')
+}
+
+export function formatNumber(amount: number): string {
+  const safe = Number.isFinite(amount) ? amount : 0
+  return withVisibleGroupSeparator(new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(safe))
+}
+
 export function formatCurrency(amount: number, currency: string = 'MAD'): string {
-  return new Intl.NumberFormat('fr-FR', {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
+  return withVisibleGroupSeparator(
+    new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  )
 }
 
 export function formatDate(date: Date | string): string {
@@ -143,4 +156,51 @@ export function formatDateTime(date: Date | string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(d)
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+// Tracé « crisp » : segments droits, seuls les sommets et les creux sont adoucis
+// par un petit arc (rayon exprimé dans les unités du viewBox).
+// radius = 0 => angles entièrement vifs.
+export function buildRoundedPath(points: { x: number; y: number }[], radius: number = 0): string {
+  if (points.length === 0) return ''
+
+  const straight = () =>
+    points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${round2(point.x)} ${round2(point.y)}`).join(' ')
+
+  if (points.length < 3 || radius <= 0) return straight()
+
+  let path = `M ${round2(points[0].x)} ${round2(points[0].y)}`
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const previous = points[i - 1]
+    const current = points[i]
+    const next = points[i + 1]
+
+    const incomingX = current.x - previous.x
+    const incomingY = current.y - previous.y
+    const outgoingX = next.x - current.x
+    const outgoingY = next.y - current.y
+
+    const incomingLength = Math.hypot(incomingX, incomingY) || 1
+    const outgoingLength = Math.hypot(outgoingX, outgoingY) || 1
+
+    // Le rayon ne doit jamais dépasser la moitié du plus court segment adjacent.
+    const corner = Math.min(radius, incomingLength / 2, outgoingLength / 2)
+
+    const arcStartX = current.x - (incomingX / incomingLength) * corner
+    const arcStartY = current.y - (incomingY / incomingLength) * corner
+    const arcEndX = current.x + (outgoingX / outgoingLength) * corner
+    const arcEndY = current.y + (outgoingY / outgoingLength) * corner
+
+    path += ` L ${round2(arcStartX)} ${round2(arcStartY)} Q ${round2(current.x)} ${round2(current.y)} ${round2(arcEndX)} ${round2(arcEndY)}`
+  }
+
+  const last = points[points.length - 1]
+  path += ` L ${round2(last.x)} ${round2(last.y)}`
+
+  return path
 }

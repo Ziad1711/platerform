@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { getPeriodRange } from '@/lib/utils'
+import { buildRoundedPath, getPeriodRange } from '@/lib/utils'
 
 function startOfDay(date: Date) {
   const d = new Date(date)
@@ -203,14 +203,12 @@ export default function AdsCostChart() {
 
   const buildPath = (key: 'cpl' | 'cpa') => {
     if (points.length === 0) return ''
-    return points
-      .map((point: { cpl: number; cpa: number }, index: number) => {
-        const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 100
-        const raw = key === 'cpl' ? point.cpl : point.cpa
-        const y = valueToY(raw)
-        return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
-      })
-      .join(' ')
+    const coordinates = points.map((point: { cpl: number; cpa: number }, index: number) => {
+      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 100
+      const raw = key === 'cpl' ? point.cpl : point.cpa
+      return { x, y: valueToY(raw) }
+    })
+    return buildRoundedPath(coordinates, 1)
   }
 
   const seriesConfig = {
@@ -296,42 +294,6 @@ export default function AdsCostChart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxCplPoint, maxCpaPoint, showCpl, showCpa, points])
 
-  // Value labels on peaks
-  const valueLabels = useMemo(() => {
-    const labels: { key: string; x: number; y: number; text: string; color: string }[] = []
-
-    if (maxCplPoint && showCpl) {
-      const x = pointToX(maxCplPoint.index)
-      const y = valueToY(maxCplPoint.value)
-      labels.push({
-        key: 'cpl',
-        x,
-        y: y - 5,
-        text: `${formatShortCurrency(maxCplPoint.value)} MAD`,
-        color: seriesConfig.cpl.color,
-      })
-    }
-
-    if (maxCpaPoint && showCpa) {
-      const x = pointToX(maxCpaPoint.index)
-      const y = valueToY(maxCpaPoint.value)
-      let labelY = y - 5
-      if (labels.length > 0 && isCollision(x, labels[0].x, 22)) {
-        labelY = labels[0].y < y ? y - 12 : y + 2
-      }
-      labels.push({
-        key: 'cpa',
-        x,
-        y: labelY,
-        text: `${formatShortCurrency(maxCpaPoint.value)} MAD`,
-        color: seriesConfig.cpa.color,
-      })
-    }
-
-    return labels
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxCplPoint, maxCpaPoint, showCpl, showCpa, points])
-
   return (
     <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
 
@@ -387,34 +349,15 @@ export default function AdsCostChart() {
                 ))}
 
                 {showCpl && (
-                  <path d={buildPath('cpl')} fill="none" stroke={seriesConfig.cpl.color} strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+                  <path d={buildPath('cpl')} fill="none" stroke={seriesConfig.cpl.color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 )}
                 {showCpa && (
-                  <path d={buildPath('cpa')} fill="none" stroke={seriesConfig.cpa.color} strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+                  <path d={buildPath('cpa')} fill="none" stroke={seriesConfig.cpa.color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 )}
 
-                {/* ── Max point dots ── */}
-                {maxCplPoint && showCpl && (
-                  <circle
-                    cx={pointToX(maxCplPoint.index)}
-                    cy={valueToY(maxCplPoint.value)}
-                    r="1"
-                    fill={seriesConfig.cpl.color}
-                    opacity="0.7"
-                  />
-                )}
-                {maxCpaPoint && showCpa && (
-                  <circle
-                    cx={pointToX(maxCpaPoint.index)}
-                    cy={valueToY(maxCpaPoint.value)}
-                    r="1"
-                    fill={seriesConfig.cpa.color}
-                    opacity="0.7"
-                  />
-                )}
-
-                {/* Les labels des sommets sont rendus en HTML hors du SVG
-                    pour éviter l'étirement horizontal (preserveAspectRatio="none") */}
+                {/* Les points des sommets et leurs labels sont rendus en HTML
+                    hors du SVG pour éviter l'étirement horizontal
+                    (preserveAspectRatio="none"). */}
 
                 {/* ── Vertical line (default last point, hover override) ── */}
                 {(hoveredIndex !== null ? hoveredIndex : points.length - 1) >= 0 && (
@@ -435,15 +378,26 @@ export default function AdsCostChart() {
               {/* ── Sommets (labels + badges) rendus en HTML pour rester nets
                   malgré l'étirement horizontal du SVG ── */}
               <div className="pointer-events-none absolute inset-y-0 right-0 left-10 z-[5]">
-                {valueLabels.map((vl) => (
+                {maxCplPoint && showCpl && (
                   <span
-                    key={`peak-${vl.key}`}
-                    className="absolute -translate-x-1/2 -translate-y-full whitespace-nowrap text-[10px] tabular-nums"
-                    style={{ left: `${vl.x}%`, top: `${vl.y}%`, color: vl.color, opacity: 0.7 }}
-                  >
-                    {vl.text}
-                  </span>
-                ))}
+                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
+                    style={{
+                      left: `${pointToX(maxCplPoint.index)}%`,
+                      top: `${valueToY(maxCplPoint.value)}%`,
+                      backgroundColor: seriesConfig.cpl.color,
+                    }}
+                  />
+                )}
+                {maxCpaPoint && showCpa && (
+                  <span
+                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
+                    style={{
+                      left: `${pointToX(maxCpaPoint.index)}%`,
+                      top: `${valueToY(maxCpaPoint.value)}%`,
+                      backgroundColor: seriesConfig.cpa.color,
+                    }}
+                  />
+                )}
 
                 {badgePositions.map((bp) => (
                   <span

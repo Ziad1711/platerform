@@ -3,7 +3,7 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber, getPeriodRange } from '@/lib/utils'
 
 type AgentRow = {
   id: string
@@ -151,8 +151,8 @@ export default function ConfirmationPerformance() {
                     <tr key={agent.id} className="border-b border-border hover:bg-secondary/50">
                       <td className="p-3 font-medium text-foreground">{agent.name}</td>
                       <td className="p-3 text-muted-foreground">{agent.language}</td>
-                      <td className="p-3 text-foreground">{agent.totalOrders}</td>
-                      <td className="p-3 text-emerald-600 font-semibold">{agent.confirmedOrders}</td>
+                      <td className="p-3 text-foreground">{formatNumber(agent.totalOrders)}</td>
+                      <td className="p-3 text-emerald-600 font-semibold">{formatNumber(agent.confirmedOrders)}</td>
                       <td className="p-3 text-blue-600 font-semibold">{agent.confirmationRate.toFixed(1)}%</td>
                       <td className="p-3 text-fuchsia-600 font-semibold">{formatCurrency(agent.totalCommission)}</td>
                     </tr>
