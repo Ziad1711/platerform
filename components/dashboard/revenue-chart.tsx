@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import { Info } from 'lucide-react'
 import { formatCurrency, getPeriodRange } from '@/lib/utils'
 
 type SeriesKey = 'revenue' | 'profit' | 'ads' | 'purchase'
@@ -78,6 +79,7 @@ export default function RevenueChart() {
     purchase: true,
   })
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
+  const [showConversionInfo, setShowConversionInfo] = useState(false)
   const plotRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [tooltipWidth, setTooltipWidth] = useState(170)
@@ -139,6 +141,8 @@ export default function RevenueChart() {
           conversion: {
             totalOrders: 0,
             confirmedOrders: 0,
+            cancelledOrders: 0,
+            pendingOrders: 0,
             sentOrders: 0,
             deliveredOrders: 0,
             returnedOrders: 0,
@@ -208,6 +212,8 @@ export default function RevenueChart() {
       let totalPurchase = 0
       let totalOrders = 0
       let confirmedOrders = 0
+      let cancelledOrders = 0
+      let pendingOrders = 0
       let sentOrders = 0
       let deliveredOrders = 0
       let returnedOrders = 0
@@ -220,12 +226,16 @@ export default function RevenueChart() {
         const conv = (payload?.conversion || {}) as {
           total_orders?: number
           confirmed_orders?: number
+          cancelled_orders?: number
+          pending_orders?: number
           sent_orders?: number
           delivered_orders?: number
           returned_orders?: number
         }
         totalOrders += Number(conv.total_orders || 0)
         confirmedOrders += Number(conv.confirmed_orders || 0)
+        cancelledOrders += Number(conv.cancelled_orders || 0)
+        pendingOrders += Number(conv.pending_orders || 0)
         sentOrders += Number(conv.sent_orders || 0)
         deliveredOrders += Number(conv.delivered_orders || 0)
         returnedOrders += Number(conv.returned_orders || 0)
@@ -258,6 +268,8 @@ export default function RevenueChart() {
         conversion: {
           totalOrders,
           confirmedOrders,
+          cancelledOrders,
+          pendingOrders,
           sentOrders,
           deliveredOrders,
           returnedOrders,
@@ -299,6 +311,20 @@ export default function RevenueChart() {
       count: conversion?.confirmedOrders || 0,
       color: 'bg-blue-500',
       soft: 'bg-blue-50 text-blue-700',
+    },
+    {
+      key: 'cancelled',
+      label: 'Annulées',
+      count: conversion?.cancelledOrders || 0,
+      color: 'bg-gray-500',
+      soft: 'bg-gray-100 text-gray-700',
+    },
+    {
+      key: 'pending',
+      label: 'En traitement',
+      count: conversion?.pendingOrders || 0,
+      color: 'bg-amber-500',
+      soft: 'bg-amber-50 text-amber-700',
     },
     {
       key: 'waiting_pickup',
@@ -747,11 +773,41 @@ export default function RevenueChart() {
 
       <div className="mt-6 pt-6 border-t border-border">
         <div className="mb-4">
-          <h4 className="text-base font-semibold text-foreground">Tunnel de conversion</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="text-base font-semibold text-foreground">Tunnel de conversion</h4>
+            <div className="relative group">
+              <button
+                type="button"
+                aria-label="Règle du tunnel de conversion"
+                aria-expanded={showConversionInfo}
+                onClick={() => setShowConversionInfo((prev) => !prev)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+              <div
+                className={`${
+                  showConversionInfo ? 'block' : 'hidden'
+                } group-hover:block absolute left-0 top-full mt-2 z-30 w-72 sm:w-80 rounded-md bg-gray-800 text-white text-[11px] leading-4 p-3 shadow-lg space-y-1 text-left font-normal`}
+              >
+                <div className="font-semibold mb-1">Règle de calcul</div>
+                <div><span className="font-medium">Commandes</span> : toutes les commandes de la période.</div>
+                <div><span className="font-medium">Confirmées</span> : commandes confirmées, expédiées, livrées et retournées.</div>
+                <div><span className="font-medium">Annulées</span> : commandes annulées.</div>
+                <div><span className="font-medium">En traitement</span> : commandes pas encore traitées par la confirmation (nouveau, call 1 à 5, sans réponse, faux numéro, répondeur, rejet de confirmation).</div>
+                <div><span className="font-medium">Non ramassé</span> : commandes confirmées en attente de ramassage.</div>
+                <div><span className="font-medium">Expédiées</span> : commandes expédiées, livrées et retournées.</div>
+                <div><span className="font-medium">Livrées</span> : commandes actuellement livrées.</div>
+                <div><span className="font-medium">Retour</span> : commandes retournées, stockées ou non stockées.</div>
+                <div className="pt-1 text-white/70">Étapes cumulatives : Confirmées ≥ Expédiées ≥ Livrées. Pourcentages calculés sur le total des commandes.</div>
+                <div className="text-white/70">Commandes = Confirmées + Annulées + En traitement + Non ramassé.</div>
+              </div>
+            </div>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">Base: {baseOrders} commandes</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           {conversionStages.map((stage) => (
             <div key={stage.key} className="rounded-lg border border-border p-3">
               <div className="flex items-center justify-between mb-2">
