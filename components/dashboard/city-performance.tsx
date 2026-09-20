@@ -13,6 +13,8 @@ export default function CityPerformance() {
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
   const supabase = createClient()
   const [sortBy, setSortBy] = useState<SortBy>('revenue')
+  const [minOrders, setMinOrders] = useState(10)
+  const isRateSort = sortBy === 'confirmationRate' || sortBy === 'returnRate'
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-city-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
@@ -84,9 +86,11 @@ export default function CityPerformance() {
 
 
   const sortedCities = useMemo(() => {
-    const rows = [...(data || [])]
+    // Les taux ne sont fiables qu'avec un minimum de commandes : les villes en dessous
+    // sont écartées du classement (seuil modifiable, 10 par défaut).
+    const rows = [...(data || [])].filter((row) => !isRateSort || row.orders >= minOrders)
     return rows.sort((a, b) => (b[sortBy] as number) - (a[sortBy] as number))
-  }, [data, sortBy])
+  }, [data, sortBy, isRateSort, minOrders])
 
   const sortLabel =
     sortBy === 'revenue'
@@ -104,15 +108,29 @@ export default function CityPerformance() {
           <h3 className="text-lg font-semibold text-foreground">Performance par ville</h3>
           <p className="text-xs text-muted-foreground mt-1">Tri par chiffre d'affaires par défaut</p>
         </div>
-        <select
-          className="border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary bg-card text-foreground"
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortBy)}
-        >
-          <option value="revenue">Chiffre d'affaires</option>
-          <option value="confirmationRate">Taux de confirmation</option>
-          <option value="returnRate">Taux de retour</option>
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          {isRateSort && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
+              Commandes minimum
+              <input
+                type="number"
+                min={1}
+                value={minOrders}
+                onChange={(e) => setMinOrders(Math.max(1, Number(e.target.value) || 1))}
+                className="w-20 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary bg-card text-foreground"
+              />
+            </label>
+          )}
+          <select
+            className="border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary bg-card text-foreground"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortBy)}
+          >
+            <option value="revenue">Chiffre d'affaires</option>
+            <option value="confirmationRate">Taux de confirmation</option>
+            <option value="returnRate">Taux de retour</option>
+          </select>
+        </div>
       </div>
 
       {isLoading ? (

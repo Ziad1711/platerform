@@ -8,6 +8,7 @@ export type DashboardPeriod =
   | 'year'
   | 'last_year'
   | 'custom'
+  | 'all'
 
 interface PeriodRangeOptions {
   customStartDate?: string | null
@@ -85,6 +86,9 @@ export function getPeriodRange(period: DashboardPeriod, options?: PeriodRangeOpt
       return { start: new Date(now.getFullYear(), 0, 1), end: addDays(startOfDay(now), 1) }
     case 'last_year':
       return { start: new Date(now.getFullYear() - 1, 0, 1), end: new Date(now.getFullYear(), 0, 1) }
+    case 'all':
+      // « Toujours » : borne basse volontairement ancienne (aucune donnée antérieure).
+      return { start: new Date(2000, 0, 1), end: addDays(startOfDay(now), 1) }
     case 'custom': {
       const start = options?.customStartDate ? parseLocalDate(options.customStartDate) : null
       const end = options?.customEndDate ? addDays(parseLocalDate(options.customEndDate), 1) : null

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
@@ -34,6 +34,37 @@ function formatShortCurrency(value: number) {
   return Math.round(value).toString()
 }
 
+// Position horizontale de l'infobulle : à côté du trait, mais toujours dans le cadre
+// du graphique (bascule de côté quand on arrive sur les extrémités).
+function getTooltipLeft(
+  hoveredIndex: number | null,
+  pointsCount: number,
+  plot: SVGSVGElement | null,
+  tooltipWidth: number
+): string | null {
+  if (hoveredIndex === null || pointsCount === 0 || !plot) return null
+
+  const container = plot.parentElement
+  if (!container) return null
+  const containerWidth = container.clientWidth
+  if (containerWidth === 0) return null
+
+  const plotRect = plot.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  const plotLeft = plotRect.left - containerRect.left
+  const plotWidth = plotRect.width
+
+  const pct = pointsCount === 1 ? 0 : hoveredIndex / (pointsCount - 1)
+  const gap = 8
+  const lineX = plotLeft + pct * plotWidth
+
+  let left = pct < 0.5 ? lineX - gap - tooltipWidth : lineX + gap
+  if (left < 0) left = lineX + gap
+  if (left + tooltipWidth > containerWidth) left = Math.max(0, lineX - gap - tooltipWidth)
+
+  return `${left}px`
+}
+
 export default function RevenueChart() {
   const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
@@ -47,6 +78,9 @@ export default function RevenueChart() {
     purchase: true,
   })
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
+  const plotRef = useRef<SVGSVGElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const [tooltipWidth, setTooltipWidth] = useState(170)
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
@@ -235,6 +269,16 @@ export default function RevenueChart() {
 
 
   const points = data?.points || []
+
+  // Largeur réelle de l'infobulle (mesurée après affichage).
+  useEffect(() => {
+    if (hoveredIndex !== null && tooltipRef.current) {
+      setTooltipWidth(tooltipRef.current.offsetWidth)
+    }
+  }, [hoveredIndex, points.length])
+
+  const tooltipLeft = getTooltipLeft(hoveredIndex, points.length, plotRef.current, tooltipWidth)
+
   const activeKeys = (Object.keys(visibleSeries) as SeriesKey[]).filter((k) => visibleSeries[k])
   const labelStep = points.length > 0 ? Math.max(1, Math.ceil(points.length / 8)) : 1
   const labelTicks = points.filter((_, index) => index % labelStep === 0 || index === points.length - 1)
@@ -519,7 +563,7 @@ export default function RevenueChart() {
                 ))}
               </div>
 
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+              <svg ref={plotRef} viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
                 {yTicks.map((tick, idx) => (
                   <line
                     key={idx}
@@ -582,8 +626,8 @@ export default function RevenueChart() {
                     stroke="currentColor"
                     className="text-foreground/40 dark:text-white/30"
                     strokeDasharray="2 4"
-                    strokeWidth="0.8"
-                    opacity={hoveredIndex !== null ? "0.25" : "0.18"}
+                    strokeWidth={hoveredIndex !== null ? '0.4' : '0.8'}
+                    opacity={hoveredIndex !== null ? '0.6' : '0.18'}
                   />
                 )}
               </svg>
@@ -639,14 +683,9 @@ export default function RevenueChart() {
 
               {hoveredIndex !== null && points[hoveredIndex] && (
                 <div
+                  ref={tooltipRef}
                   className="absolute z-20 pointer-events-none backdrop-blur-sm"
-                  style={{
-                    top: '8px',
-                    ...(hoveredIndex / (points.length - 1) < 0.5
-                      ? { right: `${100 - (points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100)}%`, transform: 'translateX(-8px)' }
-                      : { left: `${(points.length === 1 ? 0 : (hoveredIndex / (points.length - 1)) * 100)}%`, transform: 'translateX(8px)' }
-                    ),
-                  }}
+                  style={{ top: '8px', left: tooltipLeft || undefined }}
                 >
                   <div className="bg-background/80 dark:bg-background/70 border border-border/60 rounded-lg px-3.5 py-2.5 shadow-xl min-w-[140px]">
                     <div className="text-[11px] font-semibold text-foreground/80 mb-2 tracking-wide uppercase">

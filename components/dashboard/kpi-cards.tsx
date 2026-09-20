@@ -63,6 +63,11 @@ function diffDays(start: Date, end: Date) {
 function getPreviousRange(selectedPeriod: string, currentRange: DateRange): DateRange {
   const now = new Date()
 
+  // « Toujours » n'a pas de période précédente comparable : on compare à la même donnée.
+  if (selectedPeriod === 'all') {
+    return { start: null, end: null }
+  }
+
   if (selectedPeriod === 'today') {
     const todayStart = new Date(now)
     todayStart.setHours(0, 0, 0, 0)

@@ -112,24 +112,26 @@ export default function ConfirmationPerformance() {
         <div className="p-8 text-center text-muted-foreground">Chargement...</div>
       ) : (
         <div className="p-6 space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">Commandes traitées</div>
-              <div className="text-2xl font-bold text-foreground mt-1">{data?.totals.totalOrders || 0}</div>
+          {data?.agents?.length ? (
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="rounded-lg border border-border p-4">
+                <div className="text-xs text-muted-foreground">Commandes traitées</div>
+                <div className="text-2xl font-bold text-foreground mt-1">{data?.totals.totalOrders || 0}</div>
+              </div>
+              <div className="rounded-lg border border-border p-4">
+                <div className="text-xs text-muted-foreground">Commandes confirmées</div>
+                <div className="text-2xl font-bold text-emerald-600 mt-1">{data?.totals.confirmedOrders || 0}</div>
+              </div>
+              <div className="rounded-lg border border-border p-4">
+                <div className="text-xs text-muted-foreground">Taux de confirmation</div>
+                <div className="text-2xl font-bold text-blue-600 mt-1">{(data?.globalRate || 0).toFixed(1)}%</div>
+              </div>
+              <div className="rounded-lg border border-border p-4">
+                <div className="text-xs text-muted-foreground">Commission totale</div>
+                <div className="text-2xl font-bold text-fuchsia-600 mt-1">{formatCurrency(data?.totals.totalCommission || 0)}</div>
+              </div>
             </div>
-            <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">Commandes confirmées</div>
-              <div className="text-2xl font-bold text-emerald-600 mt-1">{data?.totals.confirmedOrders || 0}</div>
-            </div>
-            <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">Taux de confirmation</div>
-              <div className="text-2xl font-bold text-blue-600 mt-1">{(data?.globalRate || 0).toFixed(1)}%</div>
-            </div>
-            <div className="rounded-lg border border-border p-4">
-              <div className="text-xs text-muted-foreground">Commission totale</div>
-              <div className="text-2xl font-bold text-fuchsia-600 mt-1">{formatCurrency(data?.totals.totalCommission || 0)}</div>
-            </div>
-          </div>
+          ) : null}
 
           {data?.agents?.length ? (
             <div className="overflow-x-auto">

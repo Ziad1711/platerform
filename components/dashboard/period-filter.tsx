@@ -14,6 +14,7 @@ const periods = [
   { id: 'quarter', label: 'Ce trimestre' },
   { id: 'year', label: 'Cette année' },
   { id: 'last_year', label: 'Année dernière' },
+  { id: 'all', label: 'Toujours' },
   { id: 'custom', label: 'Période personnalisée' },
 ]
 
@@ -26,6 +27,7 @@ const periodLabels: Record<DashboardPeriod, string> = {
   quarter: 'Ce trimestre',
   year: 'Cette année',
   last_year: 'Année dernière',
+  all: 'Toujours',
   custom: 'Période personnalisée',
 }
 
