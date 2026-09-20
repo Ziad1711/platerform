@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { MapPin } from 'lucide-react'
+import { MapPin, Pencil } from 'lucide-react'
 
 interface InlineEditAddressModalProps {
   value: string
@@ -55,10 +55,21 @@ export default function InlineEditAddressModal({
     <>
       <div
         onDoubleClick={() => setOpen(true)}
-        className={`w-full min-w-0 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+        className={`group w-full min-w-0 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
         title="Double-clic pour modifier l'adresse"
       >
         {value || <span className="text-muted-foreground italic">Adresse</span>}
+        <span
+          role="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen(true)
+          }}
+          className="ml-1 inline-block align-middle cursor-pointer text-muted-foreground/30 hover:text-foreground transition-colors"
+          title="Modifier"
+        >
+          <Pencil className="inline-block h-3 w-3 align-middle" />
+        </span>
       </div>
 
       {open && (

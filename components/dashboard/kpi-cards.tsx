@@ -84,7 +84,7 @@ function getPreviousRange(selectedPeriod: string, currentRange: DateRange): Date
     return { start, end }
   }
 
-  if (selectedPeriod === 'month') {
+  if (selectedPeriod === 'month' || selectedPeriod === 'last_month') {
     const currentMonthStart = currentRange.start
     if (!currentMonthStart) return { start: null, end: null }
     const previousMonthStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - 1, 1)
@@ -98,7 +98,7 @@ function getPreviousRange(selectedPeriod: string, currentRange: DateRange): Date
     return { start: previousQuarterStart, end: currentQuarterStart }
   }
 
-  if (selectedPeriod === 'year') {
+  if (selectedPeriod === 'year' || selectedPeriod === 'last_year') {
     const currentYearStart = currentRange.start
     if (!currentYearStart) return { start: null, end: null }
     const previousYearStart = new Date(currentYearStart.getFullYear() - 1, 0, 1)

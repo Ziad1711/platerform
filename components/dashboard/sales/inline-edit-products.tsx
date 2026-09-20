@@ -251,10 +251,21 @@ export default function InlineEditProducts({
       <button
         type="button"
         onDoubleClick={open}
-        className="text-left text-[10px] sm:text-[11px] text-foreground hover:text-primary transition-colors cursor-default"
+        className="group text-left text-[10px] sm:text-[11px] text-foreground hover:text-primary transition-colors cursor-default"
         title="Double-clic pour modifier"
       >
         {triggerLabel || summary || <span className="text-muted-foreground italic">Aucun produit</span>}
+        <span
+          role="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            open()
+          }}
+          className="ml-1 inline-block align-middle cursor-pointer text-muted-foreground/30 hover:text-primary transition-colors"
+          title="Modifier"
+        >
+          <Pencil className="inline-block h-3 w-3 align-middle" />
+        </span>
       </button>
 
       {isOpen && (

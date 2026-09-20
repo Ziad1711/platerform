@@ -1,4 +1,13 @@
-export type DashboardPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'quarter' | 'year' | 'custom'
+export type DashboardPeriod =
+  | 'today'
+  | 'yesterday'
+  | 'week'
+  | 'month'
+  | 'last_month'
+  | 'quarter'
+  | 'year'
+  | 'last_year'
+  | 'custom'
 
 interface PeriodRangeOptions {
   customStartDate?: string | null
@@ -63,12 +72,19 @@ export function getPeriodRange(period: DashboardPeriod, options?: PeriodRangeOpt
     }
     case 'month':
       return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: addDays(startOfDay(now), 1) }
+    case 'last_month':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+        end: new Date(now.getFullYear(), now.getMonth(), 1),
+      }
     case 'quarter': {
       const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3
       return { start: new Date(now.getFullYear(), quarterStartMonth, 1), end: addDays(startOfDay(now), 1) }
     }
     case 'year':
       return { start: new Date(now.getFullYear(), 0, 1), end: addDays(startOfDay(now), 1) }
+    case 'last_year':
+      return { start: new Date(now.getFullYear() - 1, 0, 1), end: new Date(now.getFullYear(), 0, 1) }
     case 'custom': {
       const start = options?.customStartDate ? parseLocalDate(options.customStartDate) : null
       const end = options?.customEndDate ? addDays(parseLocalDate(options.customEndDate), 1) : null

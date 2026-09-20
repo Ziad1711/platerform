@@ -10,8 +10,10 @@ const periods = [
   { id: 'yesterday', label: 'Hier' },
   { id: 'week', label: 'Cette semaine' },
   { id: 'month', label: 'Ce mois' },
+  { id: 'last_month', label: 'Mois dernier' },
   { id: 'quarter', label: 'Ce trimestre' },
   { id: 'year', label: 'Cette année' },
+  { id: 'last_year', label: 'Année dernière' },
   { id: 'custom', label: 'Période personnalisée' },
 ]
 
@@ -20,8 +22,10 @@ const periodLabels: Record<DashboardPeriod, string> = {
   yesterday: 'Hier',
   week: 'Cette semaine',
   month: 'Ce mois',
+  last_month: 'Mois dernier',
   quarter: 'Ce trimestre',
   year: 'Cette année',
+  last_year: 'Année dernière',
   custom: 'Période personnalisée',
 }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { Pencil } from 'lucide-react'
 
 interface CityOption {
   city_key: number
@@ -124,10 +125,22 @@ export default function InlineEditCity({
         setSearch('')
         setEditing(true)
       }}
-      className={`cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+      className={`group inline-flex items-center gap-1 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
       title="Double-clic pour changer la ville"
     >
-      {value || <span className="text-muted-foreground italic">—</span>}
+      <span>{value || <span className="text-muted-foreground italic">—</span>}</span>
+      <span
+        role="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setSearch('')
+          setEditing(true)
+        }}
+        className="shrink-0 cursor-pointer text-muted-foreground/30 hover:text-foreground transition-colors"
+        title="Modifier"
+      >
+        <Pencil className="h-3 w-3" />
+      </span>
     </div>
   )
 }

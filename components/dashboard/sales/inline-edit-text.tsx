@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { Pencil } from 'lucide-react'
 
 interface InlineEditTextProps {
   value: string
@@ -67,10 +68,22 @@ export default function InlineEditText({
         setDraft(value)
         setEditing(true)
       }}
-      className={`cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+      className={`group inline-flex items-center gap-1 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
       title="Double-clic pour modifier"
     >
-      {value || <span className="text-muted-foreground italic">{placeholder || '—'}</span>}
+      <span>{value || <span className="text-muted-foreground italic">{placeholder || '—'}</span>}</span>
+      <span
+        role="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setDraft(value)
+          setEditing(true)
+        }}
+        className="shrink-0 cursor-pointer text-muted-foreground/30 hover:text-foreground transition-colors"
+        title="Modifier"
+      >
+        <Pencil className="h-3 w-3" />
+      </span>
     </div>
   )
 }

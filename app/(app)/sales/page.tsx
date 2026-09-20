@@ -5253,8 +5253,14 @@ export default function VentesPage() {
                         </td>
                       )}
                       {!isConfirmationRole && (
-                        <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-foreground">
-                          {formatCurrency(order.profit || 0)}
+                        <td className={`px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium ${
+                          order.status === 'delivered' && Number(order.profit || 0) < 0
+                            ? 'text-red-600'
+                            : order.status === 'delivered' && Number(order.profit || 0) > 0
+                              ? 'text-emerald-600'
+                              : 'text-muted-foreground'
+                        }`}>
+                          {formatCurrency(order.status === 'delivered' ? order.profit || 0 : 0)}
                         </td>
                       )}
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium">
