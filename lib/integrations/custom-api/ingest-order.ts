@@ -3,6 +3,7 @@ import { computePayloadHash, checkIdempotency, recordIdempotency } from './idemp
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { normalizeMoroccanPhone } from '@/lib/utils'
+import { validateOrderItems } from './validate-items'
 
 export type IngestOrderPayload = {
   idempotency_key: string
@@ -79,6 +80,23 @@ export async function ingestOrder(
       payload,
     })
     return { status: 'rejected', orderId: null, errorCode: 'MISSING_ITEMS', errorMessage: 'Au moins un article est requis' }
+  }
+
+  // 2b. Valider le rattachement produit / variante avant toute insertion
+  const validationError = await validateOrderItems(storeId, payload.items)
+
+  if (validationError) {
+    await logIngestion(storeId, apiKeyId, payload.external_order_id, 'rejected', {
+      errorCode: validationError.errorCode,
+      errorMessage: validationError.errorMessage,
+      payload,
+    })
+    return {
+      status: 'rejected',
+      orderId: null,
+      errorCode: validationError.errorCode,
+      errorMessage: validationError.errorMessage,
+    }
   }
 
   // 3. Créer la commande (ville brute conservée, normalisation faite à la confirmation)

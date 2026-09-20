@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Copy, Eye, EyeOff, RotateCcw, Trash2, Key, ExternalLink } from 'lucide-react'
+import { Copy, Eye, EyeOff, RotateCcw, Trash2, Key } from 'lucide-react'
+import { CustomSiteApiDocs } from '@/components/dashboard/integrations/custom-site-api-docs'
 import {
   Dialog,
   DialogContent,
@@ -212,95 +213,7 @@ export function CustomSiteKeys({ storeId }: { storeId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Documentation rapide</CardTitle>
-          <CardDescription>
-            Comment utiliser l'API pour importer des commandes depuis votre site.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          <div>
-            <h4 className="font-medium mb-1">Endpoint</h4>
-            <code className="rounded bg-muted px-2 py-1 text-xs font-mono">
-              POST /api/public/v1/orders
-            </code>
-          </div>
-
-          <div>
-            <h4 className="font-medium mb-1">Headers</h4>
-            <pre className="rounded bg-muted p-2 text-xs font-mono overflow-x-auto">
-{`Authorization: Bearer <votre_clé_api>
-Content-Type: application/json`}
-            </pre>
-          </div>
-
-          <div>
-            <h4 className="font-medium mb-1">Body (JSON)</h4>
-            <pre className="rounded bg-muted p-2 text-xs font-mono overflow-x-auto">
-{`{
-  "idempotency_key": "cmd-123-abc",
-  "external_order_id": "CMD-001",
-  "customer_name": "Jean Dupont",
-  "phone": "0612345678",
-  "city": "Casablanca",
-  "address": "12 Rue de la Liberté",
-  "total_selling_price": 250.00,
-  "delivery_charge_to_customer": 25.00,
-  "delivery_note": "je serai dispo demain à 18h",
-  "items": [
-    {
-      "product_id": "uuid-du-produit",
-      "product_name": "T-shirt Noir",
-      "product_variant_id": "uuid-de-la-variante",
-      "quantity": 2,
-      "unit_selling_price": 125.00
-    }
-  ]
-}`}
-            </pre>
-          </div>
-
-          <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
-            <h4 className="font-medium text-sm text-amber-800 dark:text-amber-200">📖 Explications des champs</h4>
-            <div className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
-              <p>
-                <strong>delivery_charge_to_customer</strong> : Montant des frais de livraison facturés au client. 
-                Si la livraison est gratuite pour le client, mettez <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">0</code>.
-              </p>
-              <p>
-                <strong>product_id</strong> (obligatoire) : L'identifiant unique du produit dans Jisra. 
-                C'est le critère principal pour rattacher l'article à un produit. 
-                Vous trouverez cet ID dans la page <strong>Produits</strong> (colonne "ID").
-              </p>
-              <p>
-                <strong>product_name</strong> (optionnel) : Le nom du produit. Ce champ est décoratif uniquement, 
-                le vrai rattachement se fait via <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">product_id</code>.
-              </p>
-              <p>
-                <strong>product_variant_id</strong> (optionnel) : L'identifiant unique de la variante (taille, couleur, etc.). 
-                Si votre produit a des variantes, vous pouvez préciser laquelle a été commandée. 
-                Laissez vide ou omettez le champ si le produit n'a pas de variantes.
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <h4 className="font-medium mb-1">Réponse succès (201)</h4>
-            <pre className="rounded bg-muted p-2 text-xs font-mono">
-{`{ "status": "accepted", "order_id": "uuid" }`}
-            </pre>
-          </div>
-
-          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950">
-            <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-            <p className="text-xs text-blue-700 dark:text-blue-300">
-              L'idempotency_key permet d'éviter les doublons en cas de renvoi. Utilisez un identifiant unique
-              par commande côté site.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <CustomSiteApiDocs />
     </div>
   )
 }

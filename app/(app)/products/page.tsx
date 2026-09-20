@@ -2235,11 +2235,12 @@ export default function ProduitsPage() {
                     {hasVariants && isExpanded ? (
                       <tr className="bg-secondary/30">
                         <td colSpan={10} className="px-6 py-3">
-                          <div className="rounded-lg border border-border/70 bg-card overflow-hidden">
+                          <div className="rounded-lg border border-border/70 bg-card overflow-x-auto">
                             <table className="min-w-full">
                               <thead className="bg-secondary/60">
                                 <tr>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Variante</th>
+                                  <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">ID variante</th>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">SKU</th>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Prix</th>
                                   <th className="px-4 py-2 text-left text-[11px] font-medium text-muted-foreground uppercase">Coût</th>
@@ -2256,6 +2257,31 @@ export default function ProduitsPage() {
                                   return (
                                     <tr key={variant.id} className="border-t border-border/60">
                                       <td className="px-4 py-2 text-sm text-foreground">{String(variant.name || '-')}</td>
+                                      <td className="px-4 py-2 text-sm">
+                                        {variant.id ? (
+                                          <div className="flex items-center gap-1">
+                                            <code className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground">
+                                              {String(variant.id).slice(0, 8)}…
+                                            </code>
+                                            <button
+                                              type="button"
+                                              title="Copier l'ID de la variante"
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(String(variant.id))
+                                                toast('ID de variante copié', {
+                                                  description: String(variant.id),
+                                                  icon: <Copy className="w-4 h-4 text-[#1fa971]" />,
+                                                })
+                                              }}
+                                              className="rounded p-1 text-muted-foreground hover:bg-muted"
+                                            >
+                                              <Copy className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">-</span>
+                                        )}
+                                      </td>
                                       <td className="px-4 py-2 text-sm text-muted-foreground">{String(variant.sku || '-')}</td>
                                       <td className="px-4 py-2 text-sm text-foreground">{formatCurrency(Number(variant.selling_price || 0))}</td>
                                       <td className="px-4 py-2 text-sm text-foreground">{formatCurrency(Number(variant.purchase_cost || 0))}</td>
