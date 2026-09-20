@@ -95,6 +95,46 @@
 - [x] Composants shadcn/ui installés (button, card, badge, alert-dialog)
 - [x] Migrations sauvegardées localement
 
+### ✅ Custom Site API v1 — Catalogue (Jisra → site client)
+- [x] Colonne `scopes` sur `public_api_keys` (products:read, stock:read, orders:write) + contrainte + index GIN — migration `20260920_public_api_key_scopes.sql`
+- [x] `lib/integrations/custom-api/auth.ts` : `normalizeScopes`, `hasScope`, `validateApiKey` retourne les périmètres (rétro-compatibilité : clés existantes = 3 droits)
+- [x] `lib/integrations/custom-api/request-auth.ts` : `requirePublicApiAuth(request, scope)` (401/403 + codes MISSING_AUTHORIZATION, MISSING_SCOPE)
+- [x] `lib/integrations/custom-api/catalog-stock.ts` : agrégation du stock (produit + variante) et règle shared/variant
+- [x] `lib/integrations/custom-api/catalog.ts` : liste paginée (keyset `cursor`), filtre `updated_since`/`sku`, prix Jisra, URLs images Storage, `includes_stock` selon périmètre
+- [x] `lib/integrations/custom-api/catalog-availability.ts` : vérification panier (existence, prix de référence, stock, motifs d'erreur)
+- [x] `lib/integrations/custom-api/resolve-item-prices.ts` : complète les prix manquants et le total depuis Jisra (le prix envoyé reste prioritaire)
+- [x] Endpoints : `GET /api/public/v1/catalog/products`, `GET /api/public/v1/catalog/products/[productId]`, `POST /api/public/v1/catalog/availability`
+- [x] `POST /api/public/v1/orders` migré sur `requirePublicApiAuth(..., 'orders:write')`
+- [x] Clés API : POST accepte `scopes`, GET retourne `scopes`, affichage des périmètres dans `custom-site-keys.tsx`
+- [x] Page de documentation `/integrations/custom-site/docs` (vue d'ensemble, démarrage, auth, catalogue, disponibilité, commandes, erreurs, exemples Node/PHP, bonnes pratiques, webhooks à venir)
+- [x] Liens vers la documentation complète depuis le modal « Site web personnalisé » et la carte `custom-site-api-docs.tsx`
+
+### ✅ Custom Site API v1 — Durcissement (sécurité, prix, stock, doc publique)
+- [x] Suppression de la politique anonyme `public_api_keys_select_key_hash_anon` + `revoke all on public_api_keys from anon`
+- [x] `can_manage_store_integrations(store_id)` (owner/admin/marketer actifs) + 4 politiques RLS `%_managers` sur `public_api_keys`
+- [x] `integrations.manage` exigé pour générer et révoquer une clé (403 `MISSING_PERMISSION`)
+- [x] Sélecteur de droits (scopes) dans `custom-site-keys.tsx` + refus 400 `MISSING_SCOPES` si aucun droit sélectionné
+- [x] `products.publication_status` (draft/active/archived) + index `(store_id, publication_status)` ; l'API n'expose que `active`
+- [x] Trigger `trg_touch_product_from_variant` : une modification de variante met à jour `products.updated_at` (sync incrémentale fiable)
+- [x] RPC `rpc_public_catalog_stock_snapshot` : agrégation du stock en SQL (repli Node conservé si RPC absente)
+- [x] RPC `rpc_ingest_public_order` : création atomique commande + articles + réservation d'idempotence (accepted / duplicate / conflict)
+- [x] Prix strict : les prix Jisra remplacent ceux envoyés par le site, écarts journalisés (`PRICE_MISMATCH`), total recalculé côté Jisra
+- [x] Validation explicite des paramètres catalogue : 400 `INVALID_LIMIT`, `INVALID_CURSOR`, `INVALID_UPDATED_SINCE`
+- [x] Correction du stock des produits sans variante dans `catalog-availability.ts`
+- [x] Documentation publique déplacée de `/integrations/custom-site/docs` (protégée) vers `/documentation` (groupe `(documentation)`, page statique) + sitemap, robots, footer, redirection de l'ancienne URL
+- [x] Refactor : `catalog-shared.ts`, `catalog-mapper.ts`, `order-items-pricing.ts`, `order-items-validation.ts` (suppression de `validate-items.ts` et `resolve-item-prices.ts`)
+- [x] Vérifié en réel : 400 paramètres, 401 sans clé, 403 scopes, exclusion des produits `draft`, prix strict (600 au lieu de 2), `duplicate`, `IDEMPOTENCY_CONFLICT`, log `PRICE_MISMATCH`
+
+### ✅ Custom Site API v1 — Validation, statut produit et documentation v2
+- [x] UI statut de publication dans `/products` : sélecteur en création et édition, badge + select rapide par ligne, filtre « Tout statut / Publiés / Brouillons / Archivés », mutation `updatePublicationStatusMutation`
+- [x] `components/dashboard/products/publication-status.tsx` : badge, select, normalisation et libellés FR
+- [x] `lib/integrations/custom-api/schemas.ts` : schémas Zod (orderBodySchema, availabilityBodySchema) + `toValidationDetails`
+- [x] Routes `/orders` et `/catalog/availability` : 400 `VALIDATION_ERROR` avec `details[{field,message}]`
+- [x] `IDEMPOTENCY_CONFLICT` → HTTP 409
+- [x] Politique stock « informative » (Option A) : aucune commande refusée pour cause de stock, commentée dans `ingest-order.ts` et documentée
+- [x] Documentation déplacée dans `components/documentation/` (primitives, overview, catalog, orders, guides) + navigation verticale sticky, scroll-spy, menu mobile, badges méthode/statut, en-tête API v1 / Stable / URL de base
+- [x] Vérifié en réel : 400 `VALIDATION_ERROR` (commande + disponibilité), commande quantité 999 acceptée, 409 conflit, 200 duplicata
+
 ## What's Left to Build
 
 ### 🔄 Phase 2 (In Progress)
@@ -300,6 +340,7 @@
 - Build global bloqué par une erreur hors scope Rapid Delivery sur `/dashboard/fournisseurs` (`useSearchParams()` sans suspense boundary)
 
 ### Medium
+- Rendu SSR neutralisé par `StoreProvider` (`lib/store-context.tsx`) : tant que `localStorage` n'est pas lu côté client, le provider affiche un spinner à la place de `children`. Le HTML initial ne contient donc aucun contenu de page (spinner plein écran), sur toutes les routes y compris publiques → limite SEO et délai perçu. Corrections possibles : rendre le blocage client-only (skeleton non bloquant), ou sortir les pages publiques (`(marketing)`, `(documentation)`) du `StoreProvider`.
 - `CRON_SECRET` doit être défini dans Vercel pour activer la synchronisation Facebook Ads automatique (sinon `/api/cron/facebook-ads-sync` répond 503)
 - No error boundaries implemented
 - No loading states on pages

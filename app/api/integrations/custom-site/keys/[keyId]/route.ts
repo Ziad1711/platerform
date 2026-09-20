@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { hasPermission, type Role } from '@/lib/auth/permissions'
 
 export async function DELETE(
   request: NextRequest,
@@ -31,6 +32,25 @@ export async function DELETE(
       }
 
       storeId = members[0].store_id
+    }
+
+    const { data: membership } = await supabase
+      .from('store_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('store_id', storeId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (!membership || !hasPermission(membership.role as Role, 'integrations.manage')) {
+      return NextResponse.json(
+        {
+          error: 'Forbidden',
+          code: 'MISSING_PERMISSION',
+          message: 'Permission integrations.manage requise pour révoquer une clé API.',
+        },
+        { status: 403 }
+      )
     }
 
     const { error } = await supabase

@@ -4,6 +4,19 @@
 Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 
 ## Recently Completed
+- ✅ Gestion du statut de publication produits dans le dashboard : sélecteur (creation/édition), badge + changement rapide en ligne dans la liste, filtre par statut, `components/dashboard/products/publication-status.tsx`
+- ✅ Validation Zod des payloads publics (`lib/integrations/custom-api/schemas.ts`) : 400 `VALIDATION_ERROR` avec `details[]` sur /orders et /catalog/availability
+- ✅ `IDEMPOTENCY_CONFLICT` retourne désormais 409 (conflit de ressource) au lieu de 422
+- ✅ Politique de stock « informative » (Option A) : l'API commandes n'est jamais bloquée par le stock, documentée dans le code et la documentation
+- ✅ Documentation refactorée dans `components/documentation/` (docs-primitives, docs-overview, docs-catalog, docs-orders, docs-guides) avec navigation **verticale sticky à gauche** (240px dès 768px, 280px dès 1024px), démarrant en haut de page, section active automatique au scroll (IntersectionObserver + `aria-current`), menu repliable sous 768px, badges GET/POST et statuts HTTP
+- ✅ Navigation réellement **fixe** : le layout `(documentation)` utilise `h-dvh` + `main` en `overflow-y-auto` (scroll interne), car le `overflow-x: hidden` global de `html/body` cassait `position: sticky`
+- ✅ Bloc d'introduction (description, URL de base, liste des endpoints) déplacé dans la section « Vue d'ensemble »
+- ✅ Documentation API publique sur `/documentation` (page statique, sitemap, robots, footer) ; `/integrations/custom-site/docs` redirige vers la nouvelle URL
+- ✅ Durcissement clés API : RLS réservée à `integrations.manage` (owner/admin/marketer), ancienne politique anonyme supprimée, scopes sélectionnables dans l'UI
+- ✅ Ingestion de commande atomique (RPC `rpc_ingest_public_order`) + prix strict Jisra (prix envoyés par le site ignorés et journalisés `PRICE_MISMATCH`)
+- ✅ `products.publication_status` (draft/active/archived) : seuls les produits `active` sont exposés ; trigger de rafraîchissement `products.updated_at` sur modification de variante
+- ✅ Stock catalogue agrégé en SQL (`rpc_public_catalog_stock_snapshot`) + correction du stock des produits sans variante
+- ✅ Catalogue public : GET /api/public/v1/catalog/products, GET /api/public/v1/catalog/products/[productId], POST /api/public/v1/catalog/availability
 - ✅ Custom Site API v1 : API publique POST /api/public/v1/orders pour importer les commandes depuis un site e-commerce propriétaire
 - ✅ Tables Supabase : public_api_keys, public_order_ingestion_logs, public_order_idempotency + colonne external_order_id sur orders
 - ✅ RLS configurée pour toutes les nouvelles tables (store_members)

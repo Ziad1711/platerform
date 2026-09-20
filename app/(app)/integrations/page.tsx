@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, X, Zap, Globe, ExternalLink, Store } from 'lucide-react'
+import { Search, X, Zap, Globe, ExternalLink, Store, BookOpen } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
@@ -695,17 +695,32 @@ export default function IntegrationsPage() {
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsCustomSiteModalOpen(false)
-                  setSelectedCustomSiteStoreId(null)
-                  setSelectedCustomSiteStoreWebsite(null)
-                }}
-                className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomSiteModalOpen(false)
+                    setSelectedCustomSiteStoreId(null)
+                    setSelectedCustomSiteStoreWebsite(null)
+                    router.push('/documentation')
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                  Documentation complète
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomSiteModalOpen(false)
+                    setSelectedCustomSiteStoreId(null)
+                    setSelectedCustomSiteStoreWebsite(null)
+                  }}
+                  className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {/* Sélecteur de store */}

@@ -11,6 +11,12 @@ import { JisraMark } from '@/components/logo'
 import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown, Copy } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import {
+  PublicationStatusBadge,
+  PublicationStatusSelect,
+  normalizePublicationStatus,
+  type PublicationStatus,
+} from '@/components/dashboard/products/publication-status'
 
 type ProductVariantForm = {
   id?: string
@@ -172,12 +178,14 @@ export default function ProduitsPage() {
   const { currentStoreId, accessibleStoreIds, accessibleStores: stores } = useStore()
   const [search, setSearch] = useState('')
   const [stockFilter, setStockFilter] = useState<'all' | 'in_stock' | 'out_of_stock'>('all')
+  const [publicationFilter, setPublicationFilter] = useState<'all' | PublicationStatus>('all')
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({})
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [selectedCreateStoreId, setSelectedCreateStoreId] = useState('')
   const [newName, setNewName] = useState('')
   const [newSku, setNewSku] = useState('')
   const [newSellingPrice, setNewSellingPrice] = useState('0')
+  const [newPublicationStatus, setNewPublicationStatus] = useState<PublicationStatus>('active')
   const [newHasVariants, setNewHasVariants] = useState(false)
   const [newAttributes, setNewAttributes] = useState<VariantAttributeForm[]>([])
   const [newAttributeDrafts, setNewAttributeDrafts] = useState<Record<number, string>>({})
@@ -196,6 +204,7 @@ export default function ProduitsPage() {
   const [editSku, setEditSku] = useState('')
   const [editStockTrackingMode, setEditStockTrackingMode] = useState<'shared' | 'variant'>('variant')
   const [editSellingPrice, setEditSellingPrice] = useState('0')
+  const [editPublicationStatus, setEditPublicationStatus] = useState<PublicationStatus>('active')
   const [editError, setEditError] = useState('')
   const [editImageFile, setEditImageFile] = useState<File | null>(null)
   const [editingAttributes, setEditingAttributes] = useState<VariantAttributeForm[]>([])
@@ -342,6 +351,7 @@ export default function ProduitsPage() {
           default_selling_price: newHasVariants ? 0 : Number(newSellingPrice || 0),
           default_purchase_cost: 0,
           image_url: imagePath,
+          publication_status: newPublicationStatus,
         })
         .select('id')
         .single()
@@ -377,6 +387,7 @@ export default function ProduitsPage() {
       setNewName('')
       setNewSku('')
       setNewSellingPrice('0')
+      setNewPublicationStatus('active')
       setNewHasVariants(false)
       setNewAttributes([])
       setNewAttributeDrafts({})
@@ -460,6 +471,7 @@ export default function ProduitsPage() {
         name: editName.trim(),
         sku: editSku.trim() || null,
         default_selling_price: hasVariants ? 0 : Number(editSellingPrice || 0),
+        publication_status: editPublicationStatus,
         stock_tracking_mode: editStockTrackingMode,
         // Action explicite du marchand: la configuration stock/variantes est considérée confirmée.
         stock_setup_confirmed_at: new Date().toISOString(),
@@ -513,6 +525,7 @@ export default function ProduitsPage() {
       setEditName('')
       setEditSku('')
       setEditSellingPrice('0')
+      setEditPublicationStatus('active')
       setEditStockTrackingMode('variant')
       setEditError('')
       setEditImageFile(null)
@@ -733,8 +746,38 @@ export default function ProduitsPage() {
     },
   })
 
+  /**
+   * Statut de publication : seul `active` est exposé au site client
+   * via l'API catalogue (draft = préparation, archived = retiré de la vente).
+   */
+  const updatePublicationStatusMutation = useMutation({
+    mutationFn: async ({ productId, status }: { productId: string; status: PublicationStatus }) => {
+      const { data, error } = await supabase
+        .from('products')
+        .update({ publication_status: status })
+        .eq('id', productId)
+        .select('id')
+
+      if (error) throw error
+      // RLS : un rôle sans droit d'écriture met à jour 0 ligne sans erreur.
+      if (!data || data.length === 0) {
+        throw new Error("Vous n'avez pas les droits pour modifier ce produit.")
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['products'] })
+      toast('Statut de publication mis à jour')
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Erreur lors de la mise à jour du statut.')
+    },
+  })
+
   const filteredProducts = (products || []).filter((product) => {
     const stock = inventoryData?.[product.id] || 0
+    if (publicationFilter !== 'all' && normalizePublicationStatus(product.publication_status) !== publicationFilter) {
+      return false
+    }
     if (stockFilter === 'in_stock') return stock > 0
     if (stockFilter === 'out_of_stock') return stock <= 0
     return true
@@ -829,11 +872,22 @@ export default function ProduitsPage() {
             <select
               value={stockFilter}
               onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
-              className="border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+              className="border border-border rounded-lg px-2 py-2 text-xs sm:text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
             >
               <option value="all">Tout stock</option>
               <option value="in_stock">En stock</option>
               <option value="out_of_stock">Rupture</option>
+            </select>
+            <select
+              value={publicationFilter}
+              onChange={(e) => setPublicationFilter(e.target.value as 'all' | PublicationStatus)}
+              className="border border-border rounded-lg px-2 py-2 text-xs sm:text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+              aria-label="Filtrer par statut de publication"
+            >
+              <option value="all">Tout statut</option>
+              <option value="active">Publiés</option>
+              <option value="draft">Brouillons</option>
+              <option value="archived">Archivés</option>
             </select>
           </div>
 
@@ -871,6 +925,17 @@ export default function ProduitsPage() {
                 />
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                <select
+                  value={publicationFilter}
+                  onChange={(e) => setPublicationFilter(e.target.value as 'all' | PublicationStatus)}
+                  className="border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:ring-2 focus:ring-jisra-green focus:border-jisra-green outline-none"
+                  aria-label="Filtrer par statut de publication"
+                >
+                  <option value="all">Tout statut</option>
+                  <option value="active">Publiés</option>
+                  <option value="draft">Brouillons</option>
+                  <option value="archived">Archivés</option>
+                </select>
                 <select
                   value={stockFilter}
                   onChange={(e) => setStockFilter(e.target.value as 'all' | 'in_stock' | 'out_of_stock')}
@@ -931,6 +996,18 @@ export default function ProduitsPage() {
                   onChange={(e) => setEditSku(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm text-foreground mb-1">Publication sur le site</label>
+                <PublicationStatusSelect
+                  value={editPublicationStatus}
+                  onChange={setEditPublicationStatus}
+                  className="w-full"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  « Publié » = visible sur le site via l&apos;API. « Brouillon » et « Archivé » ne sont pas exposés.
+                </p>
               </div>
 
               <div>
@@ -1663,6 +1740,18 @@ export default function ProduitsPage() {
                   </div>
                 ) : null}
 
+                <div>
+                  <label className="block text-sm text-foreground mb-1">Publication sur le site</label>
+                  <PublicationStatusSelect
+                    value={newPublicationStatus}
+                    onChange={setNewPublicationStatus}
+                    className="w-full"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Seuls les produits « Publié » sont exposés à l&apos;API catalogue du site.
+                  </p>
+                </div>
+
                 <div className="md:col-span-2">
                   <label className="block text-sm text-foreground mb-1">Photo produit</label>
                   <input
@@ -1994,6 +2083,9 @@ export default function ProduitsPage() {
                     SKU
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Statut
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Prix
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -2115,6 +2207,22 @@ export default function ProduitsPage() {
                         <div className="text-sm text-foreground">{product.sku || '-'}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-1.5">
+                          <PublicationStatusBadge status={product.publication_status} />
+                          <PublicationStatusSelect
+                            value={product.publication_status}
+                            disabled={updatePublicationStatusMutation.isPending}
+                            onChange={(status) =>
+                              updatePublicationStatusMutation.mutate({
+                                productId: String(product.id),
+                                status,
+                              })
+                            }
+                            className="px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-foreground">
                           {minVariantPrice !== null && maxVariantPrice !== null
                             ? `${formatCurrency(minVariantPrice)} – ${formatCurrency(maxVariantPrice)}`
@@ -2187,6 +2295,7 @@ export default function ProduitsPage() {
                                   setEditName(String(product.name || ''))
                                   setEditSku(String(product.sku || ''))
                                   setEditSellingPrice(String(product.default_selling_price || 0))
+                                  setEditPublicationStatus(normalizePublicationStatus(product.publication_status))
                                   setEditStockTrackingMode(product.stock_tracking_mode === 'shared' ? 'shared' : 'variant')
                                   const variants = (variantsByProduct?.[product.id] || []).map((variant: any) => ({
                                     id: variant.id,
@@ -2234,7 +2343,7 @@ export default function ProduitsPage() {
                     </tr>
                     {hasVariants && isExpanded ? (
                       <tr className="bg-secondary/30">
-                        <td colSpan={10} className="px-6 py-3">
+                        <td colSpan={11} className="px-6 py-3">
                           <div className="rounded-lg border border-border/70 bg-card overflow-x-auto">
                             <table className="min-w-full">
                               <thead className="bg-secondary/60">

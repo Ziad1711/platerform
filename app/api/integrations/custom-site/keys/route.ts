@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { generateApiKey } from '@/lib/integrations/custom-api/auth'
+import { generateApiKey, normalizeScopes } from '@/lib/integrations/custom-api/auth'
+import { hasPermission, type Role } from '@/lib/auth/permissions'
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
 
     const { data: keys, error } = await supabase
       .from('public_api_keys')
-      .select('id, name, key_prefix, is_active, last_used_at, created_at, revoked_at')
+      .select('id, name, key_prefix, is_active, last_used_at, created_at, revoked_at, scopes')
       .eq('store_id', storeId)
       .order('created_at', { ascending: false })
 
@@ -73,10 +74,10 @@ export async function POST(request: NextRequest) {
       storeId = members[0].store_id
     }
 
-    // Vérifier que l'utilisateur a accès à ce store
+    // Vérifier que l'utilisateur peut gérer les intégrations de ce store
     const { data: membership } = await supabase
       .from('store_members')
-      .select('store_id')
+      .select('store_id, role')
       .eq('user_id', user.id)
       .eq('store_id', storeId)
       .eq('status', 'active')
@@ -86,7 +87,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    if (!hasPermission(membership.role as Role, 'integrations.manage')) {
+      return NextResponse.json(
+        {
+          error: 'Forbidden',
+          code: 'MISSING_PERMISSION',
+          message: 'Permission integrations.manage requise pour gérer les clés API.',
+        },
+        { status: 403 }
+      )
+    }
+
+    if (Array.isArray(body.scopes) && body.scopes.length === 0) {
+      return NextResponse.json(
+        {
+          error: 'Bad Request',
+          code: 'MISSING_SCOPES',
+          message: 'Sélectionnez au moins un droit pour la clé API.',
+        },
+        { status: 400 }
+      )
+    }
+
     const keyName = body.name || 'Clé API site web'
+    const scopes = normalizeScopes(body.scopes)
 
     const { raw, prefix, hash } = generateApiKey()
 
@@ -98,6 +122,7 @@ export async function POST(request: NextRequest) {
         key_prefix: prefix,
         key_hash: hash,
         is_active: true,
+        scopes,
       })
 
     if (insertError) throw insertError
@@ -105,6 +130,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       key: raw,
       prefix,
+      scopes,
       message: 'Conservez cette clé, elle ne sera plus affichée',
     })
   } catch (error) {

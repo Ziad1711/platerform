@@ -24,7 +24,14 @@ type ApiKey = {
   last_used_at: string | null
   created_at: string
   revoked_at: string | null
+  scopes: string[] | null
 }
+
+const SCOPE_OPTIONS = [
+  { value: 'products:read', label: 'Lire les produits et les prix' },
+  { value: 'stock:read', label: 'Lire le stock disponible' },
+  { value: 'orders:write', label: 'Envoyer les commandes' },
+]
 
 export function CustomSiteKeys({ storeId }: { storeId: string }) {
   const [keys, setKeys] = useState<ApiKey[]>([])
@@ -34,6 +41,9 @@ export function CustomSiteKeys({ storeId }: { storeId: string }) {
   const [showNewKey, setShowNewKey] = useState(false)
   const [copied, setCopied] = useState(false)
   const [revokeDialogOpen, setRevokeDialogOpen] = useState<string | null>(null)
+  const [selectedScopes, setSelectedScopes] = useState<string[]>(
+    SCOPE_OPTIONS.map((option) => option.value)
+  )
 
   const fetchKeys = async () => {
     try {
@@ -52,6 +62,12 @@ export function CustomSiteKeys({ storeId }: { storeId: string }) {
     fetchKeys()
   }, [storeId])
 
+  const toggleScope = (scope: string) => {
+    setSelectedScopes((prev) =>
+      prev.includes(scope) ? prev.filter((item) => item !== scope) : [...prev, scope]
+    )
+  }
+
   const generateKey = async () => {
     setGenerating(true)
     setNewKey(null)
@@ -60,7 +76,7 @@ export function CustomSiteKeys({ storeId }: { storeId: string }) {
       const res = await fetch('/api/integrations/custom-site/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ store_id: storeId }),
+        body: JSON.stringify({ store_id: storeId, scopes: selectedScopes }),
       })
       if (!res.ok) throw new Error('Failed to generate')
       const data = await res.json()
@@ -136,7 +152,27 @@ export function CustomSiteKeys({ storeId }: { storeId: string }) {
             </div>
           )}
 
-          <Button onClick={generateKey} disabled={generating}>
+          <div className="rounded-lg border p-3">
+            <p className="text-sm font-medium text-foreground">Droits de la nouvelle clé</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              {SCOPE_OPTIONS.map((option) => (
+                <label key={option.value} className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={selectedScopes.includes(option.value)}
+                    onChange={() => toggleScope(option.value)}
+                    className="mt-0.5 h-3.5 w-3.5"
+                  />
+                  <span>
+                    <span className="block font-mono text-[11px] text-foreground">{option.value}</span>
+                    {option.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <Button onClick={generateKey} disabled={generating || selectedScopes.length === 0}>
             {generating ? (
               <>
                 <RotateCcw className="mr-2 h-4 w-4 animate-spin" />
@@ -173,6 +209,18 @@ export function CustomSiteKeys({ storeId }: { storeId: string }) {
                     <code className="text-xs text-muted-foreground font-mono">
                       {key.key_prefix}...
                     </code>
+                    {Array.isArray(key.scopes) && key.scopes.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {key.scopes.map((scope) => (
+                          <span
+                            key={scope}
+                            className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+                          >
+                            {scope}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     <div className="flex gap-4 text-xs text-muted-foreground">
                       <span>Créée le {new Date(key.created_at).toLocaleDateString('fr-FR')}</span>
                       {key.last_used_at && (

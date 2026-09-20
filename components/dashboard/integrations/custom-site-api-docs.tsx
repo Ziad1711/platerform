@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ExternalLink } from 'lucide-react'
 
@@ -186,6 +187,19 @@ Content-Type: application/json`}
           <p className="text-xs text-blue-700 dark:text-blue-300">
             L'idempotency_key permet d'éviter les doublons en cas de renvoi. Utilisez un identifiant unique
             par commande côté site.
+          </p>
+        </div>
+
+        <div className="border-t border-border pt-3">
+          <Link
+            href="/documentation"
+            className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+          >
+            Consulter la documentation complète
+            <ExternalLink className="h-4 w-4" />
+          </Link>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Catalogue, prix, stock disponible, authentification et exemples de code.
           </p>
         </div>
       </CardContent>

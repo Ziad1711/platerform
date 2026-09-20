@@ -12,6 +12,7 @@ const routes = [
   '/features/stock',
   '/features/assistant-ia',
   '/features/multi-stores',
+  '/documentation',
   '/about',
   '/contact',
   '/legal/conditions',
