@@ -22,6 +22,7 @@ export const DOC_NAV_GROUPS: DocNavGroup[] = [
     title: 'API Catalogue',
     sections: [
       { id: 'catalogue', label: 'Catalogue produits' },
+      { id: 'categories', label: 'Catégories produits' },
       { id: 'disponibilite', label: 'Vérification panier' },
     ],
   },

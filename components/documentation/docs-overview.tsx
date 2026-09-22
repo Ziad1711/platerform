@@ -27,6 +27,8 @@ export function DocsOverview({ baseUrl }: { baseUrl: string }) {
         <div className="space-y-2">
           <EndpointRow method="GET" path="/catalog/products" scope="products:read" />
           <EndpointRow method="GET" path="/catalog/products/{product_id}" scope="products:read" />
+          <EndpointRow method="GET" path="/catalog/categories" scope="products:read" />
+          <EndpointRow method="GET" path="/catalog/categories/{category_id}" scope="products:read" />
           <EndpointRow method="POST" path="/catalog/availability" scope="products:read + stock:read" />
           <EndpointRow method="POST" path="/orders" scope="orders:write" />
         </div>
@@ -45,7 +47,7 @@ Jisra (commandes, stock, livraison)`}
           rows={[
             [
               'Jisra → Site',
-              'Produits, variantes, prix, images, stock disponible',
+              'Produits, variantes, catégories, descriptions, prix et anciens prix, images (produit + variante), stock disponible',
               'Jisra (source de vérité)',
             ],
             [

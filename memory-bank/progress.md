@@ -135,6 +135,35 @@
 - [x] Documentation déplacée dans `components/documentation/` (primitives, overview, catalog, orders, guides) + navigation verticale sticky, scroll-spy, menu mobile, badges méthode/statut, en-tête API v1 / Stable / URL de base
 - [x] Vérifié en réel : 400 `VALIDATION_ERROR` (commande + disponibilité), commande quantité 999 acceptée, 409 conflit, 200 duplicata
 
+### ✅ Custom Site API v1 — Catalogue P0 (galerie, promotions, catégories, slug)
+- [x] Migration `supabase/migrations/20260922_catalog_p0_enrichment.sql` : tables `product_categories` et `product_images` (RLS + privilèges + index uniques image principale produit/variante), colonnes `products.slug/short_description/description/old_price/category_id/sort_order`, `product_variants.old_price/is_default/sort_order`
+- [x] `public.slugify_text()` (sans extension `unaccent`) + `public.validate_product_image_scope()` (cohérence store/produit/variante) + `public.touch_product_from_image()` (`products.updated_at` sur changement d'image)
+- [x] Backfill : slugs générés pour les 49 produits existants, galerie créée depuis `products.image_url` (49 images, aucune perte)
+- [x] `lib/products/slug.ts` : `slugify`, `buildUniqueProductSlug`, `buildUniqueCategorySlug` (suffixes -2, -3… sur collision)
+- [x] `lib/products/product-images.ts` : validation (JPEG/PNG/WebP ≤ 5 Mo), upload versionné, `syncProductImages` (une seule principale, suppression des fichiers Jisra uniquement), `saveGalleryImages` (rollback des uploads en cas d'erreur)
+- [x] `lib/products/variant-sync.ts` : `old_price`, `is_default` (une seule par produit), `sort_order`, réassignation du défaut si supprimé
+- [x] Dashboard Produits : `product-gallery-editor.tsx` (multi-upload, principale, alt, ordre, suppression), `category-select.tsx` (sélection + création rapide), `variant-editor.tsx` partagé (ancien prix, par défaut, ordre, photos de variante) utilisé en création, édition et gestion des variantes
+- [x] API : `images[]` produit/variante, `variants[].image_url` (repli image produit), `slug`, `short_description`, `description`, `category`, `selling_price`, `old_price`, `is_default`, `sort_order`, filtres `slug`/`category_id`/`category_slug`, endpoints `GET /catalog/categories` et `/catalog/categories/{categoryId}`
+- [x] Repli `is_default` : si aucune variante n'est marquée en base, la première (tri `sort_order`) l'est dans la réponse
+- [x] YouCan : `compare_at_price` → `old_price`, description HTML → texte + résumé, galerie produit et image de variante importées de façon **additive** (aucune image locale supprimée), variante par défaut garantie (`ensureDefaultVariant`)
+- [x] Documentation API mise à jour (nouveaux champs, catégories, filtres, note « old_price ≠ prix de commande », exemple Node image variante/promotion)
+- [x] Vérifié en réel (clés temporaires créées puis supprimées) : 200 produits/détail/catégories, `category` + `images` + `is_default` conformes, 400 `INVALID_CATEGORY_ID`, 404 `CATEGORY_NOT_FOUND`, 403 `MISSING_SCOPE`, `includes_stock:false` sans `stock:read`, filtre `slug`/`category_slug` opérationnels
+- [x] `npx tsc --noEmit` et `next build` : OK
+
+### ✅ Custom Site API v1 — Correctifs Catalogue P0 (revue de code)
+- [x] **Images de variantes rechargées** : la requête `product_images` renvoie `{ byProduct, byVariant }` (au lieu d'un seul groupe produit) — l'éditeur de variantes affiche désormais ses photos existantes et ne les supprime plus à l'enregistrement
+- [x] **Nettoyage Storage fiable** : `productStoragePath` reconnaît les chemins relatifs `{store}/{product}/fichier.ext` (et non plus seulement les URLs publiques) ; un fichier encore référencé par une copie du produit n'est jamais supprimé
+- [x] **Sauvegarde transactionnelle** : RPC `rpc_save_product_catalog(store, produit, variantes, images)` + `rpc_replace_product_images(...)` — produit, variantes et images écrits dans une seule transaction, identifiant produit généré avant l'upload, rollback des fichiers en cas d'échec
+- [x] `lib/products/save-product-catalog.ts` : upload des fichiers → RPC → nettoyage des images retirées ; messages d'erreur FR (droits, catégorie, slug, produit introuvable)
+- [x] Suppression (simple et multiple) : suppression des fichiers Storage après les lignes, sans toucher aux fichiers partagés
+- [x] **Multi-store** : trigger `validate_product_category_store_trigger` (`PRODUCT_CATEGORY_STORE_MISMATCH`) ; la RPC vérifie aussi l'appartenance au store
+- [x] **Permissions** : politique DELETE `product_images` alignée sur les rôles qui éditent le produit (owner/admin/staff)
+- [x] **Backfill variante par défaut** : chaque produit à variantes possède exactement une variante `is_default`
+- [x] Index ajoutés : `products(category_id)`, `product_images(store_id)`
+- [x] YouCan : première image d'une variante marquée principale ; `old_price` renseigné aussi quand la variante est retrouvée par SKU ; payload partiel sans effet destructeur (`?` sur les clés produit/variante)
+- [x] `lib/products/variant-sync.ts` supprimé (remplacé par la RPC transactionnelle)
+- [x] Vérifié en réel (transactions annulées) : création produit + 2 variantes + images, payload partiel (slug/présence conservés), galerie vidée (`image_url` recalculé), catégorie d'un autre store refusée
+
 ## What's Left to Build
 
 ### 🔄 Phase 2 (In Progress)

@@ -50,6 +50,14 @@ export async function GET(request: NextRequest) {
     }
 
     const sku = searchParams.get('sku')
+    const slug = searchParams.get('slug')
+    const categoryIdParam = searchParams.get('category_id')
+    const categorySlug = searchParams.get('category_slug')
+
+    if (categoryIdParam && categoryIdParam.trim() !== '' && !isValidUuid(categoryIdParam)) {
+      return badRequest('INVALID_CATEGORY_ID', 'category_id doit être un identifiant catégorie Jisra (UUID)')
+    }
+
     const includeStock = hasScope(context.scopes, 'stock:read')
 
     const result = await listCatalogProducts({
@@ -58,6 +66,9 @@ export async function GET(request: NextRequest) {
       cursor,
       updatedSince,
       sku: sku ? sku.trim() : null,
+      slug: slug ? slug.trim() : null,
+      categoryId: categoryIdParam ? categoryIdParam.trim() : null,
+      categorySlug: categorySlug ? categorySlug.trim() : null,
       includeStock,
     })
 

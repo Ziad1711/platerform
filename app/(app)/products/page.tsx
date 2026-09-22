@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency } from '@/lib/utils'
 import { detectStockMultiplier, normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
-import { syncProductVariants } from '@/lib/products/variant-sync'
+import { buildUniqueProductSlug } from '@/lib/products/slug'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown, Copy } from 'lucide-react'
@@ -17,29 +17,22 @@ import {
   normalizePublicationStatus,
   type PublicationStatus,
 } from '@/components/dashboard/products/publication-status'
-
-type ProductVariantForm = {
-  id?: string
-  name: string
-  sku: string
-  selling_price: string
-  purchase_cost: string
-  stock_multiplier?: string | number
-  option_values?: Record<string, string>
-}
+import {
+  ProductGalleryEditor,
+  type GalleryItem,
+} from '@/components/dashboard/products/product-gallery-editor'
+import { CategorySelect, type ProductCategory } from '@/components/dashboard/products/category-select'
+import {
+  VariantEditor,
+  type ProductVariantForm,
+} from '@/components/dashboard/products/variant-editor'
+import { saveProductCatalog } from '@/lib/products/save-product-catalog'
+import { deleteManagedProductImages } from '@/lib/products/product-images'
 
 type VariantAttributeForm = {
   id?: string
   name: string
   values: string
-}
-
-const EMPTY_VARIANT: ProductVariantForm = {
-  name: '',
-  sku: '',
-  selling_price: '0',
-  purchase_cost: '0',
-  stock_multiplier: '1',
 }
 
 const EMPTY_ATTRIBUTE: VariantAttributeForm = {
@@ -137,6 +130,11 @@ const generateVariantsFromAttributes = ({
       stock_multiplier: String(
         existing?.stock_multiplier ?? detectStockMultiplier({ name: generatedName })
       ),
+      // Les informations commerciales et les photos de la variante existante sont conservées.
+      old_price: existing?.old_price ?? '',
+      is_default: Boolean(existing?.is_default),
+      sort_order: existing?.sort_order,
+      images: existing?.images || [],
       option_values: optionValues,
     } as ProductVariantForm
   })
@@ -190,7 +188,12 @@ export default function ProduitsPage() {
   const [newAttributes, setNewAttributes] = useState<VariantAttributeForm[]>([])
   const [newAttributeDrafts, setNewAttributeDrafts] = useState<Record<number, string>>({})
   const [newVariants, setNewVariants] = useState<ProductVariantForm[]>([])
-  const [newImageFile, setNewImageFile] = useState<File | null>(null)
+  const [newSlug, setNewSlug] = useState('')
+  const [newShortDescription, setNewShortDescription] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newOldPrice, setNewOldPrice] = useState('')
+  const [newCategoryId, setNewCategoryId] = useState('')
+  const [newGallery, setNewGallery] = useState<GalleryItem[]>([])
   const [createError, setCreateError] = useState('')
   const [openActionsProductId, setOpenActionsProductId] = useState<string | null>(null)
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
@@ -205,8 +208,13 @@ export default function ProduitsPage() {
   const [editStockTrackingMode, setEditStockTrackingMode] = useState<'shared' | 'variant'>('variant')
   const [editSellingPrice, setEditSellingPrice] = useState('0')
   const [editPublicationStatus, setEditPublicationStatus] = useState<PublicationStatus>('active')
+  const [editSlug, setEditSlug] = useState('')
+  const [editShortDescription, setEditShortDescription] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editOldPrice, setEditOldPrice] = useState('')
+  const [editCategoryId, setEditCategoryId] = useState('')
+  const [editGallery, setEditGallery] = useState<GalleryItem[]>([])
   const [editError, setEditError] = useState('')
-  const [editImageFile, setEditImageFile] = useState<File | null>(null)
   const [editingAttributes, setEditingAttributes] = useState<VariantAttributeForm[]>([])
   const [editingAttributeDrafts, setEditingAttributeDrafts] = useState<Record<number, string>>({})
   const [editingVariants, setEditingVariants] = useState<ProductVariantForm[]>([])
@@ -233,6 +241,9 @@ export default function ProduitsPage() {
 
     return data.publicUrl
   }
+
+  /** Adaptateur pour les composants d'édition d'images (signature `string` non nullable). */
+  const resolveImageUrl = (raw: string) => getProductImageUrl(raw)
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', currentStoreId, search],
@@ -272,7 +283,10 @@ export default function ProduitsPage() {
 
       let query = supabase
         .from('product_variants')
-        .select('id, product_id, name, sku, selling_price, purchase_cost, stock_multiplier, option_values')
+        .select(
+          'id, product_id, name, sku, selling_price, purchase_cost, old_price, is_default, sort_order, stock_multiplier, option_values'
+        )
+        .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true })
 
       if (currentStoreId) {
@@ -296,6 +310,92 @@ export default function ProduitsPage() {
     },
   })
 
+  const { data: imagesByProduct } = useQuery({
+    queryKey: ['product-images-by-product', currentStoreId],
+    queryFn: async () => {
+      if (!currentStoreId && accessibleStoreIds.length === 0) {
+        return { byProduct: {}, byVariant: {} } as Record<string, any>
+      }
+
+      let query = supabase
+        .from('product_images')
+        .select('id, product_id, product_variant_id, image_url, alt_text, sort_order, is_primary, created_at')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+
+      if (currentStoreId) {
+        query = query.eq('store_id', currentStoreId)
+      } else {
+        query = query.in('store_id', accessibleStoreIds)
+      }
+
+      const { data, error } = await query
+      if (error) throw error
+
+      const byProduct: Record<string, any[]> = {}
+      const byVariant: Record<string, any[]> = {}
+
+      ;(data || []).forEach((image: any) => {
+        const productId = String(image.product_id || '')
+        if (!productId) return
+        if (!byProduct[productId]) byProduct[productId] = []
+        byProduct[productId].push(image)
+
+        const variantId = image.product_variant_id ? String(image.product_variant_id) : ''
+        if (!variantId) return
+        if (!byVariant[variantId]) byVariant[variantId] = []
+        byVariant[variantId].push(image)
+      })
+
+      return { byProduct, byVariant }
+    },
+  })
+
+  const { data: categories, refetch: refetchCategories } = useQuery({
+    queryKey: ['product-categories', currentStoreId],
+    queryFn: async () => {
+      if (!currentStoreId && accessibleStoreIds.length === 0) {
+        return [] as ProductCategory[]
+      }
+
+      let query = supabase
+        .from('product_categories')
+        .select('id, store_id, name, slug, sort_order')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true })
+
+      if (currentStoreId) {
+        query = query.eq('store_id', currentStoreId)
+      } else {
+        query = query.in('store_id', accessibleStoreIds)
+      }
+
+      const { data, error } = await query
+      if (error) throw error
+      return (data || []) as ProductCategory[]
+    },
+  })
+
+  const categoriesForStore = (storeId: string | null | undefined) =>
+    (categories || []).filter((category: any) => !storeId || String(category.store_id) === String(storeId))
+
+  const toGalleryItem = (row: any): GalleryItem => ({
+    id: row?.id ? String(row.id) : null,
+    url: String(row?.image_url || ''),
+    alt_text: String(row?.alt_text || ''),
+    is_primary: Boolean(row?.is_primary),
+  })
+
+  const productGalleryFromRows = (productId: string | null | undefined): GalleryItem[] =>
+    ((imagesByProduct?.byProduct || {})[String(productId || '')] || [])
+      .filter((row: any) => !row.product_variant_id)
+      .map(toGalleryItem)
+
+  const variantGalleryFromRows = (variantId: string | null | undefined): GalleryItem[] =>
+    ((imagesByProduct?.byVariant || {})[String(variantId || '')] || [])
+      .filter((row: any) => row.product_variant_id)
+      .map(toGalleryItem)
+
   useEffect(() => {
     if (!isCreateOpen) return
     if ((stores || []).length === 1) {
@@ -308,79 +408,69 @@ export default function ProduitsPage() {
       if (!selectedCreateStoreId) throw new Error('Veuillez sélectionner un store avant d’ajouter un produit.')
       if (!newName.trim()) throw new Error('Le nom du produit est obligatoire.')
 
-      let imagePath: string | null = null
-
-      if (newImageFile) {
-        const extension = (newImageFile.name.split('.').pop() || 'jpg').toLowerCase()
-        const filePath = `${selectedCreateStoreId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
-
-        const { error: uploadError } = await supabase.storage
-          .from('products')
-          .upload(filePath, newImageFile, { cacheControl: '3600', upsert: false })
-
-        if (uploadError) throw uploadError
-        imagePath = filePath
-      }
-
-      const normalizedVariants = (newHasVariants ? (newVariants || []) : [])
+      const variantPayloads = (newHasVariants ? (newVariants || []) : [])
         .map((variant) => ({
-          name: variant.name.trim() || buildVariantName(variant.option_values || {}),
-          sku: variant.sku.trim(),
-          selling_price: Number(variant.selling_price || 0),
-          purchase_cost: Number(variant.purchase_cost || 0),
-          stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
-          option_values: variant.option_values || {},
+          images: (variant.images || []) as GalleryItem[],
+          sync: {
+            id: variant.id,
+            name: variant.name.trim() || buildVariantName(variant.option_values || {}),
+            sku: variant.sku.trim(),
+            selling_price: Number(variant.selling_price || 0),
+            purchase_cost: Number(variant.purchase_cost || 0),
+            old_price: Number(variant.old_price || 0) > 0 ? Number(variant.old_price) : null,
+            is_default: Boolean(variant.is_default),
+            sort_order: Number(variant.sort_order || 0),
+            stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
+            option_values: variant.option_values || {},
+          },
         }))
-        .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
+        .filter(
+          (entry) =>
+            entry.sync.name || entry.sync.sku || Object.keys(entry.sync.option_values || {}).length > 0
+        )
 
-      if (newHasVariants && normalizedVariants.length === 0) {
+      if (newHasVariants && variantPayloads.length === 0) {
         throw new Error('Ce produit a des variantes: ajoutez au moins une variante.')
       }
 
-      for (const variant of normalizedVariants) {
-        if (!variant.name) throw new Error('Chaque variante doit avoir un nom.')
-        if (!variant.sku) throw new Error('Chaque variante doit avoir un SKU.')
+      for (const entry of variantPayloads) {
+        if (!entry.sync.name) throw new Error('Chaque variante doit avoir un nom.')
+        if (!entry.sync.sku) throw new Error('Chaque variante doit avoir un SKU.')
       }
 
-      const { data: insertedProduct, error } = await supabase
-        .from('products')
-        .insert({
-          store_id: selectedCreateStoreId,
+      const slug = await buildUniqueProductSlug({
+        supabase,
+        storeId: selectedCreateStoreId,
+        base: newSlug.trim() || newName.trim(),
+      })
+
+      await saveProductCatalog({
+        supabase,
+        storeId: selectedCreateStoreId,
+        product: {
           name: newName.trim(),
+          slug,
           sku: newSku.trim() || null,
+          short_description: newShortDescription.trim() || null,
+          description: newDescription.trim() || null,
+          old_price: Number(newOldPrice || 0) > 0 ? Number(newOldPrice) : null,
+          category_id: newCategoryId || null,
+          sort_order: 0,
           default_selling_price: newHasVariants ? 0 : Number(newSellingPrice || 0),
           default_purchase_cost: 0,
-          image_url: imagePath,
+          stock_tracking_mode: 'variant',
           publication_status: newPublicationStatus,
-        })
-        .select('id')
-        .single()
-
-      if (error) throw error
-
-      if (normalizedVariants.length > 0) {
-        const { error: variantsError } = await supabase
-          .from('product_variants')
-          .insert(
-            normalizedVariants.map((variant) => ({
-              store_id: selectedCreateStoreId,
-              product_id: insertedProduct.id,
-              name: variant.name,
-              sku: variant.sku,
-              selling_price: variant.selling_price,
-              purchase_cost: variant.purchase_cost,
-              stock_multiplier: variant.stock_multiplier,
-              option_values: variant.option_values,
-            }))
-          )
-
-        if (variantsError) throw variantsError
-      }
+        },
+        variants: variantPayloads.map((entry) => ({ ...entry.sync, images: entry.images })),
+        images: newGallery,
+      })
     },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['products'] }),
         queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] }),
+        queryClient.invalidateQueries({ queryKey: ['product-images-by-product'] }),
+        queryClient.invalidateQueries({ queryKey: ['product-categories'] }),
       ])
       setIsCreateOpen(false)
       setSelectedCreateStoreId(currentStoreId || '')
@@ -392,7 +482,12 @@ export default function ProduitsPage() {
       setNewAttributes([])
       setNewAttributeDrafts({})
       setNewVariants([])
-      setNewImageFile(null)
+      setNewSlug('')
+      setNewShortDescription('')
+      setNewDescription('')
+      setNewOldPrice('')
+      setNewCategoryId('')
+      setNewGallery([])
       setCreateError('')
     },
     onError: (error: any) => {
@@ -404,32 +499,65 @@ export default function ProduitsPage() {
     mutationFn: async () => {
       if (!selectedProductForVariants?.id) throw new Error('Produit invalide.')
 
-      const normalizedVariants = (editingVariants || [])
+      const variantPayloads = (editingVariants || [])
         .map((variant) => ({
-          id: variant.id,
-          name: variant.name.trim() || buildVariantName(variant.option_values || {}),
-          sku: variant.sku.trim(),
-          selling_price: Number(variant.selling_price || 0),
-          purchase_cost: Number(variant.purchase_cost || 0),
-          stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
-          option_values: variant.option_values || {},
+          images: (variant.images || []) as GalleryItem[],
+          sync: {
+            id: variant.id,
+            name: variant.name.trim() || buildVariantName(variant.option_values || {}),
+            sku: variant.sku.trim(),
+            selling_price: Number(variant.selling_price || 0),
+            purchase_cost: Number(variant.purchase_cost || 0),
+            old_price: Number(variant.old_price || 0) > 0 ? Number(variant.old_price) : null,
+            is_default: Boolean(variant.is_default),
+            sort_order: Number(variant.sort_order || 0),
+            stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
+            option_values: variant.option_values || {},
+          },
         }))
-        .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
+        .filter(
+          (entry) =>
+            entry.sync.name || entry.sync.sku || Object.keys(entry.sync.option_values || {}).length > 0
+        )
 
-      for (const variant of normalizedVariants) {
-        if (!variant.name) throw new Error('Chaque variante doit avoir un nom.')
-        if (!variant.sku) throw new Error('Chaque variante doit avoir un SKU.')
+      for (const entry of variantPayloads) {
+        if (!entry.sync.name) throw new Error('Chaque variante doit avoir un nom.')
+        if (!entry.sync.sku) throw new Error('Chaque variante doit avoir un SKU.')
       }
 
-      await syncProductVariants({
+      await saveProductCatalog({
         supabase,
         storeId: selectedProductForVariants.store_id,
         productId: selectedProductForVariants.id,
-        variants: normalizedVariants,
+        product: {
+          name: String(selectedProductForVariants.name || ''),
+          slug: selectedProductForVariants.slug || null,
+          sku: selectedProductForVariants.sku || null,
+          short_description: selectedProductForVariants.short_description || null,
+          description: selectedProductForVariants.description || null,
+          old_price:
+            selectedProductForVariants.old_price === null ||
+            selectedProductForVariants.old_price === undefined
+              ? null
+              : Number(selectedProductForVariants.old_price),
+          category_id: selectedProductForVariants.category_id || null,
+          sort_order: Number(selectedProductForVariants.sort_order || 0),
+          default_selling_price: Number(selectedProductForVariants.default_selling_price || 0),
+          default_purchase_cost: Number(selectedProductForVariants.default_purchase_cost || 0),
+          stock_tracking_mode:
+            selectedProductForVariants.stock_tracking_mode === 'shared' ? 'shared' : 'variant',
+          publication_status: String(selectedProductForVariants.publication_status || 'active'),
+        },
+        variants: variantPayloads.map((entry) => ({ ...entry.sync, images: entry.images })),
+        // La galerie produit n'est pas gérée par cet écran.
+        images: null,
       })
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] }),
+        queryClient.invalidateQueries({ queryKey: ['product-images-by-product'] }),
+      ])
       setIsVariantsOpen(false)
       setSelectedProductForVariants(null)
       setEditingAttributes([])
@@ -449,75 +577,75 @@ export default function ProduitsPage() {
 
       const hasVariants = (editingVariants || []).length > 0
 
-      let imagePath: string | null | undefined = undefined
-
-      if (editImageFile) {
-        if (editImageFile.size > 0) {
-          const extension = (editImageFile.name.split('.').pop() || 'jpg').toLowerCase()
-          const filePath = `${selectedProductForEdit.store_id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
-
-          const { error: uploadError } = await supabase.storage
-            .from('products')
-            .upload(filePath, editImageFile, { cacheControl: '3600', upsert: false })
-
-          if (uploadError) throw uploadError
-          imagePath = filePath
-        } else {
-          imagePath = null
-        }
-      }
-
-      const updateData: Record<string, any> = {
-        name: editName.trim(),
-        sku: editSku.trim() || null,
-        default_selling_price: hasVariants ? 0 : Number(editSellingPrice || 0),
-        publication_status: editPublicationStatus,
-        stock_tracking_mode: editStockTrackingMode,
-        // Action explicite du marchand: la configuration stock/variantes est considérée confirmée.
-        stock_setup_confirmed_at: new Date().toISOString(),
-      }
-
-      if (imagePath !== undefined) {
-        updateData.image_url = imagePath
-      }
-
-      const { error } = await supabase
-        .from('products')
-        .update(updateData)
-        .eq('id', selectedProductForEdit.id)
-
-      if (error) throw error
-
-      if (hasVariants) {
-        const normalizedVariants = (editingVariants || [])
-          .map((variant) => ({
+      const variantPayloads = (editingVariants || [])
+        .map((variant) => ({
+          images: (variant.images || []) as GalleryItem[],
+          sync: {
             id: variant.id,
             name: variant.name.trim() || buildVariantName(variant.option_values || {}),
             sku: variant.sku.trim(),
             selling_price: Number(variant.selling_price || 0),
             purchase_cost: Number(variant.purchase_cost || 0),
+            old_price: Number(variant.old_price || 0) > 0 ? Number(variant.old_price) : null,
+            is_default: Boolean(variant.is_default),
+            sort_order: Number(variant.sort_order || 0),
             stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
             option_values: variant.option_values || {},
-          }))
-          .filter((variant) => variant.name || variant.sku || Object.keys(variant.option_values || {}).length > 0)
+          },
+        }))
+        .filter(
+          (entry) =>
+            entry.sync.name || entry.sync.sku || Object.keys(entry.sync.option_values || {}).length > 0
+        )
 
-        for (const variant of normalizedVariants) {
-          if (!variant.name) throw new Error('Chaque variante doit avoir un nom.')
-          if (!variant.sku) throw new Error('Chaque variante doit avoir un SKU.')
-        }
+      for (const entry of variantPayloads) {
+        if (!entry.sync.name) throw new Error('Chaque variante doit avoir un nom.')
+        if (!entry.sync.sku) throw new Error('Chaque variante doit avoir un SKU.')
+      }
 
-        await syncProductVariants({
+      // Le slug reste stable : il n'est régénéré que s'il n'existe pas encore ou s'il est modifié.
+      const currentSlug = String(selectedProductForEdit.slug || '')
+      const requestedSlug = editSlug.trim()
+      let slug = currentSlug
+
+      if (!currentSlug || (requestedSlug && requestedSlug !== currentSlug)) {
+        slug = await buildUniqueProductSlug({
           supabase,
           storeId: selectedProductForEdit.store_id,
-          productId: selectedProductForEdit.id,
-          variants: normalizedVariants,
+          base: requestedSlug || editName.trim(),
+          excludeProductId: selectedProductForEdit.id,
         })
       }
+
+      await saveProductCatalog({
+        supabase,
+        storeId: selectedProductForEdit.store_id,
+        productId: selectedProductForEdit.id,
+        product: {
+          name: editName.trim(),
+          slug,
+          sku: editSku.trim() || null,
+          short_description: editShortDescription.trim() || null,
+          description: editDescription.trim() || null,
+          old_price: Number(editOldPrice || 0) > 0 ? Number(editOldPrice) : null,
+          category_id: editCategoryId || null,
+          sort_order: Number(selectedProductForEdit.sort_order || 0),
+          default_selling_price: hasVariants ? 0 : Number(editSellingPrice || 0),
+          default_purchase_cost: Number(selectedProductForEdit.default_purchase_cost || 0),
+          stock_tracking_mode: editStockTrackingMode,
+          publication_status: editPublicationStatus,
+          // Action explicite du marchand : la configuration stock/variantes est confirmée.
+          confirm_stock_setup: true,
+        },
+        variants: variantPayloads.map((entry) => ({ ...entry.sync, images: entry.images })),
+        images: editGallery,
+      })
     },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['products'] }),
         queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] }),
+        queryClient.invalidateQueries({ queryKey: ['product-images-by-product'] }),
         queryClient.invalidateQueries({ queryKey: ['inventory-movements'] }),
       ])
       setIsEditOpen(false)
@@ -528,7 +656,12 @@ export default function ProduitsPage() {
       setEditPublicationStatus('active')
       setEditStockTrackingMode('variant')
       setEditError('')
-      setEditImageFile(null)
+      setEditSlug('')
+      setEditShortDescription('')
+      setEditDescription('')
+      setEditOldPrice('')
+      setEditCategoryId('')
+      setEditGallery([])
       setEditingAttributes([])
       setEditingAttributeDrafts({})
       setEditingVariants([])
@@ -543,44 +676,50 @@ export default function ProduitsPage() {
       const productVariants = variantsByProduct?.[product.id] || []
       const duplicateName = `${product.name} (Copie)`
 
-      const { data: insertedProduct, error: insertProductError } = await supabase
-        .from('products')
-        .insert({
-          store_id: product.store_id,
+      const slug = await buildUniqueProductSlug({
+        supabase,
+        storeId: product.store_id,
+        base: duplicateName,
+      })
+
+      await saveProductCatalog({
+        supabase,
+        storeId: product.store_id,
+        product: {
           name: duplicateName,
+          slug,
           sku: product.sku || null,
+          short_description: product.short_description || null,
+          description: product.description || null,
+          old_price: product.old_price ?? null,
+          category_id: product.category_id || null,
+          sort_order: Number(product.sort_order || 0),
           default_selling_price: Number(product.default_selling_price || 0),
           default_purchase_cost: Number(product.default_purchase_cost || 0),
-          image_url: product.image_url || null,
-        })
-        .select('id')
-        .single()
-
-      if (insertProductError) throw insertProductError
-
-      if (productVariants.length > 0) {
-        const { error: insertVariantsError } = await supabase
-          .from('product_variants')
-          .insert(
-            productVariants.map((variant: any) => ({
-              store_id: product.store_id,
-              product_id: insertedProduct.id,
-              name: variant.name,
-              sku: variant.sku,
-              selling_price: Number(variant.selling_price || 0),
-              purchase_cost: Number(variant.purchase_cost || 0),
-              stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
-              option_values: variant.option_values || {},
-            }))
-          )
-
-        if (insertVariantsError) throw insertVariantsError
-      }
+          stock_tracking_mode: product.stock_tracking_mode === 'shared' ? 'shared' : 'variant',
+          publication_status: 'draft',
+        },
+        variants: productVariants.map((variant: any) => ({
+          name: String(variant.name || ''),
+          sku: String(variant.sku || ''),
+          selling_price: Number(variant.selling_price || 0),
+          purchase_cost: Number(variant.purchase_cost || 0),
+          old_price: variant.old_price ?? null,
+          is_default: Boolean(variant.is_default),
+          sort_order: Number(variant.sort_order || 0),
+          stock_multiplier: normalizeStockMultiplier(variant.stock_multiplier),
+          option_values: variant.option_values || {},
+          images: variantGalleryFromRows(variant.id).map((item) => ({ ...item, id: null })),
+        })),
+        // La copie réutilise les mêmes URLs d'images (aucun fichier dupliqué dans le Storage).
+        images: productGalleryFromRows(product.id).map((item) => ({ ...item, id: null })),
+      })
     },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['products'] }),
         queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] }),
+        queryClient.invalidateQueries({ queryKey: ['product-images-by-product'] }),
       ])
     },
   })
@@ -611,6 +750,11 @@ export default function ProduitsPage() {
         throw new Error('Suppression impossible: ce produit est déjà utilisé dans des ventes.')
       }
 
+      const { data: productImagesToClean } = await supabase
+        .from('product_images')
+        .select('image_url')
+        .eq('product_id', product.id)
+
       const { error: deleteVariantsError } = await supabase
         .from('product_variants')
         .delete()
@@ -624,6 +768,15 @@ export default function ProduitsPage() {
         .eq('id', product.id)
 
       if (deleteError) throw deleteError
+
+      // Les fichiers du Storage sont retirés après la suppression des lignes
+      // (un fichier encore référencé par une copie du produit est conservé).
+      await deleteManagedProductImages({
+        supabase,
+        imageUrls: ((productImagesToClean || []) as Array<{ image_url: string | null }>).map(
+          (row) => row.image_url
+        ),
+      })
     },
     onSuccess: async () => {
       await Promise.all([
@@ -671,6 +824,16 @@ export default function ProduitsPage() {
         }
       }
 
+      const { data: imagesToClean, error: imagesToCleanError } = await supabase
+        .from('product_images')
+        .select('image_url')
+        .in(
+          'product_id',
+          selectedProducts.map((product) => String(product.id))
+        )
+
+      if (imagesToCleanError) throw imagesToCleanError
+
       for (const product of selectedProducts) {
         const { error: deleteVariantsError } = await supabase
           .from('product_variants')
@@ -686,6 +849,13 @@ export default function ProduitsPage() {
 
         if (deleteError) throw deleteError
       }
+
+      await deleteManagedProductImages({
+        supabase,
+        imageUrls: ((imagesToClean || []) as Array<{ image_url: string | null }>).map(
+          (row) => row.image_url
+        ),
+      })
     },
     onSuccess: async () => {
       await Promise.all([
@@ -971,7 +1141,7 @@ export default function ProduitsPage() {
                   setIsEditOpen(false)
                   setSelectedProductForEdit(null)
                   setEditError('')
-                  setEditImageFile(null)
+                  setEditGallery([])
                 }}
                 className="text-muted-foreground hover:text-foreground"
               >
@@ -1040,59 +1210,73 @@ export default function ProduitsPage() {
               ) : null}
 
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Photo produit</label>
-                <div className="flex items-center gap-4">
-                  <div className="relative flex-shrink-0">
-                    {editImageFile && editImageFile.size > 0 ? (
-                      <img
-                        src={URL.createObjectURL(editImageFile)}
-                        alt="Aperçu"
-                        className="h-20 w-20 rounded-xl object-cover border-2 border-border shadow-sm"
-                      />
-                    ) : selectedProductForEdit?.image_url && !editImageFile ? (
-                      <img
-                        src={getProductImageUrl(selectedProductForEdit.image_url) || ''}
-                        alt="Produit"
-                        className="h-20 w-20 rounded-xl object-cover border-2 border-border shadow-sm"
-                      />
-                    ) : (
-                      <div className="h-20 w-20 rounded-xl border-2 border-dashed border-border bg-muted/30 flex items-center justify-center text-muted-foreground">
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-secondary text-sm font-medium text-foreground transition-colors">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                      {editImageFile && editImageFile.size > 0 ? 'Changer' : 'Télécharger'}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        key={editImageFile ? 'has-file' : 'no-file'}
-                        onChange={(e) => setEditImageFile(e.target.files?.[0] || null)}
-                        className="hidden"
-                      />
-                    </label>
-                    {editImageFile && editImageFile.size > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setEditImageFile(null)}
-                        className="ml-2 text-sm text-red-600 hover:text-red-700"
-                      >
-                        Supprimer
-                      </button>
-                    ) : selectedProductForEdit?.image_url && !editImageFile ? (
-                      <button
-                        type="button"
-                        onClick={() => setEditImageFile(new File([], ''))}
-                        className="ml-2 text-sm text-red-600 hover:text-red-700"
-                      >
-                        Supprimer
-                      </button>
-                    ) : null}
-                    <p className="text-xs text-muted-foreground mt-1.5">PNG, JPG ou WebP. La photo sera stockée dans le bucket `products`.</p>
-                  </div>
-                </div>
+                <label className="block text-sm text-foreground mb-1">Slug (URL du produit)</label>
+                <input
+                  value={editSlug}
+                  onChange={(e) => setEditSlug(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 font-mono text-sm"
+                  placeholder="table-basse-trapeze"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Laisser vide pour conserver le slug actuel. Il ne change pas automatiquement quand le nom change.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm text-foreground mb-1">Ancien prix (prix barré)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={editOldPrice}
+                  onChange={(e) => setEditOldPrice(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2"
+                  placeholder="Optionnel"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-foreground mb-1">Catégorie</label>
+                <CategorySelect
+                  categories={categoriesForStore(selectedProductForEdit?.store_id)}
+                  value={editCategoryId}
+                  onChange={setEditCategoryId}
+                  storeId={selectedProductForEdit?.store_id || null}
+                  onCreated={async () => {
+                    await refetchCategories()
+                  }}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-foreground mb-1">Description courte</label>
+                <input
+                  value={editShortDescription}
+                  onChange={(e) => setEditShortDescription(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2"
+                  placeholder="Résumé affiché sur les cartes du catalogue"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm text-foreground mb-1">Description complète</label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={4}
+                  className="w-full border rounded-lg px-3 py-2"
+                  placeholder="Description détaillée affichée sur la fiche produit"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <ProductGalleryEditor
+                  label="Photos du produit"
+                  items={editGallery}
+                  onChange={setEditGallery}
+                  resolveUrl={resolveImageUrl}
+                />
               </div>
 
               {/* Attributs et variantes dans l'édition */}
@@ -1252,92 +1436,12 @@ export default function ProduitsPage() {
                 </button>
               </div>
 
-              {(editingVariants || []).map((variant, index) => (
-                <div key={`edit-variant-${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_0.6fr_auto] gap-3 items-end border rounded-lg p-3">
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Nom variante</label>
-                    <input
-                      value={variant.name}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, name: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholder="Ex: 1kg, Noir"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">SKU variante</label>
-                    <input
-                      value={variant.sku}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, sku: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholder="Ex: TSH-001-1KG"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Prix vente</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={variant.selling_price}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, selling_price: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Coût achat</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={variant.purchase_cost}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, purchase_cost: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Qté / pack</label>
-                    <input
-                      type="number"
-                      min={1}
-                      step="1"
-                      value={variant.stock_multiplier ?? '1'}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, stock_multiplier: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholder="1"
-                    />
-                  </div>
-
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setEditingVariants((prev) => prev.filter((_, i) => i !== index))}
-                      className="px-3 py-2 rounded-lg border text-red-600"
-                    >
-                      Supprimer
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setEditingVariants((prev) => [...prev, { ...EMPTY_VARIANT }])}
-                className="text-sm text-primary hover:text-primary/80"
-              >
-                + Ajouter une variante
-              </button>
-
-              {editError ? <div className="text-sm text-red-600">{editError}</div> : null}
+              <VariantEditor
+                variants={editingVariants}
+                onChange={setEditingVariants}
+                resolveUrl={resolveImageUrl}
+                error={editError}
+              />
             </div>
 
             <div className="p-6 border-t flex items-center justify-end gap-3 shrink-0 bg-card">
@@ -1347,7 +1451,7 @@ export default function ProduitsPage() {
                   setIsEditOpen(false)
                   setSelectedProductForEdit(null)
                   setEditError('')
-                  setEditImageFile(null)
+                  setEditGallery([])
                 }}
                 className="px-4 py-2 rounded-lg border text-foreground"
               >
@@ -1550,92 +1654,12 @@ export default function ProduitsPage() {
                 </button>
               </div>
 
-              {(editingVariants || []).map((variant, index) => (
-                <div key={`${variant.id || 'new'}-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_0.6fr_auto] gap-3 items-end border rounded-lg p-3">
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Nom variante</label>
-                    <input
-                      value={variant.name}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, name: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholder="Ex: 1kg, Noir"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">SKU variante</label>
-                    <input
-                      value={variant.sku}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, sku: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholder="Ex: TSH-001-1KG"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Prix vente</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={variant.selling_price}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, selling_price: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Coût achat</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={variant.purchase_cost}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, purchase_cost: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Qté / pack</label>
-                    <input
-                      type="number"
-                      min={1}
-                      step="1"
-                      value={variant.stock_multiplier ?? '1'}
-                      onChange={(e) =>
-                        setEditingVariants((prev) => prev.map((v, i) => (i === index ? { ...v, stock_multiplier: e.target.value } : v)))
-                      }
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholder="1"
-                    />
-                  </div>
-
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setEditingVariants((prev) => prev.filter((_, i) => i !== index))}
-                      className="px-3 py-2 rounded-lg border text-red-600"
-                    >
-                      Supprimer
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setEditingVariants((prev) => [...prev, { ...EMPTY_VARIANT }])}
-                className="text-sm text-primary hover:text-primary/80"
-              >
-                + Ajouter une variante
-              </button>
-
-              {variantsError ? <div className="text-sm text-red-600">{variantsError}</div> : null}
+              <VariantEditor
+                variants={editingVariants}
+                onChange={setEditingVariants}
+                resolveUrl={resolveImageUrl}
+                error={variantsError}
+              />
             </div>
 
             <div className="p-6 border-t flex items-center justify-end gap-3 shrink-0 bg-card">
@@ -1753,14 +1777,73 @@ export default function ProduitsPage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm text-foreground mb-1">Photo produit</label>
+                  <label className="block text-sm text-foreground mb-1">Slug (URL du produit)</label>
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setNewImageFile(e.target.files?.[0] || null)}
+                    value={newSlug}
+                    onChange={(e) => setNewSlug(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 font-mono text-sm"
+                    placeholder="table-basse-trapeze"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Généré automatiquement depuis le nom si laissé vide, puis conservé tel quel.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-foreground mb-1">Ancien prix (prix barré)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newOldPrice}
+                    onChange={(e) => setNewOldPrice(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholder="Optionnel"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-foreground mb-1">Catégorie</label>
+                  <CategorySelect
+                    categories={categoriesForStore(selectedCreateStoreId)}
+                    value={newCategoryId}
+                    onChange={setNewCategoryId}
+                    storeId={selectedCreateStoreId || null}
+                    onCreated={async () => {
+                      await refetchCategories()
+                    }}
                     className="w-full border rounded-lg px-3 py-2"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">La photo sera enregistrée dans le bucket Storage `products`.</p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-foreground mb-1">Description courte</label>
+                  <input
+                    value={newShortDescription}
+                    onChange={(e) => setNewShortDescription(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholder="Résumé affiché sur les cartes du catalogue"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-foreground mb-1">Description complète</label>
+                  <textarea
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    rows={4}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholder="Description détaillée affichée sur la fiche produit"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <ProductGalleryEditor
+                    label="Photos du produit"
+                    items={newGallery}
+                    onChange={setNewGallery}
+                    resolveUrl={resolveImageUrl}
+                  />
                 </div>
 
                 {newHasVariants ? (
@@ -1945,78 +2028,18 @@ export default function ProduitsPage() {
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div>
                     <label className="block text-sm text-foreground">Variantes (optionnel)</label>
-                    <button
-                      type="button"
-                      onClick={() => setNewVariants((prev) => [...prev, { ...EMPTY_VARIANT }])}
-                      className="text-sm text-primary hover:text-primary/80"
-                    >
-                      + Ajouter
-                    </button>
+                    <p className="text-xs text-muted-foreground">
+                      Chaque variante peut avoir son propre prix, ancien prix, photos et ordre d’affichage.
+                    </p>
                   </div>
 
-                  {(newVariants || []).map((variant, index) => (
-                    <div key={`new-variant-${index}`} className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr_0.8fr_0.8fr_auto] gap-3 items-end">
-                      <div>
-                        <label className="block text-xs text-muted-foreground mb-1">Nom</label>
-                        <input
-                          value={variant.name}
-                          onChange={(e) =>
-                            setNewVariants((prev) => prev.map((v, i) => (i === index ? { ...v, name: e.target.value } : v)))
-                          }
-                          className="w-full border rounded-lg px-3 py-2"
-                          placeholder="Ex: 500g"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-muted-foreground mb-1">SKU</label>
-                        <input
-                          value={variant.sku}
-                          onChange={(e) =>
-                            setNewVariants((prev) => prev.map((v, i) => (i === index ? { ...v, sku: e.target.value } : v)))
-                          }
-                          className="w-full border rounded-lg px-3 py-2"
-                          placeholder="Ex: SKU-500G"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-muted-foreground mb-1">Prix</label>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={variant.selling_price}
-                          onChange={(e) =>
-                            setNewVariants((prev) => prev.map((v, i) => (i === index ? { ...v, selling_price: e.target.value } : v)))
-                          }
-                          className="w-full border rounded-lg px-3 py-2"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-muted-foreground mb-1">Coût</label>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={variant.purchase_cost}
-                          onChange={(e) =>
-                            setNewVariants((prev) => prev.map((v, i) => (i === index ? { ...v, purchase_cost: e.target.value } : v)))
-                          }
-                          className="w-full border rounded-lg px-3 py-2"
-                        />
-                      </div>
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => setNewVariants((prev) => prev.filter((_, i) => i !== index))}
-                          className="px-3 py-2 rounded-lg border text-red-600"
-                        >
-                          Supprimer
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                  <VariantEditor
+                    variants={newVariants}
+                    onChange={setNewVariants}
+                    resolveUrl={resolveImageUrl}
+                  />
                 </div>
                 ) : null}
               </div>
@@ -2297,14 +2320,31 @@ export default function ProduitsPage() {
                                   setEditSellingPrice(String(product.default_selling_price || 0))
                                   setEditPublicationStatus(normalizePublicationStatus(product.publication_status))
                                   setEditStockTrackingMode(product.stock_tracking_mode === 'shared' ? 'shared' : 'variant')
+                                  setEditSlug(String(product.slug || ''))
+                                  setEditShortDescription(String(product.short_description || ''))
+                                  setEditDescription(String(product.description || ''))
+                                  setEditOldPrice(
+                                    product.old_price === null || product.old_price === undefined
+                                      ? ''
+                                      : String(product.old_price)
+                                  )
+                                  setEditCategoryId(String(product.category_id || ''))
+                                  setEditGallery(productGalleryFromRows(product.id))
                                   const variants = (variantsByProduct?.[product.id] || []).map((variant: any) => ({
                                     id: variant.id,
                                     name: String(variant.name || ''),
                                     sku: String(variant.sku || ''),
                                     selling_price: String(variant.selling_price ?? 0),
                                     purchase_cost: String(variant.purchase_cost ?? 0),
+                                    old_price:
+                                      variant.old_price === null || variant.old_price === undefined
+                                        ? ''
+                                        : String(variant.old_price),
                                     stock_multiplier: String(variant.stock_multiplier ?? 1),
+                                    is_default: Boolean(variant.is_default),
+                                    sort_order: Number(variant.sort_order ?? 0),
                                     option_values: variant.option_values || {},
+                                    images: variantGalleryFromRows(variant.id),
                                   }))
                                   setEditingAttributes(deriveAttributesFromVariants(variants))
                                   setEditingVariants(variants)

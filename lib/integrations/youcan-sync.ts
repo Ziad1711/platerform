@@ -1,6 +1,7 @@
 import { listYouCanOrders, listYouCanProducts } from '@/lib/integrations/youcan'
 import { detectStockMultiplier } from '@/lib/integrations/variant-stock'
 import { normalizeMoroccanPhone } from '@/lib/utils'
+import { buildUniqueProductSlug } from '@/lib/products/slug'
 type SupabaseAdmin = any
 
 function parseDate(value: string | null | undefined) {
@@ -123,12 +124,135 @@ function buildVariantDisplayName(variant: any) {
   if (pairs.length > 0) return pairs.join(' / ')
   return 'Default'
 }
+/** Convertit une description HTML YouCan en texte simple exploitable par le site. */
+function htmlToPlainText(value: any): string | null {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+
+  const text = raw
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return text || null
+}
+
+function buildShortDescription(value: string | null, maxLength = 180): string | null {
+  if (!value) return null
+  if (value.length <= maxLength) return value
+
+  const cut = value.slice(0, maxLength)
+  const lastSpace = cut.lastIndexOf(' ')
+  const base = lastSpace > 40 ? cut.slice(0, lastSpace) : cut
+  return `${base.trim()}…`
+}
+
+function toPositiveAmount(value: any): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+/** Galerie produit YouCan, triée par `order` (repli sur la miniature). */
+function getYouCanProductImages(product: any): Array<{ url: string; alt: string | null; order: number }> {
+  const list = Array.isArray(product?.images) ? product.images : []
+
+  const images = list
+    .map((image: any) => ({
+      url: String(image?.variations?.original || image?.url || '').trim(),
+      alt: String(image?.name || '').trim() || null,
+      order: Number(image?.order ?? 0),
+    }))
+    .filter((image) => /^https?:/i.test(image.url))
+
+  if (images.length > 0) {
+    return images.sort((a, b) => a.order - b.order)
+  }
+
+  const thumbnail = String(product?.thumbnail || '').trim()
+  return /^https?:/i.test(thumbnail) ? [{ url: thumbnail, alt: null, order: 0 }] : []
+}
+
+function getYouCanVariantImageUrl(variant: any): string | null {
+  const url = String(variant?.image?.url || variant?.image?.original || '').trim()
+  return /^https?:/i.test(url) ? url : null
+}
+
+
 
 function shouldImportProductVariant(variant: any, totalVariants: number) {
   if (totalVariants > 1) return true
 
   const optionValues = getVariantOptionValues(variant)
   return Object.keys(optionValues).length > 0
+}
+
+/**
+ * Ajoute les images YouCan manquantes sans jamais supprimer une image locale.
+ * Seules des URLs externes sont référencées : aucun fichier Jisra n'est touché.
+ */
+async function syncYouCanProductImages(params: {
+  supabase: SupabaseAdmin
+  storeId: string
+  productId: string
+  productVariantId?: string | null
+  images: Array<{ url: string; alt?: string | null }>
+}) {
+  const { supabase, storeId, productId, productVariantId = null, images } = params
+  if (images.length === 0) return
+
+  const scope = (query: any) =>
+    productVariantId
+      ? query.eq('product_id', productId).eq('product_variant_id', productVariantId)
+      : query.eq('product_id', productId).is('product_variant_id', null)
+
+  const { data: existingRows, error } = await scope(
+    supabase.from('product_images').select('id, image_url, sort_order, is_primary')
+  )
+
+  if (error) throw error
+
+  const existing = (existingRows || []) as Array<{
+    id: string
+    image_url: string
+    sort_order: number
+    is_primary: boolean
+  }>
+
+  const knownUrls = new Set(existing.map((row) => String(row.image_url || '').trim()))
+  let hasPrimary = existing.some((row) => Boolean(row.is_primary))
+  let nextOrder = existing.reduce((max, row) => Math.max(max, Number(row.sort_order || 0)), -1) + 1
+
+  for (const image of images) {
+    const url = String(image.url || '').trim()
+    if (!url || knownUrls.has(url)) continue
+
+    const isPrimary = !hasPrimary
+
+    const { error: insertError } = await supabase.from('product_images').insert({
+      store_id: storeId,
+      product_id: productId,
+      product_variant_id: productVariantId,
+      image_url: url,
+      alt_text: image.alt || null,
+      sort_order: nextOrder,
+      is_primary: isPrimary,
+    })
+
+    if (insertError) throw insertError
+
+    knownUrls.add(url)
+    nextOrder += 1
+    if (isPrimary) hasPrimary = true
+  }
 }
 
 async function upsertProductFromYouCan(params: {
@@ -153,30 +277,49 @@ async function upsertProductFromYouCan(params: {
 
   const defaultSellingPrice = Number(product?.price || 0)
   const defaultPurchaseCost = Number(product?.cost_price || 0)
+  const youcanDescription = htmlToPlainText(product?.description)
+  const youcanImages = getYouCanProductImages(product)
+  const youcanOldPrice = toPositiveAmount(product?.compare_at_price)
+  const youcanSlug = String(product?.slug || '').trim()
+  const thumbnail =
+    youcanImages[0]?.url || (product?.thumbnail ? String(product.thumbnail).trim() : null)
 
   let productId = existingMap?.internal_id || null
+  let existingProduct: any = null
+
   if (productId) {
-    const { data: existingProduct } = await supabase
+    const { data } = await supabase
       .from('products')
-      .select('id')
+      .select('id, slug, short_description, description, old_price, image_url')
       .eq('id', productId)
       .maybeSingle()
 
+    existingProduct = data || null
     if (!existingProduct) {
       productId = null
     }
   }
 
   if (!productId) {
+    const slug = await buildUniqueProductSlug({
+      supabase,
+      storeId,
+      base: youcanSlug || String(product?.name || 'Produit YouCan'),
+    })
+
     const { data: inserted, error } = await supabase
       .from('products')
       .insert({
         store_id: storeId,
         name: String(product?.name || 'Produit YouCan'),
+        slug,
         sku: null,
+        short_description: buildShortDescription(youcanDescription),
+        description: youcanDescription,
+        old_price: youcanOldPrice,
         default_selling_price: Number.isFinite(defaultSellingPrice) ? defaultSellingPrice : 0,
         default_purchase_cost: Number.isFinite(defaultPurchaseCost) ? defaultPurchaseCost : 0,
-        image_url: product?.thumbnail ? String(product.thumbnail) : null,
+        image_url: thumbnail,
       })
       .select('id')
       .single()
@@ -184,17 +327,45 @@ async function upsertProductFromYouCan(params: {
     if (error) throw error
     productId = inserted.id
   } else {
-    await supabase
-      .from('products')
-      .update({
-        name: String(product?.name || 'Produit YouCan'),
-        default_selling_price: Number.isFinite(defaultSellingPrice) ? defaultSellingPrice : 0,
-        default_purchase_cost: Number.isFinite(defaultPurchaseCost) ? defaultPurchaseCost : 0,
-        image_url: product?.thumbnail ? String(product.thumbnail) : null,
-        updated_at: new Date().toISOString(),
+    // Les informations commerciales déjà saisies dans Jisra ne sont jamais écrasées par la source.
+    const updatePayload: Record<string, any> = {
+      name: String(product?.name || 'Produit YouCan'),
+      default_selling_price: Number.isFinite(defaultSellingPrice) ? defaultSellingPrice : 0,
+      default_purchase_cost: Number.isFinite(defaultPurchaseCost) ? defaultPurchaseCost : 0,
+      updated_at: new Date().toISOString(),
+    }
+
+    if (!String(existingProduct?.slug || '').trim()) {
+      updatePayload.slug = await buildUniqueProductSlug({
+        supabase,
+        storeId,
+        base: youcanSlug || String(product?.name || 'Produit YouCan'),
+        excludeProductId: productId,
       })
-      .eq('id', productId)
+    }
+
+    if (youcanDescription && !String(existingProduct?.description || '').trim()) {
+      updatePayload.description = youcanDescription
+      updatePayload.short_description = buildShortDescription(youcanDescription)
+    }
+
+    if (youcanOldPrice && existingProduct?.old_price === null) {
+      updatePayload.old_price = youcanOldPrice
+    }
+
+    if (thumbnail && !String(existingProduct?.image_url || '').trim()) {
+      updatePayload.image_url = thumbnail
+    }
+
+    await supabase.from('products').update(updatePayload).eq('id', productId)
   }
+
+  await syncYouCanProductImages({
+    supabase,
+    storeId,
+    productId: String(productId),
+    images: youcanImages.map((image) => ({ url: image.url, alt: image.alt })),
+  })
 
   await supabase.from('youcan_entity_mappings').upsert(
     {
@@ -213,6 +384,38 @@ async function upsertProductFromYouCan(params: {
   return { productId, youcanProductId }
 }
 
+/** Garantit qu'une variante reste marquée par défaut après une synchronisation. */
+async function ensureDefaultVariant(params: { supabase: SupabaseAdmin; productId: string }) {
+  const { supabase, productId } = params
+
+  const { data: defaultRows, error } = await supabase
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('is_default', true)
+    .limit(1)
+
+  if (error) throw error
+  if (defaultRows && defaultRows.length > 0) return
+
+  const { data: candidates, error: candidatesError } = await supabase
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', productId)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+    .limit(1)
+
+  if (candidatesError) throw candidatesError
+  const first = candidates?.[0]?.id
+  if (!first) return
+
+  await supabase
+    .from('product_variants')
+    .update({ is_default: true, updated_at: new Date().toISOString() })
+    .eq('id', first)
+}
+
 async function upsertVariantFromYouCan(params: {
   supabase: SupabaseAdmin
   integrationId: string
@@ -221,8 +424,18 @@ async function upsertVariantFromYouCan(params: {
   productId: string
   variant: any
   allowWithoutOptions?: boolean
+  variantIndex?: number
 }) {
-  const { supabase, integrationId, userId, storeId, productId, variant, allowWithoutOptions = false } = params
+  const {
+    supabase,
+    integrationId,
+    userId,
+    storeId,
+    productId,
+    variant,
+    allowWithoutOptions = false,
+    variantIndex = 0,
+  } = params
 
   const youcanVariantId = String(variant?.id || '')
   if (!youcanVariantId) return null
@@ -237,6 +450,8 @@ async function upsertVariantFromYouCan(params: {
 
   const sellingPrice = Number(variant?.price || 0)
   const purchaseCost = Number(variant?.cost_price || 0)
+  const oldPrice = toPositiveAmount(variant?.compare_at_price)
+  const variantImageUrl = getYouCanVariantImageUrl(variant)
   const sku = normalizeVariantSku(variant, youcanVariantId)
   const optionValues = getVariantOptionValues(variant)
   if (!allowWithoutOptions && Object.keys(optionValues).length === 0) {
@@ -256,14 +471,18 @@ async function upsertVariantFromYouCan(params: {
   }
 
   let variantId = existingMap?.internal_id || null
+  let existingVariantRow: any = null
+
   if (variantId) {
-    const { data: existingVariant } = await supabase
+    const { data } = await supabase
       .from('product_variants')
-      .select('id')
+      .select('id, old_price')
       .eq('id', variantId)
       .maybeSingle()
 
-    if (!existingVariant) {
+    existingVariantRow = data || null
+
+    if (!existingVariantRow) {
       variantId = null
     }
   }
@@ -271,12 +490,13 @@ async function upsertVariantFromYouCan(params: {
   if (!variantId) {
     const { data: existingBySku } = await supabase
       .from('product_variants')
-      .select('id')
+      .select('id, old_price')
       .eq('product_id', productId)
       .eq('sku', sku)
       .maybeSingle()
 
     variantId = existingBySku?.id || null
+    existingVariantRow = existingBySku || null
   }
 
   if (!variantId) {
@@ -289,6 +509,8 @@ async function upsertVariantFromYouCan(params: {
         sku,
         selling_price: Number.isFinite(sellingPrice) ? sellingPrice : 0,
         purchase_cost: Number.isFinite(purchaseCost) ? purchaseCost : 0,
+        old_price: oldPrice,
+        sort_order: Math.max(0, Math.trunc(variantIndex)),
         option_values: optionValues,
         stock_multiplier: stockMultiplier,
       })
@@ -306,6 +528,9 @@ async function upsertVariantFromYouCan(params: {
         sku,
         selling_price: Number.isFinite(sellingPrice) ? sellingPrice : 0,
         purchase_cost: Number.isFinite(purchaseCost) ? purchaseCost : 0,
+        // Les informations saisies manuellement dans Jisra restent prioritaires.
+        ...(oldPrice && existingVariantRow?.old_price === null ? { old_price: oldPrice } : {}),
+        sort_order: Math.max(0, Math.trunc(variantIndex)),
         option_values: optionValues,
         // Un multiplicateur détecté explicitement (ex: "3 pièces") met à jour la variante.
         // Sinon on conserve la valeur configurée manuellement.
@@ -313,6 +538,16 @@ async function upsertVariantFromYouCan(params: {
         updated_at: new Date().toISOString(),
       })
       .eq('id', variantId)
+  }
+
+  if (variantImageUrl) {
+    await syncYouCanProductImages({
+      supabase,
+      storeId,
+      productId,
+      productVariantId: String(variantId),
+      images: [{ url: variantImageUrl, alt: variantName }],
+    })
   }
 
   await supabase.from('youcan_entity_mappings').upsert(
@@ -403,7 +638,7 @@ export async function importYouCanProducts(params: {
 
       const variantRefs: YouCanPendingVariantSetup['variants'] = []
 
-      for (const variant of variants) {
+      for (const [variantIndex, variant] of variants.entries()) {
         const upsertedVariant = await upsertVariantFromYouCan({
           supabase,
           integrationId,
@@ -412,6 +647,7 @@ export async function importYouCanProducts(params: {
           productId,
           variant,
           allowWithoutOptions: rawVariants.length > 1,
+          variantIndex,
         })
 
         if (!upsertedVariant?.variantId) continue
@@ -460,6 +696,11 @@ export async function importYouCanProducts(params: {
           stockTrackingMode: productModeById.get(String(productId)) || 'variant',
           variants: variantRefs,
         })
+      }
+
+      // Le site doit toujours recevoir une variante présélectionnable.
+      if (variantRefs.length > 0) {
+        await ensureDefaultVariant({ supabase, productId: String(productId) })
       }
 
       imported += 1

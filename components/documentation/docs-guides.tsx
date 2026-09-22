@@ -30,6 +30,22 @@ export async function getCatalog() {
         />
 
         <CodeBlock
+          title="Node.js — image de la variante et promotion"
+          code={`const product = catalog[0]
+const variant = product.variants.find((v) => v.is_default) || product.variants[0]
+
+// Image à afficher : celle de la variante, repli automatique sur l'image produit
+const image = variant ? variant.image_url : product.image_url
+
+// Galerie complète de la variante (ou du produit)
+const gallery = (variant ? variant.images : product.images) || []
+
+// Ancien prix : commercial uniquement, jamais utilisé pour calculer la commande
+const oldPrice = (variant && variant.old_price) || product.old_price
+const hasPromotion = Boolean(oldPrice && oldPrice > (variant ? variant.selling_price : product.selling_price))`}
+        />
+
+        <CodeBlock
           title="Node.js — envoyer une commande"
           code={`export async function createOrder(order) {
   const response = await fetch(\`\${API_URL}/orders\`, {
