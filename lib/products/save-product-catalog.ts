@@ -29,6 +29,11 @@ export type SaveProductCatalogParams = {
   storeId: string
   /** `null` (création) : un identifiant est généré avant l'upload des fichiers. */
   productId?: string | null
+  /**
+   * Intention explicite : `create` insère le produit avec l'identifiant fourni,
+   * `update` met à jour un produit existant, `auto` déduit du payload.
+   */
+  mode?: 'create' | 'update' | 'auto'
   product: {
     name: string
     slug: string | null
@@ -89,7 +94,7 @@ function revokePreviews(items: CatalogGalleryInput[] | null | undefined) {
  * 3. en cas d'échec, les fichiers envoyés sont retirés (aucun état partiel).
  */
 export async function saveProductCatalog(params: SaveProductCatalogParams): Promise<{ productId: string }> {
-  const { supabase, storeId, product, variants = null, images = null } = params
+  const { supabase, storeId, product, variants = null, images = null, mode = 'auto' } = params
 
   const productId = params.productId || generateId()
   const uploadedPaths: string[] = []
@@ -165,6 +170,7 @@ export async function saveProductCatalog(params: SaveProductCatalogParams): Prom
       p_product: { ...product, id: productId },
       p_variants: variantsPayload,
       p_images: imagesPayload,
+      p_mode: mode,
     })
 
     if (error) throw error
@@ -192,6 +198,9 @@ export async function saveProductCatalog(params: SaveProductCatalogParams): Prom
     }
     if (message.includes('PRODUCT_NOT_FOUND')) {
       throw new Error('Produit introuvable dans ce store.')
+    }
+    if (message.includes('PRODUCT_ALREADY_EXISTS')) {
+      throw new Error('Ce produit existe déjà dans ce store.')
     }
     if (message.includes('products_store_slug_unique')) {
       throw new Error('Ce slug est déjà utilisé par un autre produit de ce store.')

@@ -125,7 +125,7 @@ const generateVariantsFromAttributes = ({
       id: existing?.id,
       name: generatedName,
       sku: String(existing?.sku || '').trim() || buildVariantSku(baseSku, optionValues),
-      selling_price: String(existing?.selling_price || defaultSellingPrice || '0'),
+      selling_price: String(existing?.selling_price ?? defaultSellingPrice ?? ''),
       purchase_cost: String(existing?.purchase_cost || '0'),
       stock_multiplier: String(
         existing?.stock_multiplier ?? detectStockMultiplier({ name: generatedName })
@@ -182,13 +182,13 @@ export default function ProduitsPage() {
   const [selectedCreateStoreId, setSelectedCreateStoreId] = useState('')
   const [newName, setNewName] = useState('')
   const [newSku, setNewSku] = useState('')
-  const [newSellingPrice, setNewSellingPrice] = useState('0')
+  const [newSellingPrice, setNewSellingPrice] = useState('')
   const [newPublicationStatus, setNewPublicationStatus] = useState<PublicationStatus>('active')
   const [newHasVariants, setNewHasVariants] = useState(false)
+  const [newStockTrackingMode, setNewStockTrackingMode] = useState<'variant' | 'shared'>('variant')
   const [newAttributes, setNewAttributes] = useState<VariantAttributeForm[]>([])
   const [newAttributeDrafts, setNewAttributeDrafts] = useState<Record<number, string>>({})
   const [newVariants, setNewVariants] = useState<ProductVariantForm[]>([])
-  const [newSlug, setNewSlug] = useState('')
   const [newShortDescription, setNewShortDescription] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [newOldPrice, setNewOldPrice] = useState('')
@@ -408,6 +408,24 @@ export default function ProduitsPage() {
       if (!selectedCreateStoreId) throw new Error('Veuillez sélectionner un store avant d’ajouter un produit.')
       if (!newName.trim()) throw new Error('Le nom du produit est obligatoire.')
 
+      const hasPrice = (value: string | number | null | undefined) => {
+        const raw = String(value ?? '').trim()
+        const parsed = Number(raw)
+        return raw !== '' && Number.isFinite(parsed) && parsed > 0
+      }
+
+      if (!newHasVariants && !hasPrice(newSellingPrice)) {
+        throw new Error('Le prix de vente est obligatoire.')
+      }
+
+      if (newHasVariants) {
+        for (const variant of newVariants || []) {
+          if (!hasPrice(variant.selling_price)) {
+            throw new Error(`Prix de vente obligatoire pour la variante « ${variant.name || 'sans nom'} ».`)
+          }
+        }
+      }
+
       const variantPayloads = (newHasVariants ? (newVariants || []) : [])
         .map((variant) => ({
           images: (variant.images || []) as GalleryItem[],
@@ -441,7 +459,7 @@ export default function ProduitsPage() {
       const slug = await buildUniqueProductSlug({
         supabase,
         storeId: selectedCreateStoreId,
-        base: newSlug.trim() || newName.trim(),
+        base: newName.trim(),
       })
 
       await saveProductCatalog({
@@ -456,11 +474,14 @@ export default function ProduitsPage() {
           old_price: Number(newOldPrice || 0) > 0 ? Number(newOldPrice) : null,
           category_id: newCategoryId || null,
           sort_order: 0,
-          default_selling_price: newHasVariants ? 0 : Number(newSellingPrice || 0),
+          default_selling_price: newHasVariants ? 0 : Number(newSellingPrice),
           default_purchase_cost: 0,
-          stock_tracking_mode: 'variant',
+          stock_tracking_mode: newHasVariants ? newStockTrackingMode : 'variant',
           publication_status: newPublicationStatus,
+          // Choix explicite du marchand : la configuration stock/variantes est confirmée.
+          confirm_stock_setup: true,
         },
+        mode: 'create',
         variants: variantPayloads.map((entry) => ({ ...entry.sync, images: entry.images })),
         images: newGallery,
       })
@@ -476,13 +497,13 @@ export default function ProduitsPage() {
       setSelectedCreateStoreId(currentStoreId || '')
       setNewName('')
       setNewSku('')
-      setNewSellingPrice('0')
+      setNewSellingPrice('')
       setNewPublicationStatus('active')
       setNewHasVariants(false)
+      setNewStockTrackingMode('variant')
       setNewAttributes([])
       setNewAttributeDrafts({})
       setNewVariants([])
-      setNewSlug('')
       setNewShortDescription('')
       setNewDescription('')
       setNewOldPrice('')
@@ -529,6 +550,7 @@ export default function ProduitsPage() {
         supabase,
         storeId: selectedProductForVariants.store_id,
         productId: selectedProductForVariants.id,
+        mode: 'update',
         product: {
           name: String(selectedProductForVariants.name || ''),
           slug: selectedProductForVariants.slug || null,
@@ -621,6 +643,7 @@ export default function ProduitsPage() {
         supabase,
         storeId: selectedProductForEdit.store_id,
         productId: selectedProductForEdit.id,
+        mode: 'update',
         product: {
           name: editName.trim(),
           slug,
@@ -685,6 +708,7 @@ export default function ProduitsPage() {
       await saveProductCatalog({
         supabase,
         storeId: product.store_id,
+        mode: 'create',
         product: {
           name: duplicateName,
           slug,
@@ -1688,7 +1712,11 @@ export default function ProduitsPage() {
           <div className="bg-card rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
             <div className="p-6 border-b flex items-center justify-between shrink-0 bg-card">
               <h3 className="text-lg font-semibold text-foreground">Nouveau produit</h3>
-              <button type="button" onClick={() => setIsCreateOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(false)}
+                className="rounded-lg border border-red-500 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+              >
                 Fermer
               </button>
             </div>
@@ -1711,82 +1739,121 @@ export default function ProduitsPage() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm text-foreground mb-1">Nom du produit</label>
-                  <input
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
-                    placeholder="Ex: T-shirt Premium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm text-foreground mb-1">SKU</label>
-                  <input
-                    value={newSku}
-                    onChange={(e) => setNewSku(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2"
-                    placeholder="Ex: TSH-001"
-                  />
-                </div>
-
-                <div className="md:col-span-2 border rounded-lg p-3 bg-muted/10">
-                  <label className="inline-flex items-center gap-2 text-sm text-foreground cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newHasVariants}
-                      onChange={(e) => {
-                        const checked = e.target.checked
-                        setNewHasVariants(checked)
-                        if (!checked) {
-                          setNewAttributes([])
-                          setNewAttributeDrafts({})
-                          setNewVariants([])
-                        }
-                      }}
-                    />
-                    Ce produit a des variantes
-                  </label>
-                </div>
-
-                {!newHasVariants ? (
+                <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div>
-                    <label className="block text-sm text-foreground mb-1">Prix de vente</label>
+                    <label className="block text-sm text-foreground mb-1">Nom du produit</label>
                     <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={newSellingPrice}
-                      onChange={(e) => setNewSellingPrice(e.target.value)}
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
                       className="w-full border rounded-lg px-3 py-2"
+                      placeholder="Ex: T-shirt Premium"
                     />
                   </div>
-                ) : null}
 
-                <div>
-                  <label className="block text-sm text-foreground mb-1">Publication sur le site</label>
-                  <PublicationStatusSelect
-                    value={newPublicationStatus}
-                    onChange={setNewPublicationStatus}
-                    className="w-full"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Seuls les produits « Publié » sont exposés à l&apos;API catalogue du site.
-                  </p>
+                  <div>
+                    <label className="block text-sm text-foreground mb-1">SKU</label>
+                    <input
+                      value={newSku}
+                      onChange={(e) => setNewSku(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2"
+                      placeholder="Ex: TSH-001"
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/10 p-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <label className="block text-sm font-medium text-foreground">Publication sur le site</label>
+                      <PublicationStatusBadge status={newPublicationStatus} />
+                    </div>
+                    <PublicationStatusSelect
+                      value={newPublicationStatus}
+                      onChange={setNewPublicationStatus}
+                      className="w-full"
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Seuls les produits « Publié » sont exposés à l&apos;API catalogue du site.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="md:col-span-2">
-                  <label className="block text-sm text-foreground mb-1">Slug (URL du produit)</label>
+                <div className="md:col-span-2 rounded-xl border border-border bg-muted/10 p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Nature du produit</p>
+                    <p className="text-xs text-muted-foreground">
+                      Indiquez si ce produit possède des variantes (couleur, taille, longueur, packs quantité…).
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewHasVariants(false)
+                        setNewAttributes([])
+                        setNewAttributeDrafts({})
+                        setNewVariants([])
+                      }}
+                      className={`rounded-xl border p-3 text-left transition-colors ${
+                        !newHasVariants
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                          : 'border-border bg-card hover:border-primary/40'
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-foreground">Produit simple</span>
+                        <span
+                          className={`h-4 w-4 rounded-full border-2 ${
+                            !newHasVariants ? 'border-primary bg-primary' : 'border-border'
+                          }`}
+                        />
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Un seul prix de vente et une seule référence (SKU).
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewHasVariants(true)}
+                      className={`rounded-xl border p-3 text-left transition-colors ${
+                        newHasVariants
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                          : 'border-border bg-card hover:border-primary/40'
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-foreground">Produit avec variantes</span>
+                        <span
+                          className={`h-4 w-4 rounded-full border-2 ${
+                            newHasVariants ? 'border-primary bg-primary' : 'border-border'
+                          }`}
+                        />
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Couleurs, tailles ou packs quantité, avec prix et photos par variante.
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-foreground mb-1">
+                    {newHasVariants ? 'Prix de vente (appliqué aux variantes)' : 'Prix de vente *'}
+                  </label>
                   <input
-                    value={newSlug}
-                    onChange={(e) => setNewSlug(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 font-mono text-sm"
-                    placeholder="table-basse-trapeze"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newSellingPrice}
+                    onChange={(e) => setNewSellingPrice(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholder="Ex: 299"
                   />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Généré automatiquement depuis le nom si laissé vide, puis conservé tel quel.
-                  </p>
+                  {newHasVariants ? (
+                    <p className="mt-1 text-xs text-green-600">
+                      Ce prix est attribué aux variantes générées ; chaque variante peut ensuite avoir son propre prix.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div>
@@ -1837,17 +1904,55 @@ export default function ProduitsPage() {
                   />
                 </div>
 
-                <div className="md:col-span-2">
-                  <ProductGalleryEditor
-                    label="Photos du produit"
-                    items={newGallery}
-                    onChange={setNewGallery}
-                    resolveUrl={resolveImageUrl}
-                  />
-                </div>
-
                 {newHasVariants ? (
                 <div className="md:col-span-2 border rounded-lg p-4 space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Nature du stock</p>
+                      <p className="text-xs text-muted-foreground">
+                        Comment le stock de ce produit doit-il être suivi ?
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setNewStockTrackingMode('variant')}
+                        className={`rounded-lg border p-3 text-left transition-colors ${
+                          newStockTrackingMode === 'variant'
+                            ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                            : 'border-border bg-card hover:border-primary/40'
+                        }`}
+                      >
+                        <span className="text-sm font-medium text-foreground">Stock par variante</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Chaque variante a son propre stock (couleur, taille, modèle…).
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setNewStockTrackingMode('shared')}
+                        className={`rounded-lg border p-3 text-left transition-colors ${
+                          newStockTrackingMode === 'shared'
+                            ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                            : 'border-border bg-card hover:border-primary/40'
+                        }`}
+                      >
+                        <span className="text-sm font-medium text-foreground">Stock unique partagé</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Une seule quantité pour le produit (packs de 1, 2, 3 unités…).
+                        </span>
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      {newStockTrackingMode === 'shared'
+                        ? 'Packs quantité : indiquez dans « Qté / pack » combien d’unités physiques chaque variante consomme.'
+                        : 'Le stock est suivi séparément pour chaque variante.'}
+                    </p>
+                  </div>
+
                   <div className="border rounded-lg p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <label className="block text-sm text-foreground">Attributs principaux</label>
@@ -2029,7 +2134,7 @@ export default function ProduitsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm text-foreground">Variantes (optionnel)</label>
+                    <label className="block text-sm text-foreground">Variantes *</label>
                     <p className="text-xs text-muted-foreground">
                       Chaque variante peut avoir son propre prix, ancien prix, photos et ordre d’affichage.
                     </p>
@@ -2042,6 +2147,15 @@ export default function ProduitsPage() {
                   />
                 </div>
                 ) : null}
+
+                <div className="md:col-span-2">
+                  <ProductGalleryEditor
+                    label="Photos du produit"
+                    items={newGallery}
+                    onChange={setNewGallery}
+                    resolveUrl={resolveImageUrl}
+                  />
+                </div>
               </div>
 
               {createError ? <div className="text-sm text-red-600">{createError}</div> : null}

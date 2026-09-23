@@ -19,7 +19,7 @@ export type ProductVariantForm = {
 export const EMPTY_VARIANT: ProductVariantForm = {
   name: '',
   sku: '',
-  selling_price: '0',
+  selling_price: '',
   purchase_cost: '0',
   old_price: '',
   stock_multiplier: '1',

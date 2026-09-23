@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import { ArrowLeft, ArrowRight, ImagePlus, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { validateProductImageFile } from '@/lib/products/product-images'
@@ -39,6 +39,7 @@ export function ProductGalleryEditor({
   compact?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const [isDragActive, setIsDragActive] = useState(false)
   const gallery = items || []
 
   const update = (next: GalleryItem[]) => {
@@ -78,6 +79,21 @@ export function ProductGalleryEditor({
     update([...gallery, ...additions])
 
     if (inputRef.current) inputRef.current.value = ''
+  }
+
+  // Dépôt des fichiers directement dans la zone (glisser-déposer).
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    setIsDragActive(false)
+    appendFiles(event.dataTransfer?.files ?? null)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    const related = event.relatedTarget as Node | null
+    // On ignore les sorties vers un enfant de la zone de dépôt.
+    if (related && event.currentTarget.contains(related)) return
+    setIsDragActive(false)
   }
 
   const removeAt = (index: number) => {
@@ -191,10 +207,25 @@ export function ProductGalleryEditor({
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="flex h-full min-h-[120px] w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 px-3 py-4 text-xs text-muted-foreground hover:bg-muted/40"
+          onDragEnter={(event) => {
+            event.preventDefault()
+            setIsDragActive(true)
+          }}
+          onDragOver={(event) => {
+            event.preventDefault()
+            setIsDragActive(true)
+          }}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`flex h-full min-h-[120px] w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-3 py-4 text-xs transition-colors ${
+            isDragActive
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/40'
+          }`}
         >
           <ImagePlus className="h-5 w-5" />
-          Ajouter des photos
+          {isDragActive ? 'Déposez les photos ici' : 'Ajouter des photos'}
+          <span className="text-[11px] text-muted-foreground">Glissez-déposez ou cliquez</span>
         </button>
       </div>
 
@@ -208,7 +239,7 @@ export function ProductGalleryEditor({
       />
 
       <p className="text-xs text-muted-foreground">
-        {helpText || 'JPEG, PNG ou WebP — 5 Mo maximum par image. Utilisez « Principale » pour choisir l’image affichée en premier.'}
+        {helpText || 'Glissez-déposez vos photos (JPEG, PNG ou WebP — 5 Mo maximum par image). Utilisez « Principale » pour choisir l’image affichée en premier.'}
       </p>
     </div>
   )
