@@ -5,6 +5,7 @@ import { getFirstAllowedRoute, type Role } from './permissions'
 const PROTECTED_APP_ROUTES = [
   '/dashboard',
   '/sales',
+  '/confirmation',
   '/products',
   '/stock',
   '/suppliers',

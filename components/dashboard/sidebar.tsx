@@ -19,6 +19,7 @@ import {
   X,
   ChevronLeft,
   LogOut,
+  PhoneCall,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { JisraMark, JisraWordmark } from '@/components/logo'
@@ -29,6 +30,7 @@ import { useStore } from '@/lib/store-context'
 const menuItems = [
   { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Ventes', href: '/sales', icon: ShoppingCart },
+  { name: 'Confirmation', href: '/confirmation', icon: PhoneCall },
   { name: 'Produits', href: '/products', icon: Package },
   { name: 'Stock', href: '/stock', icon: Warehouse },
   { name: 'Fournisseurs', href: '/suppliers', icon: Truck },

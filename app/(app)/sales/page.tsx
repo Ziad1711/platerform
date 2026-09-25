@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime, normalizeMoroccanPhone } from '@/lib/utils'
 import { normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
 import { parseCsvText } from '@/lib/imports/csv'
-import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil, AlertTriangle } from 'lucide-react'
+import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil, AlertTriangle, X, Copy, Trash2, Loader2 } from 'lucide-react'
 import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
 import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
@@ -17,6 +17,7 @@ import { usePermissions } from '@/lib/auth/use-permissions'
 import { hasPermission } from '@/lib/auth/permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
+import { toast } from 'sonner'
 
 const OZONE_PROVIDER_ID = '5f806347-45f1-481a-901d-2eb98b20b3a8'
 const SENDIT_PROVIDER_ID = '5998e563-96ed-47cc-881a-43f41827f858'
@@ -433,12 +434,15 @@ const areStringMapsEqual = (a: Record<string, string>, b: Record<string, string>
 export default function VentesPage() {
   const PAGE_SIZE = 10
   const { currentStoreId, accessibleStoreIds, accessibleStores } = useStore()
-  const { role } = usePermissions(currentStoreId)
+  const { role, can } = usePermissions(currentStoreId)
   const isConfirmationRole = role === 'confirmation'
   // Un échange crée une commande de remplacement : réservé aux rôles autorisés
   // à écrire sur les ventes ou à gérer la livraison.
   const canManageExchange =
     hasPermission(role ?? null, 'sales.write') || hasPermission(role ?? null, 'delivery.manage')
+  const canDeleteOrders = can('sales.delete')
+  const canDuplicateOrders = can('sales.write')
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [blacklistFilter, setBlacklistFilter] = useState<'all' | 'blacklisted' | 'not_blacklisted'>('all')
@@ -2147,6 +2151,108 @@ export default function VentesPage() {
     },
   })
 
+  /**
+   * Suppression groupée : la RPC restitue le stock FIFO des commandes déjà
+   * sorties, puis supprime la commande (éléments et événements en cascade).
+   */
+  const bulkDeleteOrdersMutation = useMutation({
+    mutationFn: async (orderIds: string[]) => {
+      if (orderIds.length === 0) throw new Error('Aucune commande sélectionnée.')
+
+      const { data, error } = await supabase.rpc('rpc_delete_orders', { p_order_ids: orderIds })
+      if (error) throw error
+
+      const payload = (data || {}) as { deleted?: number; restored?: number; skipped?: string[] }
+      return {
+        deleted: Number(payload.deleted || 0),
+        restored: Number(payload.restored || 0),
+        skipped: Array.isArray(payload.skipped) ? payload.skipped.length : 0,
+      }
+    },
+    onSuccess: async ({ deleted, restored, skipped }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-movements'] }),
+      ])
+      setSelectedOrderIds([])
+
+      const details = [`${deleted} commande(s) supprimée(s)`]
+      if (restored > 0) details.push(`stock restitué sur ${restored}`)
+      if (skipped > 0) details.push(`${skipped} introuvable(s)`)
+      toast.success(details.join(' · '))
+    },
+    onError: (error: any) => {
+      const message = error?.message || 'Erreur lors de la suppression groupée.'
+      toast.error(
+        message.includes('FORBIDDEN')
+          ? "Vous n'avez pas les droits pour supprimer ces commandes."
+          : message
+      )
+    },
+  })
+
+  /** Duplication groupée : chaque copie repart en « Nouvelle », sans suivi ni colis. */
+  const bulkDuplicateOrdersMutation = useMutation({
+    mutationFn: async (orderIds: string[]) => {
+      if (orderIds.length === 0) throw new Error('Aucune commande sélectionnée.')
+
+      const { data, error } = await supabase.rpc('rpc_duplicate_orders', { p_order_ids: orderIds })
+      if (error) throw error
+
+      const payload = (data || {}) as { created?: number; orderIds?: string[] }
+      return {
+        created: Number(payload.created || 0),
+        orderIds: Array.isArray(payload.orderIds) ? payload.orderIds : [],
+      }
+    },
+    onSuccess: async ({ created, orderIds }) => {
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      setSelectedOrderIds([])
+
+      if (created === 0) {
+        toast.error('Aucune commande dupliquée.')
+        return
+      }
+
+      const firstId = created === 1 && orderIds[0] ? ` — #${String(orderIds[0]).slice(0, 8)}` : ''
+      toast.success(`${created} commande(s) dupliquée(s) en « Nouvelle »${firstId}.`)
+    },
+    onError: (error: any) => {
+      const message = error?.message || 'Erreur lors de la duplication groupée.'
+      toast.error(
+        message.includes('FORBIDDEN')
+          ? "Vous n'avez pas les droits pour dupliquer ces commandes."
+          : message
+      )
+    },
+  })
+
+  const isBulkOrdersBusy =
+    bulkDeleteOrdersMutation.isPending || bulkDuplicateOrdersMutation.isPending
+
+  const handleBulkDeleteOrders = () => {
+    if (selectedOrderIds.length === 0) return
+
+    const confirmed = window.confirm(
+      `Supprimer ${selectedOrderIds.length} commande(s) ? Cette action est définitive. Le stock des commandes déjà expédiées sera restitué.`
+    )
+    if (!confirmed) return
+
+    bulkDeleteOrdersMutation.mutate(selectedOrderIds)
+  }
+
+  const handleBulkDuplicateOrders = () => {
+    if (selectedOrderIds.length === 0) return
+
+    const confirmed = window.confirm(
+      `Dupliquer ${selectedOrderIds.length} commande(s) ? Les copies seront créées en statut « Nouvelle », sans colis ni numéro de suivi.`
+    )
+    if (!confirmed) return
+
+    bulkDuplicateOrdersMutation.mutate(selectedOrderIds)
+  }
+
   useEffect(() => {
     if (!rapidDeliveryIntegration || rapidDeliveryIntegration.status !== 'connected') return
     syncAllRapidDeliveryMutation.mutate()
@@ -2257,6 +2363,29 @@ export default function VentesPage() {
   const totalOrders = orders?.count || 0
   const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total_selling_price || 0), 0)
   const totalPages = Math.max(1, Math.ceil(totalOrders / PAGE_SIZE))
+
+  // Une commande qui sort de la liste (filtre, changement de page, store)
+  // ne doit plus rester sélectionnée.
+  useEffect(() => {
+    const visibleIds = new Set((filteredOrders || []).map((order: any) => String(order.id)))
+    setSelectedOrderIds((prev) => {
+      const next = prev.filter((id) => visibleIds.has(id))
+      if (next.length === prev.length) return prev
+      return next
+    })
+  }, [filteredOrders])
+
+  const allVisibleOrdersSelected =
+    filteredOrders.length > 0 &&
+    filteredOrders.every((order: any) => selectedOrderIds.includes(String(order.id)))
+
+  const toggleAllVisibleOrders = (checked: boolean) => {
+    if (checked) {
+      setSelectedOrderIds((filteredOrders || []).map((order: any) => String(order.id)))
+      return
+    }
+    setSelectedOrderIds([])
+  }
 
   const openRapidDeliveryModal = (order: any) => {
     setRapidDeliveryOrder(order)
@@ -4952,6 +5081,69 @@ export default function VentesPage() {
         </div>
       </div>
 
+      {/* Actions groupées */}
+      {selectedOrderIds.length > 0 ? (
+        <div className="bg-card rounded-xl shadow p-4 border border-primary/30">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-foreground">
+                {selectedOrderIds.length} commande{selectedOrderIds.length > 1 ? 's' : ''}{' '}
+                sélectionnée{selectedOrderIds.length > 1 ? 's' : ''}
+              </span>
+              {isBulkOrdersBusy ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Traitement...
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {canDuplicateOrders ? (
+                <button
+                  type="button"
+                  disabled={isBulkOrdersBusy}
+                  onClick={handleBulkDuplicateOrders}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border text-foreground px-3 py-2 text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Copy className="w-4 h-4" />
+                  Dupliquer
+                </button>
+              ) : null}
+
+              {canDeleteOrders ? (
+                <button
+                  type="button"
+                  disabled={isBulkOrdersBusy}
+                  onClick={handleBulkDeleteOrders}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 text-red-600 px-3 py-2 text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Supprimer
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                disabled={isBulkOrdersBusy}
+                onClick={() => setSelectedOrderIds([])}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+                Annuler la sélection
+              </button>
+            </div>
+          </div>
+
+          {!canDuplicateOrders && !canDeleteOrders ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Votre rôle permet de consulter les commandes, mais pas de les modifier ou de les
+              supprimer.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Orders Table */}
       <div className="bg-card rounded-xl shadow overflow-hidden">
         <div className="overflow-x-auto">
@@ -4964,6 +5156,15 @@ export default function VentesPage() {
               <table className="min-w-full divide-y divide-border text-xs sm:text-sm">
               <thead className="bg-secondary">
                 <tr>
+                  <th rowSpan={2} className="w-10 px-2 py-1.5 sm:py-3 text-center align-middle">
+                    <input
+                      type="checkbox"
+                      aria-label="Tout sélectionner"
+                      checked={allVisibleOrdersSelected}
+                      disabled={isBulkOrdersBusy}
+                      onChange={(e) => toggleAllVisibleOrders(e.target.checked)}
+                    />
+                  </th>
                   <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Commande</div>
                   </th>
@@ -5058,6 +5259,23 @@ export default function VentesPage() {
                     .filter(Boolean)
                   return (
                     <tr key={order.id} className="hover:bg-secondary/50">
+                      <td className="w-10 px-2 py-1.5 sm:py-3 align-top text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`Sélectionner la commande #${order.id.slice(0, 8)}`}
+                          checked={selectedOrderIds.includes(String(order.id))}
+                          disabled={isBulkOrdersBusy}
+                          onChange={(e) =>
+                            setSelectedOrderIds((prev) => {
+                              const id = String(order.id)
+                              if (e.target.checked) {
+                                return prev.includes(id) ? prev : [...prev, id]
+                              }
+                              return prev.filter((value) => value !== id)
+                            })
+                          }
+                        />
+                      </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
                         <div className="text-xs sm:text-sm font-medium text-foreground">#{order.id.slice(0, 8)}</div>
                         {order.tracking_number && (

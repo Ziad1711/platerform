@@ -8,7 +8,7 @@ import { detectStockMultiplier, normalizeStockMultiplier } from '@/lib/integrati
 import { buildUniqueProductSlug } from '@/lib/products/slug'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
-import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown, Copy } from 'lucide-react'
+import { Search, Filter, MoreVertical, Plus, ChevronRight, ChevronDown, Copy, Loader2, X } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -28,6 +28,7 @@ import {
 } from '@/components/dashboard/products/variant-editor'
 import { saveProductCatalog } from '@/lib/products/save-product-catalog'
 import { deleteManagedProductImages } from '@/lib/products/product-images'
+import { usePermissions } from '@/lib/auth/use-permissions'
 
 type VariantAttributeForm = {
   id?: string
@@ -174,6 +175,8 @@ const appendAttributeValues = (currentValues: string, incomingValues: string[]) 
 
 export default function ProduitsPage() {
   const { currentStoreId, accessibleStoreIds, accessibleStores: stores } = useStore()
+  const { can } = usePermissions(currentStoreId)
+  const canManageProducts = can('products.manage')
   const [search, setSearch] = useState('')
   const [stockFilter, setStockFilter] = useState<'all' | 'in_stock' | 'out_of_stock'>('all')
   const [publicationFilter, setPublicationFilter] = useState<'all' | PublicationStatus>('all')
@@ -967,6 +970,47 @@ export default function ProduitsPage() {
     },
   })
 
+  /**
+   * Action groupée : applique un statut de publication aux produits sélectionnés.
+   * RLS : un rôle sans droit d'écriture met à jour 0 ligne sans erreur — on le
+   * détecte pour prévenir l'utilisateur au lieu d'afficher un faux succès.
+   */
+  const bulkUpdatePublicationStatusMutation = useMutation({
+    mutationFn: async (status: PublicationStatus) => {
+      const ids = selectedProductIds.map((id) => String(id))
+      if (ids.length === 0) throw new Error('Aucun produit sélectionné.')
+
+      const { data, error } = await supabase
+        .from('products')
+        .update({ publication_status: status })
+        .in('id', ids)
+        .select('id')
+
+      if (error) throw error
+
+      const updated = (data || []).length
+      if (updated === 0) {
+        throw new Error("Vous n'avez pas les droits pour modifier ces produits.")
+      }
+
+      return { updated, requested: ids.length }
+    },
+    onSuccess: async ({ updated, requested }) => {
+      await queryClient.invalidateQueries({ queryKey: ['products'] })
+
+      if (updated < requested) {
+        toast(`Statut mis à jour sur ${updated} produit(s) sur ${requested}.`)
+      } else {
+        toast(`Statut mis à jour sur ${updated} produit(s).`)
+      }
+
+      setSelectedProductIds([])
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Erreur lors de la mise à jour groupée.')
+    },
+  })
+
   const filteredProducts = (products || []).filter((product) => {
     const stock = inventoryData?.[product.id] || 0
     if (publicationFilter !== 'all' && normalizePublicationStatus(product.publication_status) !== publicationFilter) {
@@ -990,6 +1034,33 @@ export default function ProduitsPage() {
 
   const allVisibleSelected =
     filteredProducts.length > 0 && filteredProducts.every((product) => selectedProductIds.includes(product.id))
+
+  const isBulkBusy =
+    bulkDeleteProductsMutation.isPending || bulkUpdatePublicationStatusMutation.isPending
+
+  const handleBulkStatusChange = (status: PublicationStatus) => {
+    if (selectedProductIds.length === 0) return
+
+    if (status === 'archived') {
+      const confirmed = window.confirm(
+        `Archiver ${selectedProductIds.length} produit(s) ? Ils seront retirés de la vente mais conservés pour l’historique des commandes.`
+      )
+      if (!confirmed) return
+    }
+
+    bulkUpdatePublicationStatusMutation.mutate(status)
+  }
+
+  const handleBulkDelete = () => {
+    if (selectedProductIds.length === 0) return
+
+    const confirmed = window.confirm(
+      `Supprimer ${selectedProductIds.length} produit(s) ? Les produits liés à des ventes ou à des entrées de stock seront refusés.`
+    )
+    if (!confirmed) return
+
+    bulkDeleteProductsMutation.mutate()
+  }
 
   const { data: variantStockData } = useQuery({
     queryKey: ['inventory-variant-movements', currentStoreId],
@@ -2201,6 +2272,7 @@ export default function ProduitsPage() {
                     <input
                       type="checkbox"
                       checked={allVisibleSelected}
+                      disabled={isBulkBusy}
                       onChange={(e) => {
                         if (e.target.checked) {
                           setSelectedProductIds(filteredProducts.map((product) => String(product.id)))
@@ -2268,6 +2340,7 @@ export default function ProduitsPage() {
                         <input
                           type="checkbox"
                           checked={selectedProductIds.includes(String(product.id))}
+                          disabled={isBulkBusy}
                           onChange={(e) => {
                             setSelectedProductIds((prev) => {
                               if (e.target.checked) {
@@ -2581,6 +2654,84 @@ export default function ProduitsPage() {
           )}
         </div>
       </div>
+
+      {/* Barre d'actions groupées : collée en bas, toujours visible sans remonter */}
+      {selectedProductIds.length > 0 ? (
+        <div className="sticky bottom-0 z-30 pt-2 pointer-events-none">
+          <div className="pointer-events-auto rounded-xl border border-[#1fa971]/40 bg-card/95 shadow-2xl shadow-black/10 backdrop-blur px-4 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-foreground">
+                  {selectedProductIds.length} produit{selectedProductIds.length > 1 ? 's' : ''}{' '}
+                  sélectionné{selectedProductIds.length > 1 ? 's' : ''}
+                </span>
+                {isBulkBusy ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Traitement...
+                  </span>
+                ) : null}
+              </div>
+
+              {/* sm:pr-16 laisse la place au bouton « retour en haut » flottant */}
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:pr-16">
+                {canManageProducts ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isBulkBusy}
+                      onClick={() => handleBulkStatusChange('active')}
+                      className="rounded-lg bg-[#1fa971] hover:bg-[#178a5a] text-white px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Publier
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isBulkBusy}
+                      onClick={() => handleBulkStatusChange('draft')}
+                      className="rounded-lg border border-border text-foreground px-3 py-2 text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Mettre en brouillon
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isBulkBusy}
+                      onClick={() => handleBulkStatusChange('archived')}
+                      className="rounded-lg border border-border text-foreground px-3 py-2 text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Archiver
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isBulkBusy}
+                      onClick={handleBulkDelete}
+                      className="rounded-lg border border-red-200 text-red-600 px-3 py-2 text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Supprimer
+                    </button>
+                  </>
+                ) : null}
+
+                <button
+                  type="button"
+                  disabled={isBulkBusy}
+                  onClick={() => setSelectedProductIds([])}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <X className="w-4 h-4" />
+                  Annuler
+                </button>
+              </div>
+            </div>
+
+            {!canManageProducts ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Votre rôle permet de consulter les produits, mais pas de les modifier.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
+import { resolveStoreIntegration } from '@/lib/integrations/delivery/resolve-store-integration'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { autoCreateMarocGoDeliveryParcelForOrder } from '@/lib/integrations/maroc-go-delivery-auto'
 import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
@@ -159,18 +160,13 @@ export async function POST(request: Request) {
 
     if (status === 'confirmed' && !trackingNumber && resolvedDeliveryCompanyId) {
       const admin = createAdminClient()
-      const [{ data: deliveryCompany }, { data: integration }] = await Promise.all([
+      const [{ data: deliveryCompany }, integration] = await Promise.all([
         supabase
           .from('delivery_companies')
           .select('id, name, api_provider')
           .eq('id', resolvedDeliveryCompanyId)
           .maybeSingle(),
-        supabase
-          .from('integrations')
-          .select('id, status')
-          .eq('user_id', user.id)
-          .eq('provider', 'rapid-delivery')
-          .maybeSingle(),
+        resolveStoreIntegration(supabase, 'rapid-delivery', order.store_id),
       ])
 
       let config: {
@@ -267,12 +263,11 @@ export async function POST(request: Request) {
 
       // Maroc Go Delivery auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'maroc-go-delivery') {
-        const { data: marocGoIntegration } = await supabase
-          .from('integrations')
-          .select('id, status')
-          .eq('user_id', user.id)
-          .eq('provider', 'maroc-go-delivery')
-          .maybeSingle()
+        const marocGoIntegration = await resolveStoreIntegration(
+          supabase,
+          'maroc-go-delivery',
+          order.store_id
+        )
 
         const { data: marocGoConfig, error: marocGoConfigError } = await supabase
           .from('maroc_go_delivery_configs')
@@ -347,15 +342,7 @@ export async function POST(request: Request) {
 
       // ForceLog auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'forcelog') {
-        const [{ data: flIntegration }] = await Promise.all([
-          supabase
-            .from('integrations')
-            .select('id, status')
-            .eq('user_id', user.id)
-            .eq('provider', 'forcelog')
-            .eq('store_id', order.store_id)
-            .maybeSingle(),
-        ])
+        const flIntegration = await resolveStoreIntegration(supabase, 'forcelog', order.store_id)
 
         if (flIntegration?.status === 'connected') {
           try {
@@ -384,15 +371,7 @@ export async function POST(request: Request) {
 
       // OZONE auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'ozone') {
-        const [{ data: ozoneIntegration }] = await Promise.all([
-          supabase
-            .from('integrations')
-            .select('id, status')
-            .eq('user_id', user.id)
-            .eq('provider', 'ozone')
-            .eq('store_id', order.store_id)
-            .maybeSingle(),
-        ])
+        const ozoneIntegration = await resolveStoreIntegration(supabase, 'ozone', order.store_id)
 
         if (ozoneIntegration?.status === 'connected') {
           try {
@@ -466,15 +445,7 @@ export async function POST(request: Request) {
 
       // Sendit auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'sendit') {
-        const [{ data: senditIntegration }] = await Promise.all([
-          supabase
-            .from('integrations')
-            .select('id, status')
-            .eq('user_id', user.id)
-            .eq('provider', 'sendit')
-            .eq('store_id', order.store_id)
-            .maybeSingle(),
-        ])
+        const senditIntegration = await resolveStoreIntegration(supabase, 'sendit', order.store_id)
 
         if (senditIntegration?.status === 'connected') {
           try {
@@ -540,15 +511,7 @@ export async function POST(request: Request) {
 
       // AMEEX auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'ameex') {
-        const [{ data: ameexIntegration }] = await Promise.all([
-          supabase
-            .from('integrations')
-            .select('id, status')
-            .eq('user_id', user.id)
-            .eq('provider', 'ameex')
-            .eq('store_id', order.store_id)
-            .maybeSingle(),
-        ])
+        const ameexIntegration = await resolveStoreIntegration(supabase, 'ameex', order.store_id)
 
         if (ameexIntegration?.status === 'connected') {
           try {
@@ -608,13 +571,11 @@ export async function POST(request: Request) {
 
       // Digylog auto-create
       if (!trackingNumber && deliveryCompany?.api_provider === 'digylog') {
-        const { data: digylogIntegration } = await supabase
-          .from('integrations')
-          .select('id, status')
-          .eq('user_id', user.id)
-          .eq('provider', 'digylog')
-          .eq('store_id', order.store_id)
-          .maybeSingle()
+        const digylogIntegration = await resolveStoreIntegration(
+          supabase,
+          'digylog',
+          order.store_id
+        )
 
         if (digylogIntegration?.status === 'connected') {
           try {

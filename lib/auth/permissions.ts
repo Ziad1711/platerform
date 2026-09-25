@@ -14,6 +14,10 @@ export type Permission =
   | 'sales.update_status'
   | 'sales.write'
   | 'sales.delete'
+  | 'confirmation.view'
+  | 'confirmation.process'
+  | 'confirmation.edit'
+  | 'confirmation.settings'
   | 'products.view'
   | 'products.manage'
   | 'stock.view'
@@ -46,6 +50,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   owner: [
     'dashboard.view',
     'sales.view','sales.update_status','sales.write','sales.delete',
+    'confirmation.view','confirmation.process','confirmation.edit','confirmation.settings',
     'products.view','products.manage',
     'stock.view','stock.manage',
     'suppliers.view','suppliers.manage',
@@ -62,6 +67,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: [
     'dashboard.view',
     'sales.view','sales.update_status','sales.write','sales.delete',
+    'confirmation.view','confirmation.process','confirmation.edit','confirmation.settings',
     'products.view','products.manage',
     'stock.view','stock.manage',
     'suppliers.view','suppliers.manage',
@@ -76,6 +82,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
   confirmation: [
     'sales.view','sales.update_status',
+    'confirmation.view','confirmation.process','confirmation.edit',
   ],
   delivery: [
     'delivery.view','delivery.manage',
@@ -119,6 +126,7 @@ export function hasPermission(role: Role | null, permission: Permission): boolea
 export const MENU_PERMISSIONS: Record<string, Permission[]> = {
   '/dashboard': ['dashboard.view'],
   '/sales': ['sales.view'],
+  '/confirmation': ['confirmation.view'],
   '/products': ['products.view'],
   '/stock': ['stock.view'],
   '/suppliers': ['suppliers.view'],
@@ -159,7 +167,7 @@ export const INVITABLE_ROLES: { value: Role; label: string }[] = [
 export function getFirstAllowedRoute(role: Role | null): string {
   if (!role) return '/dashboard'
   const routeMap: Partial<Record<Role, string>> = {
-    confirmation: '/sales',
+    confirmation: '/confirmation',
     delivery: '/delivery',
     stock_manager: '/products',
   }
