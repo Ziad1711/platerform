@@ -103,6 +103,11 @@ export default function ConfirmationOrderCard({
             Rappel prévu : {formatDateTime(order.next_callback_at)}
           </span>
         ) : null}
+        {order.confirmation_agents?.name ? (
+          <span className="rounded-full bg-secondary px-2 py-0.5 font-medium">
+            Agent : {order.confirmation_agents.name}
+          </span>
+        ) : null}
         {order.tracking_number ? (
           <span className="rounded-full bg-secondary px-2 py-0.5">Suivi : {order.tracking_number}</span>
         ) : null}

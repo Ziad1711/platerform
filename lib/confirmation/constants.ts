@@ -61,6 +61,9 @@ export const CONFIRMATION_EVENT_LABELS: Record<string, string> = {
   status_corrected: 'Statut corrigé',
   parcel_creation_succeeded: 'Colis créé',
   parcel_creation_failed: 'Échec création colis',
+  assigned: 'Assignée à un agent',
+  reassigned: 'Réassignée',
+  unassigned: 'Désassignée',
 }
 
 /** Libellé lisible d'un numéro d'appel, ex. « Appel 3 ». */

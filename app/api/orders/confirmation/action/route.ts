@@ -63,6 +63,7 @@ async function logParcelEvent(input: {
   storeId: string
   orderId: string
   userId: string
+  agentId: string | null
   status: string
   parcel: ParcelResult
 }) {
@@ -72,6 +73,7 @@ async function logParcelEvent(input: {
       store_id: input.storeId,
       order_id: input.orderId,
       actor_user_id: input.userId,
+      agent_id: input.agentId,
       event_type: input.parcel.created ? 'parcel_creation_succeeded' : 'parcel_creation_failed',
       from_status: input.status,
       to_status: input.status,
@@ -133,7 +135,7 @@ export async function POST(request: Request) {
 
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id, store_id, status, delivery_company_id, tracking_number')
+      .select('id, store_id, status, delivery_company_id, tracking_number, confirmation_agent_id')
       .eq('id', orderId)
       .maybeSingle()
 
@@ -246,6 +248,7 @@ export async function POST(request: Request) {
           storeId: order.store_id,
           orderId,
           userId: user.id,
+          agentId: order.confirmation_agent_id || null,
           status: String(result.status || 'confirmed'),
           parcel,
         })

@@ -8,8 +8,10 @@ export const CONFIRMATION_ORDER_SELECT = `
   delivery_note,
   confirmation_attempt_count, next_callback_at, confirmation_last_action_at,
   cancellation_reason_code, cancellation_note,
+  confirmation_agent_id, confirmation_agents(name),
+  confirmation_assigned_at, confirmation_assignment_source,
   delivery_companies(name),
-  order_items(product_id, product_variant_id, quantity, unit_selling_price, product_name_override, products(name))
+  order_items(product_id, product_variant_id, quantity, unit_selling_price, product_name_override, products(name, product_images(image_url, is_primary, sort_order)))
 `
 
 export const CONFIRMATION_FILTERS: ConfirmationQueueFilter[] = [

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { hasPermission, type Role } from '@/lib/auth/permissions'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { resolveStoreIntegration } from '@/lib/integrations/delivery/resolve-store-integration'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
@@ -43,6 +44,7 @@ const STATUS_DATE_FIELD_MAP: Record<string, string> = {
 export async function POST(request: Request) {
   try {
     const { supabase, user } = await requireAuthenticatedUser()
+    const admin = createAdminClient()
     const body = (await request.json().catch(() => ({}))) as {
       orderId?: string
       status?: string
@@ -105,7 +107,7 @@ export async function POST(request: Request) {
       .select(`
         id, store_id, status, city, address, phone, customer_name, total_selling_price,
         delivery_city_external_id,
-        delivery_company_id, tracking_number, delivery_status_source,
+        delivery_company_id, tracking_number, delivery_status_source, confirmation_agent_id,
         order_items(quantity, product_name_override, products(name))
       `)
       .eq('id', orderId)
@@ -116,7 +118,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'ORDER_NOT_FOUND' }, { status: 404 })
     }
 
-    await verifyStoreAccess(supabase, user.id, order.store_id)
+    const member = await verifyStoreAccess(supabase, user.id, order.store_id)
+    const role = member.role as Role
+    const canUpdateStatus =
+      hasPermission(role, 'sales.update_status') ||
+      hasPermission(role, 'delivery.manage') ||
+      hasPermission(role, 'confirmation.process')
+
+    if (!canUpdateStatus) {
+      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
+
+    // Un agent de confirmation ne peut passer que ses propres commandes à « confirmed ».
+    if (role === 'confirmation') {
+      if (status !== 'confirmed') {
+        return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+      }
+      const { data: agent } = await supabase
+        .from('confirmation_agents')
+        .select('id')
+        .eq('store_id', order.store_id)
+        .eq('member_id', member.id)
+        .maybeSingle()
+      const agentId = agent?.id ? String(agent.id) : null
+      if (!agentId || String(order.confirmation_agent_id || '') !== agentId) {
+        return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+      }
+    }
 
     // Le statut reste toujours corrigeable manuellement, même pour une commande
     // suivie par un transporteur (rattrapage d'une erreur de statut) : le client
@@ -147,7 +175,7 @@ export async function POST(request: Request) {
       updatePayload[statusDateField] = now
     }
 
-    const { error: updateError } = await supabase.from('orders').update(updatePayload).eq('id', orderId)
+    const { error: updateError } = await admin.from('orders').update(updatePayload).eq('id', orderId)
     if (updateError) throw updateError
 
     let warning = ''
@@ -159,7 +187,6 @@ export async function POST(request: Request) {
       : (deliveryCompanyId || order.delivery_company_id)
 
     if (status === 'confirmed' && !trackingNumber && resolvedDeliveryCompanyId) {
-      const admin = createAdminClient()
       const [{ data: deliveryCompany }, integration] = await Promise.all([
         supabase
           .from('delivery_companies')

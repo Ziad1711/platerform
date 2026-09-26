@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id, store_id, status, tracking_number, city, delivery_city_external_id')
+      .select('id, store_id, status, tracking_number, city, delivery_city_external_id, confirmation_agent_id')
       .eq('id', orderId)
       .maybeSingle()
 
@@ -76,6 +76,20 @@ export async function POST(request: Request) {
     const member = await verifyStoreAccess(supabase, user.id, order.store_id)
     if (!hasPermission(member.role as Role, 'confirmation.edit')) {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
+
+    // Périmètre agent : un agent ne modifie que sa commande assignée.
+    if (member.role === 'confirmation') {
+      const { data: agent } = await supabase
+        .from('confirmation_agents')
+        .select('id')
+        .eq('store_id', order.store_id)
+        .eq('member_id', member.id)
+        .maybeSingle()
+      const agentId = agent?.id ? String(agent.id) : null
+      if (!agentId || String(order.confirmation_agent_id || '') !== agentId) {
+        return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+      }
     }
 
     // Garde-fou serveur : on ne modifie pas une commande déjà traitée ou déjà
@@ -91,23 +105,6 @@ export async function POST(request: Request) {
     const delivery = body.delivery || null
 
     const providedCityKey = customer ? toNullableNumber(customer.cityKey) : null
-    const nextCity = customer ? toNullableText(customer.city) : null
-
-    // La ville a changé mais aucune clé transporteur n'a été résolue : on efface
-    // l'ancienne clé pour que le transporteur recalcule la bonne ville lors de la
-    // création du colis. Sans cela, le colis partirait vers l'ancienne ville.
-    if (
-      nextCity &&
-      nextCity.toLowerCase() !== String(order.city || '').trim().toLowerCase() &&
-      providedCityKey === null
-    ) {
-      const { error: clearCityKeyError } = await supabase
-        .from('orders')
-        .update({ delivery_city_external_id: null })
-        .eq('id', orderId)
-
-      if (clearCityKeyError) throw clearCityKeyError
-    }
 
     let items: unknown = null
     if (body.items !== undefined && body.items !== null) {

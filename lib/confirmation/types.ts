@@ -38,6 +38,10 @@ export type ConfirmationOrder = {
   confirmation_last_action_at: string | null
   cancellation_reason_code: string | null
   cancellation_note: string | null
+  confirmation_agent_id: string | null
+  confirmation_agents?: { name: string | null } | null
+  confirmation_assigned_at: string | null
+  confirmation_assignment_source: string | null
   /** Avertissement calculé côté serveur, informatif uniquement. */
   is_blacklisted?: boolean
   delivery_companies?: { name: string | null } | null
@@ -47,7 +51,14 @@ export type ConfirmationOrder = {
     quantity: number | null
     product_name_override: string | null
     unit_selling_price: number | null
-    products: { name: string | null } | null
+    products: {
+      name: string | null
+      product_images: Array<{
+        image_url: string | null
+        is_primary: boolean | null
+        sort_order: number | null
+      }> | null
+    } | null
   }> | null
 }
 

@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id, store_id')
+      .select('id, store_id, confirmation_agent_id')
       .eq('id', orderId)
       .maybeSingle()
 
@@ -33,6 +33,20 @@ export async function GET(request: Request) {
     const member = await verifyStoreAccess(supabase, user.id, order.store_id)
     if (!hasPermission(member.role as Role, 'confirmation.view')) {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
+
+    // Périmètre agent : un agent ne consulte que l'historique de ses commandes.
+    if (member.role === 'confirmation') {
+      const { data: agent } = await supabase
+        .from('confirmation_agents')
+        .select('id')
+        .eq('store_id', order.store_id)
+        .eq('member_id', member.id)
+        .maybeSingle()
+      const agentId = agent?.id ? String(agent.id) : null
+      if (!agentId || String(order.confirmation_agent_id || '') !== agentId) {
+        return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+      }
     }
 
     const { data: events, error: eventsError } = await supabase
