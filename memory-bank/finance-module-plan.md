@@ -363,12 +363,21 @@ plus anciens — hors périmètre).
   seule » (`20260916_*`, `20260430_*`, `20260611_*`…) absent tel quel de
   l'historique distant. Inchangé volontairement ; à traiter séparément si un
   `db push` complet est un jour utilisé.
-- **Vérification en base (26/09/2026)** : `select version, name from
-  supabase_migrations.schema_migrations order by version desc limit 20` renvoie
-  exactement les 17 couples retenus (version `20260926185429` incluse, avec son
-  nom « pollué »). Dépôt et historique distant coïncident donc pour ce module :
-  **aucun `supabase db push` n'est requis**, et il ne faut pas en lancer tant que
-  le point ci-dessus (72 fichiers « date seule ») n'est pas traité.
+- **Contenu appliqué vérifié (26/09/2026, lecture seule)** : les 11 fonctions du
+  module existent avec les signatures attendues (`rpc_finance_overview`,
+  `rpc_finance_agent_balances`, `rpc_finance_supplier_balances`,
+  `rpc_finance_agent_orders`, `rpc_finance_supplier_purchases`,
+  `rpc_record_agent_payment`, `rpc_record_supplier_payment`,
+  `rpc_record_supplier_purchase`, `can_view_store_finances`,
+  `can_record_store_payments`, `finance_business_timezone`), toutes en
+  `search_path=public` ; le trigger `trg_stores_block_financial_history`
+  (`block_store_delete_with_financial_history`) est bien en `SECURITY DEFINER` ;
+  `anon` n'a `EXECUTE` sur aucune d'elles, et `finance_business_timezone` est
+  refusée aussi à `authenticated`. **Réserve assumée** : 8 des 17 fichiers SQL se
+  terminent par une ligne vide (`git diff --check` les signale). Ils n'ont **pas**
+  été réécrits volontairement : les migrations sont déjà appliquées et l'égalité de
+  contenu avec ce qui a été exécuté prime sur ce détail cosmétique. Aucun impact
+  SQL, mais l'avertissement réapparaîtra à chaque `git diff --check`.
 
 
 ---
