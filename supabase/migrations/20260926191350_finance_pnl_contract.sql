@@ -1,0 +1,194 @@
+-- ============================================================
+-- Finance — Lot B : contrat de calcul du résultat opérationnel
+-- ------------------------------------------------------------
+-- 1. Publicité : arbitrage PAR JOUR (et non par période).
+--    - Un jour couvert par au moins une ligne `ad_spend_daily` utilise
+--      cette source, même si le montant du jour vaut 0 : la ligne prouve
+--      que la journée est suivie.
+--    - Les jours NON couverts utilisent le repli `orders.ads_cost_allocated`
+--      (publicité importée historiquement avec le CSV ventes), limité aux
+--      commandes de ces journées.
+--    => plus de double comptage possible, et plus aucune journée suivie
+--       perdue (l'ancien repli prenait le total de la période entière).
+-- 2. Commandes livrées sans `order_items` :
+--    - le CA connu (`total_selling_price`) est repris dans « CA estimé »,
+--      jamais perdu ;
+--    - la commande est comptée dans `estimated_orders` et le résultat n'est
+--      plus annoncé comme fiable (`result_is_reliable = false`).
+-- 3. Les charges de catégorie « ads » restent comptées dans « autres charges »
+--    (décision assumée de la migration 20260926190005) mais sont désormais
+--    exposées séparément (`ads_expense_overlap`) : risque de double comptage
+--    avec la ligne « Publicité » signalé dans l'interface, aucun montant
+--    déduit en silence.
+-- 4. Ventes reconnues à la livraison (`coalesce(delivered_at, order_date)`),
+--    comme la migration 20260926190005.
+--
+-- Le contrat de calcul est décrit dans `memory-bank/finance-module-plan.md` (§4).
+-- ============================================================
+
+drop function if exists public.rpc_finance_overview(uuid, timestamptz, timestamptz);
+
+create or replace function public.rpc_finance_overview(
+  p_store_id uuid,
+  p_start_date timestamptz default null,
+  p_end_date timestamptz default null
+)
+returns table (
+  store_id uuid,
+  currency text,
+  revenue numeric,
+  revenue_reliable numeric,
+  revenue_estimated numeric,
+  cost_of_goods numeric,
+  delivery_cost numeric,
+  ad_spend numeric,
+  ad_spend_daily numeric,
+  ads_from_orders numeric,
+  ads_daily_days bigint,
+  ads_fallback_days bigint,
+  ads_fallback_orders bigint,
+  commission numeric,
+  other_expenses numeric,
+  ads_expense_overlap numeric,
+  ads_expense_overlap_count bigint,
+  operating_result numeric,
+  delivered_orders bigint,
+  estimated_orders bigint,
+  data_issues bigint,
+  result_is_reliable boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with delivered_orders as (
+    select o.*
+    from public.orders o
+    where o.store_id = p_store_id
+      and o.status = 'delivered'
+      and (p_start_date is null or coalesce(o.delivered_at, o.order_date) >= p_start_date)
+      and (p_end_date is null or coalesce(o.delivered_at, o.order_date) < p_end_date)
+  ),
+  order_item_totals as (
+    select
+      oi.order_id,
+      sum(coalesce(oi.quantity, 0) * coalesce(oi.unit_selling_price, 0))::numeric as item_revenue,
+      sum(coalesce(oi.quantity, 0) * coalesce(oi.unit_purchase_cost_snapshot, 0))::numeric as item_purchase_cost
+    from public.order_items oi
+    join delivered_orders d on d.id = oi.order_id
+    group by oi.order_id
+  ),
+  revenue_base as (
+    select
+      -- CA fiable : somme des lignes produits.
+      coalesce(sum(case when oit.order_id is not null then coalesce(oit.item_revenue, 0) else 0 end), 0)::numeric as revenue_reliable,
+      -- CA estimé : total de la commande quand les lignes manquent (jamais perdu, jamais présenté comme fiable).
+      coalesce(sum(case when oit.order_id is null then coalesce(d.total_selling_price, 0) else 0 end), 0)::numeric as revenue_estimated,
+      -- Coût produit : lignes si présentes, sinon `buy_price` (valeur à vérifier).
+      coalesce(sum(coalesce(oit.item_purchase_cost, d.buy_price, 0)), 0)::numeric as cogs,
+      coalesce(sum(coalesce(d.delivery_fee, 0)), 0)::numeric as delivery,
+      coalesce(sum(coalesce(d.confirmation_cost_allocated, 0)), 0)::numeric as commission,
+      count(d.id)::bigint as delivered,
+      count(d.id) filter (where oit.order_id is null)::bigint as estimated_orders,
+      count(d.id) filter (
+        where oit.order_id is null
+           or abs(coalesce(oit.item_revenue, 0) - coalesce(d.total_selling_price, 0)) > 0.01
+           or (coalesce(oit.item_purchase_cost, d.buy_price, 0) = 0 and coalesce(oit.item_revenue, 0) > 0)
+      )::bigint as data_issues
+    from delivered_orders d
+    left join order_item_totals oit on oit.order_id = d.id
+  ),
+  -- Journées suivies par le suivi publicitaire quotidien (clé de journée en UTC,
+  -- cohérente avec `ad_spend_daily.spend_date` stocké au début de journée).
+  ads_days_tracked as (
+    select
+      date_trunc('day', a.spend_date) as day,
+      sum(coalesce(a.spend_converted, a.spend, 0))::numeric as day_total
+    from public.ad_spend_daily a
+    where a.store_id = p_store_id
+      and (p_start_date is null or a.spend_date >= p_start_date)
+      and (p_end_date is null or a.spend_date < p_end_date)
+    group by 1
+  ),
+  ads_daily_totals as (
+    select
+      coalesce(sum(day_total), 0)::numeric as total,
+      count(*)::bigint as days
+    from ads_days_tracked
+  ),
+  ads_orders as (
+    select
+      coalesce(o.ads_cost_allocated, 0)::numeric as ads_cost,
+      date_trunc('day', o.order_date) as day,
+      exists (
+        select 1 from ads_days_tracked ad where ad.day = date_trunc('day', o.order_date)
+      ) as day_tracked
+    from public.orders o
+    where o.store_id = p_store_id
+      and (p_start_date is null or o.order_date >= p_start_date)
+      and (p_end_date is null or o.order_date < p_end_date)
+  ),
+  ads_fallback_totals as (
+    select
+      coalesce(sum(case when not day_tracked then ads_cost else 0 end), 0)::numeric as total,
+      count(*) filter (where not day_tracked and ads_cost <> 0)::bigint as orders,
+      count(distinct day) filter (where not day_tracked)::bigint as days
+    from ads_orders
+  ),
+
+  other_exp as (
+    select coalesce(sum(coalesce(e.amount, 0)), 0)::numeric as total
+    from public.expenses e
+    where e.store_id = p_store_id
+      and e.status = 'active'
+      and (p_start_date is null or e.expense_date >= p_start_date)
+      and (p_end_date is null or e.expense_date < p_end_date)
+  ),
+  -- Charges déjà rangées en « Publicité » côté Dépenses : elles restent comptées
+  -- dans « autres charges », mais sont signalées pour éviter un double comptage.
+  ads_expense_overlap as (
+    select
+      coalesce(sum(coalesce(e.amount, 0)), 0)::numeric as total,
+      count(*)::bigint as cnt
+    from public.expenses e
+    left join public.expense_categories c on c.id = e.category_id
+    where e.store_id = p_store_id
+      and e.status = 'active'
+      and coalesce(c.type, '') = 'ads'
+      and (p_start_date is null or e.expense_date >= p_start_date)
+      and (p_end_date is null or e.expense_date < p_end_date)
+  )
+  select
+    p_store_id,
+    (select s.currency from public.stores s where s.id = p_store_id),
+    (r.revenue_reliable + r.revenue_estimated)::numeric as revenue,
+    r.revenue_reliable,
+    r.revenue_estimated,
+    r.cogs,
+    r.delivery,
+    (dt.total + fb.total)::numeric as ad_spend,
+    dt.total as ad_spend_daily,
+    fb.total as ads_from_orders,
+    dt.days as ads_daily_days,
+    fb.days as ads_fallback_days,
+    fb.orders as ads_fallback_orders,
+    r.commission,
+    oe.total as other_expenses,
+    ao.total as ads_expense_overlap,
+    ao.cnt as ads_expense_overlap_count,
+    ((r.revenue_reliable + r.revenue_estimated) - r.cogs - r.delivery - (dt.total + fb.total) - r.commission - oe.total)::numeric as operating_result,
+    r.delivered,
+    r.estimated_orders,
+    r.data_issues,
+    (r.estimated_orders = 0 and r.data_issues = 0) as result_is_reliable
+  from revenue_base r
+  cross join ads_daily_totals dt
+  cross join ads_fallback_totals fb
+  cross join other_exp oe
+  cross join ads_expense_overlap ao
+  where public.can_view_store_finances(p_store_id);
+$$;
+
+revoke all on function public.rpc_finance_overview(uuid, timestamptz, timestamptz) from public;
+grant execute on function public.rpc_finance_overview(uuid, timestamptz, timestamptz) to authenticated;
