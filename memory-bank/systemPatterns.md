@@ -157,8 +157,9 @@ Order Profit =
 1. User signs up/logs in via Supabase Auth
 2. Profile created automatically (trigger)
 3. Session stored in cookies (SSR-compatible)
-4. Middleware checks auth on protected routes
-5. Redirect to /dashboard if authenticated
+4. `app/(app)/layout.tsx` (Server Component) calls `getServerUser()` and redirects to `/login` when there is no session — this is the actual route blocking; the returned identity is always verified by the Auth API (`getUser()`, fallback `getUser(access_token)`), never trusted from a locally decoded cookie
+5. `middleware.ts` does NOT block anonymous users: its permission block is guarded by `if (sessionUser && isProtectedAppRoute(pathname))`, then checks `current-store-id` + `hasPermission` and redirects to `getFirstAllowedRoute`. Its `sessionUser` (which may come from `getSession()`) is only used to pick a redirect target — data access is authorized by RLS with the real JWT, never by that value
+6. Login/signup pages redirect to `/dashboard` if already authenticated
 
 #### Initial Onboarding Flow
 ```text

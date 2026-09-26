@@ -15,7 +15,9 @@
 - [x] Registration page
 - [x] Dedicated professional signup page `/signup`
 - [x] Session management (SSR-compatible)
-- [x] Middleware for route protection
+- [x] Server-side auth guard in `app/(app)/layout.tsx` (`getServerUser()` + `redirect('/login')`)
+- [x] Server-side identity always verified by the Auth API: `getServerUser()` uses `getUser()`, then `getUser(access_token)` as fallback (`lib/supabase/server.ts`) — `getSession().user` (local cookie decode, unverified signature) is no longer trusted
+- [x] Middleware permission guards for logged-in users (`isProtectedAppRoute` + `hasPermission`, redirect to `getFirstAllowedRoute`)
 - [x] Automatic redirect to dashboard after login
 - [x] Logout functionality
 - [x] First-store onboarding modal after account creation/login when user has no store
@@ -164,7 +166,39 @@
 - [x] `lib/products/variant-sync.ts` supprimé (remplacé par la RPC transactionnelle)
 - [x] Vérifié en réel (transactions annulées) : création produit + 2 variantes + images, payload partiel (slug/présence conservés), galerie vidée (`image_url` recalculé), catégorie d'un autre store refusée
 
-## What's Left to Build
+### ✅ Module Finances v1 — Lot A (durcissement)
+- [x] `delete_store` refuse la suppression d'un store possédant un historique financier (`supplier_purchases`, `supplier_payments`, `confirmation_agent_payments`) → erreur `STORE_HAS_FINANCIAL_HISTORY` — migration `20260926183753_finance_block_store_delete.sql`
+- [x] Trigger `trg_stores_block_financial_history` (`BEFORE DELETE` sur `public.stores`, fonction `block_store_delete_with_financial_history()` en `SECURITY DEFINER` pour ne pas dépendre des droits/RLS de l'appelant) → la protection s'applique même en suppression directe ou via `service_role` — migration `20260926185429_20260926190008_finance_store_delete_trigger.sql`
+- [x] `DELETE /api/stores/[id]` : RPC appelé via le **client lié à l'utilisateur** (`getServerClient`) car le contrôle propriétaire du RPC repose sur `auth.uid()` (l'appel en service-role ne pouvait pas le résoudre) ; mapping 403 / 409 / 500
+- [x] `/finances` protégé côté serveur : helper `requireAnyPermission(permission)` (`lib/auth/require-permission.ts`, propriété via `stores.owner_user_id` ou appartenance active) ; UI interactive dans `components/dashboard/finance/finance-client.tsx`
+- [x] Vérifié en base, transactions annulées (aucune donnée persistée) : suppression bloquée quand un achat fournisseur existe, suppression normale autorisée, propriétaire autorisé / non-propriétaire refusé ; `npx tsc --noEmit` sans erreur
+- [ ] Lots C–E du plan finances (vue « À vérifier », rapprochement publicité/dépenses, alignement dashboard) — cf. `memory-bank/finance-module-plan.md`
+
+### ✅ Module Finances v1 — Lot B (contrat de calcul du résultat opérationnel)
+- [x] Publicité : arbitrage **par jour** — journée suivie par `ad_spend_daily` (même si le montant vaut 0), sinon repli sur `orders.ads_cost_allocated` **de cette journée** (fini le repli sur le total de période) — migration `20260926191350_finance_pnl_contract.sql`
+- [x] Commandes livrées sans `order_items` : CA repris de `total_selling_price` dans `revenue_estimated`, comptées dans `estimated_orders`, résultat marqué non fiable (`result_is_reliable = false`) au lieu d'un CA perdu
+- [x] Composantes exposées : `revenue_reliable` / `revenue_estimated`, `ad_spend_daily` / `ads_from_orders` (+ jours suivis / jours en repli), `ads_expense_overlap` (charges de catégorie « ads » toujours comptées dans Autres charges mais signalées : risque de double comptage)
+- [x] UI `components/dashboard/finance/pnl-overview.tsx` : sous-ligne par composante, badges « Estimé » / « À vérifier », colonne **Fiabilité** en mode « Tous les stores »
+- [x] Vérifié en base (transactions annulées) : ziilart 61 598,93 (suivi quotidien) + 706,15 (repli sur 41 jours non suivis) = 62 305,08 ; CA estimé 767 sur 3 commandes → non fiable ; période janv. 2025 recalculée indépendamment (2 351,70 et 44 livrées) ; magasin sans suivi quotidien = repli total ; magasin hors droits = 0 ligne ; `npx tsc --noEmit` OK
+
+### ✅ Module Finances v1 — Lot B (suite) : fuseau d'affaires & privilèges
+- [x] **Fuseau d'affaires explicite** : `public.finance_business_timezone()` = `Africa/Casablanca` (fonction interne, `search_path` épinglé, appel unique pour toutes les clés de journée) — migrations `20260926192926_finance_pnl_timezone.sql` et `20260926193328_finance_timezone_search_path.sql`
+- [x] **Correction d'un double comptage réel** : les clés de journée de l'arbitrage publicitaire étaient calculées en UTC alors que l'interface envoie des bornes locales → une commande passée entre 00:00 et 01:00 (heure marocaine) tombait dans la journée UTC précédente et son `ads_cost_allocated` était recompté en repli. Mesuré puis corrigé : repli total 706,15 → 141,37 MAD sur le store principal (`ziilart`), soit **564,78 MAD de publicité comptée deux fois en moins** (1 commande en repli au lieu de 8)
+- [x] **Règle des journées coupées** : `ad_spend_daily` étant une donnée de journée entière, la fenêtre publicitaire (suivi **et** repli) est élargie aux journées locales complètes touchées par la période ; aucune asymétrie en bord de période, aucun prorata silencieux
+- [x] Nouvelle colonne `ads_partial_days` : nombre de journées suivies seulement partiellement couvertes par la période (comptées en entier) — signalée sous la ligne Publicité dans `pnl-overview.tsx`
+- [x] **Privilèges** : `anon` retiré nommément de toutes les fonctions du module (`rpc_finance_*`, `rpc_record_*`, `can_view_store_finances`, `can_record_store_payments`) — migration `20260926192933_finance_rpc_grants.sql`. Les privilèges par défaut du schéma `public` accordent EXECUTE à `anon`/`authenticated`/`service_role` à chaque création de fonction : un `revoke ... from public` seul ne suffit pas
+- [x] Vérifié en base : RPC appelée sous JWT simulé (propriétaire du store) — période alignée 10/06→20/06 (3 274,80 · 10 jours · 0 jour partiel), période débutant à 12:00 (même montant, `ads_partial_days = 1`), bornes décalées UTC (11 jours, 2 partiels) ; ACL `anon` absente partout ; garde `can_view_store_finances` toujours active (0 ligne sans JWT) ; `npx tsc --noEmit` OK
+
+### ✅ Module Finances v1 — Phase 3 (actions de paiement dans l'UI existante)
+- [x] **Personnel `/staff`** : nouveau bloc « Règlements des agents de confirmation » — colonnes *Acquis / Versé / Restant* par agent (`rpc_finance_agent_balances`), ligne *Total*, historique des 10 derniers versements (`confirmation_agent_payments`, protégé par la RLS `can_view_store_finances`) et bouton « Enregistrer un versement » → `components/dashboard/staff/confirmation-agents-payments.tsx`
+- [x] **Fournisseurs `/suppliers`** : colonnes *Dû / Payé / Restant* par fournisseur (`rpc_finance_supplier_balances`), détail par achat dépliable (*dû − payé = reste* facture par facture, `rpc_finance_supplier_purchases`) → `components/dashboard/finance/supplier-purchases-detail.tsx`, et actions « Achat » / « Payer » réutilisant `SupplierPurchaseDialog` / `SupplierPaymentDialog`
+- [x] **Store explicite obligatoire** : aucun bouton de paiement en mode « Tous les stores » (`canRecordPayment = finance.payments && currentStoreId`) ; colonnes financières, détail et actions réservés à `finance.view` (les autres rôles gardent la colonne Actions inchangée)
+- [x] Vérifié en base sous JWT simulé (transaction annulée) — **agents** : 2 commandes à 100 → versements 50 (30+20) puis 40 → *acquis 200 · versé 90 · restant 110*, détail par commande 30 + 80 = 110, trop-versé bloqué (`ALLOCATION_EXCEEDS_REMAINING`) ; **fournisseurs** : achats 1 000 + 500 → paiements 400 (300+100) puis 200 → *dû 1 500 · payé 600 · restant 900*, détail par facture 500 + 400 = 900, trop-payé bloqué
+- [x] `npx tsc --noEmit` et `next build` sans erreur ; serveur de dev relancé sur `localhost:3000`
+- [ ] **BLOQUÉ** — les **avances fournisseur ne sont pas représentables** : `rpc_record_supplier_payment` impose `somme(imputations) = montant` (`ALLOCATION_TOTAL_MISMATCH`, dernière définition `20260926182058:268`, aucune redéfinition postérieure), donc aucune colonne « Avances » n'a été affichée et le cas limite §8.4 du plan reste ouvert. Décision de gestion requise avant toute écriture
+- [x] ~~`rpc_finance_agent_balances` / `rpc_finance_supplier_balances` sans contrôle de rôle ni de statut~~ — **constat périmé, vérifié en base** : ces RPC (`20260926180201:37,78`) appellent `public.can_view_store_finances(store_id)`, helper qui exige `status = 'active'` **et** `role in ('owner','admin','accountant')` (`20260926174248:6–19`). La garde en base n'est donc **pas** plus permissive que l'UI ; `20260926192933_finance_rpc_grants.sql` ne fait que retirer `anon` (aucun corps de fonction réécrit)
+
+
 
 ### 🔄 Phase 2 (In Progress)
 
@@ -366,9 +400,10 @@
 ## Known Issues
 
 ### Critical
-- Build global bloqué par une erreur hors scope Rapid Delivery sur `/dashboard/fournisseurs` (`useSearchParams()` sans suspense boundary)
+- Aucun blocage connu au 26/09/2026 : le build de production passe (`next build` OK, 137 pages) et le `PATCH /api/stores/[id]` est désormais contrôlé — cf. *Recently Resolved*.
 
 ### Medium
+- Next 16 signale que la convention `middleware.ts` est **dépréciée** au profit de `proxy` (avertissement de build, non bloquant) : migrer sans changer la logique (permissions des utilisateurs connectés uniquement, le blocage anonyme reste dans `app/(app)/layout.tsx`)
 - Rendu SSR neutralisé par `StoreProvider` (`lib/store-context.tsx`) : tant que `localStorage` n'est pas lu côté client, le provider affiche un spinner à la place de `children`. Le HTML initial ne contient donc aucun contenu de page (spinner plein écran), sur toutes les routes y compris publiques → limite SEO et délai perçu. Corrections possibles : rendre le blocage client-only (skeleton non bloquant), ou sortir les pages publiques (`(marketing)`, `(documentation)`) du `StoreProvider`.
 - `CRON_SECRET` doit être défini dans Vercel pour activer la synchronisation Facebook Ads automatique (sinon `/api/cron/facebook-ads-sync` répond 503)
 - No error boundaries implemented
@@ -377,6 +412,10 @@
 - Missing toast notifications
 
 ### Recently Resolved
+- **Build global débloqué** : l'erreur Rapid Delivery (`useSearchParams()` sans boundary) bloquait le build ; la page `/suppliers` (ex-`/dashboard/fournisseurs`) encapsule maintenant son contenu dans un `<Suspense>` — `npm run build` passe, 137 pages générées, aucune erreur
+- **`PATCH /api/stores/[id]` : contrôle d'accès ajouté** — la route écrivait via le client service-role après un simple `requireAuth()` : n'importe quel utilisateur connecté pouvait renommer un store étranger ou changer sa devise. `assertCanUpdateStore()` exige désormais le propriétaire (`stores.owner_user_id`) ou un membre **actif** dont le rôle porte `stores.update` (owner/admin) ; réponses 401 / 403 / 404. Le `DELETE` du même fichier appelle `delete_store` via le client lié à l'utilisateur (`auth.uid()`) et renvoie 409 `STORE_HAS_FINANCIAL_HISTORY`
+- **Affichage des montants** : `formatCurrency()` passe de 0 à **2 décimales** (les centimes étaient masqués, incohérent avec les registres de paiement qui enregistrent des montants partiels)
+- **Auth (identité serveur non vérifiée)** : quand `getUser()` échouait, `getServerUser()` renvoyait `getSession().user` — un simple décodage local du cookie, sans vérification de signature : un cookie forgé pouvait donc se faire passer pour une session dans `app/(app)/layout.tsx`, `dashboard`, `login` et `signup`. Le repli relit désormais uniquement le **jeton d'accès** et le soumet à l'API Auth (`getUser(access_token)`, `GET /user` en Bearer) : la confiance aveugle au cookie disparaît et le repli reste une seconde tentative **vérifiée** — sa justification d'origine (« incohérences de cookies SSR, notamment Safari ») n'est ni documentée ni reproduite, elle n'est donc plus présentée comme un correctif
 - Historical CSV ad costs were being reset by automatic allocation when `ad_spend_daily` had no rows for a day
 - Marketing chart was empty when only `orders.ads_cost_allocated` was populated
 - Marketing KPI "Dépense publicitaire" was empty for historical imported data

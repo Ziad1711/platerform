@@ -77,7 +77,7 @@ platerform/
 ├── hooks/                 # Custom React hooks (planned)
 ├── types/                 # TypeScript types (planned)
 ├── memory-bank/          # Project documentation
-├── middleware.ts         # Next.js middleware (auth)
+├── middleware.ts         # Next.js middleware (permission guards for logged-in users only)
 ├── tailwind.config.ts    # Tailwind configuration
 ├── tsconfig.json         # TypeScript configuration
 └── package.json          # Dependencies
@@ -100,7 +100,8 @@ platerform/
 
 ### Security Requirements
 - Row Level Security (RLS) on all Supabase tables
-- Server-side authentication checks via middleware
+- Server-side authentication via `getServerUser()` + `redirect('/login')` in `app/(app)/layout.tsx` (`middleware.ts` does not handle auth)
+- Server-side identity is always verified by the Auth API: `getServerUser()` calls `getUser()`, then falls back to `getUser(access_token)` re-read from the cookie (`lib/supabase/server.ts`) — never `getSession().user`, which only decodes the cookie locally (`middleware.ts` line 29 still uses `getSession()` as a redirect hint, but that value only picks a navigation target, it never authorizes data — RLS does)
 - Secure session management with httpOnly cookies
 - Input validation on both client and server
 - No sensitive data in client-side code
