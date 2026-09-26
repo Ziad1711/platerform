@@ -111,6 +111,7 @@ export default function OrderEditDialog({ open, order, onClose, onSaved }: Order
           quantity: Number(item.quantity || 1),
           unitSellingPrice: Number(item.unit_selling_price || 0),
           productNameOverride: item.product_name_override || null,
+          itemType: item.item_type || 'product',
         }))
     )
   }, [open, order])
@@ -180,6 +181,7 @@ export default function OrderEditDialog({ open, order, onClose, onSaved }: Order
               quantity: Number(item.quantity),
               unitSellingPrice: Number(item.unitSellingPrice),
               productNameOverride,
+              itemType: item.itemType || 'product',
             }
           }),
         }),

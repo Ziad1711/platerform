@@ -17,6 +17,9 @@ type FormState = {
   autoCancelOnMaxAttempts: boolean
   requireCancellationReason: boolean
   requireCallbackDatetime: boolean
+  commissionEnabled: boolean
+  defaultCommissionAmount: number
+  defaultCommissionTrigger: 'confirmed' | 'delivered'
 }
 
 const DEFAULT_FORM: FormState = {
@@ -24,6 +27,9 @@ const DEFAULT_FORM: FormState = {
   autoCancelOnMaxAttempts: true,
   requireCancellationReason: true,
   requireCallbackDatetime: true,
+  commissionEnabled: false,
+  defaultCommissionAmount: 0,
+  defaultCommissionTrigger: 'delivered',
 }
 
 function Toggle({
@@ -84,6 +90,10 @@ export default function ConfirmationSettingsSection() {
       autoCancelOnMaxAttempts: settings.auto_cancel_on_max_attempts !== false,
       requireCancellationReason: settings.require_cancellation_reason !== false,
       requireCallbackDatetime: settings.require_callback_datetime !== false,
+      commissionEnabled: settings.commission_enabled === true,
+      defaultCommissionAmount: Number(settings.default_commission_amount || 0),
+      defaultCommissionTrigger:
+        settings.default_commission_trigger === 'confirmed' ? 'confirmed' : 'delivered',
     })
   }, [data?.settings])
 
@@ -180,6 +190,61 @@ export default function ConfirmationSettingsSection() {
                 setForm((current) => ({ ...current, requireCallbackDatetime: value }))
               }
             />
+          </div>
+
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <div className="text-sm font-medium text-foreground">Commission des agents</div>
+            <p className="text-xs text-muted-foreground">
+              Coût appliqué à chaque commande traitée par un agent de confirmation. Priorité : réglage individuel de l’agent, sinon cette règle par défaut.
+            </p>
+
+            <Toggle
+              label="Activer la commission"
+              hint="Applique un coût automatique aux commandes confirmées ou livrées."
+              checked={form.commissionEnabled}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, commissionEnabled: value }))
+              }
+            />
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm space-y-1">
+                <span className="font-medium text-foreground">Montant par commande</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  disabled={!canManage || !form.commissionEnabled}
+                  value={form.defaultCommissionAmount}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      defaultCommissionAmount: Number(event.target.value),
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-sm space-y-1">
+                <span className="font-medium text-foreground">Déclenchement</span>
+                <select
+                  disabled={!canManage || !form.commissionEnabled}
+                  value={form.defaultCommissionTrigger}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      defaultCommissionTrigger:
+                        event.target.value === 'confirmed' ? 'confirmed' : 'delivered',
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="confirmed">À la confirmation</option>
+                  <option value="delivered">À la livraison</option>
+                </select>
+              </label>
+            </div>
           </div>
 
           {message ? (

@@ -50,6 +50,9 @@ export async function POST(request: Request) {
       autoCancelOnMaxAttempts?: boolean
       requireCancellationReason?: boolean
       requireCallbackDatetime?: boolean
+      commissionEnabled?: boolean
+      defaultCommissionAmount?: number
+      defaultCommissionTrigger?: 'confirmed' | 'delivered'
     }
 
     const storeId = String(body.storeId || '').trim()
@@ -67,12 +70,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVALID_MAX_ATTEMPTS' }, { status: 400 })
     }
 
+    const defaultCommissionAmount = Number(body.defaultCommissionAmount ?? 0)
+    if (!Number.isFinite(defaultCommissionAmount) || defaultCommissionAmount < 0) {
+      return NextResponse.json({ error: 'INVALID_COMMISSION_AMOUNT' }, { status: 400 })
+    }
+    const defaultCommissionTrigger =
+      body.defaultCommissionTrigger === 'confirmed' ? 'confirmed' : 'delivered'
+
     const payload = {
       store_id: storeId,
       max_attempts: Math.trunc(maxAttempts),
       auto_cancel_on_max_attempts: body.autoCancelOnMaxAttempts !== false,
       require_cancellation_reason: body.requireCancellationReason !== false,
       require_callback_datetime: body.requireCallbackDatetime !== false,
+      commission_enabled: body.commissionEnabled === true,
+      default_commission_amount: defaultCommissionAmount,
+      default_commission_trigger: defaultCommissionTrigger,
       updated_at: new Date().toISOString(),
     }
 

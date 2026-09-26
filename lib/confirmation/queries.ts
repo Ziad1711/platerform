@@ -11,7 +11,7 @@ export const CONFIRMATION_ORDER_SELECT = `
   confirmation_agent_id, confirmation_agents(name),
   confirmation_assigned_at, confirmation_assignment_source,
   delivery_companies(name),
-  order_items(product_id, product_variant_id, quantity, unit_selling_price, product_name_override, products(name, product_images(image_url, is_primary, sort_order)))
+  order_items(product_id, product_variant_id, quantity, unit_selling_price, product_name_override, item_type, products(name, product_images(image_url, is_primary, sort_order)))
 `
 
 export const CONFIRMATION_FILTERS: ConfirmationQueueFilter[] = [

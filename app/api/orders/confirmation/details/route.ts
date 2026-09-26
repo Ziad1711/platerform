@@ -30,6 +30,33 @@ type ItemInput = {
   itemType?: string | null
 }
 
+type NormalizedItem = {
+  product_id: string | null
+  product_variant_id: string | null
+  quantity: number
+  unit_selling_price: number
+  product_name_override: string | null
+  item_type: string
+}
+
+function itemSignature(item: NormalizedItem) {
+  return JSON.stringify([
+    item.product_id,
+    item.product_variant_id,
+    Number(item.quantity),
+    Number(item.unit_selling_price),
+    item.product_name_override,
+    item.item_type || 'product',
+  ])
+}
+
+function haveSameItems(left: NormalizedItem[], right: NormalizedItem[]) {
+  if (left.length !== right.length) return false
+  const leftSignatures = left.map(itemSignature).sort()
+  const rightSignatures = right.map(itemSignature).sort()
+  return leftSignatures.every((signature, index) => signature === rightSignatures[index])
+}
+
 function toNullableText(value: unknown) {
   if (value === null || value === undefined) return null
   const text = String(value).trim()
@@ -126,7 +153,7 @@ export async function POST(request: Request) {
     // `product_id` reste celui du produit d'origine. Le serveur reste autoritaire
     // même si un appel direct à l'API envoie un nom identique.
     if (Array.isArray(items) && items.length > 0) {
-      const rows = items as Array<{ product_id: string | null; product_name_override: string | null }>
+      const rows = items as NormalizedItem[]
       const productIds = Array.from(
         new Set(rows.map((row) => row.product_id).filter(Boolean))
       ) as string[]
@@ -154,6 +181,26 @@ export async function POST(request: Request) {
             product_name_override: override && override !== catalogueName ? override : null,
           }
         })
+      }
+
+      const { data: existingItems, error: existingItemsError } = await supabase
+        .from('order_items')
+        .select('product_id, product_variant_id, quantity, unit_selling_price, product_name_override, item_type')
+        .eq('order_id', orderId)
+
+      if (existingItemsError) throw existingItemsError
+
+      const normalizedExistingItems = ((existingItems || []) as NormalizedItem[]).map((item) => ({
+        product_id: item.product_id ? String(item.product_id) : null,
+        product_variant_id: item.product_variant_id ? String(item.product_variant_id) : null,
+        quantity: Number(item.quantity || 0),
+        unit_selling_price: Number(item.unit_selling_price || 0),
+        product_name_override: toNullableText(item.product_name_override),
+        item_type: toNullableText(item.item_type) || 'product',
+      }))
+
+      if (haveSameItems(items as NormalizedItem[], normalizedExistingItems)) {
+        items = null
       }
     }
 

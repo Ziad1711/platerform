@@ -3,6 +3,8 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import ConfirmationAgentsCommission from '@/components/dashboard/staff/confirmation-agents-commission'
+import ConfirmationAgentsPayments from '@/components/dashboard/staff/confirmation-agents-payments'
 
 export default function PersonnelPage() {
   const { currentStoreId } = useStore()
@@ -62,6 +64,26 @@ export default function PersonnelPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="bg-card rounded-xl shadow p-6">
+        <h2 className="text-lg font-semibold text-foreground mb-1">
+          Commissions des agents de confirmation
+        </h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Définissez le coût par commande (confirmée ou livrée) pour chaque agent.
+        </p>
+        <ConfirmationAgentsCommission />
+      </div>
+
+      <div className="bg-card rounded-xl shadow p-6">
+        <h2 className="text-lg font-semibold text-foreground mb-1">
+          Règlements des agents de confirmation
+        </h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Acquis, versé et restant à verser. Chaque versement est imputé aux commandes concernées.
+        </p>
+        <ConfirmationAgentsPayments />
       </div>
     </div>
   )

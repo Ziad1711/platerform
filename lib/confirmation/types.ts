@@ -6,6 +6,9 @@ export type ConfirmationSettings = {
   auto_cancel_on_max_attempts: boolean
   require_cancellation_reason: boolean
   require_callback_datetime: boolean
+  commission_enabled: boolean
+  default_commission_amount: number
+  default_commission_trigger: 'confirmed' | 'delivered'
 }
 
 export type ConfirmationQueueFilter =
@@ -51,6 +54,7 @@ export type ConfirmationOrder = {
     quantity: number | null
     product_name_override: string | null
     unit_selling_price: number | null
+    item_type: string | null
     products: {
       name: string | null
       product_images: Array<{

@@ -6,6 +6,7 @@ export type ConfirmationEditItem = {
   quantity: number
   unitSellingPrice: number
   productNameOverride?: string | null
+  itemType?: string | null
 }
 
 export type ConfirmationProductOption = {
