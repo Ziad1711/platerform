@@ -48,6 +48,7 @@ export async function listUserStores(client: AdminClient, userId: string) {
     .from('store_members')
     .select('store_id')
     .eq('user_id', userId)
+    .eq('status', 'active')
 
   if (membershipsError) throw membershipsError
   const storeIds = Array.from(new Set((memberships || []).map((row) => String(row.store_id || '')).filter(Boolean)))

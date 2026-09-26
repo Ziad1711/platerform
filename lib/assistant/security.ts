@@ -78,6 +78,7 @@ export async function verifyStoreAccess(
     .select('id, role')
     .eq('user_id', userId)
     .eq('store_id', storeId)
+    .eq('status', 'active')
     .maybeSingle()
 
   if (error) {
@@ -99,6 +100,7 @@ export async function getAccessibleStoreIds(
     .from('store_members')
     .select('store_id')
     .eq('user_id', userId)
+    .eq('status', 'active')
 
   if (error) {
     throw new Error('STORE_ACCESS_CHECK_FAILED')

@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
       .select('store_id')
       .eq('user_id', user.id)
       .eq('store_id', storeId)
+      .eq('status', 'active')
       .maybeSingle()
 
     if (!member) {

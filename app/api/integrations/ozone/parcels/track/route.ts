@@ -44,6 +44,7 @@ export async function GET(request: Request) {
         .select('store_id')
         .eq('user_id', user.id)
         .eq('store_id', resolvedStoreId)
+        .eq('status', 'active')
         .maybeSingle()
       if (membershipError) throw membershipError
       if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
@@ -53,6 +54,7 @@ export async function GET(request: Request) {
         .select('store_id')
         .eq('user_id', user.id)
         .eq('store_id', resolvedStoreId)
+        .eq('status', 'active')
         .maybeSingle()
       if (membershipError) throw membershipError
       if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })

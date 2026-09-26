@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       .select('store_id')
       .eq('user_id', user.id)
       .eq('store_id', storeId)
+      .eq('status', 'active')
       .maybeSingle()
 
     if (membershipError) throw membershipError
