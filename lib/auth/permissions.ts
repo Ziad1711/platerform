@@ -81,7 +81,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'stores.create','stores.update',
   ],
   confirmation: [
-    'sales.view','sales.update_status',
     'confirmation.view','confirmation.process','confirmation.edit',
   ],
   delivery: [

@@ -4,6 +4,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { formatNextAttemptLabel } from '@/lib/confirmation/constants'
 import { getConfirmationStatusColor, getConfirmationStatusLabel } from '@/lib/confirmation/status'
 import type { ConfirmationOrder } from '@/lib/confirmation/types'
+import { Phone, MessageCircle } from 'lucide-react'
 
 type ConfirmationOrderCardProps = {
   order: ConfirmationOrder
@@ -111,8 +112,9 @@ export default function ConfirmationOrderCard({
         {order.phone ? (
           <a
             href={`tel:${order.phone}`}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary"
+            className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
           >
+            <Phone className="h-4 w-4" />
             Appeler
           </a>
         ) : null}
@@ -121,8 +123,9 @@ export default function ConfirmationOrderCard({
             href={whatsappLink}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary"
+            className="inline-flex items-center gap-2 rounded-md bg-[#25D366] px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#1DA851]"
           >
+            <MessageCircle className="h-4 w-4" />
             WhatsApp
           </a>
         ) : null}
