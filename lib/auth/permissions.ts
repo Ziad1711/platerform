@@ -44,6 +44,9 @@ export type Permission =
   | 'stores.create'
   | 'stores.update'
   | 'stores.delete'
+  | 'finance.view'
+  | 'finance.payments'
+  | 'finance.corrections'
   | 'billing.manage'
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -63,6 +66,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'team.view','team.invite','team.change_role','team.remove',
     'stores.create','stores.update','stores.delete',
     'billing.manage',
+    'finance.view','finance.payments','finance.corrections',
   ],
   admin: [
     'dashboard.view',
@@ -79,6 +83,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'settings.profile','settings.preferences','settings.exchange_rates','settings.blacklist',
     'team.view','team.invite','team.change_role','team.remove',
     'stores.create','stores.update',
+    'finance.view','finance.payments','finance.corrections',
   ],
   confirmation: [
     'confirmation.view','confirmation.process','confirmation.edit',
@@ -95,6 +100,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'dashboard.view',
     'sales.view',
     'expenses.view','expenses.manage',
+    'suppliers.view',
+    'finance.view','finance.payments',
   ],
   marketer: [
     'dashboard.view',
@@ -134,6 +141,7 @@ export const MENU_PERMISSIONS: Record<string, Permission[]> = {
   '/integrations': ['integrations.view'],
   '/delivery': ['delivery.view'],
   '/ai-assistant': ['ai_assistant.use'],
+  '/finances': ['finance.view'],
   '/settings': ['settings.profile'],
 }
 

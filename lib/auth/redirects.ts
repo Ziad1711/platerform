@@ -13,6 +13,7 @@ const PROTECTED_APP_ROUTES = [
   '/expenses',
   '/integrations',
   '/delivery',
+  '/finances',
   '/ai-assistant',
   '/settings',
   '/subscription',

@@ -7,8 +7,27 @@ import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { useSearchParams } from 'next/navigation'
-import { Search, Plus, MoreVertical } from 'lucide-react'
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Search, Plus, MoreVertical, ChevronDown, ChevronUp } from 'lucide-react'
+import { Fragment, Suspense, useEffect, useMemo, useState } from 'react'
+import { usePermissions } from '@/lib/auth/use-permissions'
+import SupplierPaymentDialog from '@/components/dashboard/finance/supplier-payment-dialog'
+import SupplierPurchaseDialog from '@/components/dashboard/finance/supplier-purchase-dialog'
+import SupplierPurchasesDetail from '@/components/dashboard/finance/supplier-purchases-detail'
+
+type SupplierBalanceRow = {
+  supplier_id: string
+  supplier_name: string
+  store_id: string
+  total_due: number
+  total_paid: number
+  remaining: number
+}
+
+type SupplierRow = {
+  id: string
+  name: string
+  store_id: string
+}
 
 function FournisseursPageContent() {
   const PAGE_SIZE = 10
@@ -26,6 +45,13 @@ function FournisseursPageContent() {
   const [newNotes, setNewNotes] = useState('')
   const [createError, setCreateError] = useState('')
   const [hasHandledOpenCreateParam, setHasHandledOpenCreateParam] = useState(false)
+  const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null)
+  const [paySupplier, setPaySupplier] = useState<SupplierRow | null>(null)
+  const [purchaseSupplier, setPurchaseSupplier] = useState<SupplierRow | null>(null)
+
+  const { can } = usePermissions(currentStoreId)
+  const canViewFinance = can('finance.view')
+  const canRecordPayment = can('finance.payments') && !!currentStoreId
 
   const { data: suppliersResponse, isLoading } = useQuery({
     queryKey: ['suppliers', currentStoreId, search, currentPage],
@@ -102,6 +128,23 @@ function FournisseursPageContent() {
     },
   })
 
+  const { data: supplierBalances = [] } = useQuery<SupplierBalanceRow[]>({
+    queryKey: ['finance-supplier-balances', currentStoreId, accessibleStoreIds],
+    enabled: canViewFinance && (!!currentStoreId || accessibleStoreIds.length > 0),
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('rpc_finance_supplier_balances', {
+        p_store_ids: currentStoreId ? [currentStoreId] : accessibleStoreIds,
+      })
+      if (error) throw error
+      return (data || []) as SupplierBalanceRow[]
+    },
+  })
+
+  const balancesBySupplierId = useMemo(
+    () => new Map(supplierBalances.map((balance) => [balance.supplier_id, balance])),
+    [supplierBalances]
+  )
+
   useEffect(() => {
     if (!isCreateOpen) return
 
@@ -171,13 +214,17 @@ function FournisseursPageContent() {
     () =>
       (suppliersResponse?.data || []).map((supplier: any) => {
         const purchase = purchasesBySupplier?.[supplier.id]
+        const balance = balancesBySupplierId.get(supplier.id)
         return {
           ...supplier,
           totalQuantityIn: purchase?.quantity || 0,
           totalAmountIn: purchase?.amount || 0,
+          totalDue: balance?.total_due || 0,
+          totalPaid: balance?.total_paid || 0,
+          remaining: balance?.remaining || 0,
         }
       }),
-    [suppliersResponse, purchasesBySupplier]
+    [suppliersResponse, purchasesBySupplier, balancesBySupplierId]
   )
 
   const totalSuppliers = suppliersResponse?.count || 0
@@ -335,6 +382,19 @@ function FournisseursPageContent() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Montant acheté (IN)
                   </th>
+                  {canViewFinance ? (
+                    <>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Dû
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Payé
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Restant
+                      </th>
+                    </>
+                  ) : null}
                   <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Notes
                   </th>
@@ -345,25 +405,82 @@ function FournisseursPageContent() {
               </thead>
               <tbody className="bg-card divide-y divide-border">
                 {suppliersRows.map((supplier: any) => (
-                  <tr key={supplier.id} className="hover:bg-secondary">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-foreground">{supplier.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Ajouté le {new Date(supplier.created_at).toLocaleDateString('fr-FR')}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-foreground">{supplier.phone || '-'}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">{supplier.totalQuantityIn}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">{formatCurrency(supplier.totalAmountIn)}</td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground max-w-[280px]">
-                      <div className="truncate" title={supplier.notes || ''}>{supplier.notes || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium">
-                      <button className="text-muted-foreground hover:text-muted-foreground">
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={supplier.id}>
+                    <tr className="hover:bg-secondary">
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-medium text-foreground">{supplier.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Ajouté le {new Date(supplier.created_at).toLocaleDateString('fr-FR')}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-foreground">{supplier.phone || '-'}</td>
+                      <td className="px-6 py-4 text-sm font-medium text-foreground">{supplier.totalQuantityIn}</td>
+                      <td className="px-6 py-4 text-sm font-medium text-foreground">{formatCurrency(supplier.totalAmountIn)}</td>
+                      {canViewFinance ? (
+                        <>
+                          <td className="px-6 py-4 text-sm text-foreground">{formatCurrency(supplier.totalDue)}</td>
+                          <td className="px-6 py-4 text-sm text-foreground">{formatCurrency(supplier.totalPaid)}</td>
+                          <td className="px-6 py-4 text-sm font-medium text-foreground">{formatCurrency(supplier.remaining)}</td>
+                        </>
+                      ) : null}
+                      <td className="px-6 py-4 text-sm text-muted-foreground max-w-[280px]">
+                        <div className="truncate" title={supplier.notes || ''}>{supplier.notes || '-'}</div>
+                      </td>
+                      <td className="px-6 py-4 text-sm font-medium">
+                        {canViewFinance ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedSupplierId((current) => (current === supplier.id ? null : supplier.id))
+                              }
+                              className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground"
+                            >
+                              {expandedSupplierId === supplier.id ? (
+                                <ChevronUp className="w-3.5 h-3.5" />
+                              ) : (
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              )}
+                              Détail
+                            </button>
+                            {canRecordPayment ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setPurchaseSupplier(supplier)}
+                                  className="rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground"
+                                >
+                                  Achat
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPaySupplier(supplier)}
+                                  className="rounded-md bg-[#1fa971] px-2.5 py-1.5 text-xs text-white"
+                                >
+                                  Payer
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <button className="text-muted-foreground hover:text-muted-foreground">
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedSupplierId === supplier.id ? (
+                      <tr className="bg-secondary/20">
+                        <td colSpan={canViewFinance ? 9 : 6} className="p-0">
+                          <SupplierPurchasesDetail
+                            storeId={supplier.store_id}
+                            supplierId={supplier.id}
+                            enabled={canViewFinance}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -403,6 +520,25 @@ function FournisseursPageContent() {
           </div>
         ) : null}
       </div>
+
+      {purchaseSupplier ? (
+        <SupplierPurchaseDialog
+          open
+          onClose={() => setPurchaseSupplier(null)}
+          storeId={purchaseSupplier.store_id}
+          supplierId={purchaseSupplier.id}
+          supplierName={purchaseSupplier.name}
+        />
+      ) : null}
+      {paySupplier ? (
+        <SupplierPaymentDialog
+          open
+          onClose={() => setPaySupplier(null)}
+          storeId={paySupplier.store_id}
+          supplierId={paySupplier.id}
+          supplierName={paySupplier.name}
+        />
+      ) : null}
     </div>
   )
 }

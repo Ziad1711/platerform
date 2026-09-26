@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   LogOut,
   PhoneCall,
+  Wallet,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { JisraMark, JisraWordmark } from '@/components/logo'
@@ -38,6 +39,7 @@ const menuItems = [
   { name: 'Dépenses', href: '/expenses', icon: DollarSign },
   { name: 'Intégration', href: '/integrations', icon: Share2 },
   { name: 'Livraison', href: '/delivery', icon: Truck },
+  { name: 'Finances', href: '/finances', icon: Wallet },
   { name: 'Assistant IA', href: '/ai-assistant', icon: MessageSquare },
 ]
 

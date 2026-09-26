@@ -374,11 +374,12 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
       color: 'bg-purple-500',
     },
     {
-      title: 'Profit',
+      title: 'Profit (partiel)',
       value: kpiData ? formatCurrency(kpiData.profit) : '0 MAD',
       rawChange: kpiData?.changes?.profit || 0,
       change: formatChange(kpiData?.changes?.profit || 0),
       trend: (kpiData?.changes?.profit || 0) >= 0 ? 'up' as const : 'down' as const,
+      infoText: 'Résultat partiel : ventes livrées − coût produit − livraison − confirmation − publicité, sans les autres charges. Le résultat opérationnel complet est dans Finances.',
       icon: TrendingUp,
       color: 'bg-emerald-500',
     },
