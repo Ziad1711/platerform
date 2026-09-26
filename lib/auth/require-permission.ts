@@ -44,6 +44,36 @@ export async function requirePermission(storeId: string, permission: Permission)
   return { user, role }
 }
 
+/**
+ * Vérifie que l'utilisateur possède une permission donnée sur au moins
+ * un store (propriété ou appartenance active). Utilisé pour les pages
+ * accessibles sans cookie de store sélectionné (ex. /finances).
+ */
+export async function requireAnyPermission(permission: Permission) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('UNAUTHORIZED')
+
+  const supabase = await getServerClient()
+
+  const { data: owned } = await supabase
+    .from('stores')
+    .select('id')
+    .eq('owner_user_id', user.id)
+    .limit(1)
+  if (owned && owned.length > 0) return { user }
+
+  const { data: memberships } = await supabase
+    .from('store_members')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+
+  const granted = (memberships || []).some((m) => hasPermission(m.role as any, permission))
+  if (!granted) throw new Error('FORBIDDEN')
+
+  return { user }
+}
+
 export async function requireAuth() {
   const user = await getCurrentUser()
   if (!user) throw new Error('UNAUTHORIZED')
