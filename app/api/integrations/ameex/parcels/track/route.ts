@@ -7,7 +7,7 @@ import { getAmeexCredentials } from '@/lib/integrations/ameex-credentials'
 export async function GET(request: Request) {
   try {
     assertTrustedOrigin(request)
-    await requireAuthenticatedUser()
+    const { user } = await requireAuthenticatedUser()
 
     const { searchParams } = new URL(request.url)
     const trackingNumber = searchParams.get('trackingNumber') || ''
@@ -17,6 +17,17 @@ export async function GET(request: Request) {
     if (!storeId) return NextResponse.json({ error: 'MISSING_STORE_ID' }, { status: 400 })
 
     const admin = createAdminClient()
+
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', storeId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
 
     const { data: integration, error: integrationError } = await admin
       .from('integrations')

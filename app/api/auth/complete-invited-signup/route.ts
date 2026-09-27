@@ -50,6 +50,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVITED_USER_NOT_FOUND' }, { status: 404 })
     }
 
+    // Refuser de réinitialiser le mot de passe d'un compte déjà actif : un jeton
+    // d'invitation ne doit pas servir à écraser le mot de passe existant.
+    const alreadyActive = user.user_metadata?.password_set === true || user.last_sign_in_at != null
+    if (alreadyActive) {
+      return NextResponse.json({ error: 'ACCOUNT_ALREADY_ACTIVE' }, { status: 409 })
+    }
+
     const fullName = `${firstName} ${lastName}`.trim()
     const { error: updateError } = await admin.auth.admin.updateUserById(user.id, {
       password,

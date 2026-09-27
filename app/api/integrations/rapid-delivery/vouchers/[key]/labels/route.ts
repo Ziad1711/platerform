@@ -33,6 +33,24 @@ export async function GET(request: Request, context: { params: Promise<{ key: st
       return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
     }
 
+    const { data: integration } = await admin
+      .from('integrations')
+      .select('store_id')
+      .eq('id', mapping.integration_id)
+      .maybeSingle()
+    if (!integration?.store_id) return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
+
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', integration.store_id)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+
     const token = await getDecryptedIntegrationToken(admin, mapping.integration_id)
     const html = await downloadRapidDeliveryHtml(token, `/vouchers/${encodeURIComponent(voucherKey)}/labels/${version}/download`)
 

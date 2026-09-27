@@ -13,6 +13,18 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient()
 
+    // Vérifier que l'utilisateur est membre actif du store ciblé
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', storeId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+
     // Delete ameex_configs
     await admin.from('ameex_configs').delete().eq('store_id', storeId)
 

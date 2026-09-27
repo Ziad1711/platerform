@@ -412,6 +412,8 @@
 - No form validation feedback
 - Missing toast notifications
 
+- **Révocation verrouillée de bout en bout** (migration `20260927000135_harden_invitation_reactivation` + 12 routes d'intégration + `complete-invited-signup`) — trigger annule les invitations `pending` à la révocation ; `accept_team_invitation` aligné sur `/api/team/accept` ; routes `service_role` (ameex/forcelog/sendit/rapid-delivery vouchers) vérifient l'accès actif ; `complete-invited-signup` bloque la réinitialisation du mot de passe d'un compte actif.
+
 - **Admin révoqué exclu de `stores` + accès service-role verrouillé** (migration `20260926234633_harden_stores_update_active_admin` + routes) — `Owner or admin can update stores` exige `status='active'` ; `verifyStoreAccess()`/`getAccessibleStoreIds()` et 9 routes d'intégration + `listUserStores()` filtrent `status='active'`. Validé en JWT simulé (admin actif → 1 ligne, révoqué → 0).
 
 - **Membre actif dans les finances, suppression du propriétaire et `remove_member`** (migration `20260926233705_20260927110100_member_status_policies_and_remove_member`) — politiques `expenses`/`ad_spend_daily` avec `status='active'` ; `store_members_delete_owner_admin` bloque la ligne propriétaire ; `remove_member` écrit `revoked`. Validé en JWT simulé.
