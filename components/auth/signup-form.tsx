@@ -77,29 +77,10 @@ export default function SignupForm() {
 
       if (error) {
         const alreadyRegistered = error.message.toLowerCase().includes('already registered')
-        if (alreadyRegistered && next?.startsWith('/invite/')) {
-          const completeRes = await fetch('/api/auth/complete-invited-signup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: email.trim(),
-              password,
-              firstName: firstName.trim(),
-              lastName: lastName.trim(),
-              token: next.replace('/invite/', ''),
-            }),
-          })
-          const completePayload = await completeRes.json().catch(() => null)
-          if (!completeRes.ok) throw new Error(completePayload?.error || 'INVITED_SIGNUP_FAILED')
-
-          const { error: loginError } = await supabase.auth.signInWithPassword({
-            email: email.trim(),
-            password,
-          })
-          if (loginError) throw loginError
-
-          window.location.href = nextPath
-          return
+        if (alreadyRegistered) {
+          // Un compte existant ne passe jamais par le jeton d'invitation pour
+          // changer son mot de passe : connexion ou récupération uniquement.
+          throw new Error('Un compte existe déjà avec cet e-mail. Connectez-vous ou récupérez votre mot de passe.')
         }
         throw error
       }

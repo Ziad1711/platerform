@@ -412,7 +412,7 @@
 - No form validation feedback
 - Missing toast notifications
 
-- **Clôture de l'audit sécurité invitations/`service_role`** : `complete-invited-signup` n'accepte plus que `password_set === false` (pas de réinitialisation d'un compte existant) ; `POST /api/team/accept` passe par le RPC transactionnel `accept_team_invitation` ; appartenance active ajoutée à 5 routes (maroc-go-delivery vouchers `[key]`/`pdf`/`labels`, `ameex/vouchers/[key]/labels`, `orders/normalize-city`). `npx tsc --noEmit` OK ; RPC validé sous JWT simulé (acceptation + `INVITATION_EMAIL_MISMATCH`).
+- **Durcissement invitations finalisé** : route anonyme `complete-invited-signup` supprimée (plus de changement de mot de passe via jeton) et repli `signup-form` retiré ; migration `20260927004455_harden_invitation_concurrency` (`FOR UPDATE`, casse-insensible, règle multistore conservatrice) ; `POST /api/team/accept` via RPC ; appartenance active sur 5 routes. Validé : acceptation/mismatch/single-use/trigger multistore ; `tsc` + `next build` OK.
 
 - **Révocation verrouillée de bout en bout** (migration `20260927000135_harden_invitation_reactivation` + 12 routes d'intégration + `complete-invited-signup`) — trigger annule les invitations `pending` à la révocation ; `accept_team_invitation` aligné sur `/api/team/accept` ; routes `service_role` (ameex/forcelog/sendit/rapid-delivery vouchers) vérifient l'accès actif ; `complete-invited-signup` bloque la réinitialisation du mot de passe d'un compte actif.
 
