@@ -16,7 +16,7 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
     const admin = createAdminClient()
     const { data: mapping, error: mappingError } = await admin
       .from('delivery_entity_mappings')
-      .select('integration_id, provider_entity_id')
+      .select('integration_id, store_id, provider_entity_id')
       .eq('entity_type', 'voucher')
       .eq('provider_entity_id', voucherKey)
       .eq('user_id', user.id)
@@ -26,6 +26,21 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
     if (!mapping?.integration_id) {
       return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
     }
+
+    // Le bon n'est accessible qu'aux membres encore actifs de son store.
+    const voucherStoreId = String(mapping.store_id || '')
+    if (!voucherStoreId) return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
+
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', voucherStoreId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
 
     const token = await getDecryptedIntegrationToken(admin, mapping.integration_id)
 

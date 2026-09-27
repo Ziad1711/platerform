@@ -25,6 +25,21 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
       return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
     }
 
+    // Le bon n'est accessible qu'aux membres encore actifs de son store.
+    const voucherStoreId = String(mapping.store_id || '')
+    if (!voucherStoreId) return NextResponse.json({ error: 'VOUCHER_NOT_FOUND' }, { status: 404 })
+
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', voucherStoreId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+
     const token = await getDecryptedIntegrationToken(admin, mapping.integration_id)
     const voucher = await getMarocGoDeliveryVoucher(token, voucherKey)
     const { data: orders, error: ordersError } = await admin

@@ -50,10 +50,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INVITED_USER_NOT_FOUND' }, { status: 404 })
     }
 
-    // Refuser de réinitialiser le mot de passe d'un compte déjà actif : un jeton
-    // d'invitation ne doit pas servir à écraser le mot de passe existant.
-    const alreadyActive = user.user_metadata?.password_set === true || user.last_sign_in_at != null
-    if (alreadyActive) {
+    // Ne compléter que le signup d'un utilisateur explicitement invité qui n'a
+    // pas encore de mot de passe. Tout autre compte (déjà actif, ou créé
+    // normalement puis simplement invité) ne doit jamais voir son mot de passe
+    // réinitialisé via un jeton d'invitation.
+    const isInvitedAwaitingPassword = user.user_metadata?.password_set === false
+    if (!isInvitedAwaitingPassword) {
       return NextResponse.json({ error: 'ACCOUNT_ALREADY_ACTIVE' }, { status: 409 })
     }
 

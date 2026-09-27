@@ -29,6 +29,18 @@ export async function GET(_request: Request, context: { params: Promise<{ key: s
 
     const storeId = orders[0].store_id
 
+    // Les étiquettes ne sont accessibles qu'aux membres encore actifs du store.
+    const { data: membership, error: membershipError } = await admin
+      .from('store_members')
+      .select('store_id')
+      .eq('user_id', user.id)
+      .eq('store_id', storeId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (membershipError) throw membershipError
+    if (!membership) return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+
     // Récupérer l'intégration AMEEX pour ce store
     const { data: integration, error: integrationError } = await admin
       .from('integrations')

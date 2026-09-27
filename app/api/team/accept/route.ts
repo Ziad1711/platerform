@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth/require-permission'
+import { requireAuth, getServerClient } from '@/lib/auth/require-permission'
 import { createAdminClient } from '@/lib/supabase/admin'
+
+const INVITATION_ERROR_STATUS: Record<string, number> = {
+  INVITATION_NOT_FOUND: 404,
+  INVITATION_NOT_PENDING: 400,
+  INVITATION_EXPIRED: 400,
+  INVITATION_EMAIL_MISMATCH: 403,
+}
 
 export async function GET(request: Request) {
   try {
@@ -49,7 +56,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = await requireAuth()
+    await requireAuth()
     const body = (await request.json().catch(() => ({}))) as { token?: string }
     const token = String(body.token || '').trim()
 
@@ -57,51 +64,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'TOKEN_REQUIRED' }, { status: 400 })
     }
 
-    const admin = createAdminClient()
-    const { data: invitation, error: invitationError } = await admin
-      .from('team_invitations')
-      .select('id, email, status, expires_at, invited_by')
-      .eq('token', token)
-      .maybeSingle()
+    // L'acceptation est déléguée au RPC transactionnel `accept_team_invitation` :
+    // il vérifie l'état, l'expiration et le destinataire de l'invitation, puis
+    // la consomme et active les membres en une seule opération atomique.
+    const supabase = await getServerClient()
+    const { data, error } = await supabase.rpc('accept_team_invitation', { p_token: token })
 
-    if (invitationError) throw invitationError
-    if (!invitation || invitation.status !== 'pending' || new Date(invitation.expires_at) < new Date()) {
-      return NextResponse.json({ error: 'INVITATION_INVALID_OR_EXPIRED' }, { status: 400 })
+    if (error) throw error
+
+    const result = data as
+      | { error?: string; assignments?: Array<{ store_id?: string; role?: string }> }
+      | null
+
+    if (!result || typeof result !== 'object') {
+      return NextResponse.json({ error: 'ACCEPT_INVITATION_FAILED' }, { status: 500 })
     }
-    if (invitation.email.toLowerCase() !== (user.email || '').toLowerCase()) {
-      return NextResponse.json({ error: 'INVITATION_EMAIL_MISMATCH' }, { status: 403 })
-    }
 
-    const { data: assignmentsData, error: assignmentsError } = await admin
-      .from('team_invitation_assignments')
-      .select('store_id, role')
-      .eq('invitation_id', invitation.id)
-
-    if (assignmentsError) throw assignmentsError
-    const assignments = assignmentsData || []
-
-    for (const assignment of assignments) {
-      const { error: memberError } = await admin.from('store_members').upsert(
-        {
-          store_id: assignment.store_id,
-          user_id: user.id,
-          role: assignment.role,
-          status: 'active',
-          invited_email: invitation.email,
-          invited_by: invitation.invited_by,
-          accepted_at: new Date().toISOString(),
-        },
-        { onConflict: 'store_id,user_id' }
+    if (result.error) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: INVITATION_ERROR_STATUS[result.error] ?? 400 }
       )
-      if (memberError) throw memberError
     }
 
-    const { error: updateError } = await admin
-      .from('team_invitations')
-      .update({ status: 'accepted' })
-      .eq('id', invitation.id)
-
-    if (updateError) throw updateError
+    const assignments = Array.isArray(result.assignments) ? result.assignments : []
     const firstAssignment = assignments[0] || null
 
     return NextResponse.json({
@@ -112,6 +98,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'ACCEPT_INVITATION_FAILED'
     console.error('[ACCEPT_INVITATION_ERROR]', message, error)
-    return NextResponse.json({ error: message }, { status: 500 })
+    const status = message === 'UNAUTHORIZED' ? 401 : 500
+    return NextResponse.json({ error: message }, { status })
   }
 }
