@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText, ChevronLeft, ChevronRight, CreditCard, type LucideIcon } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
 import StoresSection from '@/components/settings/stores-section'
 import TeamSection from '@/components/settings/team-section'
 import ConfirmationSettingsSection from '@/components/settings/confirmation-settings-section'
 import InvoicingSettingsSection from '@/components/settings/invoicing-settings-section'
+import JisraBillingSection from '@/components/settings/jisra-billing-section'
 import { useTheme } from '@/components/providers'
 import { createClient } from '@/lib/supabase/client'
 
@@ -27,6 +28,7 @@ type SettingsSectionId =
   | 'blacklist'
   | 'confirmation'
   | 'invoicing'
+  | 'jisra-billing'
   | 'stores'
   | 'team'
 
@@ -52,7 +54,13 @@ const SECTION_GROUPS: { label: string; items: SettingsSection[] }[] = [
       { id: 'rates', label: 'Taux de change', description: 'Conversions entre vos devises', icon: RefreshCcw },
       { id: 'blacklist', label: 'Blacklist', description: 'Blocage automatique des clients à risque', icon: ShieldAlert },
       { id: 'confirmation', label: 'Confirmation', description: "Tentatives d'appel et commission", icon: PhoneCall },
-      { id: 'invoicing', label: 'Facturation', description: 'Identité légale et mentions de facture', icon: FileText },
+    ],
+  },
+  {
+    label: 'Facturation',
+    items: [
+      { id: 'invoicing', label: 'Factures clients', description: 'Identité légale, TVA et mentions de vos factures clients', icon: FileText },
+      { id: 'jisra-billing', label: 'Facturation Jisra', description: 'Votre abonnement, votre quota de commandes et vos crédits IA du mois', icon: CreditCard },
     ],
   },
   {
@@ -306,7 +314,7 @@ export default function SettingsPage() {
     }`
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-3 pb-8 pt-16 sm:px-4 lg:px-6 lg:pt-6">
       <div className="flex flex-col items-center md:items-start gap-1">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />
@@ -550,6 +558,7 @@ export default function SettingsPage() {
 
              {activeSection === 'confirmation' && <ConfirmationSettingsSection />}
              {activeSection === 'invoicing' && <InvoicingSettingsSection />}
+             {activeSection === 'jisra-billing' && <JisraBillingSection />}
              {activeSection === 'stores' && <StoresSection />}
              {activeSection === 'team' && <TeamSection />}
            </div>

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Store, Globe2, Building2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
+import { describeQuotaError } from '@/lib/billing/quota'
 
 const categories = [
   'Mode & vêtements',
@@ -171,7 +172,9 @@ export default function OnboardingModal() {
       })
 
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || 'STORE_CREATE_FAILED')
+      if (!response.ok) {
+        throw new Error(describeQuotaError(payload.error) || payload.error || 'STORE_CREATE_FAILED')
+      }
 
       setOpen(false)
       window.location.href = '/dashboard'

@@ -13,36 +13,30 @@ export function estimateCreditsForPrompt(parts: string[], expectedOutputTokens =
   return computeCreditsUsed(estimatedInputTokens, expectedOutputTokens)
 }
 
-export async function getOrCreateWallet(supabase: SupabaseServerClient, userId: string) {
-  const { data: existing, error } = await supabase
-    .from('ai_credit_wallets')
-    .select('id, monthly_credits, credits_used')
-    .eq('user_id', userId)
-    .maybeSingle()
+/**
+ * Portefeuille de crédits IA : création, recharge mensuelle et débit passent
+ * exclusivement par les fonctions serveur (`rpc_ensure_ai_credit_wallet`,
+ * `rpc_debit_ai_credits`). Le client n'a plus le droit d'écrire directement dans
+ * `ai_credit_wallets` (voir migration 20260928020200).
+ */
+export async function getOrCreateWallet(supabase: SupabaseServerClient) {
+  const { data, error } = await supabase.rpc('rpc_ensure_ai_credit_wallet')
 
   if (error) {
     throw new Error('WALLET_FETCH_FAILED')
   }
 
-  if (existing) {
-    return existing
-  }
+  const row = Array.isArray(data) ? data[0] : data
 
-  const { data: created, error: createError } = await supabase
-    .from('ai_credit_wallets')
-    .insert({
-      user_id: userId,
-      monthly_credits: 0,
-      credits_used: 0,
-    })
-    .select('id, monthly_credits, credits_used')
-    .single()
-
-  if (createError || !created) {
+  if (!row) {
     throw new Error('WALLET_CREATE_FAILED')
   }
 
-  return created
+  return {
+    id: String(row.wallet_id),
+    monthly_credits: Number(row.monthly_credits || 0),
+    credits_used: Number(row.credits_used || 0),
+  }
 }
 
 export function toWalletSnapshot(wallet: { monthly_credits: number; credits_used: number }): WalletSnapshot {
@@ -57,8 +51,8 @@ export function toWalletSnapshot(wallet: { monthly_credits: number; credits_used
   }
 }
 
-export async function ensureCreditsAvailable(supabase: SupabaseServerClient, userId: string, requiredCredits: number) {
-  const wallet = await getOrCreateWallet(supabase, userId)
+export async function ensureCreditsAvailable(supabase: SupabaseServerClient, requiredCredits: number) {
+  const wallet = await getOrCreateWallet(supabase)
   const snapshot = toWalletSnapshot(wallet)
 
   if (snapshot.remainingCredits < requiredCredits) {
@@ -68,18 +62,12 @@ export async function ensureCreditsAvailable(supabase: SupabaseServerClient, use
   return { wallet, snapshot }
 }
 
-export async function debitCredits(supabase: SupabaseServerClient, walletId: string, currentCreditsUsed: number, creditsUsed: number) {
-  const newCreditsUsed = Number(currentCreditsUsed || 0) + Number(creditsUsed || 0)
-
-  const { error } = await supabase
-    .from('ai_credit_wallets')
-    .update({
-      credits_used: newCreditsUsed,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', walletId)
+export async function debitCredits(supabase: SupabaseServerClient, creditsUsed: number) {
+  const { error } = await supabase.rpc('rpc_debit_ai_credits', {
+    p_credits: Math.max(0, Math.round(Number(creditsUsed || 0))),
+  })
 
   if (error) {
-    throw new Error('WALLET_DEBIT_FAILED')
+    throw new Error(error.message?.includes('INSUFFICIENT_CREDITS') ? 'INSUFFICIENT_CREDITS' : 'WALLET_DEBIT_FAILED')
   }
 }

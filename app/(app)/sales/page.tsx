@@ -18,6 +18,7 @@ import { usePermissions } from '@/lib/auth/use-permissions'
 import { hasPermission } from '@/lib/auth/permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
+import { describeQuotaError } from '@/lib/billing/quota'
 import { toast } from 'sonner'
 
 const OZONE_PROVIDER_ID = '5f806347-45f1-481a-901d-2eb98b20b3a8'
@@ -1833,7 +1834,9 @@ export default function VentesPage() {
         })
         return
       }
-      setFormError(error?.message || 'Erreur lors de la création de la commande')
+      setFormError(
+        describeQuotaError(error?.message) || error?.message || 'Erreur lors de la création de la commande'
+      )
     },
   })
 
@@ -2223,6 +2226,12 @@ export default function VentesPage() {
       toast.success(`${created} commande(s) dupliquée(s) en « Nouvelle »${firstId}.`)
     },
     onError: (error: any) => {
+      const quotaMessage = describeQuotaError(error?.message)
+      if (quotaMessage) {
+        toast.error(quotaMessage)
+        return
+      }
+
       const message = error?.message || 'Erreur lors de la duplication groupée.'
       toast.error(
         message.includes('FORBIDDEN')
@@ -3435,7 +3444,7 @@ export default function VentesPage() {
       setImportStep(3)
     },
     onError: (error: any) => {
-      setImportError(error?.message || 'Erreur import CSV')
+      setImportError(describeQuotaError(error?.message) || error?.message || 'Erreur import CSV')
       setImportProgress((progress) => ({
         ...progress,
         label: 'Import interrompu',

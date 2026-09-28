@@ -119,6 +119,8 @@ export function getErrorStatus(error: unknown) {
   if (message === 'NO_STORE_SELECTED') return 400
   if (message === 'EMPTY_MESSAGE') return 400
   if (message === 'INSUFFICIENT_CREDITS') return 402
+  if (message.includes('QUOTA_ORDER_LIMIT_REACHED')) return 403
+  if (message.includes('QUOTA_STORES_LIMIT_REACHED')) return 403
 
   return 500
 }

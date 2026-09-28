@@ -6,6 +6,7 @@ import { Store, Trash2, Pencil, Plus, Building2, Loader2, AlertTriangle } from '
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { useStore } from '@/lib/store-context'
+import { describeQuotaError } from '@/lib/billing/quota'
 
 interface StoreItem {
   id: string
@@ -18,7 +19,7 @@ interface StoreItem {
 
 async function toJson(res: Response) {
   const payload = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(payload?.error || 'REQUEST_FAILED')
+  if (!res.ok) throw new Error(describeQuotaError(payload?.error) || payload?.error || 'REQUEST_FAILED')
   return payload
 }
 

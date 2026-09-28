@@ -39,7 +39,7 @@ export interface StoreInvoiceSettings {
   legal_mentions: string | null
 }
 
-/** Champs modifiables depuis l'écran Paramètres > Facturation. */
+/** Champs modifiables depuis l'écran Paramètres > Factures clients. */
 export type StoreInvoiceSettingsInput = Omit<StoreInvoiceSettings, 'store_id'>
 
 /** Texte non nul : permet d'isoler les colonnes nullables de la base. */

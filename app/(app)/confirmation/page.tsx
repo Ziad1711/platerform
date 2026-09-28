@@ -11,6 +11,7 @@ import CancelOrderDialog from '@/components/dashboard/confirmation/cancel-order-
 import ConfirmOrderDialog from '@/components/dashboard/confirmation/confirm-order-dialog'
 import OrderConfirmationDetails from '@/components/dashboard/confirmation/order-confirmation-details'
 import OrderEditDialog from '@/components/dashboard/confirmation/order-edit-dialog'
+import { JisraMark } from '@/components/logo'
 import { useStore } from '@/lib/store-context'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { DEFAULT_MAX_ATTEMPTS } from '@/lib/confirmation/constants'
@@ -213,8 +214,13 @@ export default function ConfirmationPage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">Confirmation des commandes</h1>
+        <div className="flex flex-col items-center md:items-start gap-1">
+          <div className="flex items-center gap-2">
+            <JisraMark size={28} />
+            <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
+              Confirmation
+            </span>
+          </div>
           <p className="text-sm text-muted-foreground">
             Traitez les commandes en attente : appels, rappels, confirmations et annulations.
           </p>

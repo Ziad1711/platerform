@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePublicApiAuth } from '@/lib/integrations/custom-api/request-auth'
 import { ingestOrder, IngestOrderPayload } from '@/lib/integrations/custom-api/ingest-order'
 import { orderBodySchema, toValidationDetails } from '@/lib/integrations/custom-api/schemas'
+import { isQuotaCode } from '@/lib/billing/quota'
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,7 +57,13 @@ export async function POST(request: NextRequest) {
 
       case 'rejected': {
         // Un conflit d'idempotence est un conflit de ressource, pas une erreur de données.
-        const status = result.errorCode === 'IDEMPOTENCY_CONFLICT' ? 409 : 422
+        // Un quota d'offre atteint se distingue aussi d'une donnée invalide : le site
+        // doit cesser de réessayer et l'abonné doit passer à une offre supérieure.
+        const status = result.errorCode === 'IDEMPOTENCY_CONFLICT'
+          ? 409
+          : isQuotaCode(result.errorCode)
+            ? 429
+            : 422
         return NextResponse.json(
           { status: 'rejected', error: result.errorCode, message: result.errorMessage },
           { status }

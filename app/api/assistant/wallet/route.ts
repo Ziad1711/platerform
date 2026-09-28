@@ -4,8 +4,8 @@ import { getErrorStatus, requireAuthenticatedUser } from '@/lib/assistant/securi
 
 export async function GET() {
   try {
-    const { supabase, user } = await requireAuthenticatedUser()
-    const wallet = await getOrCreateWallet(supabase, user.id)
+    const { supabase } = await requireAuthenticatedUser()
+    const wallet = await getOrCreateWallet(supabase)
     const snapshot = toWalletSnapshot(wallet)
 
     return NextResponse.json({ wallet: snapshot })

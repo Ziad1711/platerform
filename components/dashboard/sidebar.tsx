@@ -91,20 +91,16 @@ export default function Sidebar() {
     },
   })
 
-  const { data: currentSubscription } = useQuery({
-    queryKey: ['sidebar-current-subscription', userId],
+  // Plan Jisra effectif : même règle que la base (abonnement actif non expiré le
+  // plus élevé, sinon offre gratuite).
+  const { data: billingStatus } = useQuery({
+    queryKey: ['sidebar-billing-status', userId],
     enabled: !!userId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('subscriptions')
-        .select('status, plans(name)')
-        .eq('user_id', userId!)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+      const { data, error } = await supabase.rpc('rpc_billing_status')
 
       if (error) throw error
-      return data
+      return (data || null) as { plan?: { name?: string } } | null
     },
   })
 
@@ -114,7 +110,7 @@ export default function Sidebar() {
     'Utilisateur'
 
   const displayEmail = '-'
-  const displayPlan = (currentSubscription as any)?.plans?.name || 'Aucun plan'
+  const displayPlan = billingStatus?.plan?.name || 'Aucun abonnement'
   const avatarLetter = (displayName || 'U').charAt(0).toUpperCase()
 
   const handleLogout = async () => {
@@ -237,7 +233,10 @@ export default function Sidebar() {
 
         {!collapsed && (
           <div className="px-2 mb-3">
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-primary/10 border border-primary/20">
+            <div
+              title="Abonnement Jisra"
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-primary/10 border border-primary/20"
+            >
               <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               <span className="text-xs text-muted-foreground font-mono">{displayPlan}</span>
             </div>

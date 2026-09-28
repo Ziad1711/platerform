@@ -4,6 +4,7 @@ import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { normalizeMoroccanPhone } from '@/lib/utils'
 import { resolveOrderItemsPricing, resolveOrderTotal } from './order-items-pricing'
+import { quotaCodeFromMessage, describeQuotaError } from '@/lib/billing/quota'
 
 export type IngestOrderPayload = {
   idempotency_key: string
@@ -133,16 +134,23 @@ export async function ingestOrder(
   })
 
   if (orderError) {
+    // Quota d'offre dépassé : ce n'est pas un échec technique, l'intégration doit
+    // pouvoir le distinguer (réessai inutile, action commerciale requise).
+    const quotaCode = quotaCodeFromMessage(orderError.message)
+
     await logIngestion(storeId, apiKeyId, payload.external_order_id, 'error', {
-      errorCode: 'ORDER_INSERT_FAILED',
+      errorCode: quotaCode || 'ORDER_INSERT_FAILED',
       errorMessage: orderError.message,
       payload,
     })
+
     return {
       status: 'rejected',
       orderId: null,
-      errorCode: 'ORDER_INSERT_FAILED',
-      errorMessage: "Erreur lors de l'envoi de la commande",
+      errorCode: quotaCode || 'ORDER_INSERT_FAILED',
+      errorMessage: quotaCode
+        ? describeQuotaError(orderError.message) || "Quota de l'offre Jisra atteint"
+        : "Erreur lors de l'envoi de la commande",
     }
   }
 

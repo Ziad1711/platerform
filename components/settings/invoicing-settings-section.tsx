@@ -169,7 +169,7 @@ export default function InvoicingSettingsSection() {
       }
 
       await queryClient.invalidateQueries({ queryKey: ['invoicing-settings', currentStoreId] })
-      setMessage({ type: 'success', text: 'Paramètres de facturation enregistrés.' })
+      setMessage({ type: 'success', text: 'Paramètres de facturation client enregistrés.' })
     } catch (error) {
       setMessage({
         type: 'error',
@@ -183,20 +183,25 @@ export default function InvoicingSettingsSection() {
   return (
     <section id="invoicing" className="rounded-2xl border bg-card p-6 scroll-mt-32 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-foreground">Facturation</h2>
+        <h2 className="text-lg font-semibold text-foreground">Factures clients</h2>
         <StoreSelector />
       </div>
 
+      <p className="text-sm text-muted-foreground">
+        Factures que vous émettez pour vos propres clients. Ces paramètres sont indépendants de
+        votre abonnement Jisra.
+      </p>
+
       {!currentStoreId ? (
         <p className="text-sm text-muted-foreground">
-          Sélectionnez un store pour configurer la facturation.
+          Sélectionnez un store pour configurer vos factures clients.
         </p>
       ) : isError ? (
         <div className="space-y-3">
           <p className="text-sm text-red-600">
             {forbidden
-              ? 'Votre rôle ne donne pas accès aux paramètres de facturation.'
-              : 'Impossible de charger les paramètres de facturation.'}
+              ? 'Votre rôle ne donne pas accès aux paramètres de factures clients.'
+              : 'Impossible de charger les paramètres de factures clients.'}
           </p>
           {forbidden ? null : (
             <button
@@ -209,7 +214,7 @@ export default function InvoicingSettingsSection() {
           )}
         </div>
       ) : isLoading || !form ? (
-        <p className="text-sm text-muted-foreground">Chargement des paramètres de facturation…</p>
+        <p className="text-sm text-muted-foreground">Chargement des paramètres de factures clients…</p>
       ) : (
       <div className="space-y-6">
         <div className="space-y-1">

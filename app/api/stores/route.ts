@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
 import { getUserAccess } from '@/lib/auth/access'
+import { describeQuotaError } from '@/lib/billing/quota'
 
 export async function GET() {
   try {
@@ -97,6 +98,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ store })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'STORE_CREATE_FAILED'
+    const quotaMessage = describeQuotaError(message)
+
+    if (quotaMessage) {
+      return NextResponse.json({ error: 'QUOTA_STORES_LIMIT_REACHED', message: quotaMessage }, { status: 403 })
+    }
+
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

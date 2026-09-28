@@ -435,3 +435,40 @@ Sous JWT simulé, transaction annulée :
    `sm.role in ('owner','admin','accountant')`. Un membre `confirmation`/`viewer` est
    donc refusé au même titre qu'en UI. `20260926192933` ne fait que révoquer `anon`
    (aucun corps de fonction) : rien ne rouvre la garde.
+
+## Phase « Abonnement Jisra » — limites opposables (migrations `20260928020000` → `20260928020600`)
+
+Le périmètre des offres touche directement les données financières (volume de
+commandes facturables, coût des crédits IA) : ce qui suit est la référence unique
+pour toute question « pourquoi cette action est refusée ».
+
+### Source unique des droits
+- `public.resolve_effective_plan(user_id)` : abonnement `active` **non expiré** le plus
+  cher, sinon l'offre gratuite. Aucun code applicatif ne réimplémente cette règle ;
+  `rpc_billing_status()` la renvoie telle quelle (avec l'abonnement retenu).
+- Convention « illimité » : `999999` (`public.plan_limit_is_unlimited`), alignée sur
+  l'affichage marketing.
+
+### Ce qui est bloqué en base
+| Limite | Mécanisme | Code d'erreur |
+|---|---|---|
+| Commandes / mois | trigger `trg_enforce_order_quota` (+ verrou par propriétaire), comptage sur la **date métier** `orders.order_date` du mois en cours (migration `20260928020700`) | `QUOTA_ORDER_LIMIT_REACHED` |
+| Stores | trigger `trg_enforce_store_quota` (+ verrou par propriétaire) | `QUOTA_STORES_LIMIT_REACHED` |
+| Crédits IA | `rpc_debit_ai_credits` (plafond suivi via `ai_credit_wallets.plan_id`) | `INSUFFICIENT_CREDITS` |
+
+`confirmation_agents_limit`, `delivery_integrations_limit`, `ads_automation_enabled` et
+`api_access_enabled` **ne sont pas appliqués** : l'offre gratuite porte 0 / 0 / false et
+leur activation bloquerait des fonctions déjà utilisées. Décision commerciale requise.
+
+### État des lieux des comptes
+Comptage corrigé sur la **date métier** (`orders.order_date`) par la migration
+`20260928020700` — recompté le 28/09/2026 :
+- `9d025c4c…` — 425 commandes datées de septembre (limite 250) **et** 4 stores (limite 1) :
+  dépassement réel, décision d'offre requise ;
+- `93c69c54…` — 0 commande mais 2 stores : hors quota **sur les stores seulement** ;
+- `7382e51c…` — 1322 commandes en base mais une seule datée de septembre (import
+  historique) : **plus hors quota** (créations de nouveau autorisées) ;
+- `92401bca…` (5 commandes, 1 store) et `f78272a5…` (104 commandes, 1 store) : conformes.
+
+Tant qu'aucune offre supérieure n'est enregistrée, les créations de commande et de store
+des comptes en dépassement sont refusées par les triggers (grandfather/notification à décider).

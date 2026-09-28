@@ -45,8 +45,8 @@ interface InvoicePreviewResponse {
 }
 
 const ERROR_LABELS: Record<string, string> = {
-  INVOICE_SETTINGS_MISSING: "Complétez d'abord les paramètres de facturation du store.",
-  INVOICE_SETTINGS_INCOMPLETE: 'Renseignez la raison sociale dans Paramètres > Facturation.',
+  INVOICE_SETTINGS_MISSING: "Complétez d'abord les paramètres de factures clients du store.",
+  INVOICE_SETTINGS_INCOMPLETE: 'Renseignez la raison sociale dans Paramètres > Factures clients.',
   ORDER_NOT_INVOICEABLE: 'Cette commande est annulée : aucune facture ne peut être émise.',
   ORDER_HAS_NO_ITEMS: 'Cette commande ne contient aucune ligne facturable.',
   INVOICE_LINE_MISMATCH: "Les lignes de la commande ont changé. Fermez et réouvrez l'aperçu.",
@@ -285,8 +285,8 @@ export default function InvoiceGenerateModal({
             <>
               {!preview.settingsComplete ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  Paramètres de facturation incomplets : renseignez la raison sociale dans
-                  Paramètres &gt; Facturation.
+                  Paramètres de factures clients incomplets : renseignez la raison sociale dans
+                  Paramètres &gt; Factures clients.
                 </div>
               ) : null}
 

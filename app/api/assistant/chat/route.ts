@@ -181,7 +181,7 @@ export async function POST(request: Request) {
       ...conversationalHistory.map((m) => m.content),
     ])
 
-    const { wallet } = await ensureCreditsAvailable(supabase, user.id, estimatedCredits)
+    const { wallet } = await ensureCreditsAvailable(supabase, estimatedCredits)
 
     const model = getAssistantModelName()
 
@@ -250,7 +250,7 @@ export async function POST(request: Request) {
       console.error('ai_usage insert failed:', usageError.message)
     }
 
-    await debitCredits(supabase, wallet.id, wallet.credits_used, creditsUsed)
+    await debitCredits(supabase, creditsUsed)
 
     return NextResponse.json({
       threadId: ensuredThreadId,

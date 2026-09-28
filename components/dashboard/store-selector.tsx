@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Store, AlertCircle, Loader2, Sparkles, Globe2, Building2, Plus, X, Settings } from 'lucide-react'
 import Link from 'next/link'
 import { useMemo, useState, useEffect } from 'react'
+import { describeQuotaError } from '@/lib/billing/quota'
 
 const categories = [
   'Mode & vêtements',
@@ -108,7 +109,7 @@ export default function StoreSelector() {
 
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(payload.error || 'STORE_CREATE_FAILED')
+        throw new Error(describeQuotaError(payload.error) || payload.error || 'STORE_CREATE_FAILED')
       }
 
       return payload.store as { id: string; name: string }
