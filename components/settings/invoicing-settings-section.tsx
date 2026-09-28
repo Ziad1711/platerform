@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import StoreSelector from '@/components/dashboard/store-selector'
 import { useStore } from '@/lib/store-context'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import {
@@ -121,7 +122,10 @@ export default function InvoicingSettingsSection() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const { data, isLoading } = useQuery<{ settings: StoreInvoiceSettings; configured: boolean }>({
+  const { data, isLoading, isError, error, refetch } = useQuery<{
+    settings: StoreInvoiceSettings
+    configured: boolean
+  }>({
     queryKey: ['invoicing-settings', currentStoreId],
     enabled: Boolean(currentStoreId),
     queryFn: async () => {
@@ -130,6 +134,7 @@ export default function InvoicingSettingsSection() {
       )
       const payload = await response.json().catch(() => null)
       if (!response.ok) throw new Error(payload?.error || 'INVOICE_SETTINGS_FETCH_FAILED')
+      if (!payload?.settings) throw new Error('INVOICE_SETTINGS_FETCH_FAILED')
       return payload as { settings: StoreInvoiceSettings; configured: boolean }
     },
   })
@@ -137,6 +142,9 @@ export default function InvoicingSettingsSection() {
   useEffect(() => {
     if (data?.settings) setForm(data.settings)
   }, [data])
+
+  const errorMessage = error instanceof Error ? error.message : null
+  const forbidden = errorMessage === 'FORBIDDEN' || errorMessage === 'UNAUTHORIZED'
 
   function updateText(key: TextKey, value: string) {
     setForm((current) => (current ? { ...current, [key]: value } : current))
@@ -172,21 +180,39 @@ export default function InvoicingSettingsSection() {
     }
   }
 
-  if (isLoading || !form) {
-    return (
-      <section id="invoicing" className="rounded-2xl border bg-card p-6 scroll-mt-32">
-        <div className="text-sm text-muted-foreground">
-          Chargement des paramètres de facturation…
-        </div>
-      </section>
-    )
-  }
-
   return (
-    <section id="invoicing" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+    <section id="invoicing" className="rounded-2xl border bg-card p-6 scroll-mt-32 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Facturation</h2>
+        <StoreSelector />
+      </div>
+
+      {!currentStoreId ? (
+        <p className="text-sm text-muted-foreground">
+          Sélectionnez un store pour configurer la facturation.
+        </p>
+      ) : isError ? (
+        <div className="space-y-3">
+          <p className="text-sm text-red-600">
+            {forbidden
+              ? 'Votre rôle ne donne pas accès aux paramètres de facturation.'
+              : 'Impossible de charger les paramètres de facturation.'}
+          </p>
+          {forbidden ? null : (
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"
+            >
+              Réessayer
+            </button>
+          )}
+        </div>
+      ) : isLoading || !form ? (
+        <p className="text-sm text-muted-foreground">Chargement des paramètres de facturation…</p>
+      ) : (
       <div className="space-y-6">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold text-foreground">Facturation</h2>
           <p className="text-sm text-muted-foreground">
             Mentions légales et règles de TVA appliquées aux factures générées depuis les commandes.
             Ces informations sont figées sur chaque facture au moment de son émission.
@@ -392,6 +418,7 @@ export default function InvoicingSettingsSection() {
           ) : null}
         </div>
       </div>
+      )}
     </section>
   )
 }
