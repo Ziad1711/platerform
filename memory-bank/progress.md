@@ -200,7 +200,15 @@
 
 
 
-### 🔄 Phase 2 (In Progress)
+### ✅ Module Facturation (v1) — durcissement avant émission réelle
+- [x] **Total TTC = `HT + TVA`** dans `rpc_issue_invoice` (migration `20260928010300_invoicing_total_ttc_fix`) et `lib/invoices/calc.ts` : l'ancienne formule `net + port` omettait la TVA en mode prix hors taxe (`prices_include_vat = false`). Mesuré sur 3447 commandes : 0 régression en mode TTC (réglage Jisra), 3428 commandes au total faux en hors TVA
+- [x] **PDF** : totaux scindés en deux blocs (`Articles TTC/HT`, `Remise commande`, `Livraison` d'un côté, `Total HT` + `TVA` → `Total TTC` de l'autre) — plus de double comptage de la remise ni du port (`lib/invoices/pdf.ts`)
+- [x] **Comptable** : bouton facture ouvert aux porteurs de `invoices.view` (libellé « Consulter la facture » sans `invoices.issue`), `Articles TTC/HT` selon le réglage dans `invoice-generate-modal.tsx`
+- [x] **Garde d'émission `INVOICE_TOTAL_MISMATCH`** (migration `20260928010400_invoicing_total_mismatch_guard`) : émission refusée (avant attribution de numéro) si les lignes ne reproduisent plus le total de la commande à plus d'un centime ; comparaison sur `base HT + port` pour rester valable en mode TTC comme en hors TVA. Impact réel nul : les 4 seules commandes en écart n'ont aucune ligne (déjà refusées par `ORDER_HAS_NO_ITEMS`). Erreur mappée HTTP 409 + message français
+- [x] **Bug bloquant corrigé** (migration `20260928010500_invoicing_priced_lines_fix`) : `v_priced := v_priced || v_line.item || jsonb_build_object(...)` sur un tableau jsonb ajoutait 2 éléments par ligne au lieu de fusionner → `invoice_items.line_discount_ttc` NULL → **aucune émission possible**. Parenthésage de la fusion
+- [x] Vérifié en base sous JWT simulé (transaction annulée, store `mroki`) : émission OK (`TST-2026-000001`, HT 501,67 + TVA 91,33 = TTC 593,00 = total commande, 2 lignes correctes, compteur 2026 → 1), écart de 10 forcé → `P0001 / INVOICE_TOTAL_MISMATCH` sans facture ni numéro consommé, rejeu → `duplicate: true` ; aucun résidu après rollback ; `npx tsc --noEmit` OK
+- [ ] **Reste à faire** : test authentifié de bout en bout (paramétrage UI → aperçu → émission → PDF → annulation → réémission), décisions métier (mode hors TVA, périmètre du rôle comptable) et validation par un comptable des mentions légales et du PDF
+
 
 #### Store Management (High Priority)
 - [x] Create stores table in Supabase

@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall } from 'lucide-react'
+import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
 import StoresSection from '@/components/settings/stores-section'
 import TeamSection from '@/components/settings/team-section'
 import ConfirmationSettingsSection from '@/components/settings/confirmation-settings-section'
+import InvoicingSettingsSection from '@/components/settings/invoicing-settings-section'
 import { useTheme } from '@/components/providers'
 import { createClient } from '@/lib/supabase/client'
 
@@ -297,6 +298,7 @@ export default function SettingsPage() {
              <button onClick={() => setActiveSection('rates')} className={navItemClass('rates')}><RefreshCcw className="h-4 w-4" /> Taux de change</button>
              <button onClick={() => setActiveSection('blacklist')} className={navItemClass('blacklist')}><ShieldAlert className="h-4 w-4" /> Blacklist</button>
              <button onClick={() => setActiveSection('confirmation')} className={navItemClass('confirmation')}><PhoneCall className="h-4 w-4" /> Confirmation</button>
+             <button onClick={() => setActiveSection('invoicing')} className={navItemClass('invoicing')}><FileText className="h-4 w-4" /> Facturation</button>
              <button onClick={() => setActiveSection('stores')} className={navItemClass('stores')}><Building2 className="h-4 w-4" /> Stores</button>
              <button onClick={() => setActiveSection('team')} className={navItemClass('team')}><Users className="h-4 w-4" /> Équipe</button>
           </div>
@@ -458,6 +460,7 @@ export default function SettingsPage() {
              </section>}
 
              {activeSection === 'confirmation' && <ConfirmationSettingsSection />}
+             {activeSection === 'invoicing' && <InvoicingSettingsSection />}
              {activeSection === 'stores' && <StoresSection />}
              {activeSection === 'team' && <TeamSection />}
            </div>

@@ -12,6 +12,7 @@ import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
 import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
 import InlineEditProducts from '@/components/dashboard/sales/inline-edit-products'
 import ExchangeRequestModal from '@/components/dashboard/sales/exchange-request-modal'
+import InvoiceGenerateModal from '@/components/invoices/invoice-generate-modal'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { hasPermission } from '@/lib/auth/permissions'
@@ -442,6 +443,8 @@ export default function VentesPage() {
     hasPermission(role ?? null, 'sales.write') || hasPermission(role ?? null, 'delivery.manage')
   const canDeleteOrders = can('sales.delete')
   const canDuplicateOrders = can('sales.write')
+  const canViewInvoices = can('invoices.view')
+  const canIssueInvoices = can('invoices.issue')
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -528,6 +531,7 @@ export default function VentesPage() {
   }, [openProductDropdownIndex])
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null)
+  const [invoiceOrder, setInvoiceOrder] = useState<any | null>(null)
   const [exchangeOrder, setExchangeOrder] = useState<any | null>(null)
   const [isRapidDeliveryModalOpen, setIsRapidDeliveryModalOpen] = useState(false)
   const [rapidDeliveryOrder, setRapidDeliveryOrder] = useState<any | null>(null)
@@ -4911,6 +4915,16 @@ export default function VentesPage() {
                         : ''}
                     </span>
                   ) : null}
+
+                  {canViewInvoices ? (
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceOrder(selectedOrderForDetails)}
+                      className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                    >
+                      {canIssueInvoices ? 'Générer une facture' : 'Consulter la facture'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -4944,6 +4958,23 @@ export default function VentesPage() {
         canManage={canManageExchange}
         onClose={() => setExchangeOrder(null)}
       />
+
+      {invoiceOrder ? (
+        <InvoiceGenerateModal
+          storeId={currentStoreId}
+          orderId={invoiceOrder.id}
+          canIssue={canIssueInvoices}
+          onClose={() => setInvoiceOrder(null)}
+          onIssued={() => {
+            queryClient.invalidateQueries({ queryKey: ['invoices', currentStoreId] })
+            toast.success('Facture générée')
+          }}
+          onCancelled={() => {
+            queryClient.invalidateQueries({ queryKey: ['invoices', currentStoreId] })
+            toast.success('Facture annulée')
+          }}
+        />
+      ) : null}
 
       {/* Filters */}
       <div className="bg-card rounded-xl shadow p-4">
