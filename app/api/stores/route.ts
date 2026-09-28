@@ -1,29 +1,17 @@
 import { NextResponse } from 'next/server'
 import { requireAuthenticatedUser } from '@/lib/assistant/security'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { getUserAccess } from '@/lib/auth/access'
 
 export async function GET() {
   try {
-    const { user } = await requireAuthenticatedUser()
-    const admin = createAdminClient()
-    const { data: owned, error: ownedErr } = await admin
-      .from('stores')
-      .select('id')
-      .eq('owner_user_id', user.id)
-      .limit(1)
+    const { supabase, user } = await requireAuthenticatedUser()
 
-    if (ownedErr) throw ownedErr
+    // Règle unique « store réellement accessible et actif » (voir lib/auth/access.ts) :
+    // appartenance active, puis propriété du store en filet de sécurité.
+    const access = await getUserAccess(supabase, user.id)
+    if (access.lookupFailed) throw new Error('STORE_FETCH_FAILED')
 
-    const { data: member, error: memberErr } = await admin
-      .from('store_members')
-      .select('store_id')
-      .eq('user_id', user.id)
-      .limit(1)
-
-    if (memberErr) throw memberErr
-
-    const hasStores = (owned?.length || 0) + (member?.length || 0) > 0
-    return NextResponse.json({ hasStores })
+    return NextResponse.json({ hasStores: access.hasStore })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'STORE_FETCH_FAILED'
     return NextResponse.json({ error: message }, { status: 500 })

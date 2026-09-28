@@ -1,18 +1,16 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
-import { usePermissions } from '@/lib/auth/use-permissions'
 import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { Wallet, TriangleAlert } from 'lucide-react'
-import AgentPaymentDialog from '@/components/dashboard/finance/agent-payment-dialog'
-import SupplierPurchaseDialog from '@/components/dashboard/finance/supplier-purchase-dialog'
-import SupplierPaymentDialog from '@/components/dashboard/finance/supplier-payment-dialog'
 import PnlOverview from '@/components/dashboard/finance/pnl-overview'
+import FinanceKpiCards from '@/components/dashboard/finance/finance-kpi-cards'
+import FinanceTrendChart from '@/components/dashboard/finance/finance-trend-chart'
 import PeriodFilter from '@/components/dashboard/period-filter'
 
 type AgentBalance = {
@@ -35,7 +33,6 @@ type SupplierBalance = {
 
 export default function FinancesClient() {
   const { currentStoreId, accessibleStoreIds, accessibleStores } = useStore()
-  const { can } = usePermissions(currentStoreId)
   const supabase = createClient()
 
   const storeNameById = useMemo(
@@ -73,12 +70,6 @@ export default function FinancesClient() {
   const totalSupplierRemaining = suppliers.reduce((s, a) => s + Number(a.remaining || 0), 0)
   const isSingleStore = !!currentStoreId
 
-  const [payAgent, setPayAgent] = useState<AgentBalance | null>(null)
-  const [purchaseSupplier, setPurchaseSupplier] = useState<SupplierBalance | null>(null)
-  const [paySupplier, setPaySupplier] = useState<SupplierBalance | null>(null)
-
-  const canRecord = can('finance.payments') && !!currentStoreId
-
   return (
     <div className="space-y-6 pt-2 sm:pt-0 animate-fade-in">
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -99,6 +90,8 @@ export default function FinancesClient() {
         </div>
       </div>
 
+      <FinanceKpiCards />
+      <FinanceTrendChart />
       <PnlOverview />
 
       <div className="flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-800 dark:text-amber-200">
@@ -141,16 +134,15 @@ export default function FinancesClient() {
                 <th className="px-5 py-3 font-medium">Acquises</th>
                 <th className="px-5 py-3 font-medium">Versées</th>
                 <th className="px-5 py-3 font-medium">Restant</th>
-                <th className="px-5 py-3 font-medium text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {agentsLoading ? (
-                <tr><td colSpan={5} className="px-5 py-4 text-muted-foreground">Chargement…</td></tr>
+                <tr><td colSpan={4} className="px-5 py-4 text-muted-foreground">Chargement…</td></tr>
               ) : agentsError ? (
-                <tr><td colSpan={5} className="px-5 py-4 text-red-600">Erreur de chargement.</td></tr>
+                <tr><td colSpan={4} className="px-5 py-4 text-red-600">Erreur de chargement.</td></tr>
               ) : agents.length === 0 ? (
-                <tr><td colSpan={5} className="px-5 py-4 text-muted-foreground">Aucun agent.</td></tr>
+                <tr><td colSpan={4} className="px-5 py-4 text-muted-foreground">Aucun agent.</td></tr>
               ) : (
                 agents.map((a) => (
                   <tr key={`${a.store_id}-${a.agent_id}`} className="border-b border-border/40">
@@ -163,17 +155,6 @@ export default function FinancesClient() {
                     <td className="px-5 py-3 text-foreground">{formatCurrency(a.earned_commission)}</td>
                     <td className="px-5 py-3 text-foreground">{formatCurrency(a.paid_commission)}</td>
                     <td className="px-5 py-3 font-medium text-foreground">{formatCurrency(a.remaining)}</td>
-                    <td className="px-5 py-3 text-right">
-                      {canRecord && (
-                        <button
-                          type="button"
-                          onClick={() => setPayAgent(a)}
-                          className="px-3 py-1.5 rounded-lg bg-[#1fa971] text-white text-xs"
-                        >
-                          Verser
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ))
               )}
@@ -186,8 +167,7 @@ export default function FinancesClient() {
         <div className="p-5 border-b border-border/50">
           <h2 className="font-semibold text-foreground">Fournisseurs</h2>
           <p className="text-xs text-muted-foreground mt-1">
-            Achats enregistrés dans ce module uniquement. Les entrées de stock fournisseur non encore
-            rapprochées n&apos;apparaissent pas ici tant qu&apos;elles ne sont pas qualifiées comme dettes.
+            Achats créés depuis le module Stock. Les règlements se saisissent dans Fournisseurs.
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -198,16 +178,15 @@ export default function FinancesClient() {
                 <th className="px-5 py-3 font-medium">Dû</th>
                 <th className="px-5 py-3 font-medium">Payé</th>
                 <th className="px-5 py-3 font-medium">Restant</th>
-                <th className="px-5 py-3 font-medium text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {suppliersLoading ? (
-                <tr><td colSpan={5} className="px-5 py-4 text-muted-foreground">Chargement…</td></tr>
+                <tr><td colSpan={4} className="px-5 py-4 text-muted-foreground">Chargement…</td></tr>
               ) : suppliersError ? (
-                <tr><td colSpan={5} className="px-5 py-4 text-red-600">Erreur de chargement.</td></tr>
+                <tr><td colSpan={4} className="px-5 py-4 text-red-600">Erreur de chargement.</td></tr>
               ) : suppliers.length === 0 ? (
-                <tr><td colSpan={5} className="px-5 py-4 text-muted-foreground">Aucun fournisseur.</td></tr>
+                <tr><td colSpan={4} className="px-5 py-4 text-muted-foreground">Aucun fournisseur.</td></tr>
               ) : (
                 suppliers.map((s) => (
                   <tr key={`${s.store_id}-${s.supplier_id}`} className="border-b border-border/40">
@@ -220,26 +199,6 @@ export default function FinancesClient() {
                     <td className="px-5 py-3 text-foreground">{formatCurrency(s.total_due)}</td>
                     <td className="px-5 py-3 text-foreground">{formatCurrency(s.total_paid)}</td>
                     <td className="px-5 py-3 font-medium text-foreground">{formatCurrency(s.remaining)}</td>
-                    <td className="px-5 py-3 text-right space-x-2">
-                      {canRecord && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setPurchaseSupplier(s)}
-                            className="px-3 py-1.5 rounded-lg border border-border text-foreground text-xs"
-                          >
-                            Achat
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPaySupplier(s)}
-                            className="px-3 py-1.5 rounded-lg bg-[#1fa971] text-white text-xs"
-                          >
-                            Payer
-                          </button>
-                        </>
-                      )}
-                    </td>
                   </tr>
                 ))
               )}
@@ -248,33 +207,6 @@ export default function FinancesClient() {
         </div>
       </section>
 
-      {payAgent && (
-        <AgentPaymentDialog
-          open
-          onClose={() => setPayAgent(null)}
-          storeId={payAgent.store_id}
-          agentId={payAgent.agent_id}
-          agentName={payAgent.agent_name}
-        />
-      )}
-      {purchaseSupplier && (
-        <SupplierPurchaseDialog
-          open
-          onClose={() => setPurchaseSupplier(null)}
-          storeId={purchaseSupplier.store_id}
-          supplierId={purchaseSupplier.supplier_id}
-          supplierName={purchaseSupplier.supplier_name}
-        />
-      )}
-      {paySupplier && (
-        <SupplierPaymentDialog
-          open
-          onClose={() => setPaySupplier(null)}
-          storeId={paySupplier.store_id}
-          supplierId={paySupplier.supplier_id}
-          supplierName={paySupplier.supplier_name}
-        />
-      )}
     </div>
   )
 }

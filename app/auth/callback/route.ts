@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
+import { getUserAccess } from '@/lib/auth/access'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -32,22 +33,17 @@ export async function GET(request: Request) {
   let redirectTo = '/dashboard'
 
   if (user) {
-    const { data: member } = await supabase
-      .from('store_members')
-      .select('role, store_id')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .limit(1)
-      .maybeSingle()
-
-    const passwordSet = user.user_metadata?.password_set === true
-    const hasStore = !!member
+    const access = await getUserAccess(supabase, user.id)
+    // Seul un marqueur explicite `password_set === false` (compte invité)
+    // déclenche la page de finalisation du mot de passe.
+    const needsPassword = user.user_metadata?.password_set === false
 
     redirectTo = resolvePostLoginRedirect({
       next: nextParam,
-      role: member?.role as any ?? null,
-      hasStore,
-      passwordSet,
+      role: access.role,
+      hasStore: access.hasStore,
+      needsPassword,
+      accessLookupFailed: access.lookupFailed,
     })
   }
 

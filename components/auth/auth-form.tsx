@@ -91,9 +91,15 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
 
       if (mode === 'login') {
         // Navigation serveur forcée pour que le middleware lise les cookies
-        // correctement après signInWithPassword (évite le flash login)
+        // correctement après signInWithPassword (évite le flash login).
+        // On repasse par `/login` pour que la règle commune
+        // (`resolvePostLoginRedirect`) choisisse la destination : finalisation du
+        // mot de passe (`/welcome`), `next` explicite, ou espace applicatif.
+        // Naviguer directement ici contournerait cette règle et ferait manquer
+        // `/welcome` à un compte invité qui n'a pas encore de mot de passe.
         const target = sanitizeRedirectPath(next)
-        window.location.href = target === '/dashboard' ? '/dashboard' : target
+        const query = target && target !== '/dashboard' ? `?next=${encodeURIComponent(target)}` : ''
+        window.location.href = `/login${query}`
       } else if (mode === 'signup') {
         router.refresh()
       }

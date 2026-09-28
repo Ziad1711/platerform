@@ -21,9 +21,13 @@
 - [x] Automatic redirect to dashboard after login
 - [x] Logout functionality
 - [x] First-store onboarding modal after account creation/login when user has no store
+- [x] Règle canonique de destination post-connexion (`lib/auth/redirects.ts` + `lib/auth/access.ts`) : `/welcome` réservé aux comptes invités sans mot de passe (`password_set === false`) **et sans store actif** ; comptes sans store actif envoyés vers `/dashboard` (onboarding modal) ; appartenances lues en `.limit(1)` avec erreur explicite (`lookupFailed`) — erreur qui, en plus d'être signalée, est transmise aux appelants (`accessLookupFailed`) et n'est jamais assimilée à « aucun store »
+- [x] Détection unique du store accessible (`getUserAccess`) : appartenance `status = 'active'`, puis propriété du store (`stores.owner_user_id`) — utilisée par `/login`, `/signup`, `/auth/callback`, `GET /api/stores` et (via cette route) `/welcome`
+- [x] Aucun contournement de la règle de destination : `accessLookupFailed` est évalué **avant** le test de finalisation (une lecture ratée ne mène jamais à `/welcome`), `next=/welcome` n'est pas honoré « sur demande », `/welcome` masque son formulaire quand `GET /api/stores` échoue (avec réessai), et la connexion par mot de passe (`auth-form`) repasse par `/login` pour que la page serveur applique `resolvePostLoginRedirect`
+- [x] Finalisation du mot de passe **avant** l'acceptation d'invitation (`app/invite/[token]/page.tsx`) : plus aucun invité redirigé vers `/welcome` après activation de ses stores ; le compte marqué `password_set === false` définit son mot de passe sur place (marqueur posé seulement en cas de succès, invitation non consommée en cas d'échec, bouton « Réessayer » si l'acceptation échoue)
+- [x] Invitation non perdue si la finalisation passe par `/welcome` : la destination demandée est transmise (`/welcome?next=%2Finvite%2F<token>`) et rejouée après la finalisation ; `app/auth/finish/page.tsx` valide son `next` (chemin interne, `/welcome` non honoré) pour fermer la redirection ouverte via ce point d'entrée
 
 ### ✅ Layout & Navigation
-- [x] Root layout with providers
 - [x] Dashboard layout with sidebar
 - [x] Sidebar navigation with icons
 - [x] Responsive mobile menu

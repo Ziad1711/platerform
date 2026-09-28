@@ -3,11 +3,12 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
-import { Search, Filter, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info, DollarSign } from 'lucide-react'
+import { Search, Filter, Package, ArrowDown, ArrowUp, RefreshCw, Plus, Info, DollarSign, List } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
+import { StockLevels } from '@/components/dashboard/stock/stock-levels'
 
 import { Suspense, useEffect, useMemo, useState } from 'react'
 
@@ -45,6 +46,7 @@ function StocksPageContent() {
   const [createStoreFromQuery, setCreateStoreFromQuery] = useState('')
   const [pendingCreateProductId, setPendingCreateProductId] = useState('')
   const [pendingCreateVariantId, setPendingCreateVariantId] = useState('')
+  const [activeTab, setActiveTab] = useState<'levels' | 'movements'>('movements')
   const supabase = createClient()
   const queryClient = useQueryClient()
 
@@ -285,8 +287,22 @@ function StocksPageContent() {
         throw new Error('Le coût unitaire doit être positif.')
       }
 
-      const effectiveUnitCost = unitCost
-      const totalCost = quantity * effectiveUnitCost
+      // Achat fournisseur : mouvement de stock + dette créés atomiquement.
+      if (newMovementType === 'in' && selectedSupplierId) {
+        const { error } = await supabase.rpc('rpc_record_stock_purchase', {
+          p_store_id: selectedCreateStoreId,
+          p_supplier_id: selectedSupplierId,
+          p_product_id: newProductId,
+          p_quantity: quantity,
+          p_unit_cost: unitCost,
+          p_product_variant_id: newVariantId || null,
+          p_invoice_reference: newInvoiceNumber.trim() || null,
+        })
+        if (error) throw error
+        return
+      }
+
+      const totalCost = quantity * unitCost
 
       const { error } = await supabase
         .from('inventory_movements')
@@ -299,7 +315,7 @@ function StocksPageContent() {
           supplier_id: selectedSupplierId || null,
           quantity,
           remaining_qty: newMovementType === 'in' ? quantity : null,
-          unit_cost: effectiveUnitCost,
+          unit_cost: unitCost,
           total_cost: totalCost,
           invoice_number: newInvoiceNumber.trim() || null,
         })
@@ -310,6 +326,10 @@ function StocksPageContent() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['inventory-movements-details'] }),
         queryClient.invalidateQueries({ queryKey: ['stock-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['stock-levels'] }),
+        queryClient.invalidateQueries({ queryKey: ['finance-supplier-balances'] }),
+        queryClient.invalidateQueries({ queryKey: ['finance-supplier-purchases'] }),
+        queryClient.invalidateQueries({ queryKey: ['suppliers-purchases-summary'] }),
       ])
       setIsCreateOpen(false)
       setNewMovementType('in')
@@ -350,6 +370,21 @@ function StocksPageContent() {
         throw new Error('Le coût unitaire doit être positif.')
       }
 
+      // Achat fournisseur : synchronise la dette (bloqué si déjà réglée).
+      if (editingMovement.source_type === 'supplier_purchase') {
+        const { error } = await supabase.rpc('rpc_update_stock_purchase', {
+          p_movement_id: editingMovement.id,
+          p_product_id: editProductId,
+          p_quantity: quantity,
+          p_unit_cost: unitCost,
+          p_product_variant_id: editVariantId || null,
+          p_supplier_id: editSupplierId || null,
+          p_invoice_reference: editInvoiceNumber.trim() || null,
+        })
+        if (error) throw error
+        return
+      }
+
       const { error } = await supabase
         .from('inventory_movements')
         .update({
@@ -372,6 +407,10 @@ function StocksPageContent() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['inventory-movements-details'] }),
         queryClient.invalidateQueries({ queryKey: ['stock-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['stock-levels'] }),
+        queryClient.invalidateQueries({ queryKey: ['finance-supplier-balances'] }),
+        queryClient.invalidateQueries({ queryKey: ['finance-supplier-purchases'] }),
+        queryClient.invalidateQueries({ queryKey: ['suppliers-purchases-summary'] }),
       ])
       setIsEditOpen(false)
       setEditingMovement(null)
@@ -662,6 +701,37 @@ function StocksPageContent() {
           Gestion des stocks et mouvements
         </p>
       </div>
+
+      {/* Tabs */}
+      <div className="bg-card rounded-xl shadow p-1 inline-flex gap-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab('movements')}
+          className={cn(
+            'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            activeTab === 'movements' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <List className="w-4 h-4" />
+          Mouvements
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('levels')}
+          className={cn(
+            'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            activeTab === 'levels' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Package className="w-4 h-4" />
+          Stock actuel
+        </button>
+      </div>
+
+      {activeTab === 'levels' ? (
+        <StockLevels />
+      ) : (
+        <>
 
       {/* Filters - same row as sales */}
       <div className="bg-card rounded-xl shadow p-4">
@@ -1326,6 +1396,8 @@ function StocksPageContent() {
                           <div className="text-foreground">Retour #{String(linkedOrder.id || '').slice(0, 8)}</div>
                           <div className="text-xs text-muted-foreground">{linkedOrder.customer_name || '-'} • {linkedOrder.status || '-'}</div>
                         </div>
+                      ) : movement.source_type === 'supplier_purchase' ? (
+                        <span>Achat fournisseur</span>
                       ) : movement.source_type ? (
                         <span>{movement.source_type}</span>
                       ) : (
@@ -1385,6 +1457,8 @@ function StocksPageContent() {
           </div>
         ) : null}
       </div>
+        </>
+      )}
     </div>
   )
 }

@@ -16,6 +16,11 @@ export default function InvitePage() {
   const [invitationEmail, setInvitationEmail] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [needsPassword, setNeedsPassword] = useState(false)
+  const [password, setPassword] = useState('')
+  const [pwError, setPwError] = useState('')
+  const [savingPassword, setSavingPassword] = useState(false)
+  const [retryAccept, setRetryAccept] = useState(false)
 
   useEffect(() => {
     async function check() {
@@ -41,6 +46,11 @@ export default function InvitePage() {
         return
       }
 
+      // Seul un compte invité explicitement marqué `password_set === false` doit
+      // définir son mot de passe. Ce choix se fait AVANT l'acceptation : sinon
+      // l'activation des stores rend `/welcome` inopérant (il renvoie au
+      // tableau de bord tout compte ayant déjà un store actif).
+      setNeedsPassword(user.user_metadata?.password_set === false)
       setStatus('ready')
     }
     check()
@@ -58,17 +68,48 @@ export default function InvitePage() {
       if (!res.ok) throw new Error(payload?.error || 'ACCEPT_FAILED')
 
       setStatus('success')
-      const { data: { user } } = await supabase.auth.getUser()
-      const needsPassword = user?.user_metadata?.password_set === false
+      // Le mot de passe manquant a déjà été défini sur cette page : la
+      // destination ne dépend plus que du rôle délivré par l'invitation.
       // Navigation immédiate avec window.location.href pour éviter
       // l'erreur "chrome-error://chromewebdata/" qui survient quand
       // router.push() est appelé depuis un contexte de frame interrompu
       const defaultRoute = getFirstAllowedRoute(payload?.role as any)
-      window.location.href = needsPassword ? '/welcome' : defaultRoute
+      window.location.href = defaultRoute
     } catch (e) {
       setStatus('error')
       setErrorMsg(e instanceof Error ? e.message : 'Erreur')
     }
+  }
+
+  async function handleSetPasswordAndAccept(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setPwError('')
+
+    if (password.length < 8) {
+      setPwError('Le mot de passe doit contenir au moins 8 caractères')
+      return
+    }
+
+    setSavingPassword(true)
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({
+        password,
+        data: { password_set: true },
+      })
+      if (updateError) throw updateError
+      // Le marqueur n'est posé qu'après une mise à jour réussie : en cas
+      // d'échec le compte reste « à finaliser » et l'invitation n'est pas
+      // consommée.
+      setRetryAccept(true)
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : 'Erreur')
+      setPassword('')
+      return
+    } finally {
+      setSavingPassword(false)
+    }
+
+    await handleAccept()
   }
 
   return (
@@ -93,7 +134,42 @@ export default function InvitePage() {
           </>
         )}
 
-        {status === 'ready' && (
+        {status === 'ready' && needsPassword && (
+          <form onSubmit={handleSetPasswordAndAccept} className="space-y-4 text-left">
+            <div className="text-center">
+              <h1 className="text-xl font-semibold">Définir mon mot de passe</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Choisissez votre mot de passe pour vos prochaines connexions, puis rejoignez l&apos;équipe.
+              </p>
+            </div>
+
+            <label className="block space-y-1.5 text-sm font-medium">
+              <span>Mot de passe</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
+
+            {pwError ? <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-500">{pwError}</div> : null}
+
+            <button
+              type="submit"
+              disabled={savingPassword}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {savingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Définir et rejoindre l&apos;équipe
+            </button>
+          </form>
+        )}
+
+        {status === 'ready' && !needsPassword && (
           <>
             <h1 className="text-xl font-semibold">Invitation reçue</h1>
             <p className="mt-2 text-sm text-muted-foreground">Vous avez été invité à rejoindre une équipe.</p>
@@ -116,6 +192,9 @@ export default function InvitePage() {
             <AlertTriangle className="h-8 w-8 mx-auto text-red-500"/>
             <h1 className="mt-3 text-xl font-semibold">Erreur</h1>
             <p className="mt-2 text-sm text-muted-foreground">{errorMsg}</p>
+            {retryAccept ? (
+              <button onClick={handleAccept} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Réessayer</button>
+            ) : null}
           </>
         )}
       </div>

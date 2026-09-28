@@ -7,12 +7,11 @@ import { formatCurrency } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { useSearchParams } from 'next/navigation'
-import { Search, Plus, MoreVertical, ChevronDown, ChevronUp } from 'lucide-react'
-import { Fragment, Suspense, useEffect, useMemo, useState } from 'react'
+import { Search, Plus, MoreVertical } from 'lucide-react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import SupplierPaymentDialog from '@/components/dashboard/finance/supplier-payment-dialog'
-import SupplierPurchaseDialog from '@/components/dashboard/finance/supplier-purchase-dialog'
-import SupplierPurchasesDetail from '@/components/dashboard/finance/supplier-purchases-detail'
+import SupplierTransactionsModal from '@/components/dashboard/finance/supplier-transactions-modal'
 
 type SupplierBalanceRow = {
   supplier_id: string
@@ -45,9 +44,8 @@ function FournisseursPageContent() {
   const [newNotes, setNewNotes] = useState('')
   const [createError, setCreateError] = useState('')
   const [hasHandledOpenCreateParam, setHasHandledOpenCreateParam] = useState(false)
-  const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null)
+  const [detailSupplier, setDetailSupplier] = useState<SupplierRow | null>(null)
   const [paySupplier, setPaySupplier] = useState<SupplierRow | null>(null)
-  const [purchaseSupplier, setPurchaseSupplier] = useState<SupplierRow | null>(null)
 
   const { can } = usePermissions(currentStoreId)
   const canViewFinance = can('finance.view')
@@ -405,8 +403,7 @@ function FournisseursPageContent() {
               </thead>
               <tbody className="bg-card divide-y divide-border">
                 {suppliersRows.map((supplier: any) => (
-                  <Fragment key={supplier.id}>
-                    <tr className="hover:bg-secondary">
+                  <tr key={supplier.id} className="hover:bg-secondary">
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium text-foreground">{supplier.name}</div>
                         <div className="text-xs text-muted-foreground">
@@ -429,38 +426,22 @@ function FournisseursPageContent() {
                       <td className="px-6 py-4 text-sm font-medium">
                         {canViewFinance ? (
                           <div className="flex items-center gap-2">
+                            {canRecordPayment ? (
+                              <button
+                                type="button"
+                                onClick={() => setPaySupplier(supplier)}
+                                className="rounded-md bg-[#1fa971] px-2.5 py-1.5 text-xs text-white"
+                              >
+                                Payer
+                              </button>
+                            ) : null}
                             <button
                               type="button"
-                              onClick={() =>
-                                setExpandedSupplierId((current) => (current === supplier.id ? null : supplier.id))
-                              }
+                              onClick={() => setDetailSupplier(supplier)}
                               className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground"
                             >
-                              {expandedSupplierId === supplier.id ? (
-                                <ChevronUp className="w-3.5 h-3.5" />
-                              ) : (
-                                <ChevronDown className="w-3.5 h-3.5" />
-                              )}
                               Détail
                             </button>
-                            {canRecordPayment ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => setPurchaseSupplier(supplier)}
-                                  className="rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground"
-                                >
-                                  Achat
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setPaySupplier(supplier)}
-                                  className="rounded-md bg-[#1fa971] px-2.5 py-1.5 text-xs text-white"
-                                >
-                                  Payer
-                                </button>
-                              </>
-                            ) : null}
                           </div>
                         ) : (
                           <button className="text-muted-foreground hover:text-muted-foreground">
@@ -469,18 +450,6 @@ function FournisseursPageContent() {
                         )}
                       </td>
                     </tr>
-                    {expandedSupplierId === supplier.id ? (
-                      <tr className="bg-secondary/20">
-                        <td colSpan={canViewFinance ? 9 : 6} className="p-0">
-                          <SupplierPurchasesDetail
-                            storeId={supplier.store_id}
-                            supplierId={supplier.id}
-                            enabled={canViewFinance}
-                          />
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -521,15 +490,6 @@ function FournisseursPageContent() {
         ) : null}
       </div>
 
-      {purchaseSupplier ? (
-        <SupplierPurchaseDialog
-          open
-          onClose={() => setPurchaseSupplier(null)}
-          storeId={purchaseSupplier.store_id}
-          supplierId={purchaseSupplier.id}
-          supplierName={purchaseSupplier.name}
-        />
-      ) : null}
       {paySupplier ? (
         <SupplierPaymentDialog
           open
@@ -537,6 +497,15 @@ function FournisseursPageContent() {
           storeId={paySupplier.store_id}
           supplierId={paySupplier.id}
           supplierName={paySupplier.name}
+        />
+      ) : null}
+      {detailSupplier ? (
+        <SupplierTransactionsModal
+          open
+          onClose={() => setDetailSupplier(null)}
+          storeId={detailSupplier.store_id}
+          supplierId={detailSupplier.id}
+          supplierName={detailSupplier.name}
         />
       ) : null}
     </div>

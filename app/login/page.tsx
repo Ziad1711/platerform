@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { createClient, getServerUser } from '@/lib/supabase/server'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
-import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
+import { resolvePostLoginRedirect } from '@/lib/auth/redirects'
+import { getUserAccess } from '@/lib/auth/access'
 
 type LoginPageProps = {
   searchParams?: Promise<{ signup?: string; recovery?: string; error?: string; next?: string }>
@@ -15,20 +16,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   if (user && params.recovery !== '1') {
     const supabase = await createClient()
-    const { data: member } = await supabase
-      .from('store_members')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .maybeSingle()
-    const passwordSet = user.user_metadata?.password_set === true
-    const hasStore = !!member
+    const access = await getUserAccess(supabase, user.id)
+    // Seul un marqueur explicite `password_set === false` (compte invité)
+    // déclenche la page de finalisation du mot de passe.
+    const needsPassword = user.user_metadata?.password_set === false
 
     const redirectTo = resolvePostLoginRedirect({
       next: params.next,
-      role: member?.role as any ?? null,
-      hasStore,
-      passwordSet,
+      role: access.role,
+      hasStore: access.hasStore,
+      needsPassword,
+      accessLookupFailed: access.lookupFailed,
     })
     redirect(redirectTo)
   }

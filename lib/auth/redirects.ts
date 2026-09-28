@@ -69,34 +69,64 @@ export function buildLoginRedirect(
 }
 
 /**
- * Résout la destination après connexion en fonction de :
- * - `next` : paramètre explicite de redirection
- * - `role` : rôle de l'utilisateur (pour la route par défaut)
- * - `hasStore` : si l'utilisateur a au moins un store
- * - `passwordSet` : si l'utilisateur a déjà défini son mot de passe
+ * Résout la destination après connexion selon trois états distincts :
+ * - `needsPassword` : compte invité qui n'a PAS encore défini son mot de passe
+ *   (`user_metadata.password_set === false`). C'est la seule raison d'envoyer
+ *   un utilisateur vers `/welcome`. L'absence du marqueur (`undefined`) signifie
+ *   que le mot de passe a été choisi à l'inscription : ce n'est pas un compte
+ *   à finaliser.
+ * - `hasStore` / `role` : accès à au moins un store **actif** (propriété ou
+ *   appartenance `status = 'active'`).
+ * - `next` : paramètre explicite de redirection fourni par l'appelant.
+ * - `accessLookupFailed` : la lecture de l'accès a échoué. Ni le rôle ni la
+ *   présence d'un store ne sont connus : on ne conclut rien de cette lecture
+ *   ratée (destination neutre, jamais `/welcome`).
  */
 export function resolvePostLoginRedirect(options: {
   next?: string | null
   role: Role | null
   hasStore: boolean
-  passwordSet: boolean
+  needsPassword: boolean
+  accessLookupFailed?: boolean
 }): string {
-  const { next, role, hasStore, passwordSet } = options
+  const { next, role, hasStore, needsPassword, accessLookupFailed = false } = options
 
-  // Si l'utilisateur n'a pas de store ET n'a pas défini son mot de passe
-  // → nouveau utilisateur qui doit finaliser son compte
-  if (!hasStore && !passwordSet) return '/welcome'
+  // Redirection explicite demandée par l'appelant, limitée aux chemins internes.
+  const requestedNext =
+    next && next.startsWith('/') && !next.startsWith('//') ? next : null
+  // `/welcome` n'est jamais honoré « sur demande » : c'est la règle de finalisation
+  // ci-dessous qui décide, sinon un compte déjà finalisé pourrait y être renvoyé.
+  const nextIsWelcome =
+    requestedNext === '/welcome' || (requestedNext?.startsWith('/welcome?') ?? false)
 
-  // Si l'utilisateur n'a pas de store mais a un mot de passe
-  // → doit créer un store
-  if (!hasStore) return '/welcome'
-
-  // Si un `next` explicite est fourni et valide
-  if (next && next.startsWith('/') && !next.startsWith('//')) {
-    return next
+  // 1. Lecture de l'accès en échec : une lecture ratée ne prouve ni l'absence de
+  //    store ni l'absence de mot de passe. Aucune conclusion n'en est tirée et
+  //    `/welcome` est le seul interdit (il ferait « finaliser » un compte abouti).
+  if (accessLookupFailed) {
+    return nextIsWelcome ? '/dashboard' : requestedNext ?? '/dashboard'
   }
 
-  // Route par défaut selon le rôle
+  // 2. Compte invité sans mot de passe **et sans store** → page de finalisation.
+  //    Règle identique à celle appliquée par `/welcome` : un invité qui a déjà
+  //    un store actif entre directement dans l'app.
+  //    Une destination explicitement demandée (ex. `/invite/<token>`) est
+  //    transmise à `/welcome` pour être rejouée après la finalisation : sans
+  //    cela, la finalisation du mot de passe ferait perdre l'invitation.
+  if (needsPassword && !hasStore) {
+    return requestedNext && !nextIsWelcome
+      ? `/welcome?next=${encodeURIComponent(requestedNext)}`
+      : '/welcome'
+  }
+
+  // 3. Redirection explicite demandée par l'appelant
+  if (requestedNext && !nextIsWelcome) return requestedNext
+
+  // 4. Compte authentifié sans store actif : il entre dans l'espace applicatif,
+  //    où le modal d'onboarding propose la création du store. Aucun utilisateur
+  //    déjà authentifié n'est renvoyé vers `/welcome`.
+  if (!hasStore) return '/dashboard'
+
+  // 5. Route par défaut selon le rôle
   return getFirstAllowedRoute(role)
 }
 

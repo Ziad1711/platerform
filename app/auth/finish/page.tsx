@@ -4,6 +4,7 @@ import { Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 export default function AuthFinishPage() {
   return (
@@ -20,7 +21,13 @@ function AuthFinishInner() {
   useEffect(() => {
     let cancelled = false
     const supabase = createClient()
-    const next = searchParams.get('next') || '/dashboard'
+    // `next` provient d'un lien externe (e-mail d'invitation, URL saisie) : il
+    // est validé comme chemin interne pour éviter toute redirection ouverte.
+    // `/welcome` n'est jamais honoré « sur demande » : la finalisation du mot
+    // de passe est décidée par `resolvePostLoginRedirect`, jamais par l'URL.
+    const requested = String(searchParams.get('next') || '')
+    const nextIsWelcome = requested === '/welcome' || requested.startsWith('/welcome?')
+    const next = nextIsWelcome ? '/dashboard' : sanitizeRedirectPath(requested, '/dashboard')
 
     async function finish() {
       for (let i = 0; i < 40; i += 1) {

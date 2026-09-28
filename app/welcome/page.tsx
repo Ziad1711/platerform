@@ -1,44 +1,85 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 export default function WelcomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      }
+    >
+      <WelcomeInner />
+    </Suspense>
+  )
+}
+
+function WelcomeInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = useMemo(() => createClient(), [])
+
+  // Destination à rejouer après la finalisation (ex. `/invite/<token>`).
+  // Chemin interne validé uniquement : `/welcome` n'y figure jamais, il ne
+  // peut pas être redemandé ici.
+  const requestedNext = sanitizeRedirectPath(searchParams.get('next'), '')
+  const destination =
+    requestedNext && !requestedNext.startsWith('/welcome') ? requestedNext : '/dashboard'
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     async function load() {
+      setLoadFailed(false)
+      setLoading(true)
+
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         router.replace('/login')
         return
       }
 
-      // Si l'utilisateur a déjà un store, pas besoin de finaliser
-      const { data: member } = await supabase
-        .from('store_members')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .maybeSingle()
+      // Règle unique « store accessible et actif » (voir lib/auth/access.ts) :
+      // appartenance active ou store possédé, exposée par /api/stores.
+      // Une lecture en échec ne conclut à rien : ni « aucun store », ni « compte
+      // à finaliser ». Le formulaire reste donc masqué et l'utilisateur peut
+      // réessayer — jamais de conclusion tirée d'une lecture ratée.
+      const storesResponse = await fetch('/api/stores', { cache: 'no-store' }).catch(() => null)
+      if (!storesResponse || !storesResponse.ok) {
+        setLoadFailed(true)
+        setLoading(false)
+        return
+      }
 
-      if (member) {
+      const storesPayload = await storesResponse.json().catch(() => null)
+      if (!storesPayload || typeof storesPayload.hasStores !== 'boolean') {
+        setLoadFailed(true)
+        setLoading(false)
+        return
+      }
+
+      if (storesPayload.hasStores) {
         router.replace('/dashboard')
         router.refresh()
         return
       }
 
-      // Si password déjà défini → plus besoin de cette page
-      if (user.user_metadata?.password_set === true) {
+      // Seul un compte invité explicitement marqué `password_set === false` doit
+      // définir son mot de passe. Un marqueur absent (ou `true`) signifie que le
+      // mot de passe a déjà été choisi : ce n'est pas un compte à finaliser.
+      if (user.user_metadata?.password_set !== false) {
         router.replace('/dashboard')
         router.refresh()
         return
@@ -49,7 +90,7 @@ export default function WelcomePage() {
       setLoading(false)
     }
     load()
-  }, [router, supabase])
+  }, [router, supabase, reloadKey])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -77,7 +118,9 @@ export default function WelcomePage() {
         body: JSON.stringify({ firstName, lastName }),
       })
 
-      router.replace('/dashboard')
+      // Destination validée à l'arrivée : un invité venu d'un lien
+      // d'invitation revient sur `/invite/<token>` pour accepter l'invitation.
+      router.replace(destination)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur')
@@ -88,6 +131,31 @@ export default function WelcomePage() {
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="w-full max-w-md rounded-2xl border bg-card p-8 shadow-xl space-y-4 text-center">
+          <h1 className="text-xl font-semibold">Vérification impossible</h1>
+          <p className="text-sm text-muted-foreground">
+            Vos accès n&apos;ont pas pu être vérifiés. Aucune modification n&apos;a été apportée à votre compte.
+          </p>
+          <button
+            onClick={() => setReloadKey((key) => key + 1)}
+            className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground"
+          >
+            Réessayer
+          </button>
+          <button
+            onClick={() => router.replace('/dashboard')}
+            className="w-full rounded-xl border px-4 py-3 text-sm font-medium"
+          >
+            Aller au tableau de bord
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (

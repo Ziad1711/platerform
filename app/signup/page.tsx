@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { getServerUser } from '@/lib/supabase/server'
+import { createClient, getServerUser } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
-import { sanitizeRedirectPath } from '@/lib/auth/redirects'
+import { resolvePostLoginRedirect } from '@/lib/auth/redirects'
+import { getUserAccess } from '@/lib/auth/access'
 
 type SignupPageProps = {
   searchParams?: Promise<{ next?: string }>
@@ -14,7 +15,21 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   const user = await getServerUser()
 
   if (user) {
-    redirect(sanitizeRedirectPath(params.next, '/dashboard'))
+    const supabase = await createClient()
+    const access = await getUserAccess(supabase, user.id)
+    // Aligné sur /login et /auth/callback : seul un compte invité qui n'a pas
+    // encore défini son mot de passe est renvoyé vers /welcome.
+    const needsPassword = user.user_metadata?.password_set === false
+
+    redirect(
+      resolvePostLoginRedirect({
+        next: params.next,
+        role: access.role,
+        hasStore: access.hasStore,
+        needsPassword,
+        accessLookupFailed: access.lookupFailed,
+      }),
+    )
   }
 
   return (
