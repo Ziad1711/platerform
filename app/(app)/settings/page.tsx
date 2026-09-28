@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText } from 'lucide-react'
+import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
 import StoresSection from '@/components/settings/stores-section'
 import TeamSection from '@/components/settings/team-section'
@@ -18,6 +18,53 @@ const blacklistStatuses = [
   { value: 'refused', label: 'Refusée' },
   { value: 'cancelled', label: 'Annulée' },
 ]
+
+type SettingsSectionId =
+  | 'personal'
+  | 'security'
+  | 'preferences'
+  | 'rates'
+  | 'blacklist'
+  | 'confirmation'
+  | 'invoicing'
+  | 'stores'
+  | 'team'
+
+type SettingsSection = {
+  id: SettingsSectionId
+  label: string
+  description: string
+  icon: LucideIcon
+}
+
+const SECTION_GROUPS: { label: string; items: SettingsSection[] }[] = [
+  {
+    label: 'Compte',
+    items: [
+      { id: 'personal', label: 'Informations personnelles', description: 'Nom, photo de profil et coordonnées', icon: User2 },
+      { id: 'security', label: 'Sécurité', description: 'Mot de passe et accès au compte', icon: Lock },
+      { id: 'preferences', label: 'Préférences', description: 'Devise, langue, fuseau horaire et thème', icon: Settings2 },
+    ],
+  },
+  {
+    label: 'Configuration',
+    items: [
+      { id: 'rates', label: 'Taux de change', description: 'Conversions entre vos devises', icon: RefreshCcw },
+      { id: 'blacklist', label: 'Blacklist', description: 'Blocage automatique des clients à risque', icon: ShieldAlert },
+      { id: 'confirmation', label: 'Confirmation', description: "Tentatives d'appel et commission", icon: PhoneCall },
+      { id: 'invoicing', label: 'Facturation', description: 'Identité légale et mentions de facture', icon: FileText },
+    ],
+  },
+  {
+    label: 'Organisation',
+    items: [
+      { id: 'stores', label: 'Stores', description: 'Créer et configurer vos boutiques', icon: Building2 },
+      { id: 'team', label: 'Équipe', description: 'Invitations et rôles des membres', icon: Users },
+    ],
+  },
+]
+
+const SECTIONS: SettingsSection[] = SECTION_GROUPS.flatMap((group) => group.items)
 
 async function toJson(res: Response) {
   const payload = await res.json().catch(() => null)
@@ -107,7 +154,8 @@ export default function SettingsPage() {
   const [rateForm, setRateForm] = useState({ baseCurrency: 'MAD', targetCurrency: 'USD', rate: '' })
   const [blacklistForm, setBlacklistForm] = useState({ isEnabled: true, maxStatusHits: 3, statusFilters: ['returned_not_stocked', 'returned_stocked'] as string[] })
   const [savingKey, setSavingKey] = useState('')
-  const [activeSection, setActiveSection] = useState('personal')
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('personal')
+  const [mobilePane, setMobilePane] = useState<'list' | 'detail'>('list')
 
   const { data: profilePayload } = useQuery({
     queryKey: ['settings-profile'],
@@ -240,16 +288,26 @@ export default function SettingsPage() {
     } finally { setSavingKey('') }
   }
 
-  const navItemClass = (id: string) =>
-    `flex items-center gap-2 rounded-lg px-3 py-2 transition-colors whitespace-nowrap ${
+  const activeSectionLabel = SECTIONS.find((entry) => entry.id === activeSection)?.label ?? 'Paramètres'
+
+  const selectSection = (id: SettingsSectionId) => {
+    setActiveSection(id)
+    setMobilePane('detail')
+    if (typeof window !== 'undefined') {
+      document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
+  const navItemClass = (id: SettingsSectionId) =>
+    `relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors ${
       activeSection === id
-        ? 'bg-secondary text-foreground font-medium border-l-2 border-[#1fa971] pl-[10px]'
-        : 'hover:bg-secondary/50 text-muted-foreground border-l-2 border-transparent pl-[10px]'
+        ? 'bg-primary/10 font-semibold text-primary'
+        : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
     }`
 
   return (
-    <div className="space-y-6 pt-4 sm:pt-6 lg:pt-8 pb-4 sm:pb-6 lg:pb-8">
-      <div className="flex flex-col items-center sm:items-start gap-1 px-4 sm:px-6 lg:px-8 text-center sm:text-left">
+    <div className="mx-auto w-full max-w-6xl space-y-5">
+      <div className="flex flex-col items-center md:items-start gap-1">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />
           <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
@@ -257,22 +315,10 @@ export default function SettingsPage() {
           </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          Gérez votre profil
+          Gérez votre profil, sécurité, préférences, taux de change et blacklist globale appliquée à tous vos stores.
         </p>
       </div>
-      <div className="sticky top-0 z-30 border-b bg-background/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="hidden">
-            <h1 className="text-3xl font-bold text-foreground">Paramètres</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Gérez votre profil, sécurité, préférences, taux de change et blacklist globale appliquée à tous vos stores.</p>
-          </div>
-          <div className="flex wrap items-center gap-3">
-            <div className="rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground">Dernière mise à jour: maintenant</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="px-4 sm:px-6 lg:px-8">
+      <div className="space-y-6">
         {message ? (
           <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-sm ${
             message.type === 'success'
@@ -288,23 +334,66 @@ export default function SettingsPage() {
           </div>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-          <aside className="rounded-2xl border border-[#1fa971]/20 bg-[#1fa971]/5 p-4 lg:sticky lg:top-[88px] lg:h-fit">
-          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#1fa971]/70">Navigation</div>
-          <div className="space-y-2 text-sm">
-           <button onClick={() => setActiveSection('personal')} className={navItemClass('personal')}><User2 className="h-4 w-4" />Informations personnelles</button>
-             <button onClick={() => setActiveSection('security')} className={navItemClass('security')}><Lock className="h-4 w-4" /> Sécurité</button>
-             <button onClick={() => setActiveSection('preferences')} className={navItemClass('preferences')}><Settings2 className="h-4 w-4" /> Préférences</button>
-             <button onClick={() => setActiveSection('rates')} className={navItemClass('rates')}><RefreshCcw className="h-4 w-4" /> Taux de change</button>
-             <button onClick={() => setActiveSection('blacklist')} className={navItemClass('blacklist')}><ShieldAlert className="h-4 w-4" /> Blacklist</button>
-             <button onClick={() => setActiveSection('confirmation')} className={navItemClass('confirmation')}><PhoneCall className="h-4 w-4" /> Confirmation</button>
-             <button onClick={() => setActiveSection('invoicing')} className={navItemClass('invoicing')}><FileText className="h-4 w-4" /> Facturation</button>
-             <button onClick={() => setActiveSection('stores')} className={navItemClass('stores')}><Building2 className="h-4 w-4" /> Stores</button>
-             <button onClick={() => setActiveSection('team')} className={navItemClass('team')}><Users className="h-4 w-4" /> Équipe</button>
-          </div>
+        <div className="grid gap-6 lg:grid-cols-[264px_minmax(0,1fr)] lg:items-start">
+          <aside className="hidden lg:sticky lg:top-6 lg:block">
+            <nav className="space-y-5 rounded-2xl border bg-card p-4 shadow-sm">
+              {SECTION_GROUPS.map((group) => (
+                <div key={group.label} className="space-y-1">
+                  <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70">{group.label}</p>
+                  {group.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => selectSection(item.id)}
+                      aria-current={activeSection === item.id ? 'page' : undefined}
+                      className={navItemClass(item.id)}
+                    >
+                      {activeSection === item.id ? (
+                        <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" />
+                      ) : null}
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </nav>
           </aside>
 
-          <div className="space-y-6">
+          <div className={mobilePane === 'list' ? 'lg:hidden' : 'hidden'}>
+            <nav className="space-y-2">
+              {SECTIONS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => selectSection(item.id)}
+                  className="flex w-full items-center gap-3 rounded-2xl border bg-card px-3.5 py-3 text-left transition-colors hover:border-primary/40 hover:bg-secondary/40"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <item.icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{item.label}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{item.description}</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          <div className={`space-y-4 ${mobilePane === 'list' ? 'hidden lg:block' : ''}`}>
+            <div className="flex items-center gap-3 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMobilePane('list')}
+                className="inline-flex items-center gap-1.5 rounded-xl border bg-card px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Retour aux paramètres
+              </button>
+              <span className="ml-auto truncate text-sm font-medium text-foreground">{activeSectionLabel}</span>
+            </div>
             {activeSection === 'personal' && <section id="personal" className="rounded-2xl border bg-card p-6 scroll-mt-32">
             <h2 className="text-lg font-semibold">Informations personnelles</h2>
 

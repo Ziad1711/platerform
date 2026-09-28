@@ -204,6 +204,12 @@
 
 
 
+### ✅ Paramètres — refonte responsive de la navigation (liste → détail sur mobile)
+- [x] `app/(app)/settings/page.tsx` : les 9 rubriques passent dans un registre unique `SECTION_GROUPS` / `SECTIONS` (id, libellé, description, icône, groupé en *Compte / Configuration / Organisation*) qui pilote la nav desktop **et** la liste mobile
+- [x] Desktop (`lg+`) : nav verticale à gauche dans une carte (sticky, sélection verte `bg-primary/10` + barre latérale `aria-current="page"`), contenu à droite — plus de barre « Dernière mise à jour : maintenant » ni d'en-tête collant
+- [x] Mobile : liste des rubriques (icône + libellé + description + chevron) → rubrique sélectionnée avec bouton « Retour aux paramètres » et scroll du `main` remis en haut ; aucune saisie de formulaire n'est touchée (permissions, sauvegardes et sélecteurs store inchangés)
+- [x] Vérifié : `npx tsc --noEmit` OK + `next build` OK (compiled successfully, 139 pages générées)
+
 ### ✅ Module Facturation (v1) — durcissement avant émission réelle
 - [x] **Total TTC = `HT + TVA`** dans `rpc_issue_invoice` (migration `20260928010300_invoicing_total_ttc_fix`) et `lib/invoices/calc.ts` : l'ancienne formule `net + port` omettait la TVA en mode prix hors taxe (`prices_include_vat = false`). Mesuré sur 3447 commandes : 0 régression en mode TTC (réglage Jisra), 3428 commandes au total faux en hors TVA
 - [x] **PDF** : totaux scindés en deux blocs (`Articles TTC/HT`, `Remise commande`, `Livraison` d'un côté, `Total HT` + `TVA` → `Total TTC` de l'autre) — plus de double comptage de la remise ni du port (`lib/invoices/pdf.ts`)
