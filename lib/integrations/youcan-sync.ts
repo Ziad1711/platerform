@@ -883,12 +883,6 @@ export async function upsertYouCanOrderFromPayload(params: {
   const total = Number(order?.total || 0)
   const shippingPrice = Number(shipping?.price || 0)
 
-  // Arrondi optionnel du total encaissé (option par boutique). Recalculé à chaque écriture à
-  // partir du total YouCan d'origine : une resynchronisation ne cumule ni n'efface l'arrondi.
-  const roundingEnabled =
-    roundOrderTotal ?? (await isStoreOrderTotalRoundingEnabled(storeId, supabase))
-  const roundedTotal = applyOrderTotalRounding(total, roundingEnabled)
-
   let internalOrderId = existingOrderMap?.internal_id || null
   if (internalOrderId) {
     const { data: existingOrderRow } = await supabase
@@ -902,53 +896,44 @@ export async function upsertYouCanOrderFromPayload(params: {
     }
   }
 
-  if (!internalOrderId) {
-    const { data: insertedOrder, error: insertOrderError } = await supabase
-      .from('orders')
-      .insert({
-        store_id: storeId,
-        customer_name: customerName,
-        phone,
-        address,
-        city: city,
-        status: 'new',
-        order_date: orderCreatedAt ? orderCreatedAt.toISOString() : new Date().toISOString(),
-        total_selling_price: roundedTotal.total,
-        rounding_adjustment: roundedTotal.adjustment,
-        delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
-        source: 'ads',
-      })
-      .select('id')
-      .single()
+  // Création seule : une commande YouCan déjà importée n'est jamais réécrite (ni total, ni
+  // arrondi, ni articles). Les imports répétés et les webhooks rejoués sont donc sans effet.
+  if (internalOrderId) {
+    console.info('[youcan][order] already imported — no-op', {
+      integrationId,
+      storeId,
+      youcanOrderId,
+      internalOrderId,
+    })
+    return { skipped: true, alreadyImported: true, internalOrderId }
+  }
 
-    if (insertOrderError) throw insertOrderError
-    internalOrderId = insertedOrder.id
-  } else {
-    const orderUpdatePayload: Record<string, any> = {
+  // Arrondi optionnel du total encaissé (option par boutique), appliqué uniquement à la
+  // création de la commande.
+  const roundingEnabled =
+    roundOrderTotal ?? (await isStoreOrderTotalRoundingEnabled(storeId, supabase))
+  const roundedTotal = applyOrderTotalRounding(total, roundingEnabled)
+
+  const { data: insertedOrder, error: insertOrderError } = await supabase
+    .from('orders')
+    .insert({
+      store_id: storeId,
       customer_name: customerName,
       phone,
-      source: 'ads',
+      address,
+      city: city,
+      status: 'new',
+      order_date: orderCreatedAt ? orderCreatedAt.toISOString() : new Date().toISOString(),
       total_selling_price: roundedTotal.total,
       rounding_adjustment: roundedTotal.adjustment,
       delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
-      updated_at: new Date().toISOString(),
-    }
+      source: 'ads',
+    })
+    .select('id')
+    .single()
 
-    if (address) {
-      orderUpdatePayload.address = address
-    }
-
-    if (city) {
-      orderUpdatePayload.city = city
-    }
-
-    await supabase
-      .from('orders')
-      .update(orderUpdatePayload)
-      .eq('id', internalOrderId)
-
-    await supabase.from('order_items').delete().eq('order_id', internalOrderId)
-  }
+  if (insertOrderError) throw insertOrderError
+  internalOrderId = insertedOrder.id
 
   const lines = Array.isArray(order?.variants) ? order.variants : []
   const orderItems: any[] = []
@@ -981,10 +966,8 @@ export async function upsertYouCanOrderFromPayload(params: {
   if (orderItems.length > 0) {
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
     if (itemsError) {
-      // Cleanup: if this is a newly created order and items failed, remove the orphan order
-      if (!existingOrderMap?.internal_id) {
-        await supabase.from('orders').delete().eq('id', internalOrderId)
-      }
+      // La commande vient d'être créée dans ce flux : on la supprime si ses articles échouent.
+      await supabase.from('orders').delete().eq('id', internalOrderId)
       throw itemsError
     }
   }
