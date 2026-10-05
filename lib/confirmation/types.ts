@@ -55,6 +55,7 @@ export type ConfirmationOrder = {
     product_name_override: string | null
     unit_selling_price: number | null
     item_type: string | null
+    product_variants?: { name: string | null } | null
     products: {
       name: string | null
       product_images: Array<{

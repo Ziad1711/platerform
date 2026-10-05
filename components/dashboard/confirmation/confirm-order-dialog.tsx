@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Dialog,
@@ -11,6 +11,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import {
+  AlertTriangle,
+  Loader2,
+  MapPin,
+  Package,
+  PackageCheck,
+  Phone,
+  StickyNote,
+  Truck,
+  User,
+  Wallet,
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 import type { ConfirmationOrder } from '@/lib/confirmation/types'
@@ -33,20 +45,52 @@ type ConfirmOrderDialogProps = {
 
 type DeliveryCompanyOption = { id: string; name: string; is_active: boolean | null }
 
+function SectionTitle({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {icon}
+      {label}
+    </div>
+  )
+}
+
 function renderProducts(order: ConfirmationOrder | null) {
   const items = order?.order_items || []
-  if (items.length === 0) return <div className="text-muted-foreground">Aucun produit</div>
+  if (items.length === 0) return <div className="text-sm text-muted-foreground">Aucun produit</div>
 
   return (
-    <ul className="space-y-1">
-      {items.map((item, index) => (
-        <li key={`${item.product_name_override || item.products?.name || 'item'}-${index}`}>
-          {Number(item.quantity || 0)} × {item.product_name_override || item.products?.name || 'Produit'}
-          {item.unit_selling_price
-            ? ` — ${formatCurrency(Number(item.unit_selling_price || 0))}`
-            : ''}
-        </li>
-      ))}
+    <ul className="divide-y divide-border">
+      {items.map((item, index) => {
+        const name = item.product_name_override || item.products?.name || 'Produit'
+        const variantName = item.product_variants?.name || null
+        const quantity = Number(item.quantity || 0)
+        const unitPrice = item.unit_selling_price != null ? Number(item.unit_selling_price) : null
+
+        return (
+          <li
+            key={`${name}-${variantName || 'no-variant'}-${index}`}
+            className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0"
+          >
+            <span className="mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-muted px-1.5 text-xs font-semibold text-foreground">
+              ×{quantity}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-foreground">{name}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                Variante :{' '}
+                <span className={variantName ? 'font-medium text-foreground' : ''}>
+                  {variantName || '—'}
+                </span>
+              </div>
+            </div>
+            {unitPrice != null ? (
+              <div className="shrink-0 text-sm font-medium text-foreground">
+                {formatCurrency(unitPrice)}
+              </div>
+            ) : null}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -123,57 +167,98 @@ export default function ConfirmOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Confirmer la commande</DialogTitle>
-          <DialogDescription>
-            Vérifiez les informations avant validation. Une commande confirmée sort de la file de
-            confirmation.
-          </DialogDescription>
+      <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
+        <DialogHeader className="gap-3 border-b border-border bg-muted/40 px-6 py-4 pr-14">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <PackageCheck className="h-5 w-5" />
+            </span>
+            <div className="space-y-1">
+              <DialogTitle className="text-base font-semibold">Confirmer la commande</DialogTitle>
+              <DialogDescription className="text-xs">
+                Vérifiez les informations avant validation. Une commande confirmée sort de la file
+                de confirmation.
+              </DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="space-y-3 text-sm text-foreground">
-          <div className="rounded-lg border border-border p-3 space-y-1">
-            <div className="text-muted-foreground text-xs">Client</div>
-            <div className="font-medium">{order?.customer_name || '-'}</div>
-            <div>Téléphone : {order?.phone || '-'}</div>
-            <div>Ville : {order?.city || '-'}</div>
-            {order?.address ? <div>Adresse : {order.address}</div> : null}
-          </div>
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
+          <section className="space-y-3 rounded-xl border border-border p-4">
+            <SectionTitle icon={<User className="h-3.5 w-3.5" />} label="Client" />
 
-          <div className="rounded-lg border border-border p-3 space-y-1">
-            <div className="text-muted-foreground text-xs">Produits</div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium">{order?.customer_name || 'Client inconnu'}</span>
+              {order?.phone ? (
+                <a
+                  href={`tel:${order.phone}`}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                  {order.phone}
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Téléphone manquant
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5" />
+                {order?.city || 'Ville manquante'}
+              </span>
+              {order?.address ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5" />
+                  {order.address}
+                </span>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-xl border border-border p-4">
+            <SectionTitle icon={<Package className="h-3.5 w-3.5" />} label="Produits" />
             {renderProducts(order)}
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border p-3 space-y-1">
-            <div className="text-muted-foreground text-xs">Montant</div>
-            <div className="font-semibold">{formatCurrency(Number(order?.total_selling_price || 0))}</div>
-            {Number(order?.delivery_charge_to_customer || 0) > 0 ? (
-              <div className="text-muted-foreground">
-                Livraison facturée : {formatCurrency(Number(order?.delivery_charge_to_customer || 0))}
-              </div>
-            ) : null}
-          </div>
+          <section className="space-y-3 rounded-xl border border-border p-4">
+            <SectionTitle icon={<Wallet className="h-3.5 w-3.5" />} label="Montant" />
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-2xl font-semibold">
+                {formatCurrency(Number(order?.total_selling_price || 0))}
+              </span>
+              {Number(order?.delivery_charge_to_customer || 0) > 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  + livraison {formatCurrency(Number(order?.delivery_charge_to_customer || 0))}
+                </span>
+              ) : null}
+            </div>
+          </section>
 
           {order?.is_blacklisted ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700 text-xs">
-              Ce numéro est blacklisté. Confirmez uniquement si vous avez vérifié la commande.
-            </div>
+            <section className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Ce numéro est blacklisté. Confirmez uniquement si vous avez vérifié la commande.
+              </span>
+            </section>
           ) : null}
 
-          <div className="rounded-lg border border-border p-3 space-y-3">
-            <div className="text-muted-foreground text-xs">Livraison</div>
+          <section className="space-y-4 rounded-xl border border-border p-4">
+            <SectionTitle icon={<Truck className="h-3.5 w-3.5" />} label="Livraison" />
 
-            <label className="text-sm space-y-1 block">
-              <span>Société de livraison *</span>
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium">Société de livraison *</span>
               <select
                 value={deliveryChoice}
                 onChange={(event) => {
                   setDeliveryChoice(event.target.value)
                   setLocalError('')
                 }}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">— Choisir —</option>
                 <option value="internal">Livraison interne</option>
@@ -187,29 +272,37 @@ export default function ConfirmOrderDialog({
               </select>
             </label>
 
-            <label className="text-sm space-y-1 block">
-              <span>Note de livraison (facultatif)</span>
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium">Note de livraison (facultatif)</span>
               <textarea
                 value={deliveryNote}
                 onChange={(event) => setDeliveryNote(event.target.value)}
                 rows={2}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </label>
-          </div>
+          </section>
 
           {willCreateParcel ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 text-xs">
-              La confirmation créera immédiatement le colis chez le transporteur sélectionné.
-            </div>
+            <section className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <Truck className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                La confirmation créera immédiatement le colis chez le transporteur sélectionné.
+              </span>
+            </section>
           ) : null}
 
-          {localError ? <div className="text-sm text-rose-600">{localError}</div> : null}
+          {localError ? (
+            <section className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{localError}</span>
+            </section>
+          ) : null}
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
           {canEdit ? (
-            <Button variant="outline" onClick={onEdit} disabled={busy}>
+            <Button variant="outline" onClick={onEdit} disabled={busy} className="sm:mr-auto">
               Modifier la commande
             </Button>
           ) : null}
@@ -217,6 +310,7 @@ export default function ConfirmOrderDialog({
             Fermer
           </Button>
           <Button onClick={handleSubmit} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
             {busy ? 'Confirmation...' : 'Confirmer la commande'}
           </Button>
         </DialogFooter>
