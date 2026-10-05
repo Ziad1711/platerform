@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createMarocGoDeliveryParcel, normalizeMarocGoDeliveryPhone } from '@/lib/integrations/maroc-go-delivery'
 import { getDecryptedIntegrationToken, resolveDefaultMarocGoDeliveryShopKey } from '@/lib/integrations/maroc-go-delivery-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 type AdminClient = SupabaseClient<any, 'public', any>
 
@@ -15,7 +16,11 @@ type OrderLike = {
   total_selling_price?: number | string | null
   tracking_number?: string | null
   delivery_city_external_id?: number | string | null
-  order_items?: Array<{ product_name_override?: string | null; products?: { name?: string | null } | null }> | null
+  order_items?: Array<{
+    product_name_override?: string | null
+    products?: { name?: string | null } | null
+    product_variants?: { name?: string | null } | null
+  }> | null
 }
 
 export async function autoCreateMarocGoDeliveryParcelForOrder(params: {
@@ -62,12 +67,8 @@ export async function autoCreateMarocGoDeliveryParcelForOrder(params: {
     }
   }
 
-  const orderProductNames = (order.order_items || [])
-    .map((item) => String(item?.product_name_override || item?.products?.name || '').trim())
-    .filter(Boolean)
-    .join(', ')
-
-  const article = orderProductNames || String(defaultArticleName || '').trim() || 'Commande'
+  // Nom du produit accompagné de la variante achetée : « Produit (Variante) »
+  const article = buildOrderArticleLabel(order.order_items, defaultArticleName) || 'Commande'
 
   const token = await getDecryptedIntegrationToken(admin, integrationId)
   const created = await createMarocGoDeliveryParcel(token, {

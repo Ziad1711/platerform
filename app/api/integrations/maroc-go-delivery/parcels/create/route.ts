@@ -4,6 +4,7 @@ import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from
 import { createMarocGoDeliveryParcel, normalizeMarocGoDeliveryPhone } from '@/lib/integrations/maroc-go-delivery'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/maroc-go-delivery-connect'
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 export async function POST(request: Request) {
   try {
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
         .eq('store_id', storeId)
         .maybeSingle(),
       supabase.from('orders')
-        .select('id, customer_name, phone, address, city, total_selling_price, order_items(quantity, product_name_override, products(name))')
+        .select('id, customer_name, phone, address, city, total_selling_price, order_items(quantity, product_name_override, products(name), product_variants(name))')
         .eq('id', orderId)
         .eq('store_id', storeId)
         .maybeSingle(),
@@ -63,10 +64,8 @@ export async function POST(request: Request) {
       })
     }
 
-    const article = (order.order_items || [])
-      .map((item: any) => String(item?.product_name_override || item?.products?.name || '').trim())
-      .filter(Boolean)
-      .join(', ') || 'Commande'
+    // Nom du produit accompagné de la variante achetée : « Produit (Variante) »
+    const article = buildOrderArticleLabel(order.order_items) || 'Commande'
 
     const created = await createMarocGoDeliveryParcel(token, {
       article,

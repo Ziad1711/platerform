@@ -3,6 +3,7 @@ import { createOzoneParcel, extractOzoneTrackingNumber, normalizeOzonePhone, isO
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
 import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 type AdminClient = SupabaseClient<any, 'public', any>
 
@@ -16,7 +17,11 @@ type OrderLike = {
   total_selling_price?: number | string | null
   tracking_number?: string | null
   delivery_city_external_id?: number | string | null
-  order_items?: Array<{ product_name_override?: string | null; products?: { name?: string | null } | null }> | null
+  order_items?: Array<{
+    product_name_override?: string | null
+    products?: { name?: string | null } | null
+    product_variants?: { name?: string | null } | null
+  }> | null
 }
 
 export async function autoCreateOzoneParcelForOrder(params: {
@@ -67,12 +72,8 @@ export async function autoCreateOzoneParcelForOrder(params: {
     }
   }
 
-  const orderProductNames = (order.order_items || [])
-    .map((item) => String(item?.product_name_override || item?.products?.name || '').trim())
-    .filter(Boolean)
-    .join(', ')
-
-  const article = orderProductNames || String(defaultArticleName || '').trim() || 'Commande'
+  // Nom du produit accompagné de la variante achetée : « Produit (Variante) »
+  const article = buildOrderArticleLabel(order.order_items, defaultArticleName) || 'Commande'
 
   // Récupérer la config OZONE
   const { data: integration, error: integrationError } = await admin

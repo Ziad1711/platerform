@@ -17,6 +17,7 @@ import {
   mapForceLogStatusToOrderStatus,
 } from '@/lib/integrations/forcelog'
 import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 export const forcelogAdapter: DeliveryProvider = {
   slug: 'forcelog',
@@ -125,7 +126,7 @@ export async function createForceLogParcelForOrder(params: {
     .select(`
       id, store_id, status, city, address, phone, customer_name, total_selling_price,
       delivery_city_external_id, delivery_company_id, tracking_number, forcelog_parcel_key,
-      order_items(quantity, product_name_override, products(name))
+      order_items(quantity, product_name_override, products(name), product_variants(name))
     `)
     .eq('id', orderId)
     .maybeSingle()
@@ -177,10 +178,8 @@ export async function createForceLogParcelForOrder(params: {
   const apiKey = await getDecryptedIntegrationToken(admin, integrationId)
 
   // Préparer le payload
-  const orderProductNames = (order.order_items || [])
-    .map((item: any) => String(item?.product_name_override || item?.products?.name || '').trim())
-    .filter(Boolean)
-    .join(', ')
+  // Nom du produit accompagné de la variante achetée : « Produit (Variante) »
+  const orderProductNames = buildOrderArticleLabel(order.order_items)
 
   const resolvedProductNature = productNature || config?.default_product_nature || orderProductNames || 'Commande'
 

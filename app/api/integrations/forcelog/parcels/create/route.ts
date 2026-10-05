@@ -4,6 +4,7 @@ import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from
 import { createForceLogParcel, normalizeForceLogPhone } from '@/lib/integrations/forcelog'
 import { getDecryptedIntegrationToken } from '@/lib/integrations/rapid-delivery-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 
 export async function POST(request: Request) {
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
       .select(`
         id, store_id, status, city, address, phone, customer_name, total_selling_price,
         delivery_city_external_id, delivery_company_id, tracking_number, forcelog_parcel_key,
-        order_items(quantity, product_name_override, products(name))
+        order_items(quantity, product_name_override, products(name), product_variants(name))
       `)
       .eq('id', orderId)
       .maybeSingle()
@@ -92,11 +93,8 @@ export async function POST(request: Request) {
     // Décrypter le token
     const apiKey = await getDecryptedIntegrationToken(admin, integration.id)
 
-    // Préparer le payload
-    const orderProductNames = (order.order_items || [])
-      .map((item: any) => String(item?.product_name_override || item?.products?.name || '').trim())
-      .filter(Boolean)
-      .join(', ')
+    // Préparer le payload — « Produit (Variante achetée) »
+    const orderProductNames = buildOrderArticleLabel(order.order_items)
 
     const productNature = body.productNature || config?.default_product_nature || orderProductNames || 'Commande'
 

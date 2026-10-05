@@ -19,6 +19,7 @@ import {
   mapAmeexStatusToOrderStatus,
 } from '@/lib/integrations/ameex'
 import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 /**
  * Extrait le code colis AMEEX depuis la réponse, en tentant plusieurs formats possibles.
@@ -199,7 +200,7 @@ export async function createAmeexParcelForOrder(params: {
       id, store_id, status, city, address, phone, customer_name, total_selling_price,
       delivery_city_external_id, delivery_company_id, tracking_number, ameex_parcel_code,
       ameex_city_key,
-      order_items(quantity, product_name_override, products(name))
+      order_items(quantity, product_name_override, products(name), product_variants(name))
     `)
     .eq('id', orderId)
     .maybeSingle()
@@ -249,10 +250,8 @@ export async function createAmeexParcelForOrder(params: {
   const businessId = config?.business_id || credentials.apiId
 
   // Preparer le payload
-  const orderProductNames = (order.order_items || [])
-    .map((item: any) => String(item?.product_name_override || item?.products?.name || '').trim())
-    .filter(Boolean)
-    .join(', ')
+  // Nom du produit accompagné de la variante achetée : « Produit (Variante) »
+  const orderProductNames = buildOrderArticleLabel(order.order_items)
 
   logger.info('parcel-creating', 'Creation colis AMEEX', {
     orderId,

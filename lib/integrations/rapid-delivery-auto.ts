@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createRapidDeliveryParcel, normalizeRapidDeliveryPhone } from '@/lib/integrations/rapid-delivery'
 import { getDecryptedIntegrationToken, resolveDefaultRapidDeliveryShopKey } from '@/lib/integrations/rapid-delivery-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 type AdminClient = SupabaseClient<any, 'public', any>
 
@@ -15,7 +16,11 @@ type OrderLike = {
   total_selling_price?: number | string | null
   tracking_number?: string | null
   delivery_city_external_id?: number | string | null
-  order_items?: Array<{ product_name_override?: string | null; products?: { name?: string | null } | null }> | null
+  order_items?: Array<{
+    product_name_override?: string | null
+    products?: { name?: string | null } | null
+    product_variants?: { name?: string | null } | null
+  }> | null
 }
 
 export async function autoCreateRapidDeliveryParcelForOrder(params: {
@@ -62,12 +67,8 @@ export async function autoCreateRapidDeliveryParcelForOrder(params: {
     }
   }
 
-  const orderProductNames = (order.order_items || [])
-    .map((item) => String(item?.product_name_override || item?.products?.name || '').trim())
-    .filter(Boolean)
-    .join(', ')
-
-  const article = orderProductNames || String(defaultArticleName || '').trim() || 'Commande'
+  // Nom du produit accompagné de la variante achetée : « Produit (Variante) »
+  const article = buildOrderArticleLabel(order.order_items, defaultArticleName) || 'Commande'
 
   const token = await getDecryptedIntegrationToken(admin, integrationId)
   const created = await createRapidDeliveryParcel(token, {

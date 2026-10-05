@@ -5,6 +5,7 @@ import { ozoneAdapter } from '@/lib/integrations/delivery/ozone-adapter'
 import { createParcelForOrder } from '@/lib/integrations/delivery/parcel-service'
 import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
+import { buildOrderItemArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 export async function POST(request: Request) {
   try {
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     // Récupérer la commande
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id, customer_name, phone, address, city, total_selling_price, store_id, tracking_number, delivery_city_external_id, order_items(quantity, product_name_override, products(name))')
+      .select('id, customer_name, phone, address, city, total_selling_price, store_id, tracking_number, delivery_city_external_id, order_items(quantity, product_name_override, products(name), product_variants(name))')
       .eq('id', orderId)
       .eq('store_id', storeId)
       .maybeSingle()
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
         trackingNumber: order.tracking_number,
         deliveryCityKey: cityKey,
         orderItems: (order.order_items || []).map((oi: any) => ({
-          productName: oi.product_name_override || oi.products?.name || null,
+          productName: buildOrderItemArticleLabel(oi) || null,
         })),
       },
       defaultShopKey: shopKey,

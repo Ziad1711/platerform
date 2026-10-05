@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createOrders, DigylogConfig, DigylogCreateOrdersPayload } from '@/lib/integrations/digylog'
+import { buildOrderItemArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 export async function POST(request: Request) {
   try {
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
       .from('orders')
       .select(`
         id, customer_name, phone, city, address, total_selling_price, tracking_number,
-        order_items(quantity, product_name_override, products(name))
+        order_items(quantity, product_name_override, products(name), product_variants(name))
       `)
       .in('id', orderIds)
       .eq('store_id', storeId)
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
         const refs = items.length > 0
           ? items.map((oi: any) => ({
               ref: '',
-              designation: oi.product_name_override || oi.products?.name || 'Produit',
+              designation: buildOrderItemArticleLabel(oi) || 'Produit',
               quantity: Number(oi.quantity) || 1,
             }))
           : [{ ref: '', designation: 'Produit', quantity: 1 }]

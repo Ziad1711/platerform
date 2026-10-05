@@ -650,6 +650,23 @@ export default function VentesPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const supabase = createClient()
   const queryClient = useQueryClient()
+  // Toute écriture sur une commande change aussi les KPI, les graphiques et l'écran Finances :
+  // on invalide ces vues en plus de la liste des ventes pour éviter des totaux périmés.
+  const invalidateOrderViews = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['orders'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-business-trends'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-profit-chart'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-top-products'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-ads-cost-chart'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-recent-orders'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-city-performance'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard-confirmation-performance'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance-overview'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance-kpi-summary'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance-trend-chart'] }),
+    ])
   const statusOptions = useMemo(() => {
     const priorityMap = new Map<string, number>(
       STATUS_ORDER_PRIORITY.map((status, index) => [status, index])
@@ -1798,7 +1815,7 @@ export default function VentesPage() {
       if (insertItemsError) throw insertItemsError
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses-owner'] })
       setIsCreateOpen(false)
@@ -1856,7 +1873,7 @@ export default function VentesPage() {
       return payload
     },
     onSuccess: async (payload) => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses-owner'] })
       if (payload?.warning) {
@@ -1893,7 +1910,7 @@ export default function VentesPage() {
       return response.json()
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setIsRapidDeliveryModalOpen(false)
       setRapidDeliveryOrder(null)
       setRapidDeliveryCityKey('')
@@ -1931,7 +1948,7 @@ export default function VentesPage() {
       return response.json()
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setIsOzoneModalOpen(false)
       setOzoneOrder(null)
       setOzoneCityKey('')
@@ -1955,7 +1972,7 @@ export default function VentesPage() {
       return response.json()
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setFormError('')
     },
     onError: (error: any) => {
@@ -1973,7 +1990,7 @@ export default function VentesPage() {
       return payload
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setFormError('')
     },
     onError: (error: any) => {
@@ -2006,7 +2023,7 @@ export default function VentesPage() {
       return response.json()
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setIsMarocGoDeliveryModalOpen(false)
       setMarocGoDeliveryOrder(null)
       setMarocGoDeliveryCityKey('')
@@ -2030,7 +2047,7 @@ export default function VentesPage() {
       return response.json()
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setFormError('')
     },
     onError: (error: any) => {
@@ -2048,7 +2065,7 @@ export default function VentesPage() {
       return payload
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setFormError('')
     },
     onError: (error: any) => {
@@ -2066,7 +2083,7 @@ export default function VentesPage() {
       if (error) throw error
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
     },
     onError: (error: any) => {
       setFormError(error?.message || 'Erreur de mise à jour')
@@ -2105,7 +2122,7 @@ export default function VentesPage() {
       if (error) throw error
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
     },
     onError: (error: any) => {
       setFormError(error?.message || 'Erreur de mise à jour de la ville')
@@ -2151,7 +2168,7 @@ export default function VentesPage() {
       }
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
     },
     onError: (error: any) => {
       setFormError(error?.message || 'Erreur de mise à jour des produits')
@@ -2178,7 +2195,7 @@ export default function VentesPage() {
     },
     onSuccess: async ({ deleted, restored, skipped }) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        invalidateOrderViews(),
         queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] }),
         queryClient.invalidateQueries({ queryKey: ['inventory-movements'] }),
       ])
@@ -2214,7 +2231,7 @@ export default function VentesPage() {
       }
     },
     onSuccess: async ({ created, orderIds }) => {
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       setSelectedOrderIds([])
 
       if (created === 0) {
@@ -2668,7 +2685,7 @@ export default function VentesPage() {
         `${payload?.updatedOrders || 0} ventes mises à jour • ${payload?.recalculatedDays || 0} journées recalculées.`
       )
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        invalidateOrderViews(),
         queryClient.invalidateQueries({ queryKey: ['ads-metrics'] }),
       ])
     } catch (error) {
@@ -3419,7 +3436,7 @@ export default function VentesPage() {
         label: 'Actualisation de la liste des ventes',
         status: 'running',
       })
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await invalidateOrderViews()
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
       await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses-owner'] })
 

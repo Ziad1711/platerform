@@ -3,6 +3,7 @@ import { getSenditCredentials } from '@/lib/integrations/sendit-credentials'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { createSenditParcel, getSenditLabels, mapSenditStatusToOrderStatus, normalizeSenditPhone, trackSenditParcel } from '@/lib/integrations/sendit'
 import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
+import { buildOrderItemArticleLabel } from '@/lib/integrations/delivery/order-article'
 import type { DeliveryIntegrationConfig, ParcelCreationInput, VoucherCreationInput, CreateParcelResult, CreateVoucherResult, TrackParcelResult } from './types'
 import type { DeliveryProvider } from './provider'
 
@@ -78,7 +79,7 @@ export async function createSenditParcelForOrder(params: {
   const { admin, orderId, storeId, userId, integrationId } = params
   const now = new Date().toISOString()
   const logger = createDeliveryLogger({ admin, integrationId, storeId, userId })
-  const { data: order, error } = await admin.from('orders').select('id, store_id, city, address, phone, customer_name, total_selling_price, delivery_city_external_id, sendit_parcel_code, tracking_number, order_items(quantity, product_name_override, products(name))').eq('id', orderId).maybeSingle()
+  const { data: order, error } = await admin.from('orders').select('id, store_id, city, address, phone, customer_name, total_selling_price, delivery_city_external_id, sendit_parcel_code, tracking_number, order_items(quantity, product_name_override, products(name), product_variants(name))').eq('id', orderId).maybeSingle()
   if (error) throw error
   if (!order) {
     logger.warn('parcel-order-not-found', 'Commande introuvable pour création colis Sendit', { orderId })
@@ -96,7 +97,8 @@ export async function createSenditParcelForOrder(params: {
   logger.info('parcel-creating', 'Création colis Sendit', { orderId, district, amount: order.total_selling_price })
   const credentials = await getSenditCredentials(admin, integrationId)
   const { data: cfg } = await admin.from('sendit_configs').select('*').eq('store_id', storeId).maybeSingle()
-  const products = (order.order_items || []).map((i: any) => `${i?.product_name_override || i?.products?.name || 'Produit'} x${i?.quantity || 1}`).join(', ')
+  // Nom du produit accompagné de la variante achetée : « Produit (Variante) x2 »
+  const products = (order.order_items || []).map((i: any) => `${buildOrderItemArticleLabel(i) || 'Produit'} x${i?.quantity || 1}`).join(', ')
   const deliveryFee = await resolveDeliveryFee({ supabase: admin, storeId, cityKey: district, integrationId, providerSlug: 'sendit' })
   logger.info('parcel-calling-api', 'Appel API Sendit', { district, amount: order.total_selling_price })
   const raw = await createSenditParcel(credentials.token, {

@@ -7,6 +7,7 @@ import { createDeliveryLogger } from './logger'
 import * as digylog from '@/lib/integrations/digylog'
 import { resolveDeliveryFee } from './delivery-fee-resolver'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
+import { buildOrderItemArticleLabel } from '@/lib/integrations/delivery/order-article'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -36,7 +37,7 @@ export async function createDigylogParcelForOrder(params: {
         id, store_id, status, city, address, phone, customer_name, total_selling_price,
         delivery_city_external_id, delivery_note, delivery_company_id,
         tracking_number, external_delivery_id,
-        order_items(quantity, product_name_override, products(name))
+        order_items(quantity, product_name_override, products(name), product_variants(name))
       `)
       .eq('id', orderId)
       .maybeSingle()
@@ -92,10 +93,10 @@ export async function createDigylogParcelForOrder(params: {
       providerSlug: 'digylog',
     })
 
-    // 6. Construire les refs (produits)
+    // 6. Construire les refs (produits) — « Produit (Variante achetée) »
     const refs: digylog.DigylogOrderRef[] = (order.order_items || []).map((oi: any) => ({
       ref: oi.products?.name ? undefined : undefined,
-      designation: oi.product_name_override || oi.products?.name || 'Produit',
+      designation: buildOrderItemArticleLabel(oi) || 'Produit',
       quantity: Number(oi.quantity) || 1,
     }))
 

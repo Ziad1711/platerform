@@ -108,7 +108,7 @@ export async function POST(request: Request) {
         id, store_id, status, city, address, phone, customer_name, total_selling_price,
         delivery_city_external_id,
         delivery_company_id, tracking_number, delivery_status_source, confirmation_agent_id,
-        order_items(quantity, product_name_override, products(name))
+        order_items(quantity, product_name_override, products(name), product_variants(name))
       `)
       .eq('id', orderId)
       .maybeSingle()
@@ -240,7 +240,7 @@ export async function POST(request: Request) {
               id, store_id, status, city, address, phone, customer_name, total_selling_price,
               delivery_city_external_id,
               delivery_company_id, tracking_number, delivery_status_source,
-              order_items(quantity, product_name_override, products(name))
+              order_items(quantity, product_name_override, products(name), product_variants(name))
             `)
             .eq('id', orderId)
             .maybeSingle()
@@ -249,6 +249,7 @@ export async function POST(request: Request) {
             order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
               ...oi,
               products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+              product_variants: Array.isArray(oi.product_variants) ? (oi.product_variants[0] ?? null) : oi.product_variants,
             })),
           }
           const rapidCityKey = Number(normalizedOrder.delivery_city_external_id || 0) || 0
@@ -318,7 +319,7 @@ export async function POST(request: Request) {
                 id, store_id, status, city, address, phone, customer_name, total_selling_price,
                 delivery_city_external_id,
                 delivery_company_id, tracking_number, delivery_status_source,
-                order_items(quantity, product_name_override, products(name))
+                order_items(quantity, product_name_override, products(name), product_variants(name))
               `)
               .eq('id', orderId)
               .maybeSingle()
@@ -327,6 +328,7 @@ export async function POST(request: Request) {
               order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
                 ...oi,
                 products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+                product_variants: Array.isArray(oi.product_variants) ? (oi.product_variants[0] ?? null) : oi.product_variants,
               })),
             }
             const marocGoCityKey = Number(normalizedOrder.delivery_city_external_id || 0) || 0
@@ -439,7 +441,7 @@ export async function POST(request: Request) {
                 id, store_id, status, city, address, phone, customer_name, total_selling_price,
                 delivery_city_external_id,
                 delivery_company_id, tracking_number, delivery_status_source,
-                order_items(quantity, product_name_override, products(name))
+                order_items(quantity, product_name_override, products(name), product_variants(name))
               `)
               .eq('id', orderId)
               .maybeSingle()
@@ -448,6 +450,7 @@ export async function POST(request: Request) {
               order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
                 ...oi,
                 products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+                product_variants: Array.isArray(oi.product_variants) ? (oi.product_variants[0] ?? null) : oi.product_variants,
               })),
             }
             const result = await autoCreateOzoneParcelForOrder({

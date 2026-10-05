@@ -415,6 +415,12 @@
 - [ ] Build commission calculations
 - [ ] Create staff performance reports
 
+### ✅ Coût d'achat manuel des commandes
+- [x] Migration `20260929000000_order_buy_price_manual_override` : colonnes `orders.buy_price_source` / `buy_price_manual_at`, helper `order_purchase_cost()`, trigger `trg_orders_sync_buy_price_source`, vue `order_buy_price_divergences`
+- [x] `recalc_order_financials` ne réécrase plus un coût d'achat saisi à la main (les lignes ne reprennent la main qu'avec `buy_price_source = 'auto'`)
+- [x] Les 6 lecteurs agrégés (dashboard kpi / revenue_chart / profit, finance_overview / finance_daily_series) lisent le helper `order_purchase_cost()` ; `rpc_dashboard_top_products` répartit le même coût manuel au prorata du revenu des lignes (égal au helper dès que ce revenu est > 0) : plus de divergence de coût d'achat entre commande et agrégats
+- [x] Invalidation des caches après édition d'une commande : `invalidateOrderViews()` dans la page Ventes (commandes + KPI dashboard + finance)
+
 ## Current Status Summary
 
 **Phase 1**: ✅ Complete (100%)
