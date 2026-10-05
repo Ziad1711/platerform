@@ -46,6 +46,8 @@ export interface InvoiceCalcTotals {
   itemsTtc: number
   discountTtc: number
   shippingTtc: number
+  /** Écart d'arrondi du total encaissé (0,01 ou 1), ajouté au TTC sans base HT/TVA. */
+  roundingTtc: number
   totalHt: number
   totalVat: number
   totalTtc: number
@@ -87,6 +89,8 @@ export function computeInvoice(input: {
   lines: InvoiceCalcLineInput[]
   discountAmount: number
   deliveryChargeToCustomer: number
+  /** Écart d'arrondi appliqué à la commande : repris tel quel dans le total TTC. */
+  roundingAdjustment?: number | null
   orderTotalSellingPrice?: number | null
   settings: InvoiceCalcSettings
 }): InvoiceCalcResult {
@@ -112,6 +116,7 @@ export function computeInvoice(input: {
   const discountCents = Math.min(toCents(Math.max(Number(input.discountAmount) || 0, 0)), grossTotalCents)
   const netTotalCents = grossTotalCents - discountCents
   const shippingCents = toCents(Math.max(Number(input.deliveryChargeToCustomer) || 0, 0))
+  const roundingCents = toCents(Math.max(Number(input.roundingAdjustment) || 0, 0))
 
   const lines: InvoiceCalcLine[] = []
   let cumulativeGrossCents = 0
@@ -175,7 +180,8 @@ export function computeInvoice(input: {
 
   // Le TTC vaut toujours HT + TVA : identique à `net + port` quand les prix sont
   // TTC, et seul calcul correct quand les prix unitaires sont saisis hors taxe.
-  const totalTtcCents = totalHtCents + totalVatCents
+  // L'écart d'arrondi de la commande s'ajoute au TTC sans base HT/TVA.
+  const totalTtcCents = totalHtCents + totalVatCents + roundingCents
   const orderTotal =
     input.orderTotalSellingPrice === null || input.orderTotalSellingPrice === undefined
       ? null
@@ -189,6 +195,7 @@ export function computeInvoice(input: {
       itemsTtc: fromCents(grossTotalCents),
       discountTtc: fromCents(discountCents),
       shippingTtc: fromCents(shippingCents),
+      roundingTtc: fromCents(roundingCents),
       totalHt: fromCents(totalHtCents),
       totalVat: fromCents(totalVatCents),
       totalTtc,

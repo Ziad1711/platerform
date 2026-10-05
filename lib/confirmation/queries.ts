@@ -5,6 +5,7 @@ import type { ConfirmationQueueFilter, ConfirmationSortOrder } from './types'
 export const CONFIRMATION_ORDER_SELECT = `
   id, store_id, customer_name, phone, city, address, status, order_date,
   total_selling_price, delivery_charge_to_customer, delivery_company_id, tracking_number,
+  rounding_adjustment,
   delivery_note,
   confirmation_attempt_count, next_callback_at, confirmation_last_action_at,
   cancellation_reason_code, cancellation_note,

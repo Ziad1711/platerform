@@ -15,6 +15,7 @@ interface StoreItem {
   currency: string
   country: string | null
   role: string
+  round_order_total: boolean
 }
 
 async function toJson(res: Response) {
@@ -32,7 +33,7 @@ export default function StoresSection() {
   const [showDelete, setShowDelete] = useState<StoreItem | null>(null)
   const [saving, setSaving] = useState(false)
   const [createForm, setCreateForm] = useState({ name: '', currency: 'MAD', country: '' })
-  const [editForm, setEditForm] = useState({ name: '', currency: 'MAD', country: '' })
+  const [editForm, setEditForm] = useState({ name: '', currency: 'MAD', country: '', roundOrderTotal: false })
 
 
   const currentStoreId = typeof window !== 'undefined'
@@ -72,7 +73,12 @@ export default function StoresSection() {
       await toJson(await fetch(`/api/stores/${showEdit.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm),
+        body: JSON.stringify({
+          name: editForm.name,
+          currency: editForm.currency,
+          country: editForm.country,
+          round_order_total: editForm.roundOrderTotal,
+        }),
       }))
       await queryClient.invalidateQueries({ queryKey: ['my-stores'] })
       await queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
@@ -124,7 +130,7 @@ export default function StoresSection() {
               </div>
               <div className="flex items-center gap-1">
                 {can('stores.update') && store.role !== 'viewer' && store.role !== 'confirmation' && store.role !== 'delivery' && store.role !== 'stock_manager' && store.role !== 'accountant' && store.role !== 'marketer' && (
-                  <button onClick={() => { setShowEdit(store); setEditForm({ name: store.name, currency: store.currency, country: store.country || '' }) }} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground">
+                  <button onClick={() => { setShowEdit(store); setEditForm({ name: store.name, currency: store.currency, country: store.country || '', roundOrderTotal: Boolean(store.round_order_total) }) }} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground">
                     <Pencil className="h-4 w-4"/>
                   </button>
                 )}
@@ -166,6 +172,13 @@ export default function StoresSection() {
               <div className="space-y-1"><label className="text-xs font-medium text-muted-foreground ml-1">Nom</label><input value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full rounded-xl border bg-background px-4 py-3 text-sm"/></div>
               <div className="space-y-1"><label className="text-xs font-medium text-muted-foreground ml-1">Devise</label><select value={editForm.currency} onChange={e => setEditForm({...editForm, currency: e.target.value})} className="w-full rounded-xl border bg-background px-4 py-3 text-sm"><option>MAD</option><option>USD</option><option>EUR</option></select></div>
               <div className="space-y-1"><label className="text-xs font-medium text-muted-foreground ml-1">Pays</label><input value={editForm.country} onChange={e => setEditForm({...editForm, country: e.target.value})} className="w-full rounded-xl border bg-background px-4 py-3 text-sm"/></div>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-background px-4 py-3">
+                <input type="checkbox" checked={editForm.roundOrderTotal} onChange={e => setEditForm({...editForm, roundOrderTotal: e.target.checked})} className="mt-0.5 h-4 w-4"/>
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium">Arrondir le total encaissé</span>
+                  <span className="block text-xs text-muted-foreground">49 → 50, 48,99 → 49, 99 → 100. Appliqué automatiquement aux commandes reçues (YouCan, API).</span>
+                </span>
+              </label>
             </div>
             <div className="mt-6 flex items-center justify-end gap-3">
               <button onClick={() => setShowEdit(null)} className="rounded-xl border px-4 py-2 text-sm font-medium">Annuler</button>

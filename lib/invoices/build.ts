@@ -22,6 +22,7 @@ export const INVOICE_ORDER_SELECT = [
   'discount_type',
   'delivery_charge_to_customer',
   'total_selling_price',
+  'rounding_adjustment',
   'tracking_number',
 ].join(', ')
 
@@ -60,6 +61,7 @@ export interface InvoiceOrderRow {
   discount_type: string | null
   delivery_charge_to_customer: number | null
   total_selling_price: number | null
+  rounding_adjustment: number | null
   tracking_number: string | null
 }
 

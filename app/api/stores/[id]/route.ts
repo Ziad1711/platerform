@@ -49,13 +49,25 @@ export async function PATCH(
     const admin = createAdminClient()
 
     const body = await request.json().catch(() => ({}))
-    const allowedFields = ['name', 'logo_url', 'currency', 'country', 'website']
+    const allowedFields = [
+      'name',
+      'logo_url',
+      'currency',
+      'country',
+      'website',
+      'round_order_total',
+    ]
 
     const updates: Record<string, unknown> = {}
     for (const key of allowedFields) {
       if (key in body) {
         updates[key] = body[key]
       }
+    }
+
+    // L'arrondi des totaux encaissés est un booléen : aucune valeur approximative n'est acceptée.
+    if ('round_order_total' in updates && typeof updates.round_order_total !== 'boolean') {
+      return NextResponse.json({ error: 'INVALID_ROUND_ORDER_TOTAL' }, { status: 400 })
     }
 
     if (Object.keys(updates).length === 0) {

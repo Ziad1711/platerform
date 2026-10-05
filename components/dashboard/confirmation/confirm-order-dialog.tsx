@@ -235,6 +235,11 @@ export default function ConfirmOrderDialog({
                   + livraison {formatCurrency(Number(order?.delivery_charge_to_customer || 0))}
                 </span>
               ) : null}
+              {Number(order?.rounding_adjustment || 0) > 0 ? (
+                <span className="text-xs font-medium text-primary">
+                  Arrondi + {formatCurrency(Number(order?.rounding_adjustment || 0))}
+                </span>
+              ) : null}
             </div>
           </section>
 

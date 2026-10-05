@@ -1,4 +1,8 @@
 import { listYouCanOrders, listYouCanProducts } from '@/lib/integrations/youcan'
+import {
+  applyOrderTotalRounding,
+  isStoreOrderTotalRoundingEnabled,
+} from '@/lib/integrations/order-total-rounding'
 import { detectStockMultiplier } from '@/lib/integrations/variant-stock'
 import { normalizeMoroccanPhone } from '@/lib/utils'
 import { buildUniqueProductSlug } from '@/lib/products/slug'
@@ -822,8 +826,10 @@ export async function upsertYouCanOrderFromPayload(params: {
   storeId: string
   order: any
   sinceDate?: string
+  /** Option d'arrondi de la boutique, résolue une fois par import quand elle est connue. */
+  roundOrderTotal?: boolean
 }) {
-  const { supabase, integrationId, userId, storeId, order, sinceDate } = params
+  const { supabase, integrationId, userId, storeId, order, sinceDate, roundOrderTotal } = params
 
   const createdAt = String(order?.created_at || '')
   const since = parseDate(sinceDate)
@@ -877,6 +883,12 @@ export async function upsertYouCanOrderFromPayload(params: {
   const total = Number(order?.total || 0)
   const shippingPrice = Number(shipping?.price || 0)
 
+  // Arrondi optionnel du total encaissé (option par boutique). Recalculé à chaque écriture à
+  // partir du total YouCan d'origine : une resynchronisation ne cumule ni n'efface l'arrondi.
+  const roundingEnabled =
+    roundOrderTotal ?? (await isStoreOrderTotalRoundingEnabled(storeId, supabase))
+  const roundedTotal = applyOrderTotalRounding(total, roundingEnabled)
+
   let internalOrderId = existingOrderMap?.internal_id || null
   if (internalOrderId) {
     const { data: existingOrderRow } = await supabase
@@ -901,7 +913,8 @@ export async function upsertYouCanOrderFromPayload(params: {
         city: city,
         status: 'new',
         order_date: orderCreatedAt ? orderCreatedAt.toISOString() : new Date().toISOString(),
-        total_selling_price: Number.isFinite(total) ? total : 0,
+        total_selling_price: roundedTotal.total,
+        rounding_adjustment: roundedTotal.adjustment,
         delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
         source: 'ads',
       })
@@ -915,7 +928,8 @@ export async function upsertYouCanOrderFromPayload(params: {
       customer_name: customerName,
       phone,
       source: 'ads',
-      total_selling_price: Number.isFinite(total) ? total : 0,
+      total_selling_price: roundedTotal.total,
+      rounding_adjustment: roundedTotal.adjustment,
       delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
       updated_at: new Date().toISOString(),
     }
@@ -1002,6 +1016,9 @@ export async function importYouCanOrders(params: {
 }) {
   const { supabase, integrationId, userId, storeId, accessToken, sinceDate } = params
 
+  // Option d'arrondi de la boutique : résolue une seule fois pour tout l'import.
+  const roundOrderTotal = await isStoreOrderTotalRoundingEnabled(storeId, supabase)
+
   let page = 1
   let imported = 0
 
@@ -1017,6 +1034,7 @@ export async function importYouCanOrders(params: {
         storeId,
         order,
         sinceDate,
+        roundOrderTotal,
       })
       if (!result.skipped) imported += 1
     }

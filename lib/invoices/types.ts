@@ -113,6 +113,7 @@ export interface InvoiceRecord {
   items_ttc: number
   discount_ttc: number
   shipping_ttc: number
+  rounding_ttc: number
   total_ht: number
   total_vat: number
   total_ttc: number

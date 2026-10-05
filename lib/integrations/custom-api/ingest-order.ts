@@ -4,6 +4,10 @@ import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { normalizeMoroccanPhone } from '@/lib/utils'
 import { resolveOrderItemsPricing, resolveOrderTotal } from './order-items-pricing'
+import {
+  applyOrderTotalRounding,
+  isStoreOrderTotalRoundingEnabled,
+} from '@/lib/integrations/order-total-rounding'
 import { quotaCodeFromMessage, describeQuotaError } from '@/lib/billing/quota'
 
 export type IngestOrderPayload = {
@@ -103,6 +107,11 @@ export async function ingestOrder(
     deliveryChargeToCustomer: Number(payload.delivery_charge_to_customer || 0),
   })
 
+  // Arrondi optionnel du total encaissé (option par boutique) : calculé une seule fois, sur le
+  // total d'origine, et persisté comme écart explicite sur la commande.
+  const roundingEnabled = await isStoreOrderTotalRoundingEnabled(storeId, supabase)
+  const roundedTotal = applyOrderTotalRounding(Number(resolvedTotal), roundingEnabled)
+
   // 3. Créer la commande de façon atomique (idempotence + commande + articles)
   const { data, error: orderError } = await supabase.rpc('rpc_ingest_public_order', {
     p_store_id: storeId,
@@ -115,7 +124,8 @@ export async function ingestOrder(
       phone: normalizeMoroccanPhone(payload.phone) || null,
       city: payload.city || null,
       address: payload.address || null,
-      total_selling_price: resolvedTotal,
+      total_selling_price: roundedTotal.total,
+      rounding_adjustment: roundedTotal.adjustment,
       delivery_charge_to_customer: payload.delivery_charge_to_customer ?? 0,
       delivery_note: payload.delivery_note || null,
       discount_type: payload.discount_type || null,

@@ -34,6 +34,7 @@ export type ConfirmationOrder = {
   total_selling_price: number | null
   delivery_charge_to_customer: number | null
   delivery_company_id: string | null
+  rounding_adjustment: number | null
   tracking_number: string | null
   delivery_note: string | null
   confirmation_attempt_count: number

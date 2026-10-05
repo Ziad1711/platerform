@@ -471,6 +471,12 @@ export default function InvoiceGenerateModal({
                           <span>{formatCurrency(total.shippingTtc, currency)}</span>
                         </div>
                       ) : null}
+                      {total.roundingTtc > 0 ? (
+                        <div className="flex justify-between">
+                          <span>Arrondi</span>
+                          <span>+ {formatCurrency(total.roundingTtc, currency)}</span>
+                        </div>
+                      ) : null}
                       <div className="flex justify-between border-t border-border pt-1">
                         <span>Total HT</span>
                         <span>{formatCurrency(total.totalHt, currency)}</span>

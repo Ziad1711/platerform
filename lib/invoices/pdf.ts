@@ -539,6 +539,9 @@ function drawTotalsBlock(page: PDFPage, y: number, invoice: InvoiceRecord, font:
   if (invoice.shipping_ttc > 0) {
     detailRows.push(['Livraison', money(invoice.shipping_ttc, invoice.currency)])
   }
+  if (invoice.rounding_ttc > 0) {
+    detailRows.push(['Arrondi', `+ ${money(invoice.rounding_ttc, invoice.currency)}`])
+  }
 
   const rows: [string, string][] = [
     ['Total HT', money(invoice.total_ht, invoice.currency)],

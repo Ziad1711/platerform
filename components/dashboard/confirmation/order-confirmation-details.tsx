@@ -236,6 +236,9 @@ export default function OrderConfirmationDetails({
                     {Number(order.delivery_charge_to_customer || 0) > 0
                       ? `Livraison : ${formatCurrency(Number(order.delivery_charge_to_customer || 0))}`
                       : 'Livraison offerte'}
+                    {Number(order.rounding_adjustment || 0) > 0
+                      ? ` · Arrondi + ${formatCurrency(Number(order.rounding_adjustment || 0))}`
+                      : ''}
                   </div>
                   <div className="text-base font-semibold text-foreground">
                     Total : {formatCurrency(Number(order.total_selling_price || 0))}

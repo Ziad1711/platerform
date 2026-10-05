@@ -103,6 +103,7 @@ export async function POST(request: Request) {
       discountAmount: Number(order.discount_amount) || 0,
       deliveryChargeToCustomer: Number(order.delivery_charge_to_customer) || 0,
       orderTotalSellingPrice: order.total_selling_price,
+      roundingAdjustment: order.rounding_adjustment,
       settings: {
         vatRegime: settings.vat_regime,
         vatRate: settings.vat_rate,
