@@ -8,6 +8,14 @@ import {
 } from '@/lib/confirmation/api-errors'
 import type { ConfirmationAction } from '@/lib/confirmation/constants'
 import type { ConfirmationActionResponse } from '@/lib/confirmation/types'
+import {
+  deliveryCityKeyOf,
+  deliveryProviderCatalogueId,
+  resolveDeliveryProvider,
+  sanitizeDeliveryOptions,
+  type ConfirmationDeliveryOptions,
+  type ConfirmationDeliveryProvider,
+} from '@/lib/confirmation/delivery-options'
 
 const ALLOWED_ACTIONS: ConfirmationAction[] = ['NO_ANSWER', 'POSTPONE', 'CANCEL', 'CONFIRM']
 
@@ -23,7 +31,8 @@ async function triggerParcelCreation(
   orderId: string,
   deliveryNote: string,
   deliveryCompanyId: string | null,
-  deliveryMode: 'internal' | 'shipping'
+  deliveryMode: 'internal' | 'shipping',
+  deliveryOptions: ConfirmationDeliveryOptions
 ): Promise<ParcelResult> {
   const target = new URL('/api/orders/status', new URL(request.url).origin)
 
@@ -39,6 +48,8 @@ async function triggerParcelCreation(
       deliveryNote: deliveryNote || undefined,
       deliveryCompanyId: deliveryMode === 'shipping' && deliveryCompanyId ? deliveryCompanyId : undefined,
       deliveryMode,
+      // Paramètres colis propres au transporteur (ville, ouverture, fragile...).
+      ...deliveryOptions,
     }),
   })
 
@@ -105,6 +116,8 @@ export async function POST(request: Request) {
       expectedAttemptCount?: number | null
       deliveryMode?: 'internal' | 'shipping' | null
       deliveryCompanyId?: string | null
+      /** Paramètres colis du transporteur, validés côté serveur avant usage. */
+      deliveryOptions?: unknown
     }
 
     const orderId = String(body.orderId || '').trim()
@@ -180,6 +193,8 @@ export async function POST(request: Request) {
       ? 'shipping'
       : 'internal'
     let resolvedDeliveryCompanyId: string | null = order.delivery_company_id || null
+    let resolvedProvider: ConfirmationDeliveryProvider | null = null
+    let deliveryOptions: ConfirmationDeliveryOptions = {}
 
     if (action === 'CONFIRM') {
       const requestedMode = String(body.deliveryMode || '').trim()
@@ -195,7 +210,7 @@ export async function POST(request: Request) {
 
         const { data: company, error: companyError } = await supabase
           .from('delivery_companies')
-          .select('id')
+          .select('id, api_provider')
           .eq('id', companyId)
           .eq('store_id', order.store_id)
           .maybeSingle()
@@ -207,8 +222,35 @@ export async function POST(request: Request) {
 
         resolvedDeliveryMode = 'shipping'
         resolvedDeliveryCompanyId = companyId
+        resolvedProvider = resolveDeliveryProvider(company.api_provider)
       } else {
         return NextResponse.json({ error: 'MISSING_DELIVERY_COMPANY' }, { status: 400 })
+      }
+
+      // Le transporteur réel vient de la base, jamais du client : on ne conserve
+      // que les champs de ce transporteur, avec des types sûrs.
+      const sanitized = sanitizeDeliveryOptions(resolvedProvider, body.deliveryOptions)
+      if (sanitized.error) {
+        return NextResponse.json({ error: sanitized.error }, { status: 400 })
+      }
+      deliveryOptions = sanitized.options
+
+      // Ville obligatoire pour les transporteurs à catalogue : elle doit exister
+      // dans `delivery_rates` du provider concerné.
+      const catalogueId = deliveryProviderCatalogueId(resolvedProvider)
+      const cityKey = deliveryCityKeyOf(resolvedProvider, deliveryOptions)
+      if (catalogueId && cityKey) {
+        const { data: rate, error: rateError } = await createAdminClient()
+          .from('delivery_rates')
+          .select('external_city_key')
+          .eq('provider_id', catalogueId)
+          .eq('external_city_key', cityKey)
+          .maybeSingle()
+
+        if (rateError) throw rateError
+        if (!rate) {
+          return NextResponse.json({ error: 'DELIVERY_CITY_NOT_AVAILABLE' }, { status: 400 })
+        }
       }
     }
 
@@ -240,7 +282,8 @@ export async function POST(request: Request) {
         orderId,
         toNullableString(body.note) || '',
         resolvedDeliveryCompanyId,
-        resolvedDeliveryMode
+        resolvedDeliveryMode,
+        deliveryOptions
       )
 
       if (resolvedDeliveryMode === 'shipping' && !order.tracking_number) {

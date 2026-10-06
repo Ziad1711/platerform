@@ -23,6 +23,7 @@ import type {
   ConfirmationSortOrder,
 } from '@/lib/confirmation/types'
 import { getSortOptions } from '@/lib/confirmation/queries'
+import type { ConfirmationDeliveryOptions } from '@/lib/confirmation/delivery-options'
 
 const FILTER_TABS: { value: ConfirmationQueueFilter; label: string }[] = [
   { value: 'to_process', label: 'À traiter' },
@@ -121,6 +122,7 @@ export default function ConfirmationPage() {
       note?: string
       deliveryMode?: 'internal' | 'shipping'
       deliveryCompanyId?: string | null
+      deliveryOptions?: ConfirmationDeliveryOptions
     }) => {
       const response = await fetch('/api/orders/confirmation/action', {
         method: 'POST',
@@ -133,6 +135,7 @@ export default function ConfirmationPage() {
           note: input.note ?? null,
           deliveryMode: input.deliveryMode ?? null,
           deliveryCompanyId: input.deliveryCompanyId ?? null,
+          deliveryOptions: input.deliveryOptions ?? null,
           // Détection de concurrence : un autre agent a peut-être déjà traité la commande.
           expectedStatus: input.order.status,
           expectedAttemptCount: Number(input.order.confirmation_attempt_count || 0),
@@ -407,6 +410,7 @@ export default function ConfirmationPage() {
             note: choice.deliveryNote,
             deliveryMode: choice.deliveryMode,
             deliveryCompanyId: choice.deliveryCompanyId,
+            deliveryOptions: choice.deliveryOptions,
           })
         }}
       />

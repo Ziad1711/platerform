@@ -26,11 +26,21 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 import type { ConfirmationOrder } from '@/lib/confirmation/types'
+import {
+  createDefaultDeliveryOptions,
+  resolveDeliveryProvider,
+  sanitizeDeliveryOptions,
+  validateDeliveryOptions,
+  type ConfirmationDeliveryOptions,
+  type DeliveryOptionsErrorCode,
+} from '@/lib/confirmation/delivery-options'
+import DeliveryProviderFields from './delivery-provider-fields'
 
 export type ConfirmDeliveryChoice = {
   deliveryMode: 'internal' | 'shipping'
   deliveryCompanyId: string | null
   deliveryNote: string
+  deliveryOptions: ConfirmationDeliveryOptions
 }
 
 type ConfirmOrderDialogProps = {
@@ -43,7 +53,25 @@ type ConfirmOrderDialogProps = {
   onSubmit: (choice: ConfirmDeliveryChoice) => void
 }
 
-type DeliveryCompanyOption = { id: string; name: string; is_active: boolean | null }
+type DeliveryCompanyOption = {
+  id: string
+  name: string
+  is_active: boolean | null
+  api_provider: string | null
+}
+
+const DELIVERY_OPTIONS_ERROR_MESSAGES: Record<DeliveryOptionsErrorCode, string> = {
+  MISSING_DELIVERY_CITY: 'Choisissez la ville du transporteur avant de confirmer.',
+  MISSING_DIGYLOG_NETWORK: 'Renseignez le réseau de livraison Digylog avant de confirmer.',
+  DIGYLOG_CONFIG_UNAVAILABLE:
+    'Paramètres Digylog indisponibles : rechargez la page avant de confirmer.',
+}
+
+type DeliveryOptionsState = {
+  /** Société (ou `internal` / vide) à laquelle se rattachent ces options. */
+  companyId: string
+  options: ConfirmationDeliveryOptions
+}
 
 function SectionTitle({ icon, label }: { icon: ReactNode; label: string }) {
   return (
@@ -110,6 +138,11 @@ export default function ConfirmOrderDialog({
   const [deliveryChoice, setDeliveryChoice] = useState('')
   const [deliveryNote, setDeliveryNote] = useState('')
   const [localError, setLocalError] = useState('')
+  const [providerIssue, setProviderIssue] = useState<DeliveryOptionsErrorCode | null>(null)
+  const [deliveryOptionsState, setDeliveryOptionsState] = useState<DeliveryOptionsState>({
+    companyId: '',
+    options: {},
+  })
 
   const { data: deliveryCompanies = [] } = useQuery<DeliveryCompanyOption[]>({
     queryKey: ['confirmation-confirm-delivery-companies', storeId],
@@ -117,7 +150,7 @@ export default function ConfirmOrderDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_companies')
-        .select('id, name, is_active')
+        .select('id, name, is_active, api_provider')
         .eq('store_id', storeId as string)
         .order('name', { ascending: true })
 
@@ -126,10 +159,32 @@ export default function ConfirmOrderDialog({
     },
   })
 
+  const selectedCompany = useMemo(
+    () => deliveryCompanies.find((company) => company.id === deliveryChoice) || null,
+    [deliveryCompanies, deliveryChoice]
+  )
+  const providerSlug = resolveDeliveryProvider(selectedCompany?.api_provider)
+
+  // Les options sont recalculées à chaque changement de société : aucun paramètre
+  // d'un transporteur ne doit survivre au passage à une autre société.
+  const deliveryOptions =
+    deliveryOptionsState.companyId === deliveryChoice
+      ? deliveryOptionsState.options
+      : createDefaultDeliveryOptions(providerSlug)
+
+  useEffect(() => {
+    setDeliveryOptionsState({
+      companyId: deliveryChoice,
+      options: createDefaultDeliveryOptions(providerSlug),
+    })
+  }, [deliveryChoice, providerSlug])
+
   useEffect(() => {
     if (!open) return
     setDeliveryNote(order?.delivery_note || '')
     setLocalError('')
+    setProviderIssue(null)
+    setDeliveryOptionsState({ companyId: '', options: {} })
     // Une société déjà rattachée reste sélectionnée ; sinon l'agent doit choisir.
     setDeliveryChoice(order?.delivery_company_id ? String(order.delivery_company_id) : '')
   }, [open, order])
@@ -139,6 +194,10 @@ export default function ConfirmOrderDialog({
   const hasProducts = (order?.order_items || []).length > 0
   const isShipping = deliveryChoice !== '' && deliveryChoice !== 'internal'
   const willCreateParcel = isShipping && !order?.tracking_number
+
+  const handleDeliveryOptionsChange = (next: ConfirmationDeliveryOptions) => {
+    setDeliveryOptionsState({ companyId: deliveryChoice, options: next })
+  }
 
   const handleSubmit = () => {
     if (missingPhone) {
@@ -158,10 +217,26 @@ export default function ConfirmOrderDialog({
       return
     }
 
+    const optionsError =
+      deliveryChoice !== 'internal' && providerSlug
+        ? providerIssue || validateDeliveryOptions(providerSlug, deliveryOptions)
+        : null
+
+    if (optionsError) {
+      setLocalError(DELIVERY_OPTIONS_ERROR_MESSAGES[optionsError])
+      return
+    }
+
+    const sanitizedOptions =
+      deliveryChoice === 'internal'
+        ? {}
+        : sanitizeDeliveryOptions(providerSlug, deliveryOptions).options
+
     onSubmit({
       deliveryMode: deliveryChoice === 'internal' ? 'internal' : 'shipping',
       deliveryCompanyId: deliveryChoice === 'internal' ? null : deliveryChoice,
       deliveryNote: deliveryNote.trim(),
+      deliveryOptions: sanitizedOptions,
     })
   }
 
@@ -276,6 +351,17 @@ export default function ConfirmOrderDialog({
                   ))}
               </select>
             </label>
+
+            {providerSlug ? (
+              <DeliveryProviderFields
+                key={deliveryChoice}
+                provider={providerSlug}
+                storeId={storeId}
+                value={deliveryOptions}
+                onChange={handleDeliveryOptionsChange}
+                onConfigError={setProviderIssue}
+              />
+            ) : null}
 
             <label className="block space-y-1 text-sm">
               <span className="font-medium">Note de livraison (facultatif)</span>

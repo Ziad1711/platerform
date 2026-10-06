@@ -13,11 +13,15 @@ export async function GET(request: Request) {
 
     await verifyStoreAccess(supabase, user.id, storeId)
 
-    const { data: config } = await supabase
+    const { data: config, error: configError } = await supabase
       .from('digylog_configs')
       .select('*')
       .eq('store_id', storeId)
       .maybeSingle()
+
+    // Une lecture en échec ne doit pas être confondue avec « aucune configuration » :
+    // les appelants (confirmation) bloquent la création du colis dans ce cas.
+    if (configError) throw configError
 
     return NextResponse.json({ ok: true, data: config || null })
   } catch (error) {
