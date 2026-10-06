@@ -24,6 +24,8 @@ export async function POST(request: Request) {
       pickupCityKey?: string
       pickupCityName?: string
       pickupAddress?: string
+      webhookSecret?: string
+      webhookUrl?: string
     }
 
     const apiId = String(body.apiId || '').trim()
@@ -113,24 +115,36 @@ export async function POST(request: Request) {
 
     // Creer/mettre a jour ameex_configs
     if (integrationId) {
-      await admin.from('ameex_configs').upsert(
-        {
-          integration_id: integrationId,
-          store_id: storeId,
-          business_id: businessId,
-          parcel_creation_mode: body.parcelCreationMode || 'auto',
-          default_open: body.defaultOpen !== undefined ? body.defaultOpen : true,
-          default_fragile: body.defaultFragile !== undefined ? body.defaultFragile : false,
-          default_replace: body.defaultReplace !== undefined ? body.defaultReplace : true,
-          default_parcel_type: body.defaultParcelType || 'SIMPLE',
-          pickup_phone: body.pickupPhone || null,
-          pickup_city_key: body.pickupCityKey || null,
-          pickup_city_name: body.pickupCityName || null,
-          pickup_address: body.pickupAddress || null,
-          updated_at: now,
-        },
-        { onConflict: 'store_id' }
-      )
+      const webhookSecret = String(body.webhookSecret || '').trim()
+      const webhookUrl = String(
+        body.webhookUrl ||
+          `${(process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '')}/api/integrations/ameex/webhook`,
+      ).trim()
+
+      const configPayload: Record<string, unknown> = {
+        integration_id: integrationId,
+        store_id: storeId,
+        business_id: businessId,
+        parcel_creation_mode: body.parcelCreationMode || 'auto',
+        default_open: body.defaultOpen !== undefined ? body.defaultOpen : true,
+        default_fragile: body.defaultFragile !== undefined ? body.defaultFragile : false,
+        default_replace: body.defaultReplace !== undefined ? body.defaultReplace : true,
+        default_parcel_type: body.defaultParcelType || 'SIMPLE',
+        pickup_phone: body.pickupPhone || null,
+        pickup_city_key: body.pickupCityKey || null,
+        pickup_city_name: body.pickupCityName || null,
+        pickup_address: body.pickupAddress || null,
+        webhook_url: webhookUrl || null,
+        updated_at: now,
+      }
+
+      // Le secret n'est ecrase que s'il est fourni (les mises a jour partielles
+      // du formulaire ne doivent pas effacer un secret deja configure).
+      if (webhookSecret) {
+        configPayload.webhook_secret_encrypted = encryptSecret(webhookSecret)
+      }
+
+      await admin.from('ameex_configs').upsert(configPayload, { onConflict: 'store_id' })
     }
 
     // Creer delivery_company
@@ -144,7 +158,7 @@ export async function POST(request: Request) {
     if (existingCompany?.id) {
       await admin
         .from('delivery_companies')
-        .update({ is_active: true, updated_at: now })
+        .update({ is_active: true })
         .eq('id', existingCompany.id)
     } else {
       await admin

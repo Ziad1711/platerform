@@ -3,6 +3,11 @@
 // Auth: C-Api-Id + C-Api-Key headers
 // ============================================================
 
+import { resolveAmeexStatus } from './ameex-status'
+
+export { AMEEX_STATUS_MAP, resolveAmeexStatus } from './ameex-status'
+export type { AmeexResolvedStatus, AmeexStatusMapEntry } from './ameex-status'
+
 const AMEEX_API_BASE_URL = 'https://api.ameex.app'
 
 export type AmeexParcelPayload = {
@@ -431,77 +436,30 @@ export async function createAmeexPickupRequest(
 
 // ============================================================
 // Status mapping AMEEX -> order/delivery status
+//
+// La table de correspondance et la resolution stricte vivent desormais dans
+// `lib/integrations/ameex-status.ts` (source de verite unique, partagee avec
+// le webhook de suivi et la resynchronisation). Le wrapper ci-dessous
+// conserve l'ancien contrat (deliveryStatus non nullable).
 // ============================================================
-
-type StatusMapEntry = {
-  matches: Array<{ statut: string; statut_s?: string }>
-  orderStatus: string | null
-  deliveryStatus: string
-  statusDateField: string | null
-}
-
-function normalizeAmeexStatusValue(value: string) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-export const AMEEX_STATUS_MAP: StatusMapEntry[] = [
-  { matches: [{ statut: 'DELIVERED' }, { statut: 'LIVRE' }], orderStatus: 'delivered', deliveryStatus: 'delivered', statusDateField: 'delivered_at' },
-  { matches: [{ statut: 'DISTRIBUTION' }, { statut: 'OUT_FOR_DELIVERY' }], orderStatus: 'dl_out_for_delivery', deliveryStatus: 'in_transit', statusDateField: 'dl_out_for_delivery_at' },
-  { matches: [{ statut: 'IN_PROGRESS', statut_s: 'POSTPONED' }, { statut: 'REPORTE' }], orderStatus: 'dl_postponed', deliveryStatus: 'in_transit', statusDateField: 'dl_postponed_at' },
-  { matches: [{ statut: 'IN_PROGRESS', statut_s: 'NO_ANSWER_TEAM' }], orderStatus: 'dl_no_answer', deliveryStatus: 'in_transit', statusDateField: 'dl_no_answer_at' },
-  { matches: [{ statut: 'IN_PROGRESS', statut_s: 'NO_ANSWER' }], orderStatus: 'dl_no_answer', deliveryStatus: 'in_transit', statusDateField: 'dl_no_answer_at' },
-  { matches: [{ statut: 'IN_PROGRESS', statut_s: 'UNREACHABLE' }], orderStatus: 'dl_unreachable', deliveryStatus: 'in_transit', statusDateField: 'dl_unreachable_at' },
-  { matches: [{ statut: 'REFUSED' }, { statut: 'REFUSE' }], orderStatus: 'refused', deliveryStatus: 'refused', statusDateField: 'refused_at' },
-  { matches: [{ statut: 'CANCELLED' }, { statut: 'ANNULE' }], orderStatus: 'cancelled', deliveryStatus: 'cancelled', statusDateField: 'cancelled_at' },
-  { matches: [{ statut: 'RETURNED' }, { statut: 'RETOUR' }], orderStatus: 'returned_not_stocked', deliveryStatus: 'returned', statusDateField: 'returned_not_stocked_at' },
-  { matches: [{ statut: 'PICKED_UP' }, { statut: 'RAMASSE' }], orderStatus: 'picked_up', deliveryStatus: 'picked_up', statusDateField: 'picked_up_at' },
-  { matches: [{ statut: 'SENT' }, { statut: 'ENVOYE' }, { statut: 'SHIPPED' }], orderStatus: 'sent', deliveryStatus: 'in_transit', statusDateField: 'sent_at' },
-  { matches: [{ statut: 'IN_PROGRESS' }], orderStatus: null, deliveryStatus: 'in_transit', statusDateField: null },
-]
 
 export function mapAmeexStatusToOrderStatus(
   rawStatut: string,
   rawStatutS?: string,
-): { rawStatus: string; orderStatus: string | null; deliveryStatus: string; statusDateField: string | null } {
-  const normalizedStatut = normalizeAmeexStatusValue(rawStatut)
-  const normalizedStatutS = rawStatutS ? normalizeAmeexStatusValue(rawStatutS) : ''
-
-  for (const entry of AMEEX_STATUS_MAP) {
-    for (const match of entry.matches) {
-      const statutMatch = normalizeAmeexStatusValue(match.statut)
-      const statutSMatch = match.statut_s ? normalizeAmeexStatusValue(match.statut_s) : null
-
-      if (normalizedStatut.includes(statutMatch) || statutMatch.includes(normalizedStatut)) {
-        if (statutSMatch) {
-          if (normalizedStatutS.includes(statutSMatch) || statutSMatch.includes(normalizedStatutS)) {
-            return {
-              rawStatus: rawStatut + (rawStatutS ? ` (${rawStatutS})` : ''),
-              orderStatus: entry.orderStatus,
-              deliveryStatus: entry.deliveryStatus,
-              statusDateField: entry.statusDateField,
-            }
-          }
-          continue
-        }
-        return {
-          rawStatus: rawStatut,
-          orderStatus: entry.orderStatus,
-          deliveryStatus: entry.deliveryStatus,
-          statusDateField: entry.statusDateField,
-        }
-      }
-    }
-  }
+): {
+  rawStatus: string
+  orderStatus: string | null
+  deliveryStatus: string
+  statusDateField: string | null
+} {
+  const resolved = resolveAmeexStatus(rawStatut, rawStatutS)
 
   return {
-    rawStatus: rawStatut,
-    orderStatus: null,
-    deliveryStatus: 'pending',
-    statusDateField: null,
+    rawStatus: resolved.rawStatus,
+    orderStatus: resolved.orderStatus,
+    deliveryStatus: resolved.deliveryStatus || 'pending',
+    statusDateField: resolved.statusDateField,
   }
 }
+
+

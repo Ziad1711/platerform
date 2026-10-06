@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     // Desactiver delivery_company
     await admin
       .from('delivery_companies')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .update({ is_active: false })
       .eq('store_id', storeId)
       .eq('api_provider', 'ameex')
 

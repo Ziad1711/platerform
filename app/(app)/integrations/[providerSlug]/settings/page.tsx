@@ -6,28 +6,37 @@ import { ArrowLeft, Loader2, Settings, Trash2, Zap } from 'lucide-react'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/lib/store-context'
 
 export default function IntegrationSettingsPage() {
   const params = useParams()
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { currentStoreId } = useStore()
   const providerSlug = params.providerSlug as string
   const [isDisconnecting, setIsDisconnecting] = useState(false)
 
   const { data: marketplaceItems = [], isLoading } = useQuery({
-    queryKey: ['integration-marketplace'],
-    queryFn: () => getIntegrationMarketplaceData(),
+    queryKey: ['integration-marketplace', currentStoreId],
+    queryFn: () => getIntegrationMarketplaceData(currentStoreId),
   })
 
   const integration = marketplaceItems.find((item) => item.slug === providerSlug)
 
   const handleDisconnect = async () => {
+    if (!currentStoreId) {
+      alert('Aucun store sélectionné.')
+      return
+    }
+
     if (!confirm('Êtes-vous sûr de vouloir déconnecter cette intégration ?')) return
     
     setIsDisconnecting(true)
     try {
       const response = await fetch(`/api/integrations/${providerSlug}/disconnect`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: currentStoreId }),
       })
 
       if (!response.ok) throw new Error('Failed to disconnect')
@@ -131,7 +140,9 @@ export default function IntegrationSettingsPage() {
             <div className="space-y-1">
               <p className="text-sm font-medium text-foreground">Déconnecter l'intégration</p>
               <p className="text-xs text-muted-foreground">
-                Supprime le lien entre votre boutique et la plateforme. Les webhooks seront également désactivés sur YouCan.
+                {providerSlug === 'youcan'
+                  ? 'Supprime le lien entre votre boutique et la plateforme. Les webhooks seront également désactivés sur YouCan.'
+                  : 'Supprime le lien entre votre boutique et la plateforme. La configuration de cette intégration sera effacée et le transporteur associé désactivé.'}
               </p>
             </div>
             <button

@@ -57,3 +57,26 @@ export async function getAmeexCredentials(
 
   return { apiId, apiKey }
 }
+
+/**
+ * Récupère et déchiffre le secret de signature des webhooks AMEEX d'un store.
+ * Retourne `null` si aucun secret n'est configuré (le webhook doit alors
+ * refuser l'événement plutôt que de le traiter sans authentification).
+ */
+export async function getAmeexWebhookSecret(
+  client: AdminClient,
+  storeId: string,
+): Promise<string | null> {
+  const { data, error } = await client
+    .from('ameex_configs')
+    .select('webhook_secret_encrypted')
+    .eq('store_id', storeId)
+    .maybeSingle()
+
+  if (error) throw error
+
+  const raw = String(data?.webhook_secret_encrypted || '').trim()
+  if (!raw) return null
+
+  return isEncryptedSecret(raw) ? decryptSecret(raw) : raw
+}

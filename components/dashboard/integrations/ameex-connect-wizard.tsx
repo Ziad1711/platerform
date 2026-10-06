@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, Copy, Check, Trash2 } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
+import { SITE_URL } from '@/lib/marketing/site-url'
 
 export default function AmeexConnectWizard({
   onClose,
@@ -17,7 +18,23 @@ export default function AmeexConnectWizard({
   const [apiKey, setApiKey] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [selectedStoreId, setSelectedStoreId] = useState('')
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  // URL webhook attendue par AMEEX (doit correspondre a celle enregistree).
+  useEffect(() => {
+    setWebhookUrl(`${SITE_URL}/api/integrations/ameex/webhook`)
+  }, [])
+
+  const copyWebhookUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(webhookUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* ignore */ }
+  }
 
   const validateAndConnect = async () => {
     const id = apiId.trim()
@@ -34,7 +51,7 @@ export default function AmeexConnectWizard({
       const response = await fetch('/api/integrations/ameex/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId: id, apiKey: key, storeId: selectedStoreId, parcelCreationMode: 'auto' }),
+        body: JSON.stringify({ apiId: id, apiKey: key, storeId: selectedStoreId, parcelCreationMode: 'auto', webhookUrl }),
       })
 
       const payload = await response.json().catch(() => null) as { error?: string } | null
@@ -46,6 +63,34 @@ export default function AmeexConnectWizard({
       setError(err instanceof Error ? err.message : 'Connexion AMEEX impossible.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const disconnect = async () => {
+    if (!selectedStoreId) { setError('Veuillez selectionner un store.'); return }
+    if (!confirm('Supprimer l\'integration AMEEX de ce store ? Cette action est irreversible.')) return
+
+    setIsDisconnecting(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/integrations/ameex/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: selectedStoreId }),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(payload?.error || 'AMEEX_DISCONNECT_FAILED')
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['integration-marketplace'] })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Suppression AMEEX impossible.')
+    } finally {
+      setIsDisconnecting(false)
     }
   }
 
@@ -124,6 +169,46 @@ export default function AmeexConnectWizard({
               <p className="text-sm text-muted-foreground">
                 Les villes AMEEX sont disponibles dans la page Ventes pour selection. Les colis seront automatiquement crees lors du passage au statut confirme.
               </p>
+              <div className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">URL du webhook a enregistrer cote AMEEX :</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 truncate text-xs text-foreground">{webhookUrl}</code>
+                  <button
+                    type="button"
+                    onClick={() => void copyWebhookUrl()}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    title="Copier"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Collez cette URL dans la configuration webhook de votre compte AMEEX pour recevoir les changements de statut des colis.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                <div className="flex items-start gap-2 text-destructive">
+                  <Trash2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Supprimer l&apos;integration</p>
+                    <p className="text-xs text-muted-foreground">
+                      Efface la configuration AMEEX du store, supprime la connexion et desactive le transporteur Ameex.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void disconnect()}
+                  disabled={isDisconnecting}
+                  className="mt-3 w-full rounded-xl border border-destructive/30 bg-destructive px-4 py-2.5 text-sm font-medium text-destructive-foreground disabled:opacity-50"
+                >
+                  {isDisconnecting ? (
+                    <span className="flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Suppression...</span>
+                  ) : 'Supprimer l\'integration AMEEX'}
+                </button>
+              </div>
+
               <button type="button" onClick={onClose} className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground">Fermer</button>
             </div>
           )}
