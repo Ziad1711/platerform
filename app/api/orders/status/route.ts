@@ -6,6 +6,7 @@ import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { resolveStoreIntegration } from '@/lib/integrations/delivery/resolve-store-integration'
 import { autoCreateRapidDeliveryParcelForOrder } from '@/lib/integrations/rapid-delivery-auto'
 import { autoCreateMarocGoDeliveryParcelForOrder } from '@/lib/integrations/maroc-go-delivery-auto'
+import { autoCreateRushlivParcelForOrder } from '@/lib/integrations/rushliv-auto'
 import { autoCreateOzoneParcelForOrder } from '@/lib/integrations/ozone-auto'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { createForceLogParcelForOrder } from '@/lib/integrations/delivery/forcelog-adapter'
@@ -363,6 +364,86 @@ export async function POST(request: Request) {
               orderId,
               storeId: order.store_id,
               integrationId: marocGoIntegration.id,
+              error: warning,
+            })
+          }
+        }
+      }
+
+      // Rushliv auto-create
+      if (!trackingNumber && deliveryCompany?.api_provider === 'rushliv') {
+        const rushlivIntegration = await resolveStoreIntegration(supabase, 'rushliv', order.store_id)
+
+        const { data: rushlivConfig, error: rushlivConfigError } = await supabase
+          .from('rushliv_configs')
+          .select('default_article_name, parcel_creation_mode')
+          .eq('store_id', order.store_id)
+          .maybeSingle()
+
+        if (rushlivConfigError) throw rushlivConfigError
+
+        const canAutoCreateRushliv =
+          rushlivIntegration?.status === 'connected' &&
+          rushlivConfig?.parcel_creation_mode !== 'disabled'
+
+        if (canAutoCreateRushliv && rushlivIntegration?.id && rushlivConfig) {
+          try {
+            await normalizeOrderCityById(orderId, admin, 'rushliv')
+            const { data: freshOrder } = await admin
+              .from('orders')
+              .select(`
+                id, store_id, status, city, address, phone, customer_name, total_selling_price,
+                delivery_city_external_id,
+                delivery_company_id, tracking_number, delivery_status_source,
+                order_items(quantity, product_name_override, products(name), product_variants(name))
+              `)
+              .eq('id', orderId)
+              .maybeSingle()
+            const normalizedOrder = {
+              ...(freshOrder || order),
+              order_items: ((freshOrder || order).order_items || []).map((oi: any) => ({
+                ...oi,
+                products: Array.isArray(oi.products) ? (oi.products[0] ?? null) : oi.products,
+                product_variants: Array.isArray(oi.product_variants) ? (oi.product_variants[0] ?? null) : oi.product_variants,
+              })),
+            }
+            const rushlivCityKey = String(normalizedOrder.delivery_city_external_id || '').trim()
+            if (rushlivCityKey) {
+              const rushlivDeliveryFee = await resolveDeliveryFee({
+                supabase: admin,
+                storeId: order.store_id,
+                cityKey: rushlivCityKey,
+                integrationId: rushlivIntegration.id,
+                providerSlug: 'rushliv',
+              })
+
+              // L'API Rushliv n'expose aucun tarif : un montant à 0 signifie
+              // « inconnu ». On n'écrase donc le tarif de la commande que si
+              // une grille tarifaire a réellement été saisie.
+              if (rushlivDeliveryFee > 0) {
+                await admin
+                  .from('orders')
+                  .update({ delivery_fee: rushlivDeliveryFee, updated_at: now })
+                  .eq('id', orderId)
+              }
+            }
+
+            const result = await autoCreateRushlivParcelForOrder({
+              admin,
+              userId: user.id,
+              integrationId: rushlivIntegration.id,
+              order: normalizedOrder,
+              defaultArticleName: rushlivConfig.default_article_name,
+              deliveryNote: deliveryNote || undefined,
+            })
+            warning = result.warning
+            trackingNumber = result.trackingNumber
+          } catch (error) {
+            warning = error instanceof Error ? error.message : 'RUSHLIV_AUTO_PARCEL_CREATE_FAILED'
+            console.error('Rushliv auto parcel creation failed', {
+              orderId,
+              storeId: order.store_id,
+              integrationId: rushlivIntegration.id,
               error: warning,
             })
           }

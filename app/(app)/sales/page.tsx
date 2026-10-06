@@ -549,6 +549,8 @@ export default function VentesPage() {
   const [ozoneCityKey, setOzoneCityKey] = useState('')
   const [ozoneShopKey, setOzoneShopKey] = useState('')
   const [ozoneRemark, setOzoneRemark] = useState('')
+  const [isRushlivModalOpen, setIsRushlivModalOpen] = useState(false)
+  const [rushlivOrder, setRushlivOrder] = useState<any | null>(null)
   const [deliveryNoteModalOrder, setDeliveryNoteModalOrder] = useState<any | null>(null)
   const [deliveryNoteText, setDeliveryNoteText] = useState('')
   const [deliveryNoteSelectedCompanyId, setDeliveryNoteSelectedCompanyId] = useState('')
@@ -1368,6 +1370,38 @@ export default function VentesPage() {
     },
   })
 
+  const { data: rushlivIntegration } = useQuery({
+    queryKey: ['rushliv-integration-status', currentStoreId],
+    queryFn: async () => {
+      let query = supabase
+        .from('integrations')
+        .select('id, status')
+        .eq('provider', 'rushliv')
+
+      if (currentStoreId) query = query.eq('store_id', currentStoreId)
+
+      const { data, error } = await query.maybeSingle()
+
+      if (error) throw error
+      return data || null
+    },
+  })
+
+  const { data: rushlivConfig } = useQuery({
+    queryKey: ['rushliv-config', currentStoreId],
+    enabled: !!currentStoreId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('rushliv_configs')
+        .select('store_id, parcel_creation_mode')
+        .eq('store_id', currentStoreId)
+        .maybeSingle()
+
+      if (error) throw error
+      return data || null
+    },
+  })
+
   const { data: ozoneCities = [] } = useQuery({
     queryKey: ['ozone-cities', OZONE_PROVIDER_ID],
     queryFn: async () => {
@@ -2073,6 +2107,73 @@ export default function VentesPage() {
     },
   })
 
+  const createRushlivParcelMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentStoreId || !rushlivOrder?.id) throw new Error('Commande introuvable.')
+
+      const response = await fetch('/api/integrations/rushliv/parcels/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: currentStoreId, orderId: rushlivOrder.id }),
+      })
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || 'RUSHLIV_CREATE_FAILED')
+      }
+
+      return response.json()
+    },
+    onSuccess: async () => {
+      await invalidateOrderViews()
+      setIsRushlivModalOpen(false)
+      setRushlivOrder(null)
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur création colis Rushliv')
+    },
+  })
+
+  const trackRushlivMutation = useMutation({
+    mutationFn: async ({ orderId, trackingNumber }: { orderId: string; trackingNumber: string }) => {
+      const params = new URLSearchParams({ orderId, trackingNumber })
+      const response = await fetch(`/api/integrations/rushliv/parcels/track?${params.toString()}`)
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || 'RUSHLIV_TRACK_FAILED')
+      }
+      return response.json()
+    },
+    onSuccess: async () => {
+      await invalidateOrderViews()
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur suivi Rushliv')
+    },
+  })
+
+  const syncAllRushlivMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/integrations/rushliv/parcels/sync-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: currentStoreId }),
+      })
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+      if (!response.ok) throw new Error(payload?.error || 'RUSHLIV_SYNC_ALL_FAILED')
+      return payload
+    },
+    onSuccess: async () => {
+      await invalidateOrderViews()
+      setFormError('')
+    },
+    onError: (error: any) => {
+      setFormError(error?.message || 'Erreur synchronisation Rushliv')
+    },
+  })
+
   const updateOrderFieldMutation = useMutation({
     mutationFn: async ({ orderId, field, value }: { orderId: string; field: string; value: any }) => {
       const { error } = await supabase
@@ -2294,6 +2395,13 @@ export default function VentesPage() {
     syncAllMarocGoDeliveryMutation.mutate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marocGoDeliveryIntegration?.id, marocGoDeliveryIntegration?.status])
+
+  useEffect(() => {
+    if (!rushlivIntegration || rushlivIntegration.status !== 'connected') return
+    if (!rushlivConfig?.store_id || !currentStoreId) return
+    syncAllRushlivMutation.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rushlivIntegration?.id, rushlivIntegration?.status, rushlivConfig?.store_id, currentStoreId])
 
   const isOrderLinkedToApiProvider = (order: any) => {
     // Même règle que l'API /api/orders/status : une commande encore au statut
@@ -4921,6 +5029,39 @@ export default function VentesPage() {
                     </>
                   ) : null}
 
+                  {rushlivIntegration?.status === 'connected' && rushlivConfig?.store_id
+                    && selectedOrderForDetails.delivery_companies?.api_provider === 'rushliv' ? (
+                    <>
+                      {!selectedOrderForDetails.tracking_number ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRushlivOrder(selectedOrderForDetails)
+                            setFormError('')
+                            setIsRushlivModalOpen(true)
+                          }}
+                          className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                        >
+                          Créer colis Rushliv
+                        </button>
+                      ) : null}
+                      {selectedOrderForDetails.tracking_number ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            trackRushlivMutation.mutate({
+                              orderId: selectedOrderForDetails.id,
+                              trackingNumber: selectedOrderForDetails.tracking_number,
+                            })
+                          }
+                          className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-secondary"
+                        >
+                          Synchroniser suivi Rushliv
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+
                   {isExchangeEligible(selectedOrderForDetails) ? (
                     <button
                       type="button"
@@ -5108,14 +5249,15 @@ export default function VentesPage() {
               onClick={() => {
                 if (rapidDeliveryIntegration?.status === 'connected') syncAllRapidDeliveryMutation.mutate()
                 if (marocGoDeliveryIntegration?.status === 'connected') syncAllMarocGoDeliveryMutation.mutate()
+                if (rushlivIntegration?.status === 'connected' && rushlivConfig?.store_id && currentStoreId) syncAllRushlivMutation.mutate()
               }}
               disabled={
-                (syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending)
-                || (rapidDeliveryIntegration?.status !== 'connected' && marocGoDeliveryIntegration?.status !== 'connected')
+                (syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending || syncAllRushlivMutation.isPending)
+                || (rapidDeliveryIntegration?.status !== 'connected' && marocGoDeliveryIntegration?.status !== 'connected' && !(rushlivIntegration?.status === 'connected' && rushlivConfig?.store_id))
               }
               className="inline-flex items-center justify-center border border-border hover:bg-secondary text-foreground text-sm font-medium p-2 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
             >
-              <RefreshCw className={`w-4 h-4 ${(syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending) ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${(syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending || syncAllRushlivMutation.isPending) ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline ml-1">Resynchroniser</span>
             </button>
             <button
@@ -5798,6 +5940,39 @@ export default function VentesPage() {
                 className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 {createOzoneParcelMutation.isPending ? 'Création...' : 'Créer le colis'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isRushlivModalOpen && rushlivOrder ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setIsRushlivModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Créer colis Rushliv</h3>
+                <p className="text-sm text-muted-foreground">Commande #{String(rushlivOrder.id || '').slice(0, 8)}</p>
+              </div>
+              <button type="button" onClick={() => setIsRushlivModalOpen(false)} className="text-sm text-muted-foreground">
+                Fermer
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                La ville de livraison est résolue automatiquement depuis la commande. Si elle n’est pas reconnue,
+                corrigez la ville de la commande avant de réessayer.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => createRushlivParcelMutation.mutate()}
+                disabled={createRushlivParcelMutation.isPending}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {createRushlivParcelMutation.isPending ? 'Création...' : 'Créer le colis'}
               </button>
             </div>
           </div>

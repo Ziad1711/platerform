@@ -91,7 +91,10 @@ export async function resolveDeliveryFee(params: {
   }
 
   // 5. Fallback : delivery_rates direct provider
-  if (providerSlug === 'forcelog' || providerSlug === 'ameex' || providerSlug === 'sendit') {
+  // Ces transporteurs (dont Rushliv) n'ont PAS de grille Rapid Delivery : un
+  // tarif absent signifie « inconnu » (0) et ne doit jamais hériter du tarif
+  // d'un autre transporteur.
+  if (providerSlug === 'forcelog' || providerSlug === 'ameex' || providerSlug === 'sendit' || providerSlug === 'rushliv') {
     const { data: rate } = await supabase
       .from('delivery_rates')
       .select('price')

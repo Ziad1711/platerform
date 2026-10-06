@@ -179,6 +179,10 @@ export default function LivraisonPage() {
         .filter((c: any) => c.api_provider === 'maroc-go-delivery')
         .map((c: any) => c.id)
 
+      const rushlivCompanyIds = deliveryCompanies
+        .filter((c: any) => c.api_provider === 'rushliv')
+        .map((c: any) => c.id)
+
       // Colis Rapid Delivery (via rapid_delivery_parcel_key, pas de voucher)
       const rapidPromise = rapidCompanyIds.length > 0
         ? supabase
@@ -279,8 +283,22 @@ export default function LivraisonPage() {
             .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.maroc_go_delivery_parcel_key, _provider: 'MarocGo' })))
         : Promise.resolve([])
 
-      const [rapidRes, ozoneRes, forcelogRes, ameexRes, senditRes, digylogRes, marocGoRes] = await Promise.all([rapidPromise, ozonePromise, forcelogPromise, ameexPromise, senditPromise, digylogPromise, marocGoPromise])
-      const merged = [...rapidRes, ...ozoneRes, ...forcelogRes, ...ameexRes, ...senditRes, ...digylogRes, ...marocGoRes]
+      // Colis Rushliv (via rushliv_parcel_key). Rushliv n'expose aucun endpoint
+      // d'étiquette / bon de ramassage : les colis sont listés en lecture seule.
+      const rushlivPromise = rushlivCompanyIds.length > 0
+        ? supabase
+            .from('orders')
+            .select('id, customer_name, phone, city, total_selling_price, rushliv_parcel_key, confirmed_at, status')
+            .eq('store_id', currentStoreId!)
+            .in('status', ['confirmed', 'dl_pickup_pending'])
+            .in('delivery_company_id', rushlivCompanyIds)
+            .not('rushliv_parcel_key', 'is', null)
+            .order('confirmed_at', { ascending: false })
+            .then(r => (r.data || []).map((o: any) => ({ ...o, _tracking: o.rushliv_parcel_key, _provider: 'Rushliv' })))
+        : Promise.resolve([])
+
+      const [rapidRes, ozoneRes, forcelogRes, ameexRes, senditRes, digylogRes, marocGoRes, rushlivRes] = await Promise.all([rapidPromise, ozonePromise, forcelogPromise, ameexPromise, senditPromise, digylogPromise, marocGoPromise, rushlivPromise])
+      const merged = [...rapidRes, ...ozoneRes, ...forcelogRes, ...ameexRes, ...senditRes, ...digylogRes, ...marocGoRes, ...rushlivRes]
       merged.sort((a, b) => new Date(b.confirmed_at).getTime() - new Date(a.confirmed_at).getTime())
       return merged
     },
@@ -679,7 +697,8 @@ export default function LivraisonPage() {
                           deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0 ||
                           deliveryCompanies.filter((c: any) => c.api_provider === 'sendit').length > 0 ||
                           deliveryCompanies.filter((c: any) => c.api_provider === 'digylog').length > 0 ||
-                          deliveryCompanies.filter((c: any) => c.api_provider === 'maroc-go-delivery').length > 0) && (
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'maroc-go-delivery').length > 0 ||
+                          deliveryCompanies.filter((c: any) => c.api_provider === 'rushliv').length > 0) && (
                           <th className="px-2 py-2">
                             <input
                               type="checkbox"
@@ -705,6 +724,7 @@ export default function LivraisonPage() {
                         const isSendit = order._provider === 'Sendit'
                         const isDigylog = order._provider === 'Digylog'
                         const isMarocGo = order._provider === 'MarocGo'
+                        const isRushliv = order._provider === 'Rushliv'
                         const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog || isAmeex || isSendit || isDigylog || isMarocGo
                         const badgeClass = isRapid
                           ? 'bg-[#27BEE3]/10 text-[#27BEE3]'
@@ -718,7 +738,9 @@ export default function LivraisonPage() {
                                   ? 'bg-[#10B981]/10 text-[#10B981]'
                                   : isMarocGo
                                     ? 'bg-[#F59E0B]/10 text-[#F59E0B]'
-                                    : 'bg-[#E41B29]/10 text-[#E41B29]'
+                                    : isRushliv
+                                      ? 'bg-[#6366F1]/10 text-[#6366F1]'
+                                      : 'bg-[#E41B29]/10 text-[#E41B29]'
                         return (
                           <tr key={`${order._provider}-${order.id}`} className="border-b last:border-b-0">
                             {(deliveryCompanies.filter((c: any) => c.api_provider === 'rapid-delivery').length > 0 ||
@@ -727,7 +749,8 @@ export default function LivraisonPage() {
                               deliveryCompanies.filter((c: any) => c.api_provider === 'ameex').length > 0 ||
                               deliveryCompanies.filter((c: any) => c.api_provider === 'sendit').length > 0 ||
                               deliveryCompanies.filter((c: any) => c.api_provider === 'digylog').length > 0 ||
-                              deliveryCompanies.filter((c: any) => c.api_provider === 'maroc-go-delivery').length > 0) && (
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'maroc-go-delivery').length > 0 ||
+                              deliveryCompanies.filter((c: any) => c.api_provider === 'rushliv').length > 0) && (
                               <td className="px-2 py-2">
                                 {canCreateVoucher ? (
                                   <input
@@ -764,6 +787,7 @@ export default function LivraisonPage() {
                     const isSendit = order._provider === 'Sendit'
                     const isDigylog = order._provider === 'Digylog'
                     const isMarocGo = order._provider === 'MarocGo'
+                    const isRushliv = order._provider === 'Rushliv'
                     const canCreateVoucher = isRapid || order._provider === 'OZONE' || isForceLog || isSendit || isDigylog || isMarocGo
                     const badgeClass = isRapid
                       ? 'bg-[#27BEE3]/10 text-[#27BEE3]'
@@ -775,7 +799,9 @@ export default function LivraisonPage() {
                             ? 'bg-[#10B981]/10 text-[#10B981]'
                             : isMarocGo
                               ? 'bg-[#F59E0B]/10 text-[#F59E0B]'
-                              : 'bg-[#E41B29]/10 text-[#E41B29]'
+                              : isRushliv
+                                ? 'bg-[#6366F1]/10 text-[#6366F1]'
+                                : 'bg-[#E41B29]/10 text-[#E41B29]'
                     return (
                       <div
                         key={`${order._provider}-${order.id}`}

@@ -15,6 +15,7 @@ import ForceLogConnectWizard from '@/components/dashboard/integrations/forcelog-
 import AmeexConnectWizard from '@/components/dashboard/integrations/ameex-connect-wizard'
 import SenditConnectWizard from '@/components/dashboard/integrations/sendit-connect-wizard'
 import DigylogConnectWizard from '@/components/dashboard/integrations/digylog-connect-wizard'
+import RushlivConnectWizard from '@/components/dashboard/integrations/rushliv-connect-wizard'
 import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
 import VariantStockSetupModal, { type PendingVariantSetupProduct } from '@/components/dashboard/integrations/variant-stock-setup-modal'
 import { createClient } from '@/lib/supabase/client'
@@ -143,7 +144,7 @@ export default function IntegrationsPage() {
       setSelectedCustomSiteStoreWebsite(null)
     } else {
       setConnectProviderSlug(providerSlug)
-      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'maroc-go-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex' && providerSlug !== 'sendit' && providerSlug !== 'digylog') {
+      if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'maroc-go-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex' && providerSlug !== 'sendit' && providerSlug !== 'digylog' && providerSlug !== 'rushliv') {
         setYoucanStoreSlug('')
       }
       setConnectError('')
@@ -574,8 +575,18 @@ export default function IntegrationsPage() {
         />
       ) : null}
 
+      {isConnectModalOpen && connectProviderSlug === 'rushliv' ? (
+        <RushlivConnectWizard
+          onClose={() => {
+            setIsConnectModalOpen(false)
+            setConnectProviderSlug(null)
+            setConnectError('')
+          }}
+        />
+      ) : null}
+
       {/* YouCan Connect Modal */}
-      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'maroc-go-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && connectProviderSlug !== 'sendit' && connectProviderSlug !== 'digylog' && (
+      {isConnectModalOpen && connectProviderSlug !== 'rapid-delivery' && connectProviderSlug !== 'maroc-go-delivery' && connectProviderSlug !== 'facebook-ads' && connectProviderSlug !== 'ozone' && connectProviderSlug !== 'forcelog' && connectProviderSlug !== 'ameex' && connectProviderSlug !== 'sendit' && connectProviderSlug !== 'digylog' && connectProviderSlug !== 'rushliv' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"
