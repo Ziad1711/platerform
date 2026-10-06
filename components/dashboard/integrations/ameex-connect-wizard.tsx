@@ -6,13 +6,43 @@ import { X, Loader2, Copy, Check, Trash2 } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { SITE_URL } from '@/lib/marketing/site-url'
 
+function WebhookUrlCard({
+  webhookUrl,
+  copied,
+  onCopy,
+}: {
+  webhookUrl: string
+  copied: boolean
+  onCopy: () => void
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm">
+      <p className="mb-1 text-xs font-medium text-muted-foreground">URL du webhook a enregistrer cote AMEEX :</p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 truncate text-xs text-foreground">{webhookUrl}</code>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          title="Copier"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        Collez cette URL dans la configuration webhook de votre compte AMEEX pour recevoir les changements de statut des colis.
+      </p>
+    </div>
+  )
+}
+
 export default function AmeexConnectWizard({
   onClose,
 }: {
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const { accessibleStores } = useStore()
+  const { currentStoreId, accessibleStores } = useStore()
   const [step, setStep] = useState<'credentials' | 'done'>('credentials')
   const [apiId, setApiId] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -27,6 +57,17 @@ export default function AmeexConnectWizard({
   useEffect(() => {
     setWebhookUrl(`${SITE_URL}/api/integrations/ameex/webhook`)
   }, [])
+
+  // Store par defaut : le store courant, ou l'unique store du compte.
+  // Ne remplace jamais un choix explicite de l'utilisateur.
+  useEffect(() => {
+    setSelectedStoreId((prev) => {
+      if (prev) return prev
+      if (currentStoreId) return currentStoreId
+      if (accessibleStores.length === 1) return accessibleStores[0].id
+      return ''
+    })
+  }, [currentStoreId, accessibleStores])
 
   const copyWebhookUrl = async () => {
     try {
@@ -145,6 +186,8 @@ export default function AmeexConnectWizard({
                     <span className="flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Connexion...</span>
                   ) : 'Connecter AMEEX'}
                 </button>
+
+                <WebhookUrlCard webhookUrl={webhookUrl} copied={copied} onCopy={() => void copyWebhookUrl()} />
               </div>
 
               <div className="w-full sm:w-64 shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 space-y-2 h-fit">
@@ -169,23 +212,7 @@ export default function AmeexConnectWizard({
               <p className="text-sm text-muted-foreground">
                 Les villes AMEEX sont disponibles dans la page Ventes pour selection. Les colis seront automatiquement crees lors du passage au statut confirme.
               </p>
-              <div className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm">
-                <p className="mb-1 text-xs font-medium text-muted-foreground">URL du webhook a enregistrer cote AMEEX :</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 truncate text-xs text-foreground">{webhookUrl}</code>
-                  <button
-                    type="button"
-                    onClick={() => void copyWebhookUrl()}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                    title="Copier"
-                  >
-                    {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Collez cette URL dans la configuration webhook de votre compte AMEEX pour recevoir les changements de statut des colis.
-                </p>
-              </div>
+              <WebhookUrlCard webhookUrl={webhookUrl} copied={copied} onCopy={() => void copyWebhookUrl()} />
 
               <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
                 <div className="flex items-start gap-2 text-destructive">
