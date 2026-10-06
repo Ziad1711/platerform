@@ -57,7 +57,7 @@ function getTodayStartIso() {
 
 export default function ConfirmationPage() {
   const { currentStoreId } = useStore()
-  const { can } = usePermissions(currentStoreId)
+  const { can, isLoading: isPermissionsLoading } = usePermissions(currentStoreId)
   const queryClient = useQueryClient()
 
   const canProcess = can('confirmation.process')
@@ -310,7 +310,7 @@ export default function ConfirmationPage() {
             />
           </div>
 
-          {!canProcess ? (
+          {!canProcess && !isPermissionsLoading ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               Votre rôle vous permet de consulter les commandes, mais pas de les traiter.
             </div>

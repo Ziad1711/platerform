@@ -9,7 +9,7 @@ export function usePermissions(storeId: string | null) {
   const supabase = createClient()
   const { userId } = useStore()
 
-  const { data: role } = useQuery({
+  const { data: role, isLoading } = useQuery({
     queryKey: ['member-role', storeId, userId],
     enabled: !!userId,
     staleTime: 0,
@@ -51,5 +51,7 @@ export function usePermissions(storeId: string | null) {
     role: role ?? null,
     can: (permission: Permission) => hasPermission(role ?? null, permission),
     isAdminOrOwner: role === 'owner' || role === 'admin',
+    /** true tant que le rôle n'est pas résolu : `can()` vaut alors false par défaut. */
+    isLoading: Boolean(userId) && isLoading,
   }
 }
