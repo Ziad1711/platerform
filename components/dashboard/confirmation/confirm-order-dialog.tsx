@@ -258,7 +258,7 @@ export default function ConfirmOrderDialog({
           </div>
         </DialogHeader>
 
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
+        <div className="modal-scroll max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
           <section className="space-y-3 rounded-xl border border-border p-4">
             <SectionTitle icon={<User className="h-3.5 w-3.5" />} label="Client" />
 
