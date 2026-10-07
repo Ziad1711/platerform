@@ -164,12 +164,24 @@ export async function createRushlivParcel(token: string, payload: {
     },
   })
 
-  const status = Number(raw?.status ?? 0)
-  if (status !== 200 || !raw?.tracking) {
-    throw new Error(String(raw?.msg || `Erreur création colis Rushliv (${status || 'inconnu'}).`))
+  // Rushliv n'est pas homogène : `action=track` répond `status: true` alors que
+  // `action=add` est documenté avec `status: 200`. Exiger exactement 200 faisait
+  // échouer la création alors que le colis EST créé chez Rushliv : le numéro de
+  // suivi était alors perdu et la commande restait sans tracking. Règle : un
+  // colis créé est un colis qui a un numéro de suivi.
+  const tracking = String(raw?.tracking || '').trim()
+  if (!tracking) {
+    const status = Number(raw?.status)
+    const apiStatus = Number.isFinite(status) ? status : String(raw?.status ?? 'inconnu')
+    // La réponse brute est incluse : sans elle, une création réussie mais mal
+    // interprétée resterait indétectable (colis orphelin chez le transporteur).
+    const rawResponse = JSON.stringify(raw ?? {}).slice(0, 300)
+    throw new Error(
+      `${String(raw?.msg || `Erreur création colis Rushliv (${apiStatus}).`)} — réponse Rushliv: ${rawResponse}`
+    )
   }
 
-  return raw
+  return { ...raw, tracking }
 }
 
 export async function trackRushlivParcel(token: string, tracking: string): Promise<RushlivTrackingPayload> {
