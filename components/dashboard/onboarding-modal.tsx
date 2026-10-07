@@ -81,7 +81,9 @@ export default function OnboardingModal() {
 
         // Check pending invitation first
         const pendingRes = await fetch('/api/team/invitations/pending', { cache: 'no-store' }).catch(() => null)
-        const pendingPayload = pendingRes && pendingRes.ok ? await pendingRes.json() : null
+        // Ne pas afficher l'onboarding si la recherche d'invitation echoue.
+        if (!pendingRes?.ok) return
+        const pendingPayload = await pendingRes.json()
         const pendingToken = pendingPayload?.invitation?.token || null
 
         if (!active) return
