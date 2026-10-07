@@ -26,12 +26,12 @@ import { getSortOptions } from '@/lib/confirmation/queries'
 import type { ConfirmationDeliveryOptions } from '@/lib/confirmation/delivery-options'
 
 const FILTER_TABS: { value: ConfirmationQueueFilter; label: string }[] = [
+  { value: 'all', label: 'Toutes les commandes' },
   { value: 'to_process', label: 'À traiter' },
   { value: 'to_callback', label: 'À rappeler' },
   { value: 'late', label: 'En retard' },
   { value: 'confirmed', label: 'Confirmées' },
   { value: 'cancelled', label: 'Annulées' },
-  { value: 'all', label: 'Toutes' },
 ]
 
 type QueueResponse = {
