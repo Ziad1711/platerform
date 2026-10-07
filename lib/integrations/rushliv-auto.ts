@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createRushlivParcel, normalizeRushlivPhone } from '@/lib/integrations/rushliv'
-import { getDecryptedIntegrationToken } from '@/lib/integrations/rushliv-connect'
+import { getDecryptedIntegrationToken, getRushlivProviderId } from '@/lib/integrations/rushliv-connect'
 import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
@@ -44,9 +44,15 @@ export async function autoCreateRushlivParcelForOrder(params: {
   let cityKey = String(order.delivery_city_external_id || '').trim()
 
   if (order.city) {
-    const cityMatch = await normalizeOrderCityById(order.id, admin, 'rushliv')
-    cityName = String(cityMatch.cityName || '').trim()
-    cityKey = String(cityMatch.cityKey || cityKey || '').trim()
+    // Ville déjà normalisée en amont (nom canonique + clé persistés, par ex. par la
+    // confirmation) : on réutilise ce résultat au lieu de relancer une 2e normalisation.
+    if (cityKey) {
+      cityName = String(order.city).trim()
+    } else {
+      const cityMatch = await normalizeOrderCityById(order.id, admin, 'rushliv')
+      cityName = String(cityMatch.cityName || '').trim()
+      cityKey = String(cityMatch.cityKey || cityKey || '').trim()
+    }
   }
 
   if (!cityName) {
@@ -90,21 +96,34 @@ export async function autoCreateRushlivParcelForOrder(params: {
 
   if (updateOrderError) throw updateOrderError
 
-  const { error: mappingError } = await admin.from('delivery_entity_mappings').upsert(
-    {
-      user_id: userId,
-      integration_id: integrationId,
-      store_id: order.store_id,
-      entity_type: 'parcel',
-      provider_entity_id: trackingNumber,
-      internal_id: order.id,
-      payload: { provider_slug: 'rushliv', raw: created },
-      updated_at: now,
-    },
-    { onConflict: 'integration_id,entity_type,provider_entity_id' }
-  )
+  // Le mapping est un enregistrement annexe : une fois le colis créé chez Rushliv
+  // (numéro de suivi obtenu), son échec ne doit jamais transformer ce succès en
+  // erreur côté utilisateur. Il est journalisé, jamais propagé.
+  try {
+    const providerId = await getRushlivProviderId(admin)
+    const { error: mappingError } = await admin.from('delivery_entity_mappings').upsert(
+      {
+        provider_id: providerId,
+        user_id: userId,
+        integration_id: integrationId,
+        store_id: order.store_id,
+        entity_type: 'parcel',
+        provider_entity_id: trackingNumber,
+        internal_id: order.id,
+        payload: { provider_slug: 'rushliv', raw: created },
+        updated_at: now,
+      },
+      { onConflict: 'integration_id,entity_type,provider_entity_id' }
+    )
 
-  if (mappingError) throw mappingError
+    if (mappingError) throw mappingError
+  } catch (mappingError) {
+    console.error('RUSHLIV_PARCEL_MAPPING_FAILED', {
+      orderId: order.id,
+      trackingNumber,
+      error: mappingError,
+    })
+  }
 
   return { warning: '', trackingNumber }
 }

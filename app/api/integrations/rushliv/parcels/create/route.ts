@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 import { createRushlivParcel, normalizeRushlivPhone } from '@/lib/integrations/rushliv'
-import { getDecryptedIntegrationToken } from '@/lib/integrations/rushliv-connect'
+import { getDecryptedIntegrationToken, getRushlivProviderId } from '@/lib/integrations/rushliv-connect'
 import { normalizeCityName } from '@/lib/integrations/city-normalizer'
 import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 
@@ -114,21 +114,31 @@ export async function POST(request: Request) {
 
     if (updateOrderError) throw updateOrderError
 
-    const { error: mappingError } = await admin.from('delivery_entity_mappings').upsert(
-      {
-        user_id: user.id,
-        integration_id: config.integration_id,
-        store_id: storeId,
-        entity_type: 'parcel',
-        provider_entity_id: trackingNumber,
-        internal_id: orderId,
-        payload: { provider_slug: 'rushliv', raw: created },
-        updated_at: now,
-      },
-      { onConflict: 'integration_id,entity_type,provider_entity_id' }
-    )
+    // Le mapping est un enregistrement annexe : une fois le colis créé chez Rushliv
+    // (numéro de suivi obtenu), son échec ne doit jamais transformer ce succès en
+    // erreur côté utilisateur. Il est journalisé, jamais propagé.
+    try {
+      const providerId = await getRushlivProviderId(admin)
+      const { error: mappingError } = await admin.from('delivery_entity_mappings').upsert(
+        {
+          provider_id: providerId,
+          user_id: user.id,
+          integration_id: config.integration_id,
+          store_id: storeId,
+          entity_type: 'parcel',
+          provider_entity_id: trackingNumber,
+          internal_id: orderId,
+          payload: { provider_slug: 'rushliv', raw: created },
+          updated_at: now,
+        },
+        { onConflict: 'integration_id,entity_type,provider_entity_id' }
+      )
 
-    if (mappingError) throw mappingError
+      if (mappingError) throw mappingError
+    } catch (mappingError) {
+      console.error('RUSHLIV_PARCEL_MAPPING_FAILED', { orderId, trackingNumber, error: mappingError })
+    }
+
     return NextResponse.json({ ok: true, trackingNumber, message: created.msg })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'RUSHLIV_CREATE_PARCEL_FAILED'

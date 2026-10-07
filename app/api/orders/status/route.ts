@@ -83,6 +83,8 @@ export async function POST(request: Request) {
       digylogCheckDuplicate?: 0 | 1
       digylogOpenProduct?: 1 | 2
       digylogPort?: 1 | 2
+      /** La ville a déjà été normalisée en amont (confirmation) : ne pas la recalculer. */
+      cityAlreadyNormalized?: boolean
     }
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
@@ -91,6 +93,9 @@ export async function POST(request: Request) {
     // « Livraison interne » : aucun transporteur externe ne doit être utilisé et
     // aucun colis ne doit être créé automatiquement.
     const isInternalDelivery = body.deliveryMode === 'internal'
+    // La confirmation normalise la ville une seule fois en amont : dans ce cas on
+    // réutilise le résultat déjà persisté au lieu de relancer la normalisation.
+    const cityAlreadyNormalized = body.cityAlreadyNormalized === true
     const ozoneCityKey = Number(body.ozoneCityKey || 0) || 0
     const ozoneCityName = typeof body.ozoneCityName === 'string' ? body.ozoneCityName.trim() : ''
     const ozoneParcelOptions = {
@@ -233,7 +238,9 @@ export async function POST(request: Request) {
 
       if (canAutoCreateRapid && integration?.id) {
         try {
-          await normalizeOrderCityById(orderId, admin, 'rapid-delivery')
+          if (!cityAlreadyNormalized) {
+            await normalizeOrderCityById(orderId, admin, 'rapid-delivery')
+          }
           // Recharger la commande pour avoir delivery_city_external_id à jour
           const { data: freshOrder } = await admin
             .from('orders')
@@ -312,7 +319,9 @@ export async function POST(request: Request) {
 
         if (canAutoCreateMarocGo && marocGoIntegration?.id && marocGoConfig) {
           try {
-            await normalizeOrderCityById(orderId, admin, 'maroc-go-delivery')
+            if (!cityAlreadyNormalized) {
+              await normalizeOrderCityById(orderId, admin, 'maroc-go-delivery')
+            }
             // Recharger la commande pour avoir delivery_city_external_id à jour
             const { data: freshOrder } = await admin
               .from('orders')
@@ -388,7 +397,9 @@ export async function POST(request: Request) {
 
         if (canAutoCreateRushliv && rushlivIntegration?.id && rushlivConfig) {
           try {
-            await normalizeOrderCityById(orderId, admin, 'rushliv')
+            if (!cityAlreadyNormalized) {
+              await normalizeOrderCityById(orderId, admin, 'rushliv')
+            }
             const { data: freshOrder } = await admin
               .from('orders')
               .select(`
@@ -690,7 +701,9 @@ export async function POST(request: Request) {
 
         if (digylogIntegration?.status === 'connected') {
           try {
-            const normalized = await normalizeOrderCityById(orderId, admin, 'digylog')
+            const normalized = cityAlreadyNormalized
+              ? { cityKey: String(order.delivery_city_external_id || '') || null }
+              : await normalizeOrderCityById(orderId, admin, 'digylog')
             if (normalized.cityKey) {
               const deliveryFee = await resolveDeliveryFee({
                 supabase: admin,

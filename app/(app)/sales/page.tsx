@@ -1906,16 +1906,39 @@ export default function VentesPage() {
 
       return payload
     },
-    onSuccess: async (payload) => {
-      await invalidateOrderViews()
-      await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
-      await queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses-owner'] })
+    onMutate: async ({ orderId, status: nextStatus }) => {
+      // Retour visuel immédiat : le badge de statut change sans attendre
+      // le rafraîchissement complet des listes (effectué en arrière-plan).
+      await queryClient.cancelQueries({ queryKey: ['orders'] })
+      const previousOrders = queryClient.getQueriesData({ queryKey: ['orders'] })
+      queryClient.setQueriesData({ queryKey: ['orders'] }, (old: any) => {
+        if (!old || !Array.isArray(old.data)) return old
+        return {
+          ...old,
+          data: old.data.map((order: any) =>
+            order?.id === orderId ? { ...order, status: nextStatus } : order
+          ),
+        }
+      })
+      return { previousOrders }
+    },
+    onError: (error: any, _variables, context: any) => {
+      if (Array.isArray(context?.previousOrders)) {
+        for (const [key, data] of context.previousOrders) {
+          queryClient.setQueryData(key, data)
+        }
+      }
+      setFormError(error?.message || 'Erreur lors du changement de statut')
+    },
+    onSuccess: (payload) => {
+      // Rafraîchissement en arrière-plan : le déblocage du bouton et le retour
+      // visuel n'attendent pas le refetch des vues (KPI, graphiques, finances).
+      void invalidateOrderViews()
+      void queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses'] })
+      void queryClient.invalidateQueries({ queryKey: ['sales-blacklist-order-statuses-owner'] })
       if (payload?.warning) {
         setFormError(payload.warning)
       }
-    },
-    onError: (error: any) => {
-      setFormError(error?.message || 'Erreur lors du changement de statut')
     },
   })
 

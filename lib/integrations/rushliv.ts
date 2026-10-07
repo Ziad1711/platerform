@@ -34,6 +34,10 @@ export type RushlivAddParcelResponse = {
   status?: number | string | boolean
   msg?: string
   tracking?: string
+  /** Identifiant du colis réellement renvoyé par Rushliv (ex: « C10262147658749BI »). */
+  sku?: string
+  zone?: string
+  [key: string]: unknown
 }
 
 export type RushlivMappedOrderStatus = {
@@ -169,7 +173,11 @@ export async function createRushlivParcel(token: string, payload: {
   // échouer la création alors que le colis EST créé chez Rushliv : le numéro de
   // suivi était alors perdu et la commande restait sans tracking. Règle : un
   // colis créé est un colis qui a un numéro de suivi.
-  const tracking = String(raw?.tracking || '').trim()
+  // L'identifiant du colis peut arriver dans `tracking` (réponse documentée) ou
+  // dans `sku` (réponse réellement renvoyée : {"status":true,"msg":"ajouté avec
+  // succès","sku":"C10262147658749BI","zone":"..."}). Ne lire que `tracking`
+  // faisait échouer une création pourtant réussie dont l'identifiant est `sku`.
+  const tracking = String(raw?.tracking || raw?.sku || '').trim()
   if (!tracking) {
     const status = Number(raw?.status)
     const apiStatus = Number.isFinite(status) ? status : String(raw?.status ?? 'inconnu')

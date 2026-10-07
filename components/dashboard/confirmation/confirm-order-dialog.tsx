@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   AlertTriangle,
+  Check,
   Loader2,
   MapPin,
   Package,
@@ -26,6 +27,11 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 import type { ConfirmationOrder } from '@/lib/confirmation/types'
+import {
+  CONFIRMATION_PROGRESS_LABELS,
+  type ConfirmationProgressStage,
+  type ConfirmOutcome,
+} from '@/lib/confirmation/progress'
 import {
   createDefaultDeliveryOptions,
   resolveDeliveryProvider,
@@ -47,6 +53,12 @@ type ConfirmOrderDialogProps = {
   open: boolean
   order: ConfirmationOrder | null
   busy: boolean
+  /** Étapes réellement atteintes pendant la confirmation en cours (flux serveur). */
+  progressStages?: ConfirmationProgressStage[]
+  /** La confirmation est terminée côté serveur : plus aucune étape n'est en cours. */
+  finished?: boolean
+  /** Résultat final renvoyé par le serveur, affiché dans la modale. */
+  outcome?: ConfirmOutcome | null
   canEdit: boolean
   onClose: () => void
   onEdit: () => void
@@ -127,6 +139,9 @@ export default function ConfirmOrderDialog({
   open,
   order,
   busy,
+  progressStages = [],
+  finished = false,
+  outcome = null,
   canEdit,
   onClose,
   onEdit,
@@ -239,6 +254,11 @@ export default function ConfirmOrderDialog({
       deliveryOptions: sanitizedOptions,
     })
   }
+
+  // Étapes affichées pendant la confirmation : celles réellement atteintes ; à
+  // défaut (première milliseconde), la première étape connue du serveur.
+  const visibleStages: ConfirmationProgressStage[] =
+    progressStages.length > 0 ? progressStages : ['validating']
 
   return (
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
@@ -383,6 +403,31 @@ export default function ConfirmOrderDialog({
             </section>
           ) : null}
 
+          {outcome ? (
+            <section className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+              <div className="flex items-center gap-2 font-semibold">
+                <PackageCheck className="h-4 w-4 shrink-0" />
+                Commande confirmée
+              </div>
+              {outcome.parcel?.created ? (
+                <p>
+                  Colis créé chez le transporteur. Numéro de suivi :{' '}
+                  <span className="font-medium">{outcome.parcel.trackingNumber}</span>.
+                </p>
+              ) : outcome.parcel?.warning ? (
+                <p className="text-amber-800">Colis non créé : {outcome.parcel.warning}</p>
+              ) : outcome.parcelUnknown ? (
+                <p className="text-amber-800">
+                  Colis inconnu : la confirmation a été appliquée, mais le résultat de la
+                  création du colis n’a pas pu être confirmé. Vérifiez chez le transporteur
+                  avant toute autre action.
+                </p>
+              ) : (
+                <p>La commande est confirmée. Aucun colis à créer pour ce mode de livraison.</p>
+              )}
+            </section>
+          ) : null}
+
           {localError ? (
             <section className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -391,19 +436,54 @@ export default function ConfirmOrderDialog({
           ) : null}
         </div>
 
+        {busy || (finished && visibleStages.length > 0) ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="border-t border-border bg-muted/40 px-6 py-3"
+          >
+            <ul className="space-y-1.5">
+              {visibleStages.map((stage, index) => {
+                // « Commande confirmée » est acquise dès son émission côté serveur :
+                // même dernière reçue, elle reste cochée et ne tourne pas.
+                const isActive =
+                  !finished && index === visibleStages.length - 1 && stage !== 'confirmed'
+                return (
+                  <li key={stage} className="flex items-center gap-2 text-sm text-foreground">
+                    {isActive ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" />
+                    ) : (
+                      <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+                    )}
+                    <span className={isActive ? 'font-medium' : 'text-muted-foreground'}>
+                      {CONFIRMATION_PROGRESS_LABELS[stage]}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
+
         <DialogFooter className="gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
-          {canEdit ? (
-            <Button variant="outline" onClick={onEdit} disabled={busy} className="sm:mr-auto">
-              Modifier la commande
-            </Button>
-          ) : null}
-          <Button variant="outline" onClick={onClose} disabled={busy}>
-            Fermer
-          </Button>
-          <Button onClick={handleSubmit} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-            {busy ? 'Confirmation...' : 'Confirmer la commande'}
-          </Button>
+          {outcome ? (
+            <Button onClick={onClose}>Fermer</Button>
+          ) : (
+            <>
+              {canEdit ? (
+                <Button variant="outline" onClick={onEdit} disabled={busy} className="sm:mr-auto">
+                  Modifier la commande
+                </Button>
+              ) : null}
+              <Button variant="outline" onClick={onClose} disabled={busy}>
+                Fermer
+              </Button>
+              <Button onClick={handleSubmit} disabled={busy}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
+                {busy ? 'Confirmation...' : 'Confirmer la commande'}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

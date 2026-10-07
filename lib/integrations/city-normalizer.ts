@@ -5,12 +5,17 @@ type SupabaseLike = ReturnType<typeof createAdminClient>
 
 const DIGYLOG_PROVIDER_ID = 'eeeb5b4f-741b-4d53-b4dd-72a7bd26f9cf'
 
+/** Étapes observables du pipeline de normalisation (pour afficher la progression). */
+export type CityNormalizationStage = 'ai_search'
+
 type NormalizeCityParams = {
   rawCity: string
   orderId?: string | null
   supabase?: SupabaseLike
   /** Slug du provider de livraison (obligatoire pour un flux strict) */
   providerSlug: string
+  /** Signal d'étape émis pendant la normalisation (ex. appel IA en cours). */
+  onStage?: (stage: CityNormalizationStage) => void
 }
 
 export type NormalizeCityResult = {
@@ -483,6 +488,7 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
   }
 
   // 4. DeepSeek
+  params.onStage?.('ai_search')
   let resolvedCityName = ''
   try {
     resolvedCityName = await resolveWithDeepSeek(rawCity, cities.map((city) => city.city_name))
@@ -574,7 +580,12 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
   }
 }
 
-export async function normalizeOrderCityById(orderId: string, supabase?: SupabaseLike, providerSlug?: string) {
+export async function normalizeOrderCityById(
+  orderId: string,
+  supabase?: SupabaseLike,
+  providerSlug?: string,
+  onStage?: (stage: CityNormalizationStage) => void
+) {
   const admin = supabase || createAdminClient()
   const { data: order, error } = await admin.from('orders').select('id, city').eq('id', orderId).maybeSingle()
   if (error) throw error
@@ -582,5 +593,11 @@ export async function normalizeOrderCityById(orderId: string, supabase?: Supabas
     return { cityName: '', cityKey: null, source: 'exact_match' as const, learned: false }
   }
 
-  return normalizeCityName({ rawCity: order.city, orderId: order.id, supabase: admin, providerSlug: providerSlug || 'rapid-delivery' })
+  return normalizeCityName({
+    rawCity: order.city,
+    orderId: order.id,
+    supabase: admin,
+    providerSlug: providerSlug || 'rapid-delivery',
+    onStage,
+  })
 }

@@ -126,7 +126,9 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-jisra-cream/30" />
             <input
               id="email"
+              name="email"
               type="email"
+              autoComplete={isLogin ? 'username' : 'email'}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -146,7 +148,9 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-jisra-cream/30" />
             <input
               id="password"
+              name="password"
               type={showPassword ? 'text' : 'password'}
+              autoComplete={isLogin ? 'current-password' : 'new-password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

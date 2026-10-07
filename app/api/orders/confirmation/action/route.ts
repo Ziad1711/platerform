@@ -8,6 +8,8 @@ import {
 } from '@/lib/confirmation/api-errors'
 import type { ConfirmationAction } from '@/lib/confirmation/constants'
 import type { ConfirmationActionResponse } from '@/lib/confirmation/types'
+import type { ConfirmationProgressStage } from '@/lib/confirmation/progress'
+import { normalizeOrderCityById } from '@/lib/integrations/city-normalizer'
 import {
   deliveryCityKeyOf,
   deliveryProviderCatalogueId,
@@ -32,7 +34,8 @@ async function triggerParcelCreation(
   deliveryNote: string,
   deliveryCompanyId: string | null,
   deliveryMode: 'internal' | 'shipping',
-  deliveryOptions: ConfirmationDeliveryOptions
+  deliveryOptions: ConfirmationDeliveryOptions,
+  cityAlreadyNormalized: boolean
 ): Promise<ParcelResult> {
   const target = new URL('/api/orders/status', new URL(request.url).origin)
 
@@ -48,6 +51,9 @@ async function triggerParcelCreation(
       deliveryNote: deliveryNote || undefined,
       deliveryCompanyId: deliveryMode === 'shipping' && deliveryCompanyId ? deliveryCompanyId : undefined,
       deliveryMode,
+      // La ville a déjà été normalisée ici : le pipeline de statut ne doit pas la
+      // recalculer (une seule normalisation pour toute la confirmation).
+      cityAlreadyNormalized,
       // Paramètres colis propres au transporteur (ville, ouverture, fragile...).
       ...deliveryOptions,
     }),
@@ -98,43 +104,167 @@ async function logParcelEvent(input: {
   }
 }
 
+type AttemptHandle = {
+  succeed: () => Promise<void>
+  fail: (error?: string) => Promise<void>
+}
+
+const ATTEMPT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Un identifiant de tentative valide (UUID), sinon `null`. */
+function normalizeAttemptId(value: unknown): string | null {
+  const raw = String(value ?? '').trim().toLowerCase()
+  return ATTEMPT_ID_PATTERN.test(raw) ? raw : null
+}
+
+/**
+ * Enregistre le début d'une tentative de confirmation et renvoie de quoi marquer son
+ * issue. Le suivi est « au mieux » : un échec d'écriture ne doit jamais bloquer la
+ * confirmation elle-même.
+ */
+async function beginConfirmationAttempt(input: {
+  attemptId: string
+  storeId: string
+  orderId: string
+  userId: string
+  action: string
+}): Promise<AttemptHandle | null> {
+  try {
+    const { error } = await createAdminClient().from('confirmation_action_attempts').insert({
+      attempt_id: input.attemptId,
+      store_id: input.storeId,
+      order_id: input.orderId,
+      actor_user_id: input.userId,
+      action: input.action,
+      state: 'in_progress',
+    })
+
+    // 23505 : la même tentative a déjà été enregistrée (renvoi du client) : on la reprend.
+    if (error && error.code !== '23505') {
+      console.error('CONFIRMATION_ATTEMPT_START_FAILED', error)
+      return null
+    }
+  } catch (error) {
+    console.error('CONFIRMATION_ATTEMPT_START_FAILED', error)
+    return null
+  }
+
+  const setState = async (state: 'succeeded' | 'failed', message: string | null) => {
+    try {
+      await createAdminClient()
+        .from('confirmation_action_attempts')
+        .update({ state, error: message, updated_at: new Date().toISOString() })
+        .eq('attempt_id', input.attemptId)
+    } catch (error) {
+      console.error('CONFIRMATION_ATTEMPT_UPDATE_FAILED', error)
+    }
+  }
+
+  return {
+    succeed: () => setState('succeeded', null),
+    fail: (message) => setState('failed', message ? String(message).slice(0, 500) : null),
+  }
+}
+
 function toNullableString(value: unknown) {
   const text = String(value ?? '').trim()
   return text || null
 }
 
-export async function POST(request: Request) {
+type ConfirmationActionBody = {
+  orderId?: string
+  action?: string
+  callbackAt?: string | null
+  reasonCode?: string | null
+  note?: string | null
+  expectedStatus?: string | null
+  expectedAttemptCount?: number | null
+  deliveryMode?: 'internal' | 'shipping' | null
+  deliveryCompanyId?: string | null
+  /** Paramètres colis du transporteur, validés côté serveur avant usage. */
+  deliveryOptions?: unknown
+  /** Demande un flux de progression (Server-Sent Events) pendant la confirmation. */
+  stream?: boolean
+  /** Identifiant unique de la tentative (fourni par le client) pour suivre son état. */
+  attemptId?: string | null
+}
+
+type ProgressReporter = (stage: ConfirmationProgressStage) => void
+
+/** Résultat interne d'une action : statut HTTP + corps JSON renvoyé au client. */
+type ActionOutcome = { status: number; payload: Record<string, unknown> }
+
+/** Transporteurs dont la ville est normalisée automatiquement (alias / IA). */
+const CITY_NORMALIZED_PROVIDERS: Record<string, string> = {
+  'rapid-delivery': 'rapid-delivery',
+  'maroc-go-delivery': 'maroc-go-delivery',
+  rushliv: 'rushliv',
+  digylog: 'digylog',
+}
+
+function resolveCityNormalizationSlug(apiProvider: string | null | undefined): string | null {
+  const slug = String(apiProvider || '').trim().toLowerCase()
+  return CITY_NORMALIZED_PROVIDERS[slug] || null
+}
+
+/**
+ * Exécute l'action en suivant l'éventuelle tentative de confirmation : son issue
+ * (réussite / échec) est consignée pour que la relecture, après une coupure réseau,
+ * sache distinguer « en cours » de « jamais appliquée ».
+ */
+async function runConfirmationAction(
+  request: Request,
+  body: ConfirmationActionBody,
+  report: ProgressReporter
+): Promise<ActionOutcome> {
+  const attemptRef: { current: AttemptHandle | null } = { current: null }
+
+  const outcome = await runConfirmationActionCore(request, body, report, (handle) => {
+    attemptRef.current = handle
+  })
+
+  const attempt = attemptRef.current
+  if (attempt) {
+    if (outcome.status >= 200 && outcome.status < 300) {
+      await attempt.succeed()
+    } else {
+      await attempt.fail(String(outcome.payload?.error || 'CONFIRMATION_ACTION_FAILED'))
+    }
+  }
+
+  return outcome
+}
+
+/**
+ * Exécute réellement l'action de confirmation. Le reporter propage les étapes
+ * véritablement atteintes (validation, confirmation, recherche ville, IA, colis).
+ */
+async function runConfirmationActionCore(
+  request: Request,
+  body: ConfirmationActionBody,
+  report: ProgressReporter,
+  onAttempt: (handle: AttemptHandle) => void
+): Promise<ActionOutcome> {
   try {
     const { supabase, user } = await requireAuthenticatedUser()
-    const body = (await request.json().catch(() => ({}))) as {
-      orderId?: string
-      action?: string
-      callbackAt?: string | null
-      reasonCode?: string | null
-      note?: string | null
-      expectedStatus?: string | null
-      expectedAttemptCount?: number | null
-      deliveryMode?: 'internal' | 'shipping' | null
-      deliveryCompanyId?: string | null
-      /** Paramètres colis du transporteur, validés côté serveur avant usage. */
-      deliveryOptions?: unknown
-    }
+
+    report('validating')
 
     const orderId = String(body.orderId || '').trim()
     if (!orderId) {
-      return NextResponse.json({ error: 'MISSING_ORDER_ID' }, { status: 400 })
+      return { status: 400, payload: { error: 'MISSING_ORDER_ID' } }
     }
 
     const action = String(body.action || '').trim().toUpperCase() as ConfirmationAction
     if (!ALLOWED_ACTIONS.includes(action)) {
-      return NextResponse.json({ error: 'INVALID_ACTION' }, { status: 400 })
+      return { status: 400, payload: { error: 'INVALID_ACTION' } }
     }
 
     let callbackIso: string | null = null
     if (body.callbackAt) {
       const callbackDate = new Date(body.callbackAt)
       if (Number.isNaN(callbackDate.getTime())) {
-        return NextResponse.json({ error: 'INVALID_CALLBACK_DATETIME' }, { status: 400 })
+        return { status: 400, payload: { error: 'INVALID_CALLBACK_DATETIME' } }
       }
       callbackIso = callbackDate.toISOString()
     }
@@ -154,12 +284,27 @@ export async function POST(request: Request) {
 
     if (orderError) throw orderError
     if (!order) {
-      return NextResponse.json({ error: 'ORDER_NOT_FOUND' }, { status: 404 })
+      return { status: 404, payload: { error: 'ORDER_NOT_FOUND' } }
     }
 
     const member = await verifyStoreAccess(supabase, user.id, order.store_id)
     if (!hasPermission(member.role as Role, 'confirmation.process')) {
-      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+      return { status: 403, payload: { error: 'FORBIDDEN' } }
+    }
+
+    // Suivi de la tentative : après une coupure réseau, le statut de la commande seul
+    // ne dit pas si la confirmation est encore en cours ou n'a jamais été appliquée.
+    // On consigne donc le démarrage (puis l'issue) de cette tentative.
+    const attemptId = action === 'CONFIRM' ? normalizeAttemptId(body.attemptId) : null
+    if (attemptId) {
+      const handle = await beginConfirmationAttempt({
+        attemptId,
+        storeId: order.store_id,
+        orderId,
+        userId: user.id,
+        action,
+      })
+      if (handle) onAttempt(handle)
     }
 
     // Garde-fou serveur : la fenêtre de confirmation valide déjà ces informations,
@@ -174,16 +319,16 @@ export async function POST(request: Request) {
 
       if (readinessError) throw readinessError
       if (!readiness) {
-        return NextResponse.json({ error: 'ORDER_NOT_FOUND' }, { status: 404 })
+        return { status: 404, payload: { error: 'ORDER_NOT_FOUND' } }
       }
       if (!toNullableString(readiness.phone)) {
-        return NextResponse.json({ error: 'MISSING_PHONE' }, { status: 400 })
+        return { status: 400, payload: { error: 'MISSING_PHONE' } }
       }
       if (!toNullableString(readiness.city)) {
-        return NextResponse.json({ error: 'MISSING_CITY' }, { status: 400 })
+        return { status: 400, payload: { error: 'MISSING_CITY' } }
       }
       if (((readiness.order_items || []) as unknown[]).length === 0) {
-        return NextResponse.json({ error: 'MISSING_ITEMS' }, { status: 400 })
+        return { status: 400, payload: { error: 'MISSING_ITEMS' } }
       }
     }
 
@@ -194,6 +339,7 @@ export async function POST(request: Request) {
       : 'internal'
     let resolvedDeliveryCompanyId: string | null = order.delivery_company_id || null
     let resolvedProvider: ConfirmationDeliveryProvider | null = null
+    let resolvedApiProvider: string | null = null
     let deliveryOptions: ConfirmationDeliveryOptions = {}
 
     if (action === 'CONFIRM') {
@@ -205,7 +351,7 @@ export async function POST(request: Request) {
       } else if (requestedMode === 'shipping') {
         const companyId = toNullableString(body.deliveryCompanyId)
         if (!companyId) {
-          return NextResponse.json({ error: 'MISSING_DELIVERY_COMPANY' }, { status: 400 })
+          return { status: 400, payload: { error: 'MISSING_DELIVERY_COMPANY' } }
         }
 
         const { data: company, error: companyError } = await supabase
@@ -217,21 +363,22 @@ export async function POST(request: Request) {
 
         if (companyError) throw companyError
         if (!company) {
-          return NextResponse.json({ error: 'DELIVERY_COMPANY_NOT_IN_STORE' }, { status: 400 })
+          return { status: 400, payload: { error: 'DELIVERY_COMPANY_NOT_IN_STORE' } }
         }
 
         resolvedDeliveryMode = 'shipping'
         resolvedDeliveryCompanyId = companyId
+        resolvedApiProvider = company.api_provider || null
         resolvedProvider = resolveDeliveryProvider(company.api_provider)
       } else {
-        return NextResponse.json({ error: 'MISSING_DELIVERY_COMPANY' }, { status: 400 })
+        return { status: 400, payload: { error: 'MISSING_DELIVERY_COMPANY' } }
       }
 
       // Le transporteur réel vient de la base, jamais du client : on ne conserve
       // que les champs de ce transporteur, avec des types sûrs.
       const sanitized = sanitizeDeliveryOptions(resolvedProvider, body.deliveryOptions)
       if (sanitized.error) {
-        return NextResponse.json({ error: sanitized.error }, { status: 400 })
+        return { status: 400, payload: { error: sanitized.error } }
       }
       deliveryOptions = sanitized.options
 
@@ -249,7 +396,7 @@ export async function POST(request: Request) {
 
         if (rateError) throw rateError
         if (!rate) {
-          return NextResponse.json({ error: 'DELIVERY_CITY_NOT_AVAILABLE' }, { status: 400 })
+          return { status: 400, payload: { error: 'DELIVERY_CITY_NOT_AVAILABLE' } }
         }
       }
     }
@@ -266,10 +413,16 @@ export async function POST(request: Request) {
 
     if (rpcError) {
       const message = rpcError.message || 'CONFIRMATION_ACTION_FAILED'
-      return NextResponse.json({ error: message }, { status: resolveConfirmationErrorStatus(message) })
+      return { status: resolveConfirmationErrorStatus(message), payload: { error: message } }
     }
 
     const result = (rpcData || {}) as ConfirmationActionResponse
+
+    // À partir d'ici la commande est confirmée côté base : on l'annonce même si
+    // la création du colis échoue ensuite.
+    if (action === 'CONFIRM') {
+      report('confirmed')
+    }
 
     let parcel: ParcelResult | undefined
 
@@ -277,16 +430,44 @@ export async function POST(request: Request) {
     // route qui détache un ancien transporteur en livraison interne, et qui crée
     // le colis en mode transporteur externe.
     if (action === 'CONFIRM') {
+      const willCreateParcel = resolvedDeliveryMode === 'shipping' && !order.tracking_number
+      // Normalisation de la ville faite ici, une seule fois, par le même pipeline que
+      // `/api/orders/status` : les étapes rapportées sont donc réelles et le statut
+      // réutilise ensuite le résultat au lieu de recalculer la ville.
+      let cityNormalized = false
+
+      if (willCreateParcel) {
+        const normalizationSlug = resolveCityNormalizationSlug(resolvedApiProvider)
+        if (normalizationSlug) {
+          report('city_search')
+          try {
+            await normalizeOrderCityById(orderId, createAdminClient(), normalizationSlug, () =>
+              report('city_ai')
+            )
+            // La ville n'est considérée comme normalisée qu'une fois le pipeline terminé :
+            // en cas d'échec, `/api/orders/status` peut relancer la normalisation au lieu
+            // de la sauter.
+            cityNormalized = true
+          } catch (normalizationError) {
+            // Non bloquant : `/api/orders/status` gère lui-même l'absence de ville.
+            console.error('CONFIRMATION_CITY_NORMALIZATION_FAILED', normalizationError)
+          }
+        }
+
+        report('parcel')
+      }
+
       parcel = await triggerParcelCreation(
         request,
         orderId,
         toNullableString(body.note) || '',
         resolvedDeliveryCompanyId,
         resolvedDeliveryMode,
-        deliveryOptions
+        deliveryOptions,
+        cityNormalized
       )
 
-      if (resolvedDeliveryMode === 'shipping' && !order.tracking_number) {
+      if (willCreateParcel) {
         await logParcelEvent({
           storeId: order.store_id,
           orderId,
@@ -298,10 +479,145 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ ...result, parcel })
+    return { status: 200, payload: { ...result, parcel } }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'CONFIRMATION_ACTION_FAILED'
-    return NextResponse.json({ error: message }, { status: getConfirmationErrorStatus(message) })
+    return { status: getConfirmationErrorStatus(message), payload: { error: message } }
   }
 }
 
+/** Événements diffusés sur le flux SSE de confirmation. */
+type ConfirmationStreamEvent =
+  | { type: 'progress'; stage: ConfirmationProgressStage }
+  | { type: 'result'; result: Record<string, unknown> }
+  | { type: 'error'; error: string }
+
+/**
+ * Diffuse la progression réelle de la confirmation en Server-Sent Events :
+ * chaque étape correspond à un travail effectivement terminé côté serveur,
+ * puis un unique événement terminal (`result` ou `error`) clôt le flux.
+ */
+function buildStreamResponse(request: Request, body: ConfirmationActionBody): Response {
+  const encoder = new TextEncoder()
+  const queue: string[] = []
+  let finished = false
+  let notify: (() => void) | null = null
+
+  const emit = (event: ConfirmationStreamEvent) => {
+    queue.push(`data: ${JSON.stringify(event)}\n\n`)
+    notify?.()
+    notify = null
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      void runConfirmationAction(request, body, (stage) => emit({ type: 'progress', stage }))
+        .then(({ status, payload }) => {
+          if (status >= 200 && status < 300) {
+            emit({ type: 'result', result: payload })
+          } else {
+            emit({ type: 'error', error: String(payload?.error || 'CONFIRMATION_ACTION_FAILED') })
+          }
+        })
+        .catch((error) => {
+          emit({
+            type: 'error',
+            error: error instanceof Error ? error.message : 'CONFIRMATION_ACTION_FAILED',
+          })
+        })
+        .finally(() => {
+          finished = true
+          notify?.()
+          notify = null
+        })
+
+      while (!finished || queue.length > 0) {
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            notify = () => resolve()
+          })
+          continue
+        }
+        controller.enqueue(encoder.encode(queue.shift() as string))
+      }
+
+      controller.close()
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  })
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as ConfirmationActionBody
+
+  const wantsStream =
+    body.stream === true || (request.headers.get('accept') || '').includes('text/event-stream')
+
+  if (wantsStream) {
+    return buildStreamResponse(request, body)
+  }
+
+  const { status, payload } = await runConfirmationAction(request, body, () => {})
+  return NextResponse.json(payload, { status })
+}
+
+/**
+ * Relit l'état réel d'une commande et, si `attemptId` est fourni, l'état de la
+ * tentative de confirmation correspondante : utilisé lorsqu'un flux a été coupé sans
+ * verdict, pour déterminer si la confirmation a été appliquée, est encore en cours,
+ * ou n'a jamais été enregistrée avant d'autoriser (ou non) une nouvelle tentative.
+ */
+export async function GET(request: Request) {
+  try {
+    const { supabase, user } = await requireAuthenticatedUser()
+    const searchParams = new URL(request.url).searchParams
+    const orderId = String(searchParams.get('orderId') || '').trim()
+    const attemptId = normalizeAttemptId(searchParams.get('attemptId'))
+
+    if (!orderId) {
+      return NextResponse.json({ error: 'MISSING_ORDER_ID' }, { status: 400 })
+    }
+
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('id, store_id, status, tracking_number, confirmation_attempt_count')
+      .eq('id', orderId)
+      .maybeSingle()
+
+    if (error) throw error
+    if (!order) {
+      return NextResponse.json({ error: 'ORDER_NOT_FOUND' }, { status: 404 })
+    }
+
+    const member = await verifyStoreAccess(supabase, user.id, order.store_id)
+    if (!hasPermission(member.role as Role, 'confirmation.view')) {
+      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
+
+    let attempt: { state: string; error: string | null } | null = null
+    if (attemptId) {
+      const { data: attemptRow, error: attemptError } = await supabase
+        .from('confirmation_action_attempts')
+        .select('state, error')
+        .eq('attempt_id', attemptId)
+        .eq('order_id', orderId)
+        .maybeSingle()
+
+      if (attemptError) throw attemptError
+      attempt = attemptRow || null
+    }
+
+    return NextResponse.json({ order, attempt })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'CONFIRMATION_STATE_FETCH_FAILED'
+    return NextResponse.json({ error: message }, { status: getConfirmationErrorStatus(message) })
+  }
+}
