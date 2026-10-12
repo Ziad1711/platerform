@@ -27,7 +27,12 @@ import {
   type ProductVariantForm,
 } from '@/components/dashboard/products/variant-editor'
 import { saveProductCatalog } from '@/lib/products/save-product-catalog'
-import { deleteManagedProductImages } from '@/lib/products/product-images'
+import {
+  deleteProductsSafely,
+  describeProductDeletion,
+  fetchProductDeletionReport,
+  formatDeletionReasons,
+} from '@/lib/products/delete-products'
 import { usePermissions } from '@/lib/auth/use-permissions'
 
 type VariantAttributeForm = {
@@ -753,57 +758,31 @@ export default function ProduitsPage() {
 
   const deleteProductMutation = useMutation({
     mutationFn: async (product: any) => {
-      const { data: linkedPurchases, error: linkedPurchasesError } = await supabase
-        .from('inventory_movements')
-        .select('id')
-        .eq('product_id', product.id)
-        .eq('movement_type', 'in')
-        .or('supplier_id.not.is.null,source_type.eq.purchase')
-        .limit(1)
+      const storeId = String(product?.store_id || currentStoreId || '')
 
-      if (linkedPurchasesError) throw linkedPurchasesError
-      if ((linkedPurchases || []).length > 0) {
-        throw new Error('Suppression impossible: ce produit est lié à des achats/entrées de stock.')
+      if (!storeId) {
+        throw new Error('Aucun store sélectionné.')
       }
 
-      const { data: linkedOrderItems, error: linkedOrderItemsError } = await supabase
-        .from('order_items')
-        .select('id')
-        .eq('product_id', product.id)
-        .limit(1)
-
-      if (linkedOrderItemsError) throw linkedOrderItemsError
-      if ((linkedOrderItems || []).length > 0) {
-        throw new Error('Suppression impossible: ce produit est déjà utilisé dans des ventes.')
-      }
-
-      const { data: productImagesToClean } = await supabase
-        .from('product_images')
-        .select('image_url')
-        .eq('product_id', product.id)
-
-      const { error: deleteVariantsError } = await supabase
-        .from('product_variants')
-        .delete()
-        .eq('product_id', product.id)
-
-      if (deleteVariantsError) throw deleteVariantsError
-
-      const { error: deleteError } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', product.id)
-
-      if (deleteError) throw deleteError
-
-      // Les fichiers du Storage sont retirés après la suppression des lignes
-      // (un fichier encore référencé par une copie du produit est conservé).
-      await deleteManagedProductImages({
+      // Le contrôle des dépendances est fait en base (ventes, mouvements de stock) : un
+      // produit lié à une vente n'est jamais supprimé, l'historique reste intact.
+      const outcome = await deleteProductsSafely({
         supabase,
-        imageUrls: ((productImagesToClean || []) as Array<{ image_url: string | null }>).map(
-          (row) => row.image_url
-        ),
+        storeId,
+        productIds: [String(product.id)],
       })
+
+      if (outcome.deletedCount === 0) {
+        const reason = formatDeletionReasons(outcome.blocked[0]?.reasons)
+
+        throw new Error(
+          reason
+            ? `Suppression refusée : produit ${reason}. Archivez-le pour le retirer de la vente en conservant l’historique.`
+            : 'Suppression refusée.'
+        )
+      }
+
+      return outcome
     },
     onSuccess: async () => {
       await Promise.all([
@@ -813,6 +792,9 @@ export default function ProduitsPage() {
       ])
       setSelectedProductIds((prev) => prev.filter((id) => id !== String((deleteProductMutation as any).variables?.id || '')))
     },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Erreur lors de la suppression.')
+    },
   })
 
   const bulkDeleteProductsMutation = useMutation({
@@ -821,79 +803,44 @@ export default function ProduitsPage() {
         throw new Error('Aucun produit sélectionné.')
       }
 
-      const selectedProducts = (filteredProducts || []).filter((product) =>
-        selectedProductIds.includes(String(product.id))
-      )
+      const storeId = String(currentStoreId || '')
 
-      for (const product of selectedProducts) {
-        const { data: linkedPurchases, error: linkedPurchasesError } = await supabase
-          .from('inventory_movements')
-          .select('id')
-          .eq('product_id', product.id)
-          .eq('movement_type', 'in')
-          .or('supplier_id.not.is.null,source_type.eq.purchase')
-          .limit(1)
-
-        if (linkedPurchasesError) throw linkedPurchasesError
-        if ((linkedPurchases || []).length > 0) {
-          throw new Error(`Suppression impossible (${product.name}): lié à des achats/entrées de stock.`)
-        }
-
-        const { data: linkedOrderItems, error: linkedOrderItemsError } = await supabase
-          .from('order_items')
-          .select('id')
-          .eq('product_id', product.id)
-          .limit(1)
-
-        if (linkedOrderItemsError) throw linkedOrderItemsError
-        if ((linkedOrderItems || []).length > 0) {
-          throw new Error(`Suppression impossible (${product.name}): déjà utilisé dans des ventes.`)
-        }
+      if (!storeId) {
+        throw new Error('Aucun store sélectionné.')
       }
 
-      const { data: imagesToClean, error: imagesToCleanError } = await supabase
-        .from('product_images')
-        .select('image_url')
-        .in(
-          'product_id',
-          selectedProducts.map((product) => String(product.id))
-        )
-
-      if (imagesToCleanError) throw imagesToCleanError
-
-      for (const product of selectedProducts) {
-        const { error: deleteVariantsError } = await supabase
-          .from('product_variants')
-          .delete()
-          .eq('product_id', product.id)
-
-        if (deleteVariantsError) throw deleteVariantsError
-
-        const { error: deleteError } = await supabase
-          .from('products')
-          .delete()
-          .eq('id', product.id)
-
-        if (deleteError) throw deleteError
-      }
-
-      await deleteManagedProductImages({
+      // Un seul appel : le rapport et la suppression sont faits côte à côte en base, seuls
+      // les produits sans dépendance sont effacés, et le bilan revient par produit.
+      return deleteProductsSafely({
         supabase,
-        imageUrls: ((imagesToClean || []) as Array<{ image_url: string | null }>).map(
-          (row) => row.image_url
-        ),
+        storeId,
+        productIds: selectedProductIds.map((id) => String(id)),
       })
     },
-    onSuccess: async () => {
+    onSuccess: async (outcome) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['products'] }),
         queryClient.invalidateQueries({ queryKey: ['product-variants-by-product'] }),
         queryClient.invalidateQueries({ queryKey: ['inventory-movements'] }),
       ])
       setSelectedProductIds([])
+
+      if (outcome.deletedCount > 0) {
+        toast.success(`${outcome.deletedCount} produit(s) supprimé(s).`)
+      }
+
+      if (outcome.blocked.length > 0) {
+        const reasons = formatDeletionReasons(
+          Array.from(new Set(outcome.blocked.flatMap((item) => item.reasons)))
+        )
+
+        toast.error(
+          `${outcome.blocked.length} produit(s) conservé(s)${reasons ? ` (${reasons})` : ''} : utilisez « Archiver » pour les retirer de la vente.`
+        )
+      }
     },
     onError: (error: any) => {
-      window.alert(error?.message || 'Erreur lors de la suppression multiple.')
+      toast.error(error?.message || 'Erreur lors de la suppression multiple.')
     },
   })
 
@@ -1051,13 +998,37 @@ export default function ProduitsPage() {
     bulkUpdatePublicationStatusMutation.mutate(status)
   }
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedProductIds.length === 0) return
 
-    const confirmed = window.confirm(
-      `Supprimer ${selectedProductIds.length} produit(s) ? Les produits liés à des ventes ou à des entrées de stock seront refusés.`
-    )
-    if (!confirmed) return
+    const storeId = String(currentStoreId || '')
+
+    if (!storeId) {
+      toast.error('Aucun store sélectionné.')
+      return
+    }
+
+    let report
+
+    try {
+      // Le rapport est demandé avant toute confirmation : l'utilisateur voit exactement ce
+      // qui sera supprimé, ce qui sera conservé, et pourquoi.
+      report = await fetchProductDeletionReport({
+        supabase,
+        storeId,
+        productIds: selectedProductIds.map((id) => String(id)),
+      })
+    } catch (reportError: any) {
+      toast.error(reportError?.message || 'Impossible d’analyser les produits sélectionnés.')
+      return
+    }
+
+    if (report.totals.deletable === 0) {
+      window.alert(describeProductDeletion(report))
+      return
+    }
+
+    if (!window.confirm(describeProductDeletion(report))) return
 
     bulkDeleteProductsMutation.mutate()
   }
