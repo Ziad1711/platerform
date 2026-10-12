@@ -1,0 +1,1915 @@
+{
+  "info": {
+    "_postman_id": "7a37ef73-56e4-4008-94ca-c47267e39a96",
+    "name": "Lightfunnels API V2",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "55987628",
+    "_collection_link": "https://go.postman.co/collection/55987628-7a37ef73-56e4-4008-94ca-c47267e39a96?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "auth / consent screen",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://app.lightfunnels.com/admin/oauth?client_id={{client_id}}&redirect_uri=https://dummy.com/redirect&scope=products,orders&account-id={{account_id}}&state=123&response_type=code",
+          "protocol": "https",
+          "host": [
+            "app",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "admin",
+            "oauth"
+          ],
+          "query": [
+            {
+              "key": "client_id",
+              "value": "{{client_id}}"
+            },
+            {
+              "key": "redirect_uri",
+              "value": "https://dummy.com/redirect"
+            },
+            {
+              "key": "scope",
+              "value": "products,orders"
+            },
+            {
+              "key": "account-id",
+              "value": "{{account_id}}"
+            },
+            {
+              "key": "state",
+              "value": "123"
+            },
+            {
+              "key": "response_type",
+              "value": "code"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "auth / get access token",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"client_id\" : \"{{client_id}}\",\n    \"client_secret\" : \"{{client_secret}}\",\n    \"code\" : \"PASTE_YOUR_AUTH_CODE_HERE\"\n}\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://api.lightfunnels.com/oauth/access_token",
+          "protocol": "https",
+          "host": [
+            "api",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "oauth",
+            "access_token"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "webhook / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation webhooksCreateMutation($node: WebhookInput!) {\n  createWebhook(node: $node) {\n    id\n    _id\n    type\n    url\n  }\n}",
+            "variables": "{\n  \"node\": {\n    \"type\": \"order/confirmed\",\n    \"url\": \"https://example.com/webhook\",\n    \"settings\": {}\n  }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "webhooks / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query WebhooksQuery {\n  webhooks{\n    id\n    _id\n    version\n    url\n    settings {\n        segments_uids\n    }\n    type\n  }\n}",
+            "variables": ""
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "webhooks / delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation webhooksDeleteMutation($id: ID!){\n\tdeleteWebhook(id: $id)\n}",
+            "variables": "{\r\n    \"id\" : \"webhook_id\"\r\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "image/importFromURL",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation importByUrlMutation(\n  $url: String!\n) {\n  importImage(url: $url) {\n    id,\n    _id\n  }\n}\n",
+            "variables": "{\n  \"url\": \"https://as1.ftcdn.net/v2/jpg/01/07/13/06/1000_F_107130687_eL8OaH6blKqw7lXua5dwYsVsKdOjznZU.jpg\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "image/bulk import From URLs",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation bulkImportImagesMutation(\n  $urls: [String!]!\n) {\n  bulkImportImages(urls: $urls) {\n    id,\n    _id\n  }\n}",
+            "variables": "{\n  \"urls\" : [\n    \"https://as1.ftcdn.net/v2/jpg/01/07/13/06/1000_F_107130687_eL8OaH6blKqw7lXua5dwYsVsKdOjznZU.jpg\"\n    ]\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        },
+        "description": "urls array length shouldnt be less than 1 or greater than 100"
+      },
+      "response": []
+    },
+    {
+      "name": "shipping rate group / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation createShippingRateGroupMutation(\n  $node: InputShippingRateGroup!\n) {\n  createShippingRateGroup(node: $node) {\n    id\n\t\tshipping_rates{\n\t\t\tuid\n\t\t\tlabel\n\t\t\tzones{\n\t\t\t\tid\n\t\t\t\tlabel\n\t\t\t\tcountries\n\t\t\t\trates{\n\t\t\t\t\tid\n\t\t\t\t\tlabel\n\t\t\t\t\tprice\n\t\t\t\t}\n\t\t\t}\n\t\t}\n  }\n}\n",
+            "variables": "{\n  \"node\": {\n    \"label\": \"First Shipping Rate Group\",\n    \"zones\": [\n\t\t\t{\n\t\t\t\t\"id\": \"0723dc95-00d7-467a-b02d-726bee15a6fa\",\n\t\t\t\t\"label\": \"Africa\",\n\t\t\t\t\"countries\": [\"MA\"],\n\t\t\t\t\"rates\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"id\": \"d85400b0-8d14-4a7b-a677-633b29dce8d0\",\n\t\t\t\t\t\t\"label\": \"Free Shipping\",\n\t\t\t\t\t\t\"price\": 0\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t]\n  }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "shipping rate group / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateShippingRateGroupMutation(\n  $node: InputShippingRateGroup!,\n  $id: ID!\n) {\n  updateShippingRateGroup(node: $node, id: $id) {\n    uid\n    label\n    zones{\n        id\n        label\n        countries\n        rates{\n            id\n            label\n            price\n        }\n    }\n  }\n}\n",
+            "variables": "{\n  \"id\": \"shrg_qsdqsdqsdqsd\",\n  \"node\": {\n    \"label\": \"First Shipping Rate Group\",\n    \"zones\": [\n\t\t\t{\n\t\t\t\t\"id\": \"0723dc95-00d7-467a-b02d-726bee15a6fa\",\n\t\t\t\t\"label\": \"Africa\",\n\t\t\t\t\"countries\": [\"MA\"],\n\t\t\t\t\"rates\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"id\": \"d85400b0-8d14-4a7b-a677-633b29dce8d0\",\n\t\t\t\t\t\t\"label\": \"Free Shipping\",\n\t\t\t\t\t\t\"price\": 0\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t]\n  }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "shipping rate group /  delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteShippingRateGroupMutation(\n  $id: ID!\n) {\n  deleteShippingRateGroup(id: $id) {\n    id\n\t\tshipping_rates{\n\t\t\tuid\n\t\t\tlabel\n\t\t\tzones{\n\t\t\t\tid\n\t\t\t\tlabel\n\t\t\t\tcountries\n\t\t\t\trates{\n\t\t\t\t\tid\n\t\t\t\t\tlabel\n\t\t\t\t\tprice\n\t\t\t\t}\n\t\t\t}\n\t\t}\n  }\n}\n",
+            "variables": "{\n  \"id\": \"shrg_qsdqsdqsdqsd\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "product / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation newProductMutation(\n  $node: InputProduct!\n) {\n  createProduct(node: $node) {\n    id\n    _id\n    title\n    price\n  }\n}\n",
+            "variables": "{\n  \"node\": {\n    \"title\": \"My product\",\n    \"options\": [],\n    \"variants\": [],\n    \"price\": 35\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "product / update",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation newProductUpdateMutation($node: InputUpdateProduct!, $id: ID!){\n    updateProduct(node: $node, id: $id){\n        id\n        _id\n        title\n        price\n    }\n}\n",
+            "variables": "{\n  \"node\": {\n    \"title\": \"Updated Product\"\n  },\n  \"id\": \"prod_L8WGlMDUfgM6LAivoCZhv\"\n}  "
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "product / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query productQuery($id: ID!){\n    node(id: $id){\n        ... on Product {\n            id\n            _id\n            title\n            price\n        }\n    }\n}\n",
+            "variables": "{\n  \"id\": \"prod_L8WGlMDUfgM6LAivoCZhv\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "products / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query productsQuery($first: Int, $after: String, $query: String!){\n\tproducts(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\t_id\n\t\t\t\ttitle\n\t\t\t\tprice\n\t\t\t\tcreated_at\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{\n  \"query\": \"order_by:id\",\n  \"first\": 10,\n  \"after\": \"\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "product / delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteProductsMutation($items: [ID!]!){\n    deleteProducts(items: $items)\n}",
+            "variables": "{\n    \"items\": [\"prod_bsT_MnjyqGZ-8p-xJXG_g\"]\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "product / add products to store",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation addProductsToStore(\n  $node: AddProductsToStoreInput!\n  $id: ID!\n) {\n  addProductsToStore(id: $id, node: $node) {\n    id\n    products(cursor: null){\n        title\n        price\n        link\n        cursor\n    }\n  }\n}",
+            "variables": "{\n    \"node\": {\n        \"products_uids\": [\n            \"prod_qsoijdqsdkjsq\"\n        ]\n    },\n    \"id\": \"store_ioqsidqnis\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "order / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query viewOrderQuery(\n  $id: ID!\n) {\n  node(id: $id){\n    ... on Order {\n        id\n        _id\n        total\n        subtotal\n        discount_value\n      items {\n        __typename\n        ... on VariantSnapshot {\n          product_uid: product_id\n          id\n          _id\n          groupID\n          image {\n            path(version: version2)\n            id\n          }\n          customer_files {\n            name\n            files {\n              path\n              key\n            }\n          }\n          title\n          price\n          variant_id\n          fulfillment_status\n          carrier\n          tracking_number\n          tracking_link\n          refund_id\n          payment_id\n          removed_at\n          sku\n          custom_options {\n            name\n            key\n            files {\n              url\n            }\n            value\n            type\n          }\n          payment {\n            id\n            source {\n              payment_gateway {\n                active\n                type\n                id\n              }\n              id\n            }\n          }\n          options {\n            option_id: id\n            label\n            value\n          }\n        }\n        ... on OrderBumpSnapshot {\n          product_uid: product_id\n          groupID\n          id\n          _id\n          sku\n          image {\n            path(version: version2)\n            id\n          }\n          title\n          price\n          fulfillment_status\n          carrier\n          tracking_number\n          tracking_link\n          refund_id\n          payment_id\n          removed_at\n          payment {\n            id\n            source {\n              payment_gateway {\n                active\n                type\n                id\n              }\n              id\n            }\n          }\n        }\n        ... on Node {\n          __isNode: __typename\n          id\n        }\n      }\n    }\n  }  \n}\n",
+            "variables": "{\n  \"id\": \"order_XXX\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "orders / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query ordersQuery($first: Int, $after: String, $query: String!){\n\torders(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\t_id\n\t\t\t\tname\n\t\t\t\ttotal\n\t\t\t\tfulfillment_status\n\t\t\t\tfinancial_status\n\t\t\t\tcustomer {\n\t\t\t\t\tid\n\t\t\t\t\tfull_name\n\t\t\t\t}\n\t\t\t\tcancelled_at\n\t\t\t\tcreated_at\n\t\t\t\ttest\n\t\t\t}\n            cursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{\n  \"query\": \"order_by:id\",\n  \"after\": \"\",\n  \"first\": 10\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "order / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateOrderMutation($node: InputOrder!, $id: ID!){\n    updateOrder(node: $node, id: $id){\n        id\n        _id\n        name\n        total\n        subtotal\n        notes\n    }\n}",
+            "variables": "{\n  \"node\": {\n    \"notes\": \"this order should be customized\",\n    \"tags\": [\"custom\"]\n  },\n  \"id\": \"order_Du5a-BSbN5oGquwAVGOU4\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "order / cancel",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation cancelOrderMutation($id: ID!, $reason: String!, $notifyCustomer: Boolean!, $refund: Boolean!) {\n    cancelOrder(id: $id, reason: $reason, notifyCustomer: $notifyCustomer, refund: $refund) {\n        id\n        cancelled_at\n        refunded_amount\n        paid_by_customer\n        net_payment\n        refundable\n        payments{\n            id\n            refunded\n            refundable\n            refunds{\n                id\n                amount\n                reason\n            }\n        }\n    }\n}",
+            "variables": "{\n    \"id\": \"order_sB9vPqMArQRZetbn1-fnl\",\n    \"reason\": \"the item was not shipped\",\n    \"notifyCustomer\": true,\n    \"refund\": true\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "order / fulfill items",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation itemsFulfillMutation($items: [ID!]!, $trackingNumber: String!, $trackingLink: String!, $id: ID!, $carrier: String){\n\tfulfillItems(items: $items, trackingNumber: $trackingNumber, trackingLink: $trackingLink, id: $id, carrier: $carrier){\n\t\tid\n\t\tfulfillment_status\n\t\titems{\n\t\t\t... on VariantSnapshot{\n\t\t\t\tid\n\t\t\t\ttracking_number\n\t\t\t\ttracking_link\n\t\t\t\tfulfillment_status\n\t\t\t}\n\t\t\t... on OrderBumpSnapshot{\n\t\t\t\tid\n\t\t\t\ttracking_number\n\t\t\t\ttracking_link\n\t\t\t\tfulfillment_status\n\t\t\t}\n\t\t}\n\t}\n}",
+            "variables": "{\n\t\"items\": [\"vars_qsjkqsdazdq\", \"obs_qdalknazsf\"],\n\t\"trackingNumber\": \"OTALP123\",\n\t\"trackingLink\": \"\",\n\t\"carrier\": \"OTALP\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "order / mark as paid",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation markOrderAsPaid($id: ID!){\n\tmarkAsPaid(id: $id){\n\t\tid\n\t\t_id\n\t  total\n\t}\n}",
+            "variables": "{\n\t\"id\": \"order_qsdazdazdazqsd\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "bundle / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($node: InputPriceBundle!) {\n    createPriceBundle(node: $node){\n        id \n        label\n        items {\n            id\n            label\n            quantity\n            discount_value\n            discount_type\n        }\n    }\n}",
+            "variables": "{\n    \"node\" : {\n        \"label\": \"Bundle test\",\n        \"items\": [{\n            \"id\": \"pb_idshouldbelikethisformat\",\n            \"label\": \"Test Bundle\",\n            \"quantity\": 1,\n            \"discount_value\": 10,\n            \"discount_type\" : \"percentage\"\n        }]\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "bundles / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query BundlesQuery($first: Int, $after: String, $query: String!){\n\tpriceBundles(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\tlabel\n\t\t\t\tcreated_at\n\t\t\t\titems {\n\t\t\t\t\tid\n\t\t\t\t\tdiscount_value\n\t\t\t\t\tquantity\n\t\t\t\t\tdiscount_type\n\t\t\t\t\tlabel\n\t\t\t\t}\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{\n    \"query\": \"order_by:id\",\n    \"after\": \"\",\n    \"first\": 10\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "bundle / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query BundleQuery($id: ID!){\n    node(id: $id){\n        ... on PriceBundle{\n            id\n            label\n            created_at\n            items {\n                id\n                discount_value\n                quantity\n                discount_type\n                label\n            }\n        }\n    }\n}\n",
+            "variables": "{\n    \"id\": \"pb_V87FTn2M3aak9yh8mTfG_\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "bundle /  update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation newUpdateBundleMutation($id: ID!, $node: InputUpdatePriceBundle!){\n    updatePriceBundle(id: $id, node: $node){\n        id\n        label\n        items {\n            id\n            quantity\n            discount_value\n            discount_type\n        }\n        created_at\n    }\n}",
+            "variables": "{\n  \"id\": \"Q3VzdG9tZXI6MTkxMzUw\",\n  \"node\": {\n    \"items\": {\n        \"label\": \"Test Updated\",\n        \"quantity\": 1,\n        \"discount_value\": 10,\n        \"discount_type\" : \"percentage\"\n    }\n  }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "bundle /  delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteBundlesMutation($items: [ID!]!){\n    deletePriceBundles(items: $items)\n}\n",
+            "variables": "{\n    \"items\": [\"pb_uKZg5Hlq7k6jqU8S38EC-\"] \n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "discounts /  get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query DiscountsQuery($first: Int, $after: String, $query: String!){\n\tdiscounts(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\tcode\n\t\t\t\tvalue\n\t\t\t\ttype\n\t\t\t\tusage_limit\n\t\t\t\tone_time_usage_per_customer\n\t\t\t\tstarted_at\n\t\t\t\texpired_at\n\t\t\t\tactive\n\t\t\t\tlimited_usage\n\t\t\t\tusage\n\t\t\t}\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{\n  \"query\": \"order_by:id\",\n  \"after\": \"\",\n  \"first\": 10\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "discount /  get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query DiscountQuery($id: ID!){\n    node(id: $id){\n        ... on Discount{\n            id\n            code\n            value\n            type\n            usage_limit\n        }\n    }\n}\n   ",
+            "variables": "{\n  \"id\": \"disc_rOIcHQOOUPhsPg1x04htS\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "discount /  update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateDiscountMutation($input: updateDiscountMutationInput!){\n    updateDiscount(input: $input){\n        discount{\n            id\n            code\n            value\n            type\n            usage_limit\n        }\n    }\n}\n   ",
+            "variables": "{\n    \"input\": {\n        \"id\": \"disc_rOIcHQOOUPhsPg1x04htS\",\n        \"node\": {\n            \"code\": \"test discount\",\n            \"value\": 15,\n            \"type\": \"percentage\",\n            \"usage_limit\": 25\n        }\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "discount /  create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($input: createDiscountMutationInput!) {\n\tcreateDiscount(input: $input){\n\t\tnode {\n            id\n            code\n            value\n            usage_limit\n        }\n\t}\n}\n   ",
+            "variables": "{\n  \"input\": {\n      \"node\": {\n        \"code\": \"my test discount code\",\n        \"value\": 35,\n        \"type\": \"percentage\",\n        \"usage_limit\": 155,\n        \"one_time_usage_per_customer\": true,\n        \"limited_usage\": false\n      }\n  }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "discount /  delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteDiscountsMutation($items: [ID!]!){\n    deleteDiscounts(items: $items)\n}\n   ",
+            "variables": "{\n    \"items\": [\"disc_oDsvHJxGv2sHYr0yLUCQu\"] \n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "funnels /  get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query FunnelsQuery($first: Int, $after: String, $query: String!){\n\tfunnels(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\t_id\n\t\t\t\tname\n\t\t\t\tpublished\n\t\t\t\tslug\n\t\t\t\tcreated_at\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n} ",
+            "variables": "{\n    \"query\": \"order_by:id published:true\",\n    \"first\": 10,\n    \"after\": \"\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "funnel /  get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query FunnelQuery($id: ID!){\n    node(id: $id){\n        ... on Funnel {\n            id\n            _id\n            name\n            published\n            slug\n            created_at\n        }\n    }\n}",
+            "variables": "{\n    \"id\": \"fun_kaJyhZNbmJvXUoVhc3mTo\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "funnel /  create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($node: InputCreateFunnel!) {\n\tcreateFunnel(node: $node){\n\t\tid\n        _id\n        name\n        published\n        slug\n        created_at\n\t}\n}",
+            "variables": "{\n    \"node\": {\n       \"name\": \"My Test funnel\",\n       \"slug\": \"first_funnel\",\n       \"funnel_steps\": [\n           \"product_page\",\n            \"checkout_page\",\n            \"upsell_page\",\n            \"thank_you_page\"\n        ],\n        \"lang\": \"en\"\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "funnel / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateFunnelMutation($node: InputFunnel!, $id: ID!){\n    updateFunnel(node: $node, id: $id){\n        id\n        _id\n        name\n        published\n        slug\n        created_at\n    }\n}",
+            "variables": "{\n    \"id\": \"fun_NGZCx-Rntv6Ts-NNbPHA9\",\n    \"node\": {\n        \"name\": \"My Awesome Funnel\",\n        \"published\": true\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "funnel / delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteFunnelsMutation($items: [ID!]!){\n\t\tdeleteFunnels(items: $items)\n\t}",
+            "variables": "{\n    \"items\": [\"fun_NGZCx-Rntv6Ts-NNbPHA9\"]\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "reviews / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query reviewsQuery($first: Int, $after: String, $query: String!){\n\treviews(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\tuid\n\t\t\t\tname\n\t\t\t\temail\n\t\t\t\tcontent\n\t\t\t\trate\n\t\t\t\tpublished\n\t\t\t\tavatar\n\t\t\t\tcreated_at\n\t\t\t\tupdated_at\t\t\t\t\t\t\t\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{\n    \"query\": \"\", \"after\": \"\", \"first\": 10\n}\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "review / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query reviewQuery($id: ID!){\n    node(id: $id){\n        ... on Review {\n            id\n            uid\n            name\n            email\n            content\n            rate\n            published\n            avatar\n        }\n    }\n}    ",
+            "variables": "{\n    \"id\": \"review_ojOSbHOoTjR1wn900-c97\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "review / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($product_id: ID!, $node: InputReview!) {\n\tcreateReview(product_id: $product_id, node: $node){\n\t\tid\n        uid\n        name\n        content\n        rate\n        published\n        date\n\t}\n}   ",
+            "variables": "{\n    \"product_id\": \"prod_EkGHPJvUf5GDH4SbJlCGj\",\n    \"node\": {\n        \"name\": \"Yassir\",\n        \"content\": \"This is a test review message\",\n        \"rate\": 5,\n        \"images\": [],\n        \"date\" : \"2023-12-15 02:51:50\"\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "review / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateReviewMutation($node: InputUpdateReview!, $id: ID!){\n    updateReview(node: $node, id: $id){\n        id\n        uid\n        name\n        content\n        rate\n        published\n        date\n    }\n}  ",
+            "variables": "{\n    \"id\": \"review_ojOSbHOoTjR1wn900-c97\",\n    \"node\": {\n        \"name\": \"Updated name\"\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "review / delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteReviewsMutation($items: [ID!]!){\n    deleteReviews(items: $items)\n} ",
+            "variables": "{\n    \"items\": [\"review_RPE6yLg2vzTtxij0mOx3o\", \"review_OHUC03OePFaFKkgzc68H9\"]\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "segments / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query SegmentsQuery($first: Int, $after: String, $query: String!){\n\tsegments(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\tname\n\t\t\t\tdescription\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{\n  \"query\": \"order_by:id order_dir:desc\", \"after\": \"\", \"first\": 10\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "segment / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query SegmentQuery($id: ID!){\n    node(id: $id){\n        ... on Segment {\n            id\n            name\n        }\n    }\n}",
+            "variables": "{\n  \"id\": \"seg_5WZ8HKwQOfzTWuI3qArGo\"\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "segment / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($node: SegmentInput!) {\n\tcreateSegment(node: $node){\n\t\tid\n        name\n        description\n\t}\n}",
+            "variables": "{\n    \"node\": {\n       \"name\": \"Segment Test\",\n       \"description\": \"this is a segment test description\",\n       \"settings\": {\n            \"include\": {\n                    \"operator\": \"AND\", \n                    \"tags\": []\n            },\n           \"exclude\": {\n                \"operator\": \"AND\", \n                \"tags\": []\n           }\n       }\n    }\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "segment / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateSegmentMutation($node: SegmentInput!, $id: ID!){\n    updateSegment(node: $node, id: $id){\n        id\n        name\n        description\n    }\n}",
+            "variables": "{   \n    \"id\": \"seg_Dx3WVa4yKv5Wi8C5uQjiq\",\n    \"node\": {\n       \"name\": \"Segment Test (Updated)\",\n       \"description\": \"this is a segment test description\",\n       \"settings\": {\n            \"include\": {\n                    \"operator\": \"AND\", \n                    \"tags\": []\n            },\n           \"exclude\": {\n                \"operator\": \"AND\", \n                \"tags\": []\n           }\n       }\n    }\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "segment / delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteSegmentsMutation($items: [ID!]!){\n    deleteSegments(items: $items)\n}",
+            "variables": "{   \n    \"items\": [\"seg_7BPyMeqRc859kxOKb927R\"]\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "collections / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query collectionsQuery($first: Int, $after: String, $query: String!){\n\tcollections(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\ttype\n\t\t\t\tname\n\t\t\t\tcreated_at\t\t\t\t\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{   \n   \"query\": \"\", \"after\":\"\", \"first\": 10\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "collection / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query collectionQuery($id: ID!){\n    node(id: $id){\n        ... on Collection{\n            id\n            type\n            name\n            slug\n            created_at\n        }\n    }\n}",
+            "variables": "{   \n    \"id\": \"col_cEUI6QFMAMg16nmlKTeXx\"\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "collection / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($node: CollectionInput!) {\n\tcreateCollection(node: $node){\n\t\tid\n        type\n        name\n        slug\n        created_at\n\t}\n}",
+            "variables": "{   \n   \"node\": {\n       \"name\": \"Test Collection\",\n       \"description\": \"this is a description text\",\n       \"type\": \"specific_products\",\n       \"slug\": \"product\"\n   }\n}\n\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "collection / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateCollectionMutation($node: CollectionUpdateInput!, $id: ID!){\n    updateCollection(node: $node, id: $id){\n        id\n        type\n        name\n        created_at\t\n    }\n}",
+            "variables": "{   \n   \"id\": \"col_cEUI6QFMAMg16nmlKTeXx\",\n   \"node\": {\n       \"name\": \"Updated Test Collection\"\n   }\n}\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "collection / delete",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation deleteCollectionsMutation($ids: [ID!]!){\n    deleteCollections(ids: $ids)\n}",
+            "variables": "{   \n    \"ids\": [\"col_n4kAAdpV-S9xmxFBcy3dw\"]\n}\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "customers / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query CustomersQuery($first: Int, $after: String, $query: String!){\n\tcustomers(query: $query, after: $after, first: $first){\n\t\tedges{\n\t\t\tnode{\n\t\t\t\tid\n\t\t\t\t_id\n\t\t\t\tavatar\n\t\t\t\tfull_name\n\t\t\t\texpenses\n\t\t\t\torders_count\n\t\t\t\tupdated_at\n\t\t\t\tcreated_at\n\t\t\t}\n\t\t\tcursor\n\t\t}\n\t\tpageInfo{\n\t\t\tendCursor\n\t\t\thasNextPage\n\t\t}\n\t}\n}",
+            "variables": "{   \n    \"query\": \"order_by:id order_dir:desc\", \"after\": \"\", \"first\": 10\n}\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "customer / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query CustomerQuery($id: ID!){\n    node(id: $id){\n        ... on Customer {\n            id\n            _id\n            avatar\n            full_name\n            expenses\n            orders_count\n            updated_at\n            created_at\n        }\n    }\n}",
+            "variables": "{   \n    \"id\": \"cus_Dp5c2dQr0faFcpNifZOJ3\"\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "customer / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateCustomerMutation($node: InputUpdateCustomer!, $id: ID!){\n    updateCustomer(node: $node, id: $id){\n        id\n        _id\n        avatar\n        full_name\n        expenses\n        orders_count\n        updated_at\n        created_at\n    }\n}",
+            "variables": "{   \n   \"id\": \"cus_Dp5c2dQr0faFcpNifZOJ3\",\n   \"node\": {\n       \"first_name\": \"Updated customer\",\n       \"email\": \"customer@email.com\"\n   }\n}\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "customer / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation mutationName($node: InputCustomer!) {\n\tcreateCustomer(node: $node){\n\t\tfull_name\n        expenses\n        orders_count\n        updated_at\n        created_at\n\t}\n}",
+            "variables": "{   \n   \"node\": {\n       \"first_name\": \"Test customer\",\n       \"last_name\": \"last name\",\n       \"phone\": \"+1 (513) 484-3692\",\n       \"email\": \"customer@gmail.com\",\n       \"accepts_marketing\": false,\n       \"tags\": []\n   }\n}\n"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "appCharge / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation createAppChargeMutation($input: createAppChargeInput!) {\n\tcreateAppCharge(input: $input) {\n\t\tappCharge{\n            id\n            price\n        }\n\t}\n}",
+            "variables": "{   \n    \"input\": {\n        \"node\": {\n            \"price\": 30,\n            \"return_url\": \"https://your_website.com\",\n            \"name\": \"your plan name\",\n            \"trial\": 0,\n            \"plan_id\": \"navigate to your app billing tab and select a plan id under app plans\"\n        }\n    }\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "appCharges / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query appChargesQuery {\n    appCharges{\n        list {\n            id\n            price\n            name\n            started_at\n        }\n    }\n}",
+            "variables": "{}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "appCharge / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query appChargeQuery($id: ID!) {\n    appCharge(id: $id){\n        id\n        price\n        name\n        started_at\n    }\n}",
+            "variables": "{\r\n    \"id\": \"charge id\"\r\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "account / pixels / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query AccountQuery {\n    account{\n        facebook_pixels {\n          label\n          value\n        }\n        snapchat_pixels {\n          label\n          value\n        }\n        tiktok_pixels {\n          label\n          value\n        }\n    }   \n}",
+            "variables": ""
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "account / pixels / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateStoreMutation($node: InputUpdateAccount!){\n    updateAccount(node: $node){\n        id\n    }\n}",
+            "variables": "{\r\n    \"node\": {\r\n        \"facebook_pixels\": [{\r\n            \"label\": \"My pixel\",\r\n            \"value\": \"fb px\"\r\n        }],\r\n        \"snapchat_pixels\": [{\r\n            \"label\": \"My pixel\",\r\n            \"value\": \"sn px\"\r\n        }],\r\n        \"tiktok_pixels\": [{\r\n            \"label\": \"My pixel\",\r\n            \"value\": \"tk px\"\r\n        }]\r\n    }\r\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "account / shipping locations / update",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation updateAccountShippingLocationsMutation($node: InputUpdateAccount!){\n    updateAccount(node: $node){\n        id\n        shipping_countries{\n            country\n            regions{\n                id\n                region\n                cities{\n                    id\n                    city\n                    areas{\n                        id\n                        label\n                    }\n                }\n            }\n        }\n    }\n}",
+            "variables": "{\r\n    \"node\": {\r\n        \"shipping_countries\": [\r\n            {\r\n            \"country\": \"MA\",\r\n            \"regions\": [\r\n                {\r\n                \"id\": \"Osmus4TE9R3US2DY7gqAM\",\r\n                \"region\": \"Béni Mellal-Khénifra\",\r\n                \"cities\": [\r\n                    {\r\n                    \"id\": \"8bLgudHAszB8tRWE-94hF\",\r\n                    \"city\": \"Afourar\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"2UzdaY-_H2Ci0hQ2jvF_a\",\r\n                    \"city\": \"Aghbala\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"4OsFjb6YVohWQLN88lSVj\",\r\n                    \"city\": \"Amalou Ighriben\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"XD9O1QLxsl3eUmoQNqGdD\",\r\n                    \"city\": \"Azilal\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"SnEBpSof1hFn_4Qa2Uu4y\",\r\n                    \"city\": \"Aït Attab\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"jPqFICMElZKvxvEeQLltm\",\r\n                    \"city\": \"Aït Ishaq\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"iYF0U_bTu7lhgn-Fnu-Xu\",\r\n                    \"city\": \"Aït Majden\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"YHu0Sv7Pyh3EfUVXiJ1ce\",\r\n                    \"city\": \"Bejaâd\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"3cQk2aLj_opEx-kBwXr4A\",\r\n                    \"city\": \"Beni Ayat\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"oAP9833ULHru5x8AfFZtn\",\r\n                    \"city\": \"Bin elouidane\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"EVv_d9kFSpG71pfqrqRJx\",\r\n                    \"city\": \"Boujniba\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"9z5dX2RBKwdVzAqaZmgFT\",\r\n                    \"city\": \"Boulanouare\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"_N0_1n0Qv5ZD-N7qgTkkD\",\r\n                    \"city\": \"Bradia\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"XDDZL-ybNwlx305rinVk4\",\r\n                    \"city\": \"Bzou\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"rgLV5Crl8ZQPk00Jz9thf\",\r\n                    \"city\": \"Béni Mellal\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"L5-aosWZowEe6YjnWDcYU\",\r\n                    \"city\": \"Dar Oulad Zidouh\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"YTaQHbkYJ0VHbGcr31gSM\",\r\n                    \"city\": \"Demnate\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"KHnXTjSG1qWkgwl_5na5F\",\r\n                    \"city\": \"El Ksiba\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"XwxoAMNMjpzve49H23UO_\",\r\n                    \"city\": \"Elkbab\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"qJeEcjwb_lB008f-jBXRH\",\r\n                    \"city\": \"Er-Rich\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"OsZiRMVUVoDYuAUsI2Jqg\",\r\n                    \"city\": \"Foum Jamaa\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"HOlzI_L5uFXrjbsdCXDGF\",\r\n                    \"city\": \"Fquih Ben Salah\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"45MCUejqWeymY2dWztgMR\",\r\n                    \"city\": \"Had Bouhssoussen\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"cqUv89uS13Vmy2xLX5sx3\",\r\n                    \"city\": \"Hattane\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"QUAeFjdR2NvNXyDaDe9TZ\",\r\n                    \"city\": \"Kasba Tadla\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"ud-y2n2yxNzy985NOye6v\",\r\n                    \"city\": \"Kehf Nsour\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"XMxZgoYcVHdAjxWhZ3Ttq\",\r\n                    \"city\": \"Kerrouchen\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"gC-eNw22a_gRDaLAS4Wsr\",\r\n                    \"city\": \"Khouribga\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"Lju4YzCsmJJGZPd90dIV-\",\r\n                    \"city\": \"Khénifra\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"m3hkB_piCQnK4YL44wyfu\",\r\n                    \"city\": \"M'rirt\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"FeOw6BBkF1RLSyz3hqtyh\",\r\n                    \"city\": \"Moulay Bouazza\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"my4DC720OyyrJ-zDkuZ9x\",\r\n                    \"city\": \"Ouaouizeght\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"TdmFeke_bVG6OCs3jYT58\",\r\n                    \"city\": \"Ouaoumana\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"mSvsPO-WcB3SRJX5mTPiD\",\r\n                    \"city\": \"Oued Zem\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"qC5ycxOVemr6a1Yqdbpjo\",\r\n                    \"city\": \"Oulad Ayad\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"IZjmpcvxPlbc8s5hk55nm\",\r\n                    \"city\": \"Oulad M'Barek\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"g_6Z0x2PUsIQ-VAMdlkJI\",\r\n                    \"city\": \"Oulad Yaich\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"6MBvmkQHsG0dyiyZYJVXl\",\r\n                    \"city\": \"Sidi Jaber\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"Ngv31XhhSCKPFIcle9nCp\",\r\n                    \"city\": \"Souk Sebt Oulad Nemma\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"oJnzSWh1ZlL1TZ0y0Mfwq\",\r\n                    \"city\": \"Tighassaline\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"-m629OULw8gilVB0XNSpC\",\r\n                    \"city\": \"Tighza\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"c7F8UB9UCNHTXab56ppG1\",\r\n                    \"city\": \"Zaouïat Cheikh\",\r\n                    \"areas\": []\r\n                    }\r\n                ]\r\n                },\r\n                {\r\n                \"id\": \"p5LToWhEJtftymEHxlr_4\",\r\n                \"region\": \"Souss-Massa\",\r\n                \"cities\": [\r\n                    {\r\n                    \"id\": \"C0Y5NJWAdOBEIcLaJUXcX\",\r\n                    \"city\": \"Agadir\",\r\n                    \"areas\": [\r\n                        {\r\n                        \"id\": \"UJel4u-ZAnZhG2Uda7fW1\",\r\n                        \"label\": \"Abattoirs\"\r\n                        },\r\n                        {\r\n                        \"id\": \"7Stfstd77JKOhTV6W_y1e\",\r\n                        \"label\": \"Agadir Oufella\"\r\n                        },\r\n                        {\r\n                        \"id\": \"yjt1PIr0gM8kLaFQuQ1l-\",\r\n                        \"label\": \"Al Wifaq\"\r\n                        },\r\n                        {\r\n                        \"id\": \"tqZsxVebFVovNSyiMhJIt\",\r\n                        \"label\": \"Amicales\"\r\n                        },\r\n                        {\r\n                        \"id\": \"alFqONiLNlbA77-uYZdqC\",\r\n                        \"label\": \"Amsernate\"\r\n                        },\r\n                        {\r\n                        \"id\": \"N0gQD4DEvC5d985Ga3mqD\",\r\n                        \"label\": \"Anahda\"\r\n                        },\r\n                        {\r\n                        \"id\": \"ECIcNGubd38cR40v8LtTD\",\r\n                        \"label\": \"Anoual Souss\"\r\n                        },\r\n                        {\r\n                        \"id\": \"EyK7iPZADZoNSNszh5UOQ\",\r\n                        \"label\": \"Anza\"\r\n                        },\r\n                        {\r\n                        \"id\": \"Kmf7CUIvhi3q7NmPR_MYQ\",\r\n                        \"label\": \"Arghoud\"\r\n                        },\r\n                        {\r\n                        \"id\": \"ezV8kC1KVrGpiQJo8Q3n_\",\r\n                        \"label\": \"Assaka\"\r\n                        },\r\n                        {\r\n                        \"id\": \"SwnHhZIHXkLsHu9MPu2Ec\",\r\n                        \"label\": \"Autre secteur\"\r\n                        },\r\n                        {\r\n                        \"id\": \"oBCxDN9T7ahyEPsqXGuyU\",\r\n                        \"label\": \"Av des Far\"\r\n                        },\r\n                        {\r\n                        \"id\": \"GQm7pAH94V6gGWsUNkJEs\",\r\n                        \"label\": \"Av Mokawama\"\r\n                        },\r\n                        {\r\n                        \"id\": \"oPlnOPrrhfXZkGAW-JmaF\",\r\n                        \"label\": \"Ben Serguaou\"\r\n                        },\r\n                        {\r\n                        \"id\": \"9I1rKTUp3QUNK2LhvVexX\",\r\n                        \"label\": \"Bouargane\"\r\n                        },\r\n                        {\r\n                        \"id\": \"CPO_mGph5GZqMd8pHaurq\",\r\n                        \"label\": \"Boutchakat\"\r\n                        },\r\n                        {\r\n                        \"id\": \"KPIKQeO1zclxEJ4H_JoH3\",\r\n                        \"label\": \"Centre Ville\"\r\n                        },\r\n                        {\r\n                        \"id\": \"9-Kjm0mZl5ZBouJJvc7ez\",\r\n                        \"label\": \"Charaf\"\r\n                        },\r\n                        {\r\n                        \"id\": \"vsHMs7pQNlX82B6VLryar\",\r\n                        \"label\": \"Cité Adrar\"\r\n                        },\r\n                        {\r\n                        \"id\": \"HZulpwxBBqnbDdQjoz0ie\",\r\n                        \"label\": \"El Houda\"\r\n                        },\r\n                        {\r\n                        \"id\": \"x20V3-UFG5eZ39dHHewgP\",\r\n                        \"label\": \"Ennahda\"\r\n                        },\r\n                        {\r\n                        \"id\": \"1vGVWxZCCrKt4mxT-dadl\",\r\n                        \"label\": \"Extension Dakhla\"\r\n                        },\r\n                        {\r\n                        \"id\": \"OlgzvADCzgHt3_U3twZjj\",\r\n                        \"label\": \"Founty\"\r\n                        },\r\n                        {\r\n                        \"id\": \"xDeQDEhQKvRwdSSY9i7oi\",\r\n                        \"label\": \"Haut Anza\"\r\n                        },\r\n                        {\r\n                        \"id\": \"Hwep-rer_v4lo6eyuOoXS\",\r\n                        \"label\": \"Haut-Founty\"\r\n                        },\r\n                        {\r\n                        \"id\": \"jP1IwdsKhhLuKmepLFIDK\",\r\n                        \"label\": \"Hay Al Farah\"\r\n                        },\r\n                        {\r\n                        \"id\": \"lRpE5QPaQC86tyzjtkRAK\",\r\n                        \"label\": \"Hay Al Wafaa\"\r\n                        },\r\n                        {\r\n                        \"id\": \"X6EGVD6b5Jz--d5w31e1J\",\r\n                        \"label\": \"Hay Dakhla\"\r\n                        },\r\n                        {\r\n                        \"id\": \"Sy17-iuLXMNuaxN5_0RHJ\",\r\n                        \"label\": \"Hay Hassani\"\r\n                        },\r\n                        {\r\n                        \"id\": \"V0_kSfyNfkZxzwNyn6gor\",\r\n                        \"label\": \"Hay Massira\"\r\n                        },\r\n                        {\r\n                        \"id\": \"qpVaqOV5fgjlmm1PMRhjH\",\r\n                        \"label\": \"Hay Mohammadi\"\r\n                        },\r\n                        {\r\n                        \"id\": \"7B6i3JhgUvlF9Umh-zsjD\",\r\n                        \"label\": \"Hay Najah\"\r\n                        },\r\n                        {\r\n                        \"id\": \"yS-v-RKSGP9ZvCUkKFKBv\",\r\n                        \"label\": \"Hay Qods\"\r\n                        },\r\n                        {\r\n                        \"id\": \"z_3iu9EIC5DU1i-WFgufu\",\r\n                        \"label\": \"Hay Salam\"\r\n                        },\r\n                        {\r\n                        \"id\": \"CINPK7zidutoYl0lxf8gw\",\r\n                        \"label\": \"Hay Zaytoun\"\r\n                        },\r\n                        {\r\n                        \"id\": \"-WsY6XBH9gfTvhQ_Hj1kY\",\r\n                        \"label\": \"Ihchach\"\r\n                        },\r\n                        {\r\n                        \"id\": \"D94xT_6OHGmGi3VWkXAGi\",\r\n                        \"label\": \"Illigh\"\r\n                        },\r\n                        {\r\n                        \"id\": \"LKPDUV4bq7GTdZegyB-DA\",\r\n                        \"label\": \"Laazib\"\r\n                        },\r\n                        {\r\n                        \"id\": \"tvs8UukyEzpEZQymHCTGC\",\r\n                        \"label\": \"Le bord de mer\"\r\n                        },\r\n                        {\r\n                        \"id\": \"0McCGXMPaZeZi3hhWv40v\",\r\n                        \"label\": \"Le centre-ville\"\r\n                        },\r\n                        {\r\n                        \"id\": \"jpWrxatROKjAHTorHLhtC\",\r\n                        \"label\": \"Lekhiam\"\r\n                        },\r\n                        {\r\n                        \"id\": \"d9AHEzND0H-qpJDGnPxmT\",\r\n                        \"label\": \"Les Amicales\"\r\n                        },\r\n                        {\r\n                        \"id\": \"iK5bGV5bcceryjf0151cw\",\r\n                        \"label\": \"Marina\"\r\n                        },\r\n                        {\r\n                        \"id\": \"mq8sL0vGi6HExMLr0HIvy\",\r\n                        \"label\": \"Najah\"\r\n                        },\r\n                        {\r\n                        \"id\": \"_RIVDRaq1co3GesDSwuC9\",\r\n                        \"label\": \"Port\"\r\n                        },\r\n                        {\r\n                        \"id\": \"tSAyEoDeGsPF0RQhuhoMo\",\r\n                        \"label\": \"Riad Salam\"\r\n                        },\r\n                        {\r\n                        \"id\": \"mzcSxP4ZcTyDmepvLuZUV\",\r\n                        \"label\": \"Secteur Touristique\"\r\n                        },\r\n                        {\r\n                        \"id\": \"r-UIu90Em4LT737rqxe3u\",\r\n                        \"label\": \"Sonaba\"\r\n                        },\r\n                        {\r\n                        \"id\": \"uKn-vtVZw1RGnXYOoN31v\",\r\n                        \"label\": \"Suisse\"\r\n                        },\r\n                        {\r\n                        \"id\": \"_bKwai3dublXufs1EfPTr\",\r\n                        \"label\": \"Taddart\"\r\n                        },\r\n                        {\r\n                        \"id\": \"MZkPyPbREOoj8cUs4WsX2\",\r\n                        \"label\": \"Taddart Anza\"\r\n                        },\r\n                        {\r\n                        \"id\": \"vB1uRgKwkKQeOgAUTt6l0\",\r\n                        \"label\": \"Talborjt\"\r\n                        },\r\n                        {\r\n                        \"id\": \"2paPOQwlq4y6zvQNCR57S\",\r\n                        \"label\": \"Tamraght\"\r\n                        },\r\n                        {\r\n                        \"id\": \"yTBofiPxU2YxsJfzKG7CL\",\r\n                        \"label\": \"Tassila\"\r\n                        },\r\n                        {\r\n                        \"id\": \"FAtMJCQV8XlM_mTCf5DBW\",\r\n                        \"label\": \"Tilila\"\r\n                        },\r\n                        {\r\n                        \"id\": \"2_zRZCt-xuuQbTTtviMCz\",\r\n                        \"label\": \"Ville Nouvelle\"\r\n                        },\r\n                        {\r\n                        \"id\": \"tETROYaijnDrtt5_iBg_W\",\r\n                        \"label\": \"Wifaq\"\r\n                        },\r\n                        {\r\n                        \"id\": \"jkPQR8tS3vMhZL7KgzZr-\",\r\n                        \"label\": \"Zone Industrielle Agadir\"\r\n                        }\r\n                    ]\r\n                    },\r\n                    {\r\n                    \"id\": \"A4zOHXYzDdYuztGbQopgT\",\r\n                    \"city\": \"Agni Izimmer\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"SeLgJHdvDL2MVF796lrTc\",\r\n                    \"city\": \"Akka\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"hCt-2GsFV5AJ3h6X611GH\",\r\n                    \"city\": \"Anzi\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"pBAB7hsoqfENQffyt_TOP\",\r\n                    \"city\": \"Aoulouz\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"9klb5fmpd0vUHuitGv5eT\",\r\n                    \"city\": \"Aourir\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"aYDbpUbF73bAKviuC8BQz\",\r\n                    \"city\": \"Arazane\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"NgBvuvAMe2sAtsxCcKC3Q\",\r\n                    \"city\": \"Aït Baha\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"qiKWU3RBFkMyRCbyUbvzw\",\r\n                    \"city\": \"Aït Iaâza\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"Fc4Ev_JzX_NmAnc7_7DvP\",\r\n                    \"city\": \"Aït Melloul\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"VgOnN1GnWpL1N6X-YIyOx\",\r\n                    \"city\": \"Ben Sergao\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"E2PC6YGXslH4rZxBZf3bI\",\r\n                    \"city\": \"Biougra\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"IiQ0KjPv8pcKi_t-WRgxC\",\r\n                    \"city\": \"Dcheira El Jihadia\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"JkpwpivRZ77xxR7CPuvM4\",\r\n                    \"city\": \"Drargua\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"dq39Hb-Hff5925AMALDp8\",\r\n                    \"city\": \"El Guerdane\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"PF__SjHbd9LGUlH5n85pM\",\r\n                    \"city\": \"Fam El Hisn\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"HUpDXSObIOToPf7vQv59R\",\r\n                    \"city\": \"Foum Zguid\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"cxFGC06UgEW3qPyqUbCpT\",\r\n                    \"city\": \"Ida Ougnidif\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"qvuI-8RUpesPaW-x_OEA_\",\r\n                    \"city\": \"Igdamen\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"e5M4de6t6HsdvHzpMKCaC\",\r\n                    \"city\": \"Inezgane\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"TDcoolBLuxuNKrb5mYcaw\",\r\n                    \"city\": \"Irherm\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"i295mqGxy3wziVbYR8tbK\",\r\n                    \"city\": \"Lakhsas\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"rDgVlRxElTlzBkoQWzTpQ\",\r\n                    \"city\": \"Lakhsass\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"PnIAbt2xHVFfa48KsP4Bz\",\r\n                    \"city\": \"Lqliâa\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"OIBBBkuRkUDyWyd42CXLD\",\r\n                    \"city\": \"Massa (Maroc)\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"rgfgHDK-S7J8FzqFptCky\",\r\n                    \"city\": \"Megousse\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"jwV-alZ26cMcHDzNU26ba\",\r\n                    \"city\": \"Oulad Berhil\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"JsbXJISWRrI77JQKlQpU8\",\r\n                    \"city\": \"Oulad Teïma\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"wAyEYQBauGxqKwpBrUk8Q\",\r\n                    \"city\": \"Tafraout\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"FtosuRvaRpRoxzCrFPD5_\",\r\n                    \"city\": \"Tagzen\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"ErW40yqPvAOpUaHhgxsIG\",\r\n                    \"city\": \"Taliouine\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"nmA8P0_gcw8nRkLIa-3Bg\",\r\n                    \"city\": \"Tamraght\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"AvC2DDf-zSw6W9eUMYbip\",\r\n                    \"city\": \"Tanalt\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"YJv-63QIr_LVNkg6ZCWi7\",\r\n                    \"city\": \"Taroudannt\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"YxBqUD48serW-xvq_poon\",\r\n                    \"city\": \"Tata\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"vOYfPBLKQheddTM5l5pJy\",\r\n                    \"city\": \"Temsia\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"HxG9G5oYp8MK8de6cJn8X\",\r\n                    \"city\": \"Tifnit\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"WefTkMRe-b7b1RCx1E_8G\",\r\n                    \"city\": \"Tisgdal\",\r\n                    \"areas\": []\r\n                    },\r\n                    {\r\n                    \"id\": \"YveMqVn3xl8FUXjzk0VER\",\r\n                    \"city\": \"Tiznit\",\r\n                    \"areas\": []\r\n                    }\r\n                ]\r\n                }\r\n            ]\r\n            }\r\n        ]\r\n    }\r\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "account / integrations / get",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query AccountQuery {\n    account{\n        integrations {\n          id\n          label\n          platform\n          details\n        }\n    }   \n}",
+            "variables": ""
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "account / integrations / create",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation AccountCAPIMutation($node: FacebookConversionApi!) {\n    createConversionApiFacebookIntegration(node: $node){\n        id\n    }\n}",
+            "variables": "{\r\n    \"node\": {\r\n        \"label\": \"A name for this integration\",\r\n        \"token\": \"capi-access-token-here\",\r\n        \"pixels\": [\"pixel-id-here\"]   \r\n    }\r\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "account / integration / remove",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation trackingRemoveIntegrationMutation($id: ID!){\n    removeIntegration(id: $id){\n        id\n        integrations{\n            id\n        }\n    }\n}",
+            "variables": "{\r\n    \"id\": \"integration id\"\r\n}"
+          }
+        },
+        "url": {
+          "raw": "https://services.lightfunnels.com/api/v2",
+          "protocol": "https",
+          "host": [
+            "services",
+            "lightfunnels",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "client_id",
+      "value": "replace with your actual client_id"
+    },
+    {
+      "key": "client_secret",
+      "value": "replace with your actual client_secret",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "replace with your actual access_token",
+      "type": "string"
+    }
+  ]
+}

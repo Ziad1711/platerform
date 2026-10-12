@@ -4,6 +4,9 @@ import { useParams, useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, Settings, Trash2, Zap } from 'lucide-react'
 import { getIntegrationMarketplaceData } from '@/lib/integrations/service'
+import LightfunnelsImportStepper, {
+  type LightfunnelsApiStatus,
+} from '@/components/dashboard/integrations/lightfunnels-import-stepper'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/lib/store-context'
@@ -23,20 +26,44 @@ export default function IntegrationSettingsPage() {
 
   const integration = marketplaceItems.find((item) => item.slug === providerSlug)
 
+  const [lightfunnelsRefreshKey, setLightfunnelsRefreshKey] = useState(0)
+
+  const isLightfunnels = providerSlug === 'lightfunnels'
+
+  const { data: lightfunnelsStatus, isLoading: isLightfunnelsLoading } = useQuery({
+    queryKey: ['lightfunnels-status', currentStoreId, lightfunnelsRefreshKey],
+    enabled: isLightfunnels && Boolean(currentStoreId),
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/integrations/lightfunnels/status?storeId=${encodeURIComponent(currentStoreId || '')}`,
+        { credentials: 'include' }
+      )
+      if (!response.ok) throw new Error('LIGHTFUNNELS_STATUS_FAILED')
+      return (await response.json()) as LightfunnelsApiStatus
+    },
+  })
+
   const handleDisconnect = async () => {
-    if (!currentStoreId) {
+    // Lightfunnels est lié au **compte** (une installation par utilisateur) : la
+    // déconnexion ne doit pas exiger de store sélectionné.
+    if (!currentStoreId && !isLightfunnels) {
       alert('Aucun store sélectionné.')
       return
     }
 
-    if (!confirm('Êtes-vous sûr de vouloir déconnecter cette intégration ?')) return
-    
+    const confirmMessage = isLightfunnels
+      ? 'Déconnecter Lightfunnels ? Toutes les boutiques liées seront détachées et les webhooks supprimés. Les commandes déjà importées sont conservées.'
+      : 'Êtes-vous sûr de vouloir déconnecter cette intégration ?'
+
+    if (!confirm(confirmMessage)) return
+
     setIsDisconnecting(true)
     try {
       const response = await fetch(`/api/integrations/${providerSlug}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId: currentStoreId }),
+        // Lightfunnels : une installation par utilisateur, la déconnexion est globale au compte.
+        body: JSON.stringify(isLightfunnels ? {} : { storeId: currentStoreId }),
       })
 
       if (!response.ok) throw new Error('Failed to disconnect')
@@ -127,6 +154,42 @@ export default function IntegrationSettingsPage() {
           </section>
         )}
 
+        {/* Lightfunnels : import des commandes et boutiques liées */}
+        {isLightfunnels && (
+          <section className="space-y-4">
+            {isLightfunnelsLoading && !lightfunnelsStatus ? (
+              <div className="flex items-center justify-center rounded-2xl border border-border/50 bg-card p-8 shadow-sm">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : null}
+
+            {lightfunnelsStatus && lightfunnelsStatus.connected ? (
+              <LightfunnelsImportStepper
+                status={lightfunnelsStatus}
+                showDisconnect={false}
+                onChanged={() => {
+                  setLightfunnelsRefreshKey((current) => current + 1)
+                  void queryClient.invalidateQueries({ queryKey: ['integration-marketplace'] })
+                }}
+              />
+            ) : null}
+
+            {isLightfunnels && !currentStoreId ? (
+              <div className="rounded-2xl border border-border/50 bg-card p-6 text-sm text-muted-foreground shadow-sm">
+                Sélectionnez un store en haut de page pour afficher les étapes de synchronisation.
+                La déconnexion reste disponible ci-dessous.
+              </div>
+            ) : null}
+
+            {lightfunnelsStatus && !lightfunnelsStatus.connected ? (
+              <div className="rounded-2xl border border-border/50 bg-card p-6 text-sm text-muted-foreground shadow-sm">
+                Aucune connexion Lightfunnels active. Reconnectez l’intégration depuis la page
+                Intégrations.
+              </div>
+            ) : null}
+          </section>
+        )}
+
         {/* Danger Zone */}
         <section className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6 shadow-sm">
           <div className="mb-6 flex items-center gap-3 text-destructive">
@@ -142,7 +205,9 @@ export default function IntegrationSettingsPage() {
               <p className="text-xs text-muted-foreground">
                 {providerSlug === 'youcan'
                   ? 'Supprime le lien entre votre boutique et la plateforme. Les webhooks seront également désactivés sur YouCan.'
-                  : 'Supprime le lien entre votre boutique et la plateforme. La configuration de cette intégration sera effacée et le transporteur associé désactivé.'}
+                  : isLightfunnels
+                    ? 'Supprime l’accès Lightfunnels et détache toutes les boutiques liées (webhooks supprimés). Les commandes et les produits déjà importés sont conservés.'
+                    : 'Supprime le lien entre votre boutique et la plateforme. La configuration de cette intégration sera effacée et le transporteur associé désactivé.'}
               </p>
             </div>
             <button

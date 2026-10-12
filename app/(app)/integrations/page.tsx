@@ -16,6 +16,7 @@ import AmeexConnectWizard from '@/components/dashboard/integrations/ameex-connec
 import SenditConnectWizard from '@/components/dashboard/integrations/sendit-connect-wizard'
 import DigylogConnectWizard from '@/components/dashboard/integrations/digylog-connect-wizard'
 import RushlivConnectWizard from '@/components/dashboard/integrations/rushliv-connect-wizard'
+import LightfunnelsConnectWizard from '@/components/dashboard/integrations/lightfunnels-connect-wizard'
 import { CustomSiteKeys } from '@/components/dashboard/integrations/custom-site-keys'
 import VariantStockSetupModal, { type PendingVariantSetupProduct } from '@/components/dashboard/integrations/variant-stock-setup-modal'
 import { createClient } from '@/lib/supabase/client'
@@ -65,6 +66,7 @@ export default function IntegrationsPage() {
   const [isStartingImport, setIsStartingImport] = useState(false)
   const [importError, setImportError] = useState('')
   const [isCustomSiteModalOpen, setIsCustomSiteModalOpen] = useState(false)
+  const [isLightfunnelsModalOpen, setIsLightfunnelsModalOpen] = useState(false)
   const [selectedCustomSiteStoreId, setSelectedCustomSiteStoreId] = useState<string | null>(null)
   const [selectedCustomSiteStoreWebsite, setSelectedCustomSiteStoreWebsite] = useState<string | null>(null)
   const popupMonitorRef = useRef<number | null>(null)
@@ -142,6 +144,9 @@ export default function IntegrationsPage() {
       setIsCustomSiteModalOpen(true)
       setSelectedCustomSiteStoreId(null)
       setSelectedCustomSiteStoreWebsite(null)
+    } else if (providerSlug === 'lightfunnels') {
+      // Connexion OAuth puis liaison explicite des boutiques : parcours dédié.
+      setIsLightfunnelsModalOpen(true)
     } else {
       setConnectProviderSlug(providerSlug)
       if (providerSlug !== 'facebook-ads' && providerSlug !== 'rapid-delivery' && providerSlug !== 'maroc-go-delivery' && providerSlug !== 'ozone' && providerSlug !== 'forcelog' && providerSlug !== 'ameex' && providerSlug !== 'sendit' && providerSlug !== 'digylog' && providerSlug !== 'rushliv') {
@@ -891,6 +896,15 @@ export default function IntegrationsPage() {
           </div>
         </div>
       )}
+
+      {isLightfunnelsModalOpen ? (
+        <LightfunnelsConnectWizard
+          onClose={() => {
+            setIsLightfunnelsModalOpen(false)
+            void queryClient.invalidateQueries({ queryKey: ['integration-marketplace'] })
+          }}
+        />
+      ) : null}
 
       {variantSetupProducts.length > 0 && variantSetupStoreId ? (
         <VariantStockSetupModal
