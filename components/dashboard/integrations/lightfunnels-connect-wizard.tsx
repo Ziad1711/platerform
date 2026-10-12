@@ -163,13 +163,15 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
           </button>
         </div>
 
-        {isLoading ? (
+        {/* Le spinner n'apparaît que faute d'état connu : les relances de statut ne doivent
+            jamais démonter l'assistant, sinon l'étape en cours serait perdue (retour à 1). */}
+        {isLoading && !status ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : null}
 
-        {!isLoading && status?.needsReconnect ? (
+        {status?.needsReconnect ? (
           <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
@@ -179,7 +181,7 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
           </div>
         ) : null}
 
-        {!isLoading && status ? (
+        {status ? (
           <LightfunnelsImportStepper
             status={status}
             onChanged={loadStatus}
@@ -196,6 +198,22 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
                   </>
                 ) : (
                   'Se connecter à Lightfunnels'
+                )}
+              </button>
+            }
+            reconnectAction={
+              <button
+                type="button"
+                onClick={() => void connect()}
+                disabled={isConnecting || !currentStoreId}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              >
+                {isConnecting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Connexion en cours...
+                  </>
+                ) : (
+                  'Reconnecter le compte Lightfunnels'
                 )}
               </button>
             }

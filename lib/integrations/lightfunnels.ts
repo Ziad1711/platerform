@@ -40,12 +40,15 @@ export function getLightfunnelsEndpoints() {
   }
 }
 /**
- * Scopes demandés : `orders` pour lire les commandes, `funnels` pour lire les boutiques du
- * compte (la documentation rattache `account.stores` au scope `funnels`) — sans lui, la
- * liaison des boutiques échoue alors que le consentement a été accepté.
+ * Scopes demandés :
+ * - `orders` : lire les commandes ;
+ * - `products` : lire le catalogue — **sans** ce scope, toute requête `products` est refusée
+ *   par Lightfunnels (l'import du catalogue échoue alors sans lire un seul produit) ;
+ * - `funnels` : lire les boutiques du compte (la documentation rattache `account.stores` au
+ *   scope `funnels`).
  * Référence : https://developer.lightfunnels.com/scopes
  */
-export const LIGHTFUNNELS_SCOPES = 'orders,funnels'
+export const LIGHTFUNNELS_SCOPES = 'orders,products,funnels'
 
 export const LIGHTFUNNELS_WEBHOOK_EVENT_ORDER_CONFIRMED = 'order/confirmed'
 
@@ -371,13 +374,17 @@ export async function listLightfunnelsOrders(params: {
  * Référence : https://developer.lightfunnels.com/products/types
  */
 /**
- * `store_id` permet de rattacher chaque produit à sa boutique : sans lui, un compte
- * possédant plusieurs boutiques verrait leurs catalogues mélangés dans un même store Jisra.
+ * Boutiques du produit. Le schéma documenté expose la relation `stores` (`[Store!]!`) et
+ * **pas** de champ `store_id` sur `Product` : demander `store_id` fait échouer la requête
+ * entière, donc l'import n'aurait plus aucune vérification de boutique.
+ * Référence : https://developer.lightfunnels.com/products/types
  */
-export const LIGHTFUNNELS_PRODUCT_STORE_ID_FIELD = `
-        store_id`
+export const LIGHTFUNNELS_PRODUCT_STORES_FIELD = `
+        stores {
+          id
+        }`
 
-function buildProductsQuery(options: { details: boolean; thumbnail: boolean; storeId: boolean }) {
+function buildProductsQuery(options: { details: boolean; thumbnail: boolean; stores: boolean }) {
   const thumbnail = options.thumbnail
     ? `
         thumbnail {
@@ -418,7 +425,7 @@ function buildProductsQuery(options: { details: boolean; thumbnail: boolean; sto
         compare_at_price
         sku
         created_at
-        updated_at${thumbnail}${variants}${options.storeId ? LIGHTFUNNELS_PRODUCT_STORE_ID_FIELD : ''}
+        updated_at${thumbnail}${variants}${options.stores ? LIGHTFUNNELS_PRODUCT_STORES_FIELD : ''}
       }
       cursor
     }
@@ -431,25 +438,28 @@ function buildProductsQuery(options: { details: boolean; thumbnail: boolean; sto
 }
 
 /**
- * Combinaisons essayées pour les produits : champs détaillés + vignette + `store_id`, puis
- * de moins en moins de champs. La première combinaison acceptée est mémorisée, et
- * `storeIdAvailable` indique si la boutique distante a pu être vérifiée.
+ * Combinaisons essayées pour les produits, du plus complet au plus minimal. La première
+ * acceptée est mémorisée. `storeIdAvailable` indique si la boutique du produit a pu être
+ * lue (relation `stores`), donc si l'appartenance peut être vérifiée.
  */
 const PRODUCT_QUERY_VARIANTS = [
-  { details: true, thumbnail: true, storeId: true },
-  { details: true, thumbnail: false, storeId: true },
-  { details: false, thumbnail: false, storeId: true },
-  { details: true, thumbnail: true, storeId: false },
-  { details: true, thumbnail: false, storeId: false },
-  { details: false, thumbnail: false, storeId: false },
+  { details: true, thumbnail: true, stores: true },
+  { details: true, thumbnail: true, stores: false },
+  { details: true, thumbnail: false, stores: false },
+  { details: false, thumbnail: false, stores: false },
+  { details: false, thumbnail: false, stores: true },
 ]
 
 let productQueryVariantIndex: number | null = null
 
 /**
  * Liste paginée du catalogue (curseur). Filtres documentés : `order_by`, `order_dir`.
- * `storeIdAvailable` est faux quand le schéma installé n'expose pas `store_id` : l'appelant
+ * `storeIdAvailable` est faux quand la boutique du produit n'est pas exposée : l'appelant
  * refuse alors d'importer un compte multi-boutiques dans un store unique.
+ *
+ * Chaque échec est conservé : sans le motif exact, une permission manquante (scope
+ * `products`) et un champ inconnu seraient indistinguables derrière le seul code
+ * `LIGHTFUNNELS_PRODUCTS_FETCH_FAILED`.
  */
 export async function listLightfunnelsProducts(params: {
   accessToken: string
@@ -457,6 +467,7 @@ export async function listLightfunnelsProducts(params: {
   after?: string | null
 }) {
   const warnings: string[] = []
+  const attempts: string[] = []
   const startIndex = productQueryVariantIndex ?? 0
 
   for (let index = startIndex; index < PRODUCT_QUERY_VARIANTS.length; index += 1) {
@@ -477,7 +488,7 @@ export async function listLightfunnelsProducts(params: {
       const pageInfo = result.data?.products?.pageInfo || {}
       productQueryVariantIndex = index
 
-      if (!variant.storeId && !warnings.includes('PRODUCTS_WITHOUT_STORE_ID')) {
+      if (!variant.stores && !warnings.includes('PRODUCTS_WITHOUT_STORE_ID')) {
         warnings.push('PRODUCTS_WITHOUT_STORE_ID')
       }
 
@@ -485,15 +496,17 @@ export async function listLightfunnelsProducts(params: {
         products: edges.map((edge: any) => edge?.node).filter((node: any) => Boolean(node?.id)),
         endCursor: pageInfo.endCursor ?? null,
         hasNextPage: Boolean(pageInfo.hasNextPage),
-        storeIdAvailable: variant.storeId,
+        storeIdAvailable: variant.stores,
         warnings,
       }
     }
 
-    warnings.push(`PRODUCTS_QUERY_FALLBACK:${result.errors.join(' | ')}`)
+    const detail = result.errors.join(' | ').slice(0, 220)
+    attempts.push(`essai${index + 1}=${detail}`)
+    warnings.push(`PRODUCTS_QUERY_FALLBACK:${detail}`)
   }
 
-  throw new Error('LIGHTFUNNELS_PRODUCTS_FETCH_FAILED')
+  throw new Error(`LIGHTFUNNELS_PRODUCTS_FETCH_FAILED:${attempts.join(' || ').slice(0, 900)}`)
 }
 
 /**

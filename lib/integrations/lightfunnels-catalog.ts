@@ -112,7 +112,9 @@ export function readLightfunnelsProduct(product: any): NormalizedProduct | null 
     compareAtPrice: toAmount(product?.compare_at_price),
     sku: readText(product?.sku) || '',
     imageUrl: readText(product?.thumbnail?.path),
-    storeId: readText(product?.store_id, product?.store?.id),
+    // La boutique vient de la relation documentée `stores` ; les anciens champs sont acceptés
+    // en repli si une version de l'API les expose encore.
+    storeId: readText(product?.stores?.[0]?.id, product?.store_id, product?.store?.id),
     variants,
   }
 }
@@ -525,8 +527,8 @@ export async function importLightfunnelsProducts(params: {
         if (!warnings.includes(warning)) warnings.push(warning)
       }
 
-      // Sans `store_id` interrogeable, l'unicité doit être prouvée sur le **compte distant** :
-      // sinon l'import est refusé au lieu de mélanger les catalogues.
+      // Sans boutique lisible pour le produit, l'unicité doit être prouvée sur le **compte
+      // distant** : sinon l'import est refusé au lieu de mélanger les catalogues.
       if (!page.storeIdAvailable && !(await isRemoteStoreSingle())) {
         return await fail('STORE_ID_NOT_QUERYABLE')
       }

@@ -130,6 +130,7 @@ export default function LightfunnelsImportStepper({
   onChanged,
   showDisconnect = true,
   connectAction = null,
+  reconnectAction = null,
 }: {
   status: LightfunnelsApiStatus
   onChanged: () => void | Promise<void>
@@ -140,6 +141,12 @@ export default function LightfunnelsImportStepper({
   showDisconnect?: boolean
   /** Action de connexion OAuth injectée par l'assistant quand le compte n'est pas encore lié. */
   connectAction?: ReactNode
+  /**
+   * Action de **ré-autorisation** proposée quand le compte est déjà lié : indispensable après
+   * l'ajout d'une permission (le consentement déjà accordé ne l'inclut pas), et sans effet sur
+   * les liaisons et les données déjà importées.
+   */
+  reconnectAction?: ReactNode
 }) {
   const queryClient = useQueryClient()
   const { currentStoreId, setCurrentStoreId, accessibleStores, isStoresLoading } = useStore()
@@ -153,8 +160,6 @@ export default function LightfunnelsImportStepper({
   const [unbindingId, setUnbindingId] = useState<string | null>(null)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
 
-  const [importProducts, setImportProducts] = useState(true)
-  const [importOrders, setImportOrders] = useState(true)
   const [sinceDate, setSinceDate] = useState(status.minSinceDate)
 
   const [productsState, setProductsState] = useState<StepState>('pending')
@@ -371,6 +376,9 @@ export default function LightfunnelsImportStepper({
         // « Partiel » plutôt que « Terminé » tant qu'il reste des pages à parcourir.
         const remaining = productResults.some((result) => result.hasMore)
         setProductsState(failed ? 'error' : remaining ? 'partial' : 'done')
+
+        // Étape franchie : on enchaîne sur les ventes, sans repasser par la boutique.
+        if (!failed && !remaining) setStep(3)
       } else {
         const orderResults = payload?.orders || []
         setOrdersResults(orderResults)
@@ -540,6 +548,18 @@ export default function LightfunnelsImportStepper({
                 </button>
               </div>
             ))}
+
+            {/* Une autorisation déjà accordée ne gagne pas les nouvelles permissions : cette
+                action relance le consentement OAuth sans toucher aux liaisons ni aux données. */}
+            {reconnectAction ? (
+              <div className="space-y-1">
+                {reconnectAction}
+                <p className="text-xs text-muted-foreground">
+                  À utiliser après une mise à jour des permissions (ex. lecture du catalogue) :
+                  les liaisons et les commandes déjà importées sont conservées.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-3">
@@ -650,53 +670,41 @@ export default function LightfunnelsImportStepper({
         </div>
 
         <div className="space-y-3">
-          <label className="flex items-center gap-3 text-sm text-foreground">
-            <input
-              type="radio"
-              name="lightfunnels-products-choice"
-              checked={importProducts}
-              onChange={() => {
-                setImportProducts(true)
-                setProductsState('pending')
-              }}
-              disabled={productsState === 'running'}
-            />
-            Importer les produits (+ variantes)
-          </label>
-
-          <label className="flex items-center gap-3 text-sm text-foreground">
-            <input
-              type="radio"
-              name="lightfunnels-products-choice"
-              checked={!importProducts}
-              onChange={() => {
-                setImportProducts(false)
+          {/* Deux choix seulement : « Non » avance sans aucun appel API, « Synchroniser »
+              importe puis enchaîne lui-même sur les ventes. */}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                setError('')
                 setProductsState('skipped')
                 setProductsResults([])
+                setStep(3)
               }}
               disabled={productsState === 'running'}
-            />
-            Ne pas importer les produits
-          </label>
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 sm:flex-1"
+            >
+              Non
+            </button>
 
-          {importProducts ? (
             <button
               type="button"
               onClick={() => void runStep('products')}
               disabled={productsState === 'running' || step1State !== 'done'}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50 sm:flex-1"
             >
               {productsState === 'running' ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Synchronisation des produits...
+                  <Loader2 className="h-4 w-4 animate-spin" /> Synchronisation...
                 </>
               ) : (
                 <>
-                  <RefreshCw className="h-4 w-4" /> Synchroniser les produits
+                  <RefreshCw className="h-4 w-4" />
+                  {productsState === 'partial' ? 'Reprendre' : 'Synchroniser'}
                 </>
               )}
             </button>
-          ) : null}
+          </div>
 
           {productsResults.length > 0 ? (
             <div className="space-y-2">
@@ -764,70 +772,54 @@ export default function LightfunnelsImportStepper({
         </div>
 
         <div className="space-y-3">
-          <label className="flex items-center gap-3 text-sm text-foreground">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-foreground">Commandes depuis</label>
             <input
-              type="radio"
-              name="lightfunnels-orders-choice"
-              checked={importOrders}
-              onChange={() => {
-                setImportOrders(true)
-                setOrdersState('pending')
+              type="date"
+              min={status.minSinceDate}
+              value={sinceDate}
+              onChange={(event) => {
+                const value = event.target.value
+                setSinceDate(value < status.minSinceDate ? status.minSinceDate : value)
               }}
               disabled={ordersState === 'running'}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
             />
-            Importer les ventes (commandes)
-          </label>
+          </div>
 
-          <label className="flex items-center gap-3 text-sm text-foreground">
-            <input
-              type="radio"
-              name="lightfunnels-orders-choice"
-              checked={!importOrders}
-              onChange={() => {
-                setImportOrders(false)
+          {/* Deux choix seulement : « Non » termine sans appel API, « Synchroniser » importe. */}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                setError('')
                 setOrdersState('skipped')
                 setOrdersResults([])
               }}
               disabled={ordersState === 'running'}
-            />
-            Ne pas importer les commandes
-          </label>
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 sm:flex-1"
+            >
+              Non
+            </button>
 
-          {importOrders ? (
-            <>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Commandes depuis</label>
-                <input
-                  type="date"
-                  min={status.minSinceDate}
-                  value={sinceDate}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setSinceDate(value < status.minSinceDate ? status.minSinceDate : value)
-                  }}
-                  disabled={ordersState === 'running'}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={() => void runStep('orders')}
-                disabled={ordersState === 'running' || step1State !== 'done'}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {ordersState === 'running' ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Import des commandes...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4" /> Importer / rattraper les commandes
-                  </>
-                )}
-              </button>
-            </>
-          ) : null}
+            <button
+              type="button"
+              onClick={() => void runStep('orders')}
+              disabled={ordersState === 'running' || step1State !== 'done'}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50 sm:flex-1"
+            >
+              {ordersState === 'running' ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Import...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  {ordersState === 'partial' ? 'Reprendre' : 'Synchroniser'}
+                </>
+              )}
+            </button>
+          </div>
 
           {ordersResults.length > 0 ? (
             <div className="space-y-2">
@@ -863,6 +855,14 @@ export default function LightfunnelsImportStepper({
               ))}
             </div>
           ) : null}
+
+          {ordersState === 'done' || ordersState === 'skipped' ? (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400">
+              {ordersState === 'skipped'
+                ? 'Étape ignorée : les ventes n’ont pas été importées. Vous pouvez fermer cette fenêtre.'
+                : 'Import terminé. Vous pouvez fermer cette fenêtre.'}
+            </div>
+          ) : null}
         </div>
       </section>
       ) : null}
@@ -878,17 +878,19 @@ export default function LightfunnelsImportStepper({
           Précédent
         </button>
 
-        {step < 3 ? (
+        {step === 1 ? (
           <button
             type="button"
-            onClick={() => setStep((current) => ((current + 1) as 1 | 2 | 3))}
-            disabled={step === 1 && step1State !== 'done'}
+            onClick={() => setStep(2)}
+            disabled={step1State !== 'done'}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             Suivant
           </button>
         ) : (
-          <span className="text-xs text-muted-foreground">Dernière étape</span>
+          <span className="text-xs text-muted-foreground">
+            {step === 2 ? 'Choisissez « Non » ou « Synchroniser »' : 'Dernière étape'}
+          </span>
         )}
       </div>
 
