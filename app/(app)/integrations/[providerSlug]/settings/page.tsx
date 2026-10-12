@@ -166,7 +166,6 @@ export default function IntegrationSettingsPage() {
             {lightfunnelsStatus && lightfunnelsStatus.connected ? (
               <LightfunnelsImportStepper
                 status={lightfunnelsStatus}
-                showDisconnect={false}
                 onChanged={() => {
                   setLightfunnelsRefreshKey((current) => current + 1)
                   void queryClient.invalidateQueries({ queryKey: ['integration-marketplace'] })

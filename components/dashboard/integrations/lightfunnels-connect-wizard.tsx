@@ -185,6 +185,7 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
           <LightfunnelsImportStepper
             status={status}
             onChanged={loadStatus}
+            showBindingActions={false}
             connectAction={
               <button
                 type="button"

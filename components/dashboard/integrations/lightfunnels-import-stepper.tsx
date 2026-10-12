@@ -11,7 +11,6 @@ import {
   Package,
   RefreshCw,
   ShoppingCart,
-  Trash2,
   Unplug,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -50,8 +49,9 @@ export type LightfunnelsApiStatus = {
   warnings: string[]
 }
 
-/** `partial` : la synchronisation s'est arrêtée alors qu'il reste des pages à parcourir. */
-type StepState = 'pending' | 'running' | 'done' | 'partial' | 'skipped' | 'error'
+/** `partial` : la synchronisation s'est arrêtée alors qu'il reste des pages à parcourir.
+ *  `current` : étape affichée, pas encore résolue — c'est là qu'est l'« En cours ». */
+type StepState = 'pending' | 'running' | 'current' | 'done' | 'partial' | 'skipped' | 'error'
 
 type ProductStepResult = {
   ok: boolean
@@ -84,10 +84,110 @@ type OrderStepResult = {
   warnings?: string[]
 }
 
+/**
+ * Nombre de lots d'une synchronisation : chaque lot traite une page, la progression reste donc
+ * visible pendant l'import et une interruption reprend au curseur enregistré.
+ */
+const MAX_SYNC_BATCHES = 20
+
+/** Libellés lisibles des motifs d'ignoré (le code technique reste visible entre parenthèses). */
+const REASON_LABELS: Record<string, string> = {
+  ORDER_DETAIL_UNAVAILABLE: 'commande illisible',
+  BEFORE_SINCE_DATE: 'antérieure à la date choisie',
+  TEST_ORDER: 'commande de test',
+  MISSING_REMOTE_STORE: 'boutique absente',
+  STORE_MISMATCH: 'autre boutique',
+  CURRENCY_MISMATCH: 'devise différente du store',
+  NO_ITEMS: 'aucun article',
+  OTHER_STORE: 'produit d’une autre boutique',
+}
+
 function formatReasons(reasons: Record<string, number> | undefined) {
   return Object.entries(reasons || {})
-    .map(([reason, count]) => `${reason} (${count})`)
+    .map(([reason, count]) => `${REASON_LABELS[reason] || reason} (${count})`)
     .join(', ')
+}
+
+function mergeReasons(
+  current: Record<string, number> | undefined,
+  incoming: Record<string, number> | undefined
+) {
+  const merged: Record<string, number> = { ...(current || {}) }
+
+  for (const [reason, count] of Object.entries(incoming || {})) {
+    merged[reason] = (merged[reason] || 0) + count
+  }
+
+  return merged
+}
+
+/** Cumule les lots d'une même boutique : l'utilisateur lit un bilan, pas un lot isolé. */
+function mergeProductBatch(
+  byBinding: Map<string, ProductStepResult>,
+  batch: ProductStepResult[]
+) {
+  for (const result of batch) {
+    const key = result.bindingId || result.lightfunnelsStoreId || 'binding'
+    const current = byBinding.get(key)
+
+    if (!current) {
+      byBinding.set(key, { ...result })
+      continue
+    }
+
+    byBinding.set(key, {
+      ...current,
+      ok: current.ok && result.ok,
+      reason: result.reason || current.reason,
+      scanned: current.scanned + result.scanned,
+      productsCreated: current.productsCreated + result.productsCreated,
+      productsUpdated: current.productsUpdated + result.productsUpdated,
+      productsMatched: current.productsMatched + result.productsMatched,
+      variantsCreated: current.variantsCreated + result.variantsCreated,
+      variantsUpdated: current.variantsUpdated + result.variantsUpdated,
+      skipped: (current.skipped || 0) + (result.skipped || 0),
+      skippedReasons: mergeReasons(current.skippedReasons, result.skippedReasons),
+      hasMore: result.hasMore,
+      warnings: Array.from(new Set([...(current.warnings || []), ...(result.warnings || [])])),
+    })
+  }
+}
+
+function summarizeProducts(results: ProductStepResult[]) {
+  const created = results.reduce((total, row) => total + row.productsCreated, 0)
+  const updated = results.reduce((total, row) => total + row.productsUpdated, 0)
+  return `${created} créé(s), ${updated} mis à jour`
+}
+
+function summarizeOrders(results: OrderStepResult[]) {
+  const imported = results.reduce((total, row) => total + row.imported, 0)
+  const skipped = results.reduce((total, row) => total + row.skipped, 0)
+  return `${imported} importée(s), ${skipped} ignorée(s)`
+}
+
+function mergeOrderBatch(byBinding: Map<string, OrderStepResult>, batch: OrderStepResult[]) {
+  for (const result of batch) {
+    const key = result.bindingId || result.lightfunnelsStoreId || 'binding'
+    const current = byBinding.get(key)
+
+    if (!current) {
+      byBinding.set(key, { ...result })
+      continue
+    }
+
+    byBinding.set(key, {
+      ...current,
+      ok: current.ok && result.ok,
+      reason: result.reason || current.reason,
+      scanned: current.scanned + result.scanned,
+      imported: current.imported + result.imported,
+      alreadyImported: current.alreadyImported + result.alreadyImported,
+      skipped: current.skipped + result.skipped,
+      skippedReasons: mergeReasons(current.skippedReasons, result.skippedReasons),
+      hasMore: result.hasMore,
+      warnings: Array.from(new Set([...(current.warnings || []), ...(result.warnings || [])])),
+    })
+  }
 }
 
 /**
@@ -128,17 +228,12 @@ function formatWarnings(warnings: string[] | undefined) {
 export default function LightfunnelsImportStepper({
   status,
   onChanged,
-  showDisconnect = true,
   connectAction = null,
   reconnectAction = null,
+  showBindingActions = true,
 }: {
   status: LightfunnelsApiStatus
   onChanged: () => void | Promise<void>
-  /**
-   * Affiche la déconnexion en fin d'assistant. Les réglages de l'intégration possèdent déjà
-   * leur propre « Zone de danger » : ils passent `false` pour éviter le doublon.
-   */
-  showDisconnect?: boolean
   /** Action de connexion OAuth injectée par l'assistant quand le compte n'est pas encore lié. */
   connectAction?: ReactNode
   /**
@@ -147,6 +242,11 @@ export default function LightfunnelsImportStepper({
    * les liaisons et les données déjà importées.
    */
   reconnectAction?: ReactNode
+  /**
+   * « Détacher » par boutique n'est proposé que dans les réglages de l'intégration : le
+   * parcours de connexion initial ne doit exposer aucune action destructive.
+   */
+  showBindingActions?: boolean
 }) {
   const queryClient = useQueryClient()
   const { currentStoreId, setCurrentStoreId, accessibleStores, isStoresLoading } = useStore()
@@ -158,7 +258,6 @@ export default function LightfunnelsImportStepper({
   const [remoteStoreId, setRemoteStoreId] = useState('')
   const [isBinding, setIsBinding] = useState(false)
   const [unbindingId, setUnbindingId] = useState<string | null>(null)
-  const [isDisconnecting, setIsDisconnecting] = useState(false)
 
   const [sinceDate, setSinceDate] = useState(status.minSinceDate)
 
@@ -168,6 +267,8 @@ export default function LightfunnelsImportStepper({
   // boutique, jamais un bilan agrégé.
   const [productsResults, setProductsResults] = useState<ProductStepResult[]>([])
   const [ordersResults, setOrdersResults] = useState<OrderStepResult[]>([])
+  /** Progression du lot en cours (« lot 3 · 12 créé(s) · 25 analysé(s) »). */
+  const [progressNote, setProgressNote] = useState('')
   const [error, setError] = useState('')
 
   const targetStoreId = currentStoreId || selectedStoreId
@@ -186,6 +287,9 @@ export default function LightfunnelsImportStepper({
 
   const storeName = (storeId: string) =>
     accessibleStores.find((store) => store.id === storeId)?.name || 'Store inconnu'
+
+  /** Borne du sélecteur de date : importer des commandes « depuis demain » n'a aucun sens. */
+  const todayIso = new Date().toISOString().slice(0, 10)
 
   /** Libellé d'un résultat d'import : boutique Lightfunnels → store Jisra. */
   const bindingLabel = (result: { bindingId?: string; lightfunnelsStoreId?: string }) => {
@@ -242,6 +346,8 @@ export default function LightfunnelsImportStepper({
       }
 
       await refresh()
+      // Boutique liée : le parcours enchaîne seul sur les produits, sans étape manuelle.
+      setStep(2)
     } catch (bindError) {
       setError(bindError instanceof Error ? bindError.message : 'LIGHTFUNNELS_BINDING_FAILED')
     } finally {
@@ -292,42 +398,11 @@ export default function LightfunnelsImportStepper({
     }
   }
 
-  // Déconnexion de portée compte : elle ne dépend d'aucun store sélectionné.
-  const disconnectAccount = async () => {
-    if (
-      !confirm(
-        'Déconnecter Lightfunnels ? Toutes les boutiques liées seront détachées et les webhooks supprimés. Les commandes et les produits déjà importés sont conservés.'
-      )
-    ) {
-      return
-    }
-
-    setIsDisconnecting(true)
-    setError('')
-
-    try {
-      const response = await fetch('/api/integrations/lightfunnels/disconnect', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null
-        throw new Error(payload?.error || 'LIGHTFUNNELS_DISCONNECT_FAILED')
-      }
-
-      await refresh()
-    } catch (disconnectError) {
-      setError(
-        disconnectError instanceof Error ? disconnectError.message : 'LIGHTFUNNELS_DISCONNECT_FAILED'
-      )
-    } finally {
-      setIsDisconnecting(false)
-    }
-  }
-
+  /**
+   * Import par lots courts : chaque requête traite une page, la progression est donc visible
+   * pendant l'exécution, et une limite de débit du fournisseur n'oblige pas à tout recommencer
+   * (la reprise repart du curseur enregistré). Les compteurs sont cumulés par boutique.
+   */
   const runStep = async (step: 'products' | 'orders') => {
     if (!targetStoreId) {
       setError('Sélectionnez un store avant de lancer la synchronisation.')
@@ -339,55 +414,83 @@ export default function LightfunnelsImportStepper({
       return
     }
 
-    if (step === 'products') setProductsState('running')
-    else setOrdersState('running')
+    if (step === 'products') {
+      setProductsState('running')
+      setProductsResults([])
+    } else {
+      setOrdersState('running')
+      setOrdersResults([])
+    }
 
     setError('')
+    setProgressNote('')
 
     try {
-      const response = await fetch('/api/integrations/lightfunnels/sync', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          storeId: targetStoreId,
-          ...(binding ? { bindingId: binding.id } : {}),
-          sinceDate,
-          importProducts: step === 'products',
-          importOrders: step === 'orders',
-        }),
-      })
-
-      const payload = (await response.json().catch(() => null)) as {
-        error?: string
-        ok?: boolean
-        products?: ProductStepResult[]
-        orders?: OrderStepResult[]
-        warnings?: string[]
-      } | null
-
-      if (!response.ok) throw new Error(payload?.error || 'LIGHTFUNNELS_SYNC_FAILED')
-
-      const failed = payload?.ok === false
-
       if (step === 'products') {
-        const productResults = payload?.products || []
-        setProductsResults(productResults)
-        // « Partiel » plutôt que « Terminé » tant qu'il reste des pages à parcourir.
-        const remaining = productResults.some((result) => result.hasMore)
+        const byBinding = new Map<string, ProductStepResult>()
+        let failedAny = false
+        let errorText = ''
+
+        for (let batch = 1; batch <= MAX_SYNC_BATCHES; batch += 1) {
+          const payload = await requestSyncBatch(step)
+          const results = payload?.products || []
+          mergeProductBatch(byBinding, results)
+
+          if (payload?.ok === false) {
+            failedAny = true
+            errorText = (payload?.warnings || []).join(' · ')
+          }
+
+          const rows = Array.from(byBinding.values())
+          setProductsResults(rows)
+          setProgressNote(
+            `lot ${batch} · ${rows.reduce((total, row) => total + row.productsCreated, 0)} créé(s) · ` +
+              `${rows.reduce((total, row) => total + row.scanned, 0)} analysé(s)`
+          )
+
+          if (failedAny || !rows.some((row) => row.hasMore)) break
+        }
+
+        const rows = Array.from(byBinding.values())
+        const remaining = rows.some((row) => row.hasMore)
+        const failed = failedAny || rows.some((row) => !row.ok)
+
         setProductsState(failed ? 'error' : remaining ? 'partial' : 'done')
+        if (failed) setError(errorText || 'Synchronisation des produits interrompue.')
 
         // Étape franchie : on enchaîne sur les ventes, sans repasser par la boutique.
         if (!failed && !remaining) setStep(3)
       } else {
-        const orderResults = payload?.orders || []
-        setOrdersResults(orderResults)
-        const remaining = orderResults.some((result) => result.hasMore)
-        setOrdersState(failed ? 'error' : remaining ? 'partial' : 'done')
-      }
+        const byBinding = new Map<string, OrderStepResult>()
+        let failedAny = false
+        let errorText = ''
 
-      if (failed) {
-        setError(payload?.warnings?.join(' · ') || 'Synchronisation interrompue.')
+        for (let batch = 1; batch <= MAX_SYNC_BATCHES; batch += 1) {
+          const payload = await requestSyncBatch(step)
+          const results = payload?.orders || []
+          mergeOrderBatch(byBinding, results)
+
+          if (payload?.ok === false) {
+            failedAny = true
+            errorText = (payload?.warnings || []).join(' · ')
+          }
+
+          const rows = Array.from(byBinding.values())
+          setOrdersResults(rows)
+          setProgressNote(
+            `lot ${batch} · ${rows.reduce((total, row) => total + row.imported, 0)} importée(s) · ` +
+              `${rows.reduce((total, row) => total + row.scanned, 0)} analysée(s)`
+          )
+
+          if (failedAny || !rows.some((row) => row.hasMore)) break
+        }
+
+        const rows = Array.from(byBinding.values())
+        const remaining = rows.some((row) => row.hasMore)
+        const failed = failedAny || rows.some((row) => !row.ok)
+
+        setOrdersState(failed ? 'error' : remaining ? 'partial' : 'done')
+        if (failed) setError(errorText || 'Import des commandes interrompu.')
       }
 
       await refresh()
@@ -398,16 +501,49 @@ export default function LightfunnelsImportStepper({
       setError(message)
       if (step === 'products') setProductsState('error')
       else setOrdersState('error')
+    } finally {
+      setProgressNote('')
     }
   }
 
+  /** Un lot = une page : voir `MAX_SYNC_BATCHES` pour la borne du parcours complet. */
+  const requestSyncBatch = async (step: 'products' | 'orders') => {
+    const response = await fetch('/api/integrations/lightfunnels/sync', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        storeId: targetStoreId,
+        ...(binding ? { bindingId: binding.id } : {}),
+        sinceDate,
+        importProducts: step === 'products',
+        importOrders: step === 'orders',
+        maxPages: 1,
+      }),
+    })
+
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string
+      ok?: boolean
+      products?: ProductStepResult[]
+      orders?: OrderStepResult[]
+      warnings?: string[]
+    } | null
+
+    if (!response.ok) throw new Error(payload?.error || 'LIGHTFUNNELS_SYNC_FAILED')
+
+    return payload
+  }
+
   const stepBadge = (state: StepState) => {
+    const isActive = state === 'running' || state === 'current'
+
     const label =
       state === 'done'
         ? 'Terminé'
         : state === 'partial'
           ? 'Partiel'
-          : state === 'running'
+          : isActive
             ? 'En cours'
             : state === 'error'
               ? 'À corriger'
@@ -420,7 +556,7 @@ export default function LightfunnelsImportStepper({
         ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
         : state === 'partial'
           ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-          : state === 'running'
+          : isActive
             ? 'bg-primary/10 text-primary'
             : state === 'error'
               ? 'bg-red-500/10 text-red-600 dark:text-red-400'
@@ -428,7 +564,7 @@ export default function LightfunnelsImportStepper({
 
     return (
       <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium', tone)}>
-        {state === 'running' ? (
+        {isActive ? (
           <Loader2 className="h-3 w-3 animate-spin" />
         ) : state === 'done' ? (
           <Check className="h-3 w-3" />
@@ -458,19 +594,72 @@ export default function LightfunnelsImportStepper({
           />
         </div>
 
-        <div className="mt-3 grid gap-2 text-[11px] sm:grid-cols-3">
+        <div className="mt-4 space-y-2">
           {(
             [
-              ['1. Boutique', step1State],
-              ['2. Produits', productsState],
-              ['3. Commandes', ordersState],
-            ] as Array<[string, StepState]>
-          ).map(([label, state]) => (
-            <div key={label} className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">{label}</span>
-              {stepBadge(state)}
-            </div>
-          ))}
+              {
+                index: 1 as const,
+                label: 'Boutique associée',
+                state: step1State,
+                detail:
+                  storeBindings.length > 0
+                    ? `${storeBindings.length} boutique(s) liée(s)`
+                    : 'boutique à associer',
+              },
+              {
+                index: 2 as const,
+                label: 'Produits',
+                state: productsState,
+                detail: productsResults.length > 0
+                  ? summarizeProducts(productsResults)
+                  : 'à synchroniser ou à ignorer',
+              },
+              {
+                index: 3 as const,
+                label: 'Commandes',
+                state: ordersState,
+                detail: ordersResults.length > 0
+                  ? summarizeOrders(ordersResults)
+                  : 'à importer ou à ignorer',
+              },
+            ] as Array<{ index: 1 | 2 | 3; label: string; state: StepState; detail: string }>
+          ).map((row) => {
+            const isActive = row.index === step
+            // L'étape affichée est « en cours » tant qu'elle n'est pas résolue : les états
+            // restent donc à leur place, y compris pendant une synchronisation.
+            const state: StepState = isActive && row.state === 'pending' ? 'current' : row.state
+            const isRunning = row.state === 'running'
+
+            return (
+              <div
+                key={row.label}
+                className={cn(
+                  'flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-xs',
+                  isActive ? 'border-primary/40 bg-primary/5' : 'border-transparent'
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={cn(
+                      'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+                      isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    )}
+                  >
+                    {row.index}
+                  </span>
+                  <span className="min-w-0">
+                    <span className={cn(isActive ? 'font-medium text-foreground' : 'text-muted-foreground')}>
+                      {row.label}
+                    </span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {isRunning && progressNote ? progressNote : row.detail}
+                    </span>
+                  </span>
+                </div>
+                {stepBadge(state)}
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -533,19 +722,21 @@ export default function LightfunnelsImportStepper({
                   ) : null}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => void unbind(row.id)}
-                  disabled={unbindingId === row.id}
-                  className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-                >
-                  {unbindingId === row.id ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Unplug className="h-3 w-3" />
-                  )}
-                  Détacher
-                </button>
+                {showBindingActions ? (
+                  <button
+                    type="button"
+                    onClick={() => void unbind(row.id)}
+                    disabled={unbindingId === row.id}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  >
+                    {unbindingId === row.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Unplug className="h-3 w-3" />
+                    )}
+                    Détacher
+                  </button>
+                ) : null}
               </div>
             ))}
 
@@ -777,9 +968,10 @@ export default function LightfunnelsImportStepper({
             <input
               type="date"
               min={status.minSinceDate}
+              max={todayIso}
               value={sinceDate}
               onChange={(event) => {
-                const value = event.target.value
+                const value = event.target.value > todayIso ? todayIso : event.target.value
                 setSinceDate(value < status.minSinceDate ? status.minSinceDate : value)
               }}
               disabled={ordersState === 'running'}
@@ -898,39 +1090,6 @@ export default function LightfunnelsImportStepper({
         <p className="text-xs text-amber-600">
           Associez d’abord une boutique (étape 1) pour activer les étapes produits et commandes.
         </p>
-      ) : null}
-
-      {/* Déconnexion : l'accès Lightfunnels est global au compte, pas à un store */}
-      {showDisconnect ? (
-        <section className="rounded-2xl border border-destructive/20 bg-destructive/5 p-5 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <Trash2 className="mt-0.5 h-4 w-4 text-destructive" />
-              <div>
-                <p className="text-sm font-medium text-foreground">Déconnecter Lightfunnels</p>
-                <p className="text-xs text-muted-foreground">
-                  Retire l’accès au compte et détache toutes les boutiques liées (webhooks supprimés).
-                  Les commandes et les produits déjà importés sont conservés.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => void disconnectAccount()}
-              disabled={isDisconnecting}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-destructive px-5 py-2.5 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              {isDisconnecting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Déconnexion...
-                </>
-              ) : (
-                'Déconnecter'
-              )}
-            </button>
-          </div>
-        </section>
       ) : null}
 
       {error ? <p className="text-sm text-red-500">{error}</p> : null}

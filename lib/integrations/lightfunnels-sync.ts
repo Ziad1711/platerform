@@ -8,6 +8,7 @@ import {
   parseLightfunnelsDate,
   readLightfunnelsAddress,
   readLightfunnelsOrderLines,
+  isLightfunnelsRateLimitError,
   refreshLightfunnelsToken,
   type LightfunnelsOrderLine,
 } from '@/lib/integrations/lightfunnels'
@@ -811,10 +812,13 @@ export async function importLightfunnelsOrders(params: {
   let cursor: string | null = binding.has_more ? binding.import_cursor : null
   let hasMore = binding.has_more
   let pages = 0
+  /** Échec bloquant (lecture de page ou limitation de débit) : remonté tel quel. */
+  let failureReason: string | null = null
 
   // La progression est enregistrée à chaque page : une coupure ne fait pas repartir de zéro
-  // et une défaillance d'enregistrement n'est jamais silencieuse.
-  const persistImportProgress = async (): Promise<boolean> => {
+  // et une défaillance d'enregistrement n'est jamais silencieuse. Un échec est conservé sur la
+  // liaison (`last_import_error`) pour rester visible dans l'assistant.
+  const persistImportProgress = async (errorReason: string | null = null): Promise<boolean> => {
     const { error: persistError } = await supabase
       .from('lightfunnels_store_bindings')
       .update({
@@ -824,7 +828,7 @@ export async function importLightfunnelsOrders(params: {
         last_import_scanned: scanned,
         last_import_imported: imported,
         last_import_skipped: skipped,
-        last_import_error: null,
+        last_import_error: errorReason,
         updated_at: new Date().toISOString(),
       })
       .eq('id', binding.id)
@@ -845,7 +849,22 @@ export async function importLightfunnelsOrders(params: {
   }
 
   while (pages < maxPages) {
-    const page = await listLightfunnelsOrders({ accessToken, first: pageSize, after: cursor })
+    // Curseur de début de page : en cas d'échec, la reprise doit repartir d'ici, jamais après.
+    const pageStartCursor = cursor
+
+    let page: Awaited<ReturnType<typeof listLightfunnelsOrders>>
+    try {
+      page = await listLightfunnelsOrders({ accessToken, first: pageSize, after: cursor })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ORDERS_LIST_FAILED'
+      cursor = pageStartCursor
+      hasMore = true
+      failureReason = message
+      if (!warnings.includes(message)) warnings.push(message)
+      await persistImportProgress(message)
+      break
+    }
+
     pages += 1
 
     for (const warning of page.warnings) {
@@ -876,6 +895,7 @@ export async function importLightfunnelsOrders(params: {
     }
 
     let reachedSinceDate = false
+    let rateLimitStop = false
 
     for (const headline of page.orders) {
       const orderId = String(headline?.id || '').trim()
@@ -888,7 +908,31 @@ export async function importLightfunnelsOrders(params: {
         continue
       }
 
-      const detail = await getLightfunnelsOrder({ accessToken, orderId })
+      let detail: Awaited<ReturnType<typeof getLightfunnelsOrder>>
+      try {
+        detail = await getLightfunnelsOrder({ accessToken, orderId })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'ORDER_DETAIL_FAILED'
+
+        // Limitation de débit : inutile de poursuivre la page, la reprise repart de son début.
+        if (isLightfunnelsRateLimitError(message)) {
+          cursor = pageStartCursor
+          hasMore = true
+          failureReason = message
+          if (!warnings.includes(message)) warnings.push(message)
+          await persistImportProgress(message)
+          rateLimitStop = true
+          break
+        }
+
+        // Une commande illisible ne doit pas bloquer tout l'historique : elle est comptée avec
+        // son motif exact, et les commandes suivantes continuent.
+        skipped += 1
+        skippedReasons['ORDER_DETAIL_UNAVAILABLE'] =
+          (skippedReasons['ORDER_DETAIL_UNAVAILABLE'] || 0) + 1
+        if (!warnings.includes(message)) warnings.push(message)
+        continue
+      }
 
       for (const warning of detail.warnings) {
         if (!warnings.includes(warning)) warnings.push(warning)
@@ -936,6 +980,8 @@ export async function importLightfunnelsOrders(params: {
       }
     }
 
+    if (rateLimitStop) break
+
     cursor = page.endCursor
     hasMore = page.hasNextPage
 
@@ -958,13 +1004,17 @@ export async function importLightfunnelsOrders(params: {
   // Fin de parcours sans aucune nouveauté : l'historique est réellement à jour (le parcours
   // va jusqu'à la date plancher ou la fin des pages, jamais arrêté sur une page déjà connue —
   // sinon une commande ancienne manquante resterait introuvable).
-  if (!hasMore && !progressFailed && imported === 0 && alreadyImported > 0) {
+  if (!hasMore && !progressFailed && !failureReason && imported === 0 && alreadyImported > 0) {
     if (!warnings.includes('HISTORY_UP_TO_DATE')) warnings.push('HISTORY_UP_TO_DATE')
   }
 
   const summary: LightfunnelsImportSummary = {
-    ok: !progressFailed,
-    ...(progressFailed ? { reason: 'IMPORT_PROGRESS_NOT_SAVED' } : {}),
+    ok: !progressFailed && !failureReason,
+    ...(failureReason
+      ? { reason: failureReason }
+      : progressFailed
+        ? { reason: 'IMPORT_PROGRESS_NOT_SAVED' }
+        : {}),
     scanned,
     imported,
     alreadyImported,
@@ -975,7 +1025,8 @@ export async function importLightfunnelsOrders(params: {
     cursor,
   }
 
-  if (!progressFailed && !(await persistImportProgress())) {
+  // Un échec conserve son motif sur la liaison (visible dans l'assistant) ; un succès l'efface.
+  if (!progressFailed && !(await persistImportProgress(failureReason))) {
     summary.ok = false
     summary.reason = 'IMPORT_PROGRESS_NOT_SAVED'
   }

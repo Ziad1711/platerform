@@ -20,10 +20,14 @@ function normalizeSinceDate(input: unknown) {
   const raw = String(input || '').trim() || LIGHTFUNNELS_DEFAULT_SINCE_DATE
   const min = new Date(LIGHTFUNNELS_DEFAULT_SINCE_DATE)
   const parsed = new Date(raw)
+  const today = new Date().toISOString().slice(0, 10)
 
   if (Number.isNaN(parsed.getTime()) || parsed < min) return LIGHTFUNNELS_DEFAULT_SINCE_DATE
 
-  return parsed.toISOString().slice(0, 10)
+  // Une date future n'a aucun sens pour un import : elle est ramenée à aujourd'hui côté serveur,
+  // quelles que soient les limites du sélecteur de date du navigateur.
+  const normalized = parsed.toISOString().slice(0, 10)
+  return normalized > today ? today : normalized
 }
 
 function normalizeMaxPages(input: unknown) {

@@ -149,6 +149,22 @@ export type LightfunnelsGraphqlResult<T> = {
 }
 
 /**
+ * Réponse « rate limit » du fournisseur. Elle ne signifie **pas** que la requête est
+ * invalide : réessayer une autre variante ne fait qu'aggraver la limitation, et retenter
+ * immédiatement en boucle est inutile. Les appelants l'utilisent pour arrêter proprement.
+ */
+export function isLightfunnelsRateLimitError(message: string) {
+  const value = String(message || '')
+  return /rate limit/i.test(value) || value.includes('LIGHTFUNNELS_HTTP_429')
+}
+
+const RATE_LIMIT_RETRY_DELAY_MS = 1500
+
+async function waitForRetry(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
  * Requête GraphQL brute. Les erreurs applicatives arrivent avec un HTTP 200 :
  * le tableau `errors` est donc toujours remonté, sans être masqué par des données partielles.
  */
@@ -157,37 +173,56 @@ export async function lightfunnelsRawRequest<T = any>(params: {
   query: string
   variables?: Record<string, unknown>
 }): Promise<LightfunnelsGraphqlResult<T>> {
-  const response = await fetch(getLightfunnelsEndpoints().apiBaseUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${params.accessToken}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      query: params.query,
-      variables: params.variables || {},
-    }),
-  })
+  const run = async (): Promise<LightfunnelsGraphqlResult<T>> => {
+    const response = await fetch(getLightfunnelsEndpoints().apiBaseUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        query: params.query,
+        variables: params.variables || {},
+      }),
+    })
 
-  const raw = await response.text()
+    const raw = await response.text()
 
-  if (!response.ok) {
-    throw new Error(`LIGHTFUNNELS_HTTP_${response.status}:${raw.slice(0, 600)}`)
+    if (!response.ok) {
+      throw new Error(`LIGHTFUNNELS_HTTP_${response.status}:${raw.slice(0, 600)}`)
+    }
+
+    let payload: any = null
+    try {
+      payload = raw ? JSON.parse(raw) : null
+    } catch {
+      throw new Error('LIGHTFUNNELS_INVALID_JSON')
+    }
+
+    const errors: string[] = Array.isArray(payload?.errors)
+      ? payload.errors.map((error: any) => String(error?.message || error?.key || 'UNKNOWN'))
+      : []
+
+    return { data: (payload?.data ?? null) as T | null, errors }
   }
 
-  let payload: any = null
-  try {
-    payload = raw ? JSON.parse(raw) : null
-  } catch {
-    throw new Error('LIGHTFUNNELS_INVALID_JSON')
+  const first = await run()
+
+  // Une seule nouvelle tentative, après une courte attente : au-delà, la limitation est
+  // durable et l'appelant doit arrêter son traitement au lieu d'insister.
+  if (first.errors.some(isLightfunnelsRateLimitError)) {
+    await waitForRetry(RATE_LIMIT_RETRY_DELAY_MS)
+    const second = await run()
+
+    if (second.errors.some(isLightfunnelsRateLimitError)) {
+      throw new Error(`LIGHTFUNNELS_RATE_LIMITED:${second.errors.join(' | ').slice(0, 300)}`)
+    }
+
+    return second
   }
 
-  const errors: string[] = Array.isArray(payload?.errors)
-    ? payload.errors.map((error: any) => String(error?.message || error?.key || 'UNKNOWN'))
-    : []
-
-  return { data: (payload?.data ?? null) as T | null, errors }
+  return first
 }
 
 /** Requête GraphQL : renvoie les données ou lève une erreur explicite. */
@@ -510,9 +545,12 @@ export async function listLightfunnelsProducts(params: {
 }
 
 /**
- * Détail d'une commande. Les adresses sont demandées en plus : si le schéma installé ne
- * les expose pas telles quelles, la requête est rejouée sans elles (l'import reste
- * fonctionnel et la raison est journalisée) plutôt que d'échouer.
+ * Détail d'une commande.
+ *
+ * Les champs facultatifs sont demandés par paliers (adresses portées par la commande, puis par
+ * le client, puis `store_id`, puis lignes réduites) et **le motif exact de chaque échec est
+ * conservé** : sans lui, un champ inconnu et une limitation de débit seraient indistinguables
+ * derrière le seul code `LIGHTFUNNELS_ORDER_FETCH_FAILED`.
  */
 const LIGHTFUNNELS_ORDER_ITEMS_FIELDS = `items {
           __typename
@@ -529,6 +567,25 @@ const LIGHTFUNNELS_ORDER_ITEMS_FIELDS = `items {
               label
               value
             }
+          }
+          ... on OrderBumpSnapshot {
+            id
+            title
+            sku
+            price
+            removed_at
+          }
+        }`
+
+/** Lignes réduites : identité, libellé, prix — suffisant pour recréer une vente. */
+const LIGHTFUNNELS_ORDER_ITEMS_MINIMAL_FIELDS = `items {
+          __typename
+          ... on VariantSnapshot {
+            id
+            title
+            sku
+            price
+            removed_at
           }
           ... on OrderBumpSnapshot {
             id
@@ -565,39 +622,133 @@ const LIGHTFUNNELS_ORDER_ADDRESS_FIELDS = `
           country
         }`
 
-function buildOrderDetailQuery(options: { includeAddresses: boolean; includeStoreId: boolean }) {
+/** Adresses portées par le client quand la commande ne les expose pas. */
+const LIGHTFUNNELS_CUSTOMER_ADDRESS_FIELDS = `
+        customer {
+          id
+          full_name
+          shipping_address {
+            first_name
+            last_name
+            full_name
+            email
+            phone
+            line1
+            line2
+            city
+            area
+            state
+            zip
+            country
+          }
+          billing_address {
+            first_name
+            last_name
+            full_name
+            email
+            phone
+            line1
+            line2
+            city
+            area
+            state
+            zip
+            country
+          }
+        }`
+
+/** En-tête sans le bloc `customer`, pour ne jamais le sélectionner deux fois. */
+const LIGHTFUNNELS_ORDER_HEADLINE_WITHOUT_CUSTOMER = `id
+        _id
+        name
+        total
+        subtotal
+        shipping
+        discount_value
+        currency
+        account_id
+        financial_status
+        fulfillment_status
+        cancelled_at
+        archived_at
+        created_at
+        updated_at
+        phone
+        email
+        notes
+        test`
+
+/** En-tête minimal : de quoi identifier et dater la commande. */
+const LIGHTFUNNELS_ORDER_HEADLINE_MINIMAL = `id
+        _id
+        name
+        total
+        created_at
+        cancelled_at
+        financial_status
+        fulfillment_status
+        test`
+
+type OrderDetailAttempt = {
+  headline: 'full' | 'minimal'
+  items: 'full' | 'minimal' | 'none'
+  addresses: 'order' | 'customer' | 'none'
+  storeId: boolean
+}
+
+/**
+ * Paliers essayés dans l'ordre, du plus riche au plus minimal. Le premier accepté est
+ * mémorisé pour le reste du processus.
+ */
+const ORDER_DETAIL_VARIANTS: OrderDetailAttempt[] = [
+  { headline: 'full', items: 'full', addresses: 'order', storeId: true },
+  { headline: 'full', items: 'full', addresses: 'order', storeId: false },
+  { headline: 'full', items: 'full', addresses: 'customer', storeId: false },
+  { headline: 'full', items: 'full', addresses: 'none', storeId: false },
+  { headline: 'full', items: 'minimal', addresses: 'none', storeId: false },
+  { headline: 'minimal', items: 'minimal', addresses: 'none', storeId: false },
+  { headline: 'minimal', items: 'none', addresses: 'none', storeId: false },
+]
+
+let orderDetailVariantIndex: number | null = null
+
+function buildOrderDetailQuery(attempt: OrderDetailAttempt) {
+  const headline =
+    attempt.headline === 'minimal'
+      ? LIGHTFUNNELS_ORDER_HEADLINE_MINIMAL
+      : attempt.addresses === 'customer'
+        ? LIGHTFUNNELS_ORDER_HEADLINE_WITHOUT_CUSTOMER
+        : LIGHTFUNNELS_ORDER_HEADLINE_FIELDS
+
+  const items =
+    attempt.items === 'full'
+      ? LIGHTFUNNELS_ORDER_ITEMS_FIELDS
+      : attempt.items === 'minimal'
+        ? LIGHTFUNNELS_ORDER_ITEMS_MINIMAL_FIELDS
+        : ''
+
+  const addresses =
+    attempt.addresses === 'order'
+      ? LIGHTFUNNELS_ORDER_ADDRESS_FIELDS
+      : attempt.addresses === 'customer'
+        ? LIGHTFUNNELS_CUSTOMER_ADDRESS_FIELDS
+        : ''
+
   return `query JisraOrderQuery($id: ID!) {
   node(id: $id) {
     ... on Order {
-      ${LIGHTFUNNELS_ORDER_HEADLINE_FIELDS}${options.includeStoreId ? LIGHTFUNNELS_STORE_ID_FIELD : ''}
-      ${LIGHTFUNNELS_ORDER_ITEMS_FIELDS}${options.includeAddresses ? LIGHTFUNNELS_ORDER_ADDRESS_FIELDS : ''}
+      ${headline}${attempt.storeId ? LIGHTFUNNELS_STORE_ID_FIELD : ''}${items ? `\n      ${items}` : ''}${addresses}
     }
   }
 }`
 }
 
-/**
- * Combinaisons de champs essayées dans l'ordre : adresses + `store_id`, puis sans l'un
- * et/ou l'autre. La combinaison retenue est mémorisée pour le reste du processus.
- */
-const ORDER_DETAIL_VARIANTS = [
-  { includeAddresses: true, includeStoreId: true },
-  { includeAddresses: false, includeStoreId: true },
-  { includeAddresses: false, includeStoreId: false },
-]
-
-let orderDetailVariantIndex: number | null = null
-
-/**
- * Détail d'une commande. Les champs optionnels (adresses, `store_id`) sont demandés puis
- * abandonnés individuellement si le schéma installé ne les expose pas : l'import reste
- * fonctionnel et la raison est journalisée, plutôt qu'un échec silencieux.
- */
 export async function getLightfunnelsOrder(params: {
   accessToken: string
   orderId: string
 }) {
   const warnings: string[] = []
+  const attempts: string[] = []
   const startIndex = orderDetailVariantIndex ?? 0
 
   for (let index = startIndex; index < ORDER_DETAIL_VARIANTS.length; index += 1) {
@@ -611,18 +762,44 @@ export async function getLightfunnelsOrder(params: {
 
     if (result.errors.length === 0 && result.data?.node) {
       orderDetailVariantIndex = index
+      const node = result.data.node as any
+      const customer = node?.customer || {}
+
+      // Les adresses du client sont remontées au niveau de la commande : la lecture reste
+      // unique, où que le schéma les expose.
+      const order =
+        variant.addresses === 'customer' && !node?.shipping_address
+          ? {
+              ...node,
+              shipping_address: customer?.shipping_address ?? null,
+              billing_address: customer?.billing_address ?? null,
+            }
+          : node
+
       return {
-        order: result.data.node as any,
-        addressesAvailable: variant.includeAddresses,
-        storeIdAvailable: variant.includeStoreId,
+        order,
+        addressesAvailable: variant.addresses !== 'none',
+        storeIdAvailable: variant.storeId,
         warnings,
       }
     }
 
-    warnings.push(`ORDER_DETAIL_FALLBACK:${result.errors.join(' | ') || 'NO_DATA'}`)
+    const detail = result.errors.join(' | ').slice(0, 200)
+    attempts.push(`essai${index + 1}=${detail || 'NO_DATA'}`)
+
+    // Limitation de débit : inutile d'essayer d'autres variantes, l'appelant doit s'arrêter.
+    if (detail && isLightfunnelsRateLimitError(detail)) {
+      throw new Error(`LIGHTFUNNELS_RATE_LIMITED:${detail}`)
+    }
   }
 
-  throw new Error(`LIGHTFUNNELS_ORDER_FETCH_FAILED:${params.orderId}`)
+  if (attempts.length > 0 && attempts.every((entry) => entry.endsWith('=NO_DATA'))) {
+    throw new Error(`LIGHTFUNNELS_ORDER_NOT_FOUND:${params.orderId}`)
+  }
+
+  throw new Error(
+    `LIGHTFUNNELS_ORDER_FETCH_FAILED:${params.orderId}:${attempts.join(' || ').slice(0, 700)}`
+  )
 }
 
 export const LIGHTFUNNELS_WEBHOOKS_QUERY = `query JisraWebhooksQuery {
