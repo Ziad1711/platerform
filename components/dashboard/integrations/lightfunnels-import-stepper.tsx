@@ -92,7 +92,6 @@ const MAX_SYNC_BATCHES = 20
 
 /** Libellés lisibles des motifs d'ignoré (le code technique reste visible entre parenthèses). */
 const REASON_LABELS: Record<string, string> = {
-  ORDER_DETAIL_UNAVAILABLE: 'commande illisible',
   BEFORE_SINCE_DATE: 'antérieure à la date choisie',
   TEST_ORDER: 'commande de test',
   MISSING_REMOTE_STORE: 'boutique absente',
@@ -203,6 +202,12 @@ const WARNING_LABELS: Record<string, string> = {
   ORDERS_QUERY_WITHOUT_STORE_ID: 'La boutique n’est pas exposée par l’API des commandes.',
   PRODUCTS_WITHOUT_STORE_ID: 'La boutique n’est pas exposée par l’API du catalogue.',
   ORDER_WITHOUT_REMOTE_STORE: 'Commande sans boutique : acceptée car une seule boutique est liée.',
+  LIGHTFUNNELS_RATE_LIMITED: 'Limite temporaire chez Lightfunnels : réessayez dans quelques minutes.',
+  ORDER_DETAIL_BLOCKED:
+    'Commande bloquante : la page sera relue à la reprise, les commandes déjà importées ne seront pas dupliquées.',
+  LIGHTFUNNELS_ORDER_DETAIL_INCOMPLETE:
+    'Commande lue sans ses articles : import refusé pour ne pas créer une vente incomplète.',
+  LIGHTFUNNELS_ORDER_NOT_FOUND: 'Commande introuvable chez Lightfunnels.',
 }
 
 function formatWarnings(warnings: string[] | undefined) {
@@ -891,7 +896,9 @@ export default function LightfunnelsImportStepper({
               ) : (
                 <>
                   <RefreshCw className="h-4 w-4" />
-                  {productsState === 'partial' ? 'Reprendre' : 'Synchroniser'}
+                  {productsState === 'partial' || productsState === 'error'
+                    ? 'Reprendre'
+                    : 'Synchroniser'}
                 </>
               )}
             </button>
@@ -1007,7 +1014,9 @@ export default function LightfunnelsImportStepper({
               ) : (
                 <>
                   <RefreshCw className="h-4 w-4" />
-                  {ordersState === 'partial' ? 'Reprendre' : 'Synchroniser'}
+                  {ordersState === 'partial' || ordersState === 'error'
+                    ? 'Reprendre'
+                    : 'Synchroniser'}
                 </>
               )}
             </button>
@@ -1035,6 +1044,11 @@ export default function LightfunnelsImportStepper({
                   {result.warnings && result.warnings.length > 0 ? (
                     <p className="text-amber-600 dark:text-amber-400">
                       {formatWarnings(result.warnings)}
+                    </p>
+                  ) : null}
+                  {!result.ok && result.reason ? (
+                    <p className="flex items-center gap-1 text-red-500">
+                      <AlertTriangle className="h-3 w-3" /> {formatWarnings([result.reason])}
                     </p>
                   ) : null}
                   {result.hasMore ? (

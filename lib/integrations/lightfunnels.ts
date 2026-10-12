@@ -159,9 +159,29 @@ export function isLightfunnelsRateLimitError(message: string) {
 }
 
 const RATE_LIMIT_RETRY_DELAY_MS = 1500
+/** Attente maximale imposée avant une nouvelle tentative (une consigne plus longue est plafonnée). */
+const MAX_RATE_LIMIT_WAIT_MS = 5000
 
 async function waitForRetry(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Attente demandée par le fournisseur (`Retry-After`), bornée. */
+function rateLimitWaitMs(retryAfterHeader: string | null) {
+  const seconds = Number(String(retryAfterHeader || '').trim())
+  if (!Number.isFinite(seconds) || seconds <= 0) return RATE_LIMIT_RETRY_DELAY_MS
+  return Math.min(seconds * 1000, MAX_RATE_LIMIT_WAIT_MS)
+}
+
+type LightfunnelsAttempt<T> = {
+  data: T | null
+  errors: string[]
+  /** Limitation de débit : HTTP 429 ou erreur GraphQL « rate limit ». */
+  rateLimited: boolean
+  /** Erreur HTTP hors limitation : message prêt à être lancé. */
+  httpError: string | null
+  /** Attente avant nouvelle tentative (consigne du fournisseur, bornée). */
+  waitMs: number
 }
 
 /**
@@ -173,7 +193,7 @@ export async function lightfunnelsRawRequest<T = any>(params: {
   query: string
   variables?: Record<string, unknown>
 }): Promise<LightfunnelsGraphqlResult<T>> {
-  const run = async (): Promise<LightfunnelsGraphqlResult<T>> => {
+  const run = async (): Promise<LightfunnelsAttempt<T>> => {
     const response = await fetch(getLightfunnelsEndpoints().apiBaseUrl, {
       method: 'POST',
       headers: {
@@ -190,7 +210,18 @@ export async function lightfunnelsRawRequest<T = any>(params: {
     const raw = await response.text()
 
     if (!response.ok) {
-      throw new Error(`LIGHTFUNNELS_HTTP_${response.status}:${raw.slice(0, 600)}`)
+      // Seul le 429 est une limitation : les autres codes sont des erreurs définitives et
+      // gardent leur message d'origine (401/403 sont reconnus par les appelants).
+      return {
+        data: null,
+        errors: [],
+        rateLimited: response.status === 429,
+        httpError:
+          response.status === 429
+            ? null
+            : `LIGHTFUNNELS_HTTP_${response.status}:${raw.slice(0, 600)}`,
+        waitMs: rateLimitWaitMs(response.headers.get('retry-after')),
+      }
     }
 
     let payload: any = null
@@ -204,25 +235,37 @@ export async function lightfunnelsRawRequest<T = any>(params: {
       ? payload.errors.map((error: any) => String(error?.message || error?.key || 'UNKNOWN'))
       : []
 
-    return { data: (payload?.data ?? null) as T | null, errors }
+    return {
+      data: (payload?.data ?? null) as T | null,
+      errors,
+      rateLimited: errors.some(isLightfunnelsRateLimitError),
+      httpError: null,
+      waitMs: RATE_LIMIT_RETRY_DELAY_MS,
+    }
   }
 
   const first = await run()
 
-  // Une seule nouvelle tentative, après une courte attente : au-delà, la limitation est
-  // durable et l'appelant doit arrêter son traitement au lieu d'insister.
-  if (first.errors.some(isLightfunnelsRateLimitError)) {
-    await waitForRetry(RATE_LIMIT_RETRY_DELAY_MS)
+  // Une seule nouvelle tentative, après l'attente demandée par le fournisseur (bornée) : au-delà,
+  // la limitation est durable et l'appelant doit arrêter son traitement au lieu d'insister.
+  if (first.rateLimited) {
+    await waitForRetry(first.waitMs)
     const second = await run()
 
-    if (second.errors.some(isLightfunnelsRateLimitError)) {
-      throw new Error(`LIGHTFUNNELS_RATE_LIMITED:${second.errors.join(' | ').slice(0, 300)}`)
+    if (second.rateLimited) {
+      throw new Error(
+        `LIGHTFUNNELS_RATE_LIMITED:${(second.errors.join(' | ') || 'HTTP_429').slice(0, 300)}`
+      )
     }
 
-    return second
+    if (second.httpError) throw new Error(second.httpError)
+
+    return { data: second.data, errors: second.errors }
   }
 
-  return first
+  if (first.httpError) throw new Error(first.httpError)
+
+  return { data: first.data, errors: first.errors }
 }
 
 /** Requête GraphQL : renvoie les données ou lève une erreur explicite. */
@@ -694,6 +737,12 @@ type OrderDetailAttempt = {
   items: 'full' | 'minimal' | 'none'
   addresses: 'order' | 'customer' | 'none'
   storeId: boolean
+  /**
+   * Palier de **diagnostic** : il confirme que la commande existe et que l'en-tête est lisible,
+   * mais une réponse sans articles n'est jamais importable — elle servirait à créer une vente
+   * vide. Le résultat sert donc à expliquer l'échec, jamais à importer.
+   */
+  diagnosticOnly?: boolean
 }
 
 /**
@@ -707,7 +756,7 @@ const ORDER_DETAIL_VARIANTS: OrderDetailAttempt[] = [
   { headline: 'full', items: 'full', addresses: 'none', storeId: false },
   { headline: 'full', items: 'minimal', addresses: 'none', storeId: false },
   { headline: 'minimal', items: 'minimal', addresses: 'none', storeId: false },
-  { headline: 'minimal', items: 'none', addresses: 'none', storeId: false },
+  { headline: 'minimal', items: 'none', addresses: 'none', storeId: false, diagnosticOnly: true },
 ]
 
 let orderDetailVariantIndex: number | null = null
@@ -761,6 +810,13 @@ export async function getLightfunnelsOrder(params: {
     })
 
     if (result.errors.length === 0 && result.data?.node) {
+      if (variant.diagnosticOnly) {
+        // L'en-tête est lisible mais les articles sont refusés : la commande n'est pas
+        // importable — le palier explique l'échec et la boucle se termine sur un refus explicite.
+        attempts.push(`essai${index + 1}=items_refuses`)
+        continue
+      }
+
       orderDetailVariantIndex = index
       const node = result.data.node as any
       const customer = node?.customer || {}
@@ -791,6 +847,12 @@ export async function getLightfunnelsOrder(params: {
     if (detail && isLightfunnelsRateLimitError(detail)) {
       throw new Error(`LIGHTFUNNELS_RATE_LIMITED:${detail}`)
     }
+  }
+
+  if (attempts.some((entry) => entry.endsWith('=items_refuses'))) {
+    throw new Error(
+      `LIGHTFUNNELS_ORDER_DETAIL_INCOMPLETE:${params.orderId}:${attempts.join(' || ').slice(0, 700)}`
+    )
   }
 
   if (attempts.length > 0 && attempts.every((entry) => entry.endsWith('=NO_DATA'))) {

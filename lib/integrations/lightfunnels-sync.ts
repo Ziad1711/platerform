@@ -895,7 +895,8 @@ export async function importLightfunnelsOrders(params: {
     }
 
     let reachedSinceDate = false
-    let rateLimitStop = false
+    /** Interruption de page (limitation de débit ou commande bloquante) : reprise au début. */
+    let pageAborted = false
 
     for (const headline of page.orders) {
       const orderId = String(headline?.id || '').trim()
@@ -914,24 +915,17 @@ export async function importLightfunnelsOrders(params: {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'ORDER_DETAIL_FAILED'
 
-        // Limitation de débit : inutile de poursuivre la page, la reprise repart de son début.
-        if (isLightfunnelsRateLimitError(message)) {
-          cursor = pageStartCursor
-          hasMore = true
-          failureReason = message
-          if (!warnings.includes(message)) warnings.push(message)
-          await persistImportProgress(message)
-          rateLimitStop = true
-          break
-        }
-
-        // Une commande illisible ne doit pas bloquer tout l'historique : elle est comptée avec
-        // son motif exact, et les commandes suivantes continuent.
-        skipped += 1
-        skippedReasons['ORDER_DETAIL_UNAVAILABLE'] =
-          (skippedReasons['ORDER_DETAIL_UNAVAILABLE'] || 0) + 1
-        if (!warnings.includes(message)) warnings.push(message)
-        continue
+        // La commande n'est jamais sautée : la page est relue depuis son début, sinon une
+        // commande non lue serait définitivement dépassée par le curseur et jamais importée.
+        failureReason = isLightfunnelsRateLimitError(message)
+          ? message
+          : `ORDER_DETAIL_BLOCKED:${orderId}:${message}`
+        cursor = pageStartCursor
+        hasMore = true
+        if (!warnings.includes(failureReason)) warnings.push(failureReason)
+        await persistImportProgress(failureReason)
+        pageAborted = true
+        break
       }
 
       for (const warning of detail.warnings) {
@@ -980,7 +974,7 @@ export async function importLightfunnelsOrders(params: {
       }
     }
 
-    if (rateLimitStop) break
+    if (pageAborted) break
 
     cursor = page.endCursor
     hasMore = page.hasNextPage
