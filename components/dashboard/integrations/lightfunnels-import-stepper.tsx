@@ -249,8 +249,6 @@ const WARNING_LABELS: Record<string, string> = {
     'Options des variantes illisibles : les produits concernés ont été ignorés au lieu de deviner leurs variantes — relancez la synchronisation du catalogue.',
   ORDER_ADDRESSES_UNAVAILABLE: 'Adresses absentes de la réponse : ville ou client possiblement incomplets.',
   ORDERS_QUERY_WITHOUT_STORE_ID: 'La boutique n’est pas exposée par l’API des commandes.',
-  ORDERS_QUERY_WITHOUT_DATE:
-    'Le champ de date des commandes n’est pas exposé par l’API : la date des ventes importées ne peut pas être établie.',
   PRODUCTS_WITHOUT_STORE_ID: 'La boutique n’est pas exposée par l’API du catalogue.',
   ORDER_WITHOUT_REMOTE_STORE: 'Commande sans boutique : acceptée car une seule boutique est liée.',
   LIGHTFUNNELS_RATE_LIMITED: 'Limite temporaire chez Lightfunnels : réessayez dans quelques minutes.',
@@ -262,7 +260,7 @@ const WARNING_LABELS: Record<string, string> = {
   LIGHTFUNNELS_ORDER_LINE_AMBIGUOUS:
     'Articles refusés faute d’options lisibles : la commande sera relue à la reprise (aucune variante devinée, aucune commande sautée).',
   LIGHTFUNNELS_ORDER_DATE_UNRESOLVABLE:
-    'Date de commande illisible chez Lightfunnels (valeur relative) : la commande est bloquée pour ne pas être datée d’aujourd’hui, elle sera relue à la reprise.',
+    'Date de commande illisible chez Lightfunnels : la commande est bloquée plutôt que datée d’aujourd’hui, elle sera relue à la reprise.',
   ORDER_UPSERT_BLOCKED:
     'Écriture de la commande bloquée : la page sera relue à la reprise, aucune commande n’est sautée.',
 }

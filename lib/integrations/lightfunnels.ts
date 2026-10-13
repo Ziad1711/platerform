@@ -375,7 +375,6 @@ export const LIGHTFUNNELS_ORDER_HEADLINE_FIELDS = `id
         fulfillment_status
         cancelled_at
         archived_at
-        date
         created_at
         updated_at
         phone
@@ -391,18 +390,12 @@ export const LIGHTFUNNELS_ORDER_HEADLINE_FIELDS = `id
 export const LIGHTFUNNELS_STORE_ID_FIELD = `
         store_id`
 
-function buildOrdersQuery(includeStoreId: boolean, includeDate = true) {
-  // Le champ `date` (documenté pour les commandes) peut être refusé par un schéma plus ancien :
-  // le repli le retire pour ne pas bloquer tout l'import des commandes.
-  const headline = includeDate
-    ? LIGHTFUNNELS_ORDER_HEADLINE_FIELDS
-    : LIGHTFUNNELS_ORDER_HEADLINE_FIELDS.replace('\n        date', '')
-
+function buildOrdersQuery(includeStoreId: boolean) {
   return `query JisraOrdersQuery($first: Int, $after: String, $query: String!) {
   orders(first: $first, after: $after, query: $query) {
     edges {
       node {
-        ${headline}${includeStoreId ? LIGHTFUNNELS_STORE_ID_FIELD : ''}
+        ${LIGHTFUNNELS_ORDER_HEADLINE_FIELDS}${includeStoreId ? LIGHTFUNNELS_STORE_ID_FIELD : ''}
       }
       cursor
     }
@@ -428,12 +421,6 @@ export type LightfunnelsOrderConnection = {
 let ordersQuerySupportsStoreId: boolean | null = null
 
 /**
- * Le schéma installé accepte-t-il le champ `date` sur les commandes ? Mémorisé pour éviter de
- * réessayer indéfiniment une sélection refusée (comme `store_id`).
- */
-let ordersQuerySupportsDateField: boolean | null = null
-
-/**
  * Liste paginée des commandes (curseur). Le tri est imposé par Lightfunnels :
  * `order_by:id order_dir:desc` renvoie les commandes les plus récentes en premier.
  */
@@ -444,10 +431,10 @@ export async function listLightfunnelsOrders(params: {
 }) {
   const first = params.first || 25
 
-  const run = async (includeStoreId: boolean, includeDate: boolean) => {
+  const run = async (includeStoreId: boolean) => {
     const result = await lightfunnelsRawRequest<LightfunnelsOrderConnection>({
       accessToken: params.accessToken,
-      query: buildOrdersQuery(includeStoreId, includeDate),
+      query: buildOrdersQuery(includeStoreId),
       variables: {
         first,
         after: params.after || null,
@@ -466,53 +453,26 @@ export async function listLightfunnelsOrders(params: {
     }
   }
 
-  const includeDate = ordersQuerySupportsDateField !== false
-  const attempts: Array<{
-    includeStoreId: boolean
-    includeDate: boolean
-    warnings: string[]
-  }> = []
-
   if (ordersQuerySupportsStoreId !== false) {
-    attempts.push({ includeStoreId: true, includeDate, warnings: [] })
-  }
-
-  attempts.push({
-    includeStoreId: false,
-    includeDate,
-    warnings: ['ORDERS_QUERY_WITHOUT_STORE_ID'],
-  })
-
-  if (includeDate) {
-    // Dernier repli : schéma sans le champ `date` — la date des commandes sera alors signalée
-    // comme non résoluble, jamais remplacée par la date du jour.
-    attempts.push({
-      includeStoreId: false,
-      includeDate: false,
-      warnings: ['ORDERS_QUERY_WITHOUT_STORE_ID', 'ORDERS_QUERY_WITHOUT_DATE'],
-    })
-  }
-
-  const errors: string[] = []
-
-  for (const attempt of attempts) {
-    const result = await run(attempt.includeStoreId, attempt.includeDate)
-
-    if (result.errors.length === 0) {
-      ordersQuerySupportsStoreId = attempt.includeStoreId
-      ordersQuerySupportsDateField = attempt.includeDate
-
-      return {
-        ...result,
-        storeIdAvailable: attempt.includeStoreId,
-        warnings: attempt.warnings,
-      }
+    const attempt = await run(true)
+    if (attempt.errors.length === 0) {
+      ordersQuerySupportsStoreId = true
+      return { ...attempt, storeIdAvailable: true, warnings: [] as string[] }
     }
 
-    errors.push(result.errors.join(' | ').slice(0, 220))
+    ordersQuerySupportsStoreId = false
   }
 
-  throw new Error(`LIGHTFUNNELS_GRAPHQL_ERROR:${errors.join(' || ').slice(0, 900)}`)
+  const fallback = await run(false)
+  if (fallback.errors.length > 0) {
+    throw new Error(`LIGHTFUNNELS_GRAPHQL_ERROR:${fallback.errors.join(' | ')}`)
+  }
+
+  return {
+    ...fallback,
+    storeIdAvailable: false,
+    warnings: ['ORDERS_QUERY_WITHOUT_STORE_ID'],
+  }
 }
 
 /**
@@ -789,7 +749,6 @@ const LIGHTFUNNELS_ORDER_HEADLINE_WITHOUT_CUSTOMER = `id
         fulfillment_status
         cancelled_at
         archived_at
-        date
         created_at
         updated_at
         phone
@@ -802,7 +761,6 @@ const LIGHTFUNNELS_ORDER_HEADLINE_MINIMAL = `id
         _id
         name
         total
-        date
         created_at
         cancelled_at
         financial_status
@@ -1116,8 +1074,64 @@ export function parseLightfunnelsOAuthState(
 }
 
 /**
+ * Lightfunnels peut renvoyer les dates de commande en **relatif** (« 7 months ago »,
+ * « 20 days ago »). L'API n'expose alors **aucune date absolue** : la date est donc
+ * **approximée** à partir de la valeur relative (choix produit assumé — une date approximative
+ * reste plus juste qu'une vente datée du jour). La précision est la journée pour les valeurs
+ * récentes, le mois pour les anciennes.
+ */
+function parseLightfunnelsRelativeDate(raw: string): Date | null {
+  const value = raw.toLowerCase().replace(/\s+/g, ' ')
+  const now = new Date()
+
+  if (value === 'yesterday') return new Date(now.getTime() - 86_400_000)
+  if (value === 'today' || value === 'just now' || value === 'moments ago' || value === 'a moment ago') {
+    return now
+  }
+
+  const match = value.match(/^(?:(\d+)|a|an|one)\s+(second|minute|hour|day|week|month|year)s?\s+ago$/)
+  if (!match) return null
+
+  const amount = match[1] ? Number(match[1]) : 1
+  if (!Number.isFinite(amount) || amount < 0) return null
+
+  // Un décalage en mois/années est calendaire (clampé au dernier jour du mois cible) : un
+  // simple multiple de 30 jours dériverait de plusieurs jours.
+  const shiftCalendar = (months: number, years: number) => {
+    const shifted = new Date(now.getTime())
+    const day = shifted.getDate()
+    shifted.setDate(1)
+    shifted.setMonth(shifted.getMonth() - months)
+    shifted.setFullYear(shifted.getFullYear() - years)
+    const lastDay = new Date(shifted.getFullYear(), shifted.getMonth() + 1, 0).getDate()
+    shifted.setDate(Math.min(day, lastDay))
+    return shifted
+  }
+
+  switch (match[2]) {
+    case 'second':
+      return new Date(now.getTime() - amount * 1_000)
+    case 'minute':
+      return new Date(now.getTime() - amount * 60_000)
+    case 'hour':
+      return new Date(now.getTime() - amount * 3_600_000)
+    case 'day':
+      return new Date(now.getTime() - amount * 86_400_000)
+    case 'week':
+      return new Date(now.getTime() - amount * 7 * 86_400_000)
+    case 'month':
+      return shiftCalendar(amount, 0)
+    case 'year':
+      return shiftCalendar(0, amount)
+    default:
+      return null
+  }
+}
+
+/**
  * Lightfunnels renvoie `created_at` sous la forme `YYYY-MM-DD HH:mm:ss`, sans fuseau
- * (exemple officiel : `2024-03-18 14:20:37`). Ces valeurs sont interprétées en UTC.
+ * (exemple officiel : `2024-03-18 14:20:37`). Ces valeurs sont interprétées en UTC. Une valeur
+ * **relative** (« 7 months ago ») est convertie en date approximative.
  */
 export function parseLightfunnelsDate(value: unknown): Date | null {
   const raw = String(value ?? '').trim()
@@ -1127,6 +1141,9 @@ export function parseLightfunnelsDate(value: unknown): Date | null {
     const date = new Date(`${raw.replace(' ', 'T')}Z`)
     return Number.isNaN(date.getTime()) ? null : date
   }
+
+  const relative = parseLightfunnelsRelativeDate(raw)
+  if (relative) return relative
 
   const date = new Date(raw)
   return Number.isNaN(date.getTime()) ? null : date

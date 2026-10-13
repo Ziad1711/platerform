@@ -660,11 +660,10 @@ export async function upsertLightfunnelsOrderFromPayload(params: {
 
   if (!externalOrderId) return { status: 'skipped', reason: 'MISSING_ORDER_ID' }
 
-  // La date de la commande vient de `date` (champ documenté) puis, en repli, de `created_at`.
-  // Lightfunnels peut renvoyer ces champs en **relatif** (« 7 months ago ») : dans ce cas la
-  // date n'est pas résoluble et la commande est bloquée plus bas au lieu d'être datée du jour.
-  const orderDate =
-    parseLightfunnelsDate(order?.date) ?? parseLightfunnelsDate(order?.created_at)
+  // Seul `created_at` existe sur `Order` (le champ `date` de la documentation est refusé par
+  // l'API réelle). Il peut être **relatif** (« 7 months ago ») : `parseLightfunnelsDate` le
+  // convertit alors en date approximative ; une valeur illisible bloque la commande plus bas.
+  const orderDate = parseLightfunnelsDate(order?.created_at)
   const since = params.sinceDate ? parseLightfunnelsDate(String(params.sinceDate)) : null
 
   if (since && orderDate && orderDate < since) {
