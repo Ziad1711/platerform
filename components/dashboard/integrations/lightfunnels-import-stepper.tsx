@@ -110,6 +110,13 @@ export type LightfunnelsFlowState = {
  */
 const MAX_SYNC_BATCHES = 20
 
+/**
+ * Pause entre deux lots d'un même import de commandes : le quota du fournisseur est limité
+ * (`429` constaté en plein import) et enchaîner les pages sans respirer ne fait que consommer
+ * ce quota plus vite.
+ */
+const ORDER_BATCH_PAUSE_MS = 400
+
 /** Libellés lisibles des motifs d'ignoré (le code technique reste visible entre parenthèses). */
 const REASON_LABELS: Record<string, string> = {
   BEFORE_SINCE_DATE: 'antérieure à la date choisie',
@@ -256,6 +263,15 @@ function formatWarnings(warnings: string[] | undefined) {
       return rest.length > 0 ? `${label} (${rest.join(':')})` : label
     })
     .join(' · ')
+}
+
+/**
+ * Un arrêt par limitation de débit (`429`) n'est pas une erreur de données : la reprise
+ * continue à la page enregistrée. Le message affiché doit donc le dire clairement au lieu
+ * d'annoncer des commandes manquantes.
+ */
+function isRateLimitReason(reason: string | undefined) {
+  return String(reason || '').includes('LIGHTFUNNELS_RATE_LIMITED')
 }
 
 /**
@@ -555,17 +571,26 @@ export default function LightfunnelsImportStepper({
 
           if (payload?.ok === false) {
             failedAny = true
-            errorText = (payload?.warnings || []).join(' · ')
+            // Motif d'échec de chaque boutique, en libellés lisibles : la limitation du
+            // fournisseur ne doit pas être noyée dans les avertissements de données.
+            errorText = (payload?.orders || [])
+              .filter((row) => !row.ok && row.reason)
+              .map((row) => formatWarnings([String(row.reason)]))
+              .join(' · ')
           }
 
           const rows = Array.from(byBinding.values())
           setOrdersResults(rows)
           setProgressNote(
             `lot ${batch} · ${rows.reduce((total, row) => total + row.imported, 0)} importée(s) · ` +
+              `${rows.reduce((total, row) => total + row.alreadyImported, 0)} déjà vérifiée(s) · ` +
               `${rows.reduce((total, row) => total + row.scanned, 0)} analysée(s)`
           )
 
           if (failedAny || !rows.some((row) => row.hasMore)) break
+
+          // Une pause entre deux pages laisse respirer le quota du fournisseur.
+          await new Promise((resolve) => setTimeout(resolve, ORDER_BATCH_PAUSE_MS))
         }
 
         const rows = Array.from(byBinding.values())
@@ -1122,6 +1147,40 @@ export default function LightfunnelsImportStepper({
             </button>
           </div>
 
+          {/* Progression visible pendant l'import : le total de l'historique n'est pas connu,
+              aucun pourcentage n'est donc inventé — on montre le lot en cours et les compteurs
+              réellement reçus (barre indéterminée volontaire). */}
+          {ordersState === 'running' ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3"
+            >
+              <p className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                Import en cours — {progressNote || 'lecture de la page…'}
+              </p>
+
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                Chaque lot regroupe plusieurs commandes : les compteurs s’actualisent à la fin de
+                chaque lot, pas commande par commande.
+              </p>
+
+              {ordersResults.length > 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {ordersResults.reduce((total, row) => total + row.imported, 0)} importée(s) ·{' '}
+                  {ordersResults.reduce((total, row) => total + row.alreadyImported, 0)} déjà
+                  vérifiée(s) · {ordersResults.reduce((total, row) => total + row.scanned, 0)}{' '}
+                  analysée(s)
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           {ordersResults.length > 0 ? (
             <div className="space-y-2">
               {ordersResults.map((result) => (
@@ -1147,9 +1206,11 @@ export default function LightfunnelsImportStepper({
                       {formatReasons(result.skippedReasons) ? ` : ${formatReasons(result.skippedReasons)}` : ''}
                     </p>
                   ) : null}
-                  {result.warnings && result.warnings.length > 0 ? (
+                  {(result.warnings || []).filter((warning) => warning !== result.reason).length > 0 ? (
                     <p className="text-amber-600 dark:text-amber-400">
-                      {formatWarnings(result.warnings)}
+                      {formatWarnings(
+                        (result.warnings || []).filter((warning) => warning !== result.reason)
+                      )}
                     </p>
                   ) : null}
                   {!result.ok && result.reason ? (
@@ -1159,8 +1220,9 @@ export default function LightfunnelsImportStepper({
                   ) : null}
                   {result.hasMore ? (
                     <p className="text-amber-600 dark:text-amber-400">
-                      Il reste d’anciennes commandes : relancez l’import, la reprise continue à la
-                      page enregistrée.
+                      {isRateLimitReason(result.reason)
+                        ? 'Lecture interrompue par Lightfunnels (limite de débit) : la reprise continue à la page enregistrée et aucune commande n’est sautée.'
+                        : 'Il reste des pages à parcourir : relancez l’import, la reprise continue à la page enregistrée.'}
                     </p>
                   ) : null}
                 </div>

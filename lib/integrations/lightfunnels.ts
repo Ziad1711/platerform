@@ -159,18 +159,33 @@ export function isLightfunnelsRateLimitError(message: string) {
 }
 
 const RATE_LIMIT_RETRY_DELAY_MS = 1500
-/** Attente maximale imposée avant une nouvelle tentative (une consigne plus longue est plafonnée). */
-const MAX_RATE_LIMIT_WAIT_MS = 5000
+/**
+ * Budget d'attente qu'une requête peut s'offrir avant de retenter un appel limité. Une consigne
+ * plus longue n'est **jamais raccourcie** : on ne retente pas (retenter avant l'échéance
+ * reviendrait à ignorer la consigne) et l'appelant reprend l'import au curseur enregistré.
+ */
+const MAX_RATE_LIMIT_WAIT_MS = 8000
 
 async function waitForRetry(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Attente demandée par le fournisseur (`Retry-After`), bornée. */
-function rateLimitWaitMs(retryAfterHeader: string | null) {
+/**
+ * Attente demandée par le fournisseur (`Retry-After`) : `requestedMs` est la consigne **telle
+ * quelle** (jamais raccourcie à l'insu de l'appelant), `waitMs` sa version utilisable
+ * immédiatement.
+ */
+function rateLimitWait(retryAfterHeader: string | null) {
   const seconds = Number(String(retryAfterHeader || '').trim())
-  if (!Number.isFinite(seconds) || seconds <= 0) return RATE_LIMIT_RETRY_DELAY_MS
-  return Math.min(seconds * 1000, MAX_RATE_LIMIT_WAIT_MS)
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return { waitMs: RATE_LIMIT_RETRY_DELAY_MS, requestedMs: null as number | null }
+  }
+
+  return {
+    waitMs: Math.min(seconds * 1000, MAX_RATE_LIMIT_WAIT_MS),
+    requestedMs: Math.round(seconds * 1000),
+  }
 }
 
 type LightfunnelsAttempt<T> = {
@@ -180,8 +195,10 @@ type LightfunnelsAttempt<T> = {
   rateLimited: boolean
   /** Erreur HTTP hors limitation : message prêt à être lancé. */
   httpError: string | null
-  /** Attente avant nouvelle tentative (consigne du fournisseur, bornée). */
+  /** Attente avant nouvelle tentative (consigne du fournisseur, bornée au budget disponible). */
   waitMs: number
+  /** Consigne `Retry-After` telle quelle, sans plafond (null si le fournisseur n'en donne pas). */
+  retryAfterMs: number | null
 }
 
 /**
@@ -210,6 +227,8 @@ export async function lightfunnelsRawRequest<T = any>(params: {
     const raw = await response.text()
 
     if (!response.ok) {
+      const rateLimit = rateLimitWait(response.headers.get('retry-after'))
+
       // Seul le 429 est une limitation : les autres codes sont des erreurs définitives et
       // gardent leur message d'origine (401/403 sont reconnus par les appelants).
       return {
@@ -220,7 +239,8 @@ export async function lightfunnelsRawRequest<T = any>(params: {
           response.status === 429
             ? null
             : `LIGHTFUNNELS_HTTP_${response.status}:${raw.slice(0, 600)}`,
-        waitMs: rateLimitWaitMs(response.headers.get('retry-after')),
+        waitMs: rateLimit.waitMs,
+        retryAfterMs: response.status === 429 ? rateLimit.requestedMs : null,
       }
     }
 
@@ -241,14 +261,23 @@ export async function lightfunnelsRawRequest<T = any>(params: {
       rateLimited: errors.some(isLightfunnelsRateLimitError),
       httpError: null,
       waitMs: RATE_LIMIT_RETRY_DELAY_MS,
+      retryAfterMs: null,
     }
   }
 
   const first = await run()
 
-  // Une seule nouvelle tentative, après l'attente demandée par le fournisseur (bornée) : au-delà,
+  // Une seule nouvelle tentative, après l'attente demandée par le fournisseur : au-delà,
   // la limitation est durable et l'appelant doit arrêter son traitement au lieu d'insister.
+  // Une consigne `Retry-After` plus longue que le budget d'attente n'est **jamais raccourcie** :
+  // retenter plus tôt reviendrait à l'ignorer — l'import s'arrête et reprendra au curseur.
   if (first.rateLimited) {
+    if (first.retryAfterMs !== null && first.retryAfterMs > MAX_RATE_LIMIT_WAIT_MS) {
+      throw new Error(
+        `LIGHTFUNNELS_RATE_LIMITED:retry_after=${Math.ceil(first.retryAfterMs / 1000)}s`
+      )
+    }
+
     await waitForRetry(first.waitMs)
     const second = await run()
 

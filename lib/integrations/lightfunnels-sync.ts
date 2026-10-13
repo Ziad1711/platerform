@@ -27,6 +27,12 @@ type SupabaseLike = any
 /** Date plancher de l'import initial, alignée sur l'import YouCan. */
 export const LIGHTFUNNELS_DEFAULT_SINCE_DATE = '2026-01-01'
 const ACCESS_TOKEN_SAFETY_WINDOW_MS = 5 * 60 * 1000
+/**
+ * Attente minimale entre deux lectures de détail de commande. Lightfunnels a répondu `429`
+ * (« rate limit ») en plein import de 25 commandes : l'espacement évite de gaspiller le quota
+ * du compte et de repartir d'une reprise inutile.
+ */
+const ORDER_DETAIL_THROTTLE_MS = 250
 
 export type LightfunnelsOrderImportResult = {
   status: 'created' | 'already_imported' | 'skipped' | 'rejected'
@@ -824,7 +830,10 @@ export async function importLightfunnelsOrders(params: {
 }): Promise<LightfunnelsImportSummary> {
   const { supabase, integrationId, userId, binding, accessToken } = params
   const maxPages = Math.max(1, params.maxPages ?? 10)
-  const pageSize = Math.min(Math.max(params.pageSize ?? 25, 1), 50)
+  // Page plus courte depuis la limitation de débit constatée chez Lightfunnels (429 en plein
+  // import) : moins de commandes par lot, donc moins de lectures de détail en rafale, et une
+  // progression visible plus souvent.
+  const pageSize = Math.min(Math.max(params.pageSize ?? 10, 1), 50)
   const sinceDate = params.sinceDate || LIGHTFUNNELS_DEFAULT_SINCE_DATE
 
   const warnings: string[] = []
@@ -866,6 +875,24 @@ export async function importLightfunnelsOrders(params: {
   let pages = 0
   /** Échec bloquant (lecture de page ou limitation de débit) : remonté tel quel. */
   let failureReason: string | null = null
+
+  /**
+   * Espacement des lectures de détail : le fournisseur limite le débit (429 constaté en plein
+   * import) et un import interrompu coûte plus cher qu'une attente de quelques centièmes de
+   * seconde par commande. Les commandes déjà vérifiées ne font aucun appel : l'attente n'est
+   * appliquée qu'avant une requête réelle.
+   */
+  let lastDetailRequestAt = 0
+
+  const throttleOrderDetail = async () => {
+    const elapsed = Date.now() - lastDetailRequestAt
+
+    if (lastDetailRequestAt > 0 && elapsed < ORDER_DETAIL_THROTTLE_MS) {
+      await new Promise((resolve) => setTimeout(resolve, ORDER_DETAIL_THROTTLE_MS - elapsed))
+    }
+
+    lastDetailRequestAt = Date.now()
+  }
 
   // La progression est enregistrée à chaque page : une coupure ne fait pas repartir de zéro
   // et une défaillance d'enregistrement n'est jamais silencieuse. Un échec est conservé sur la
@@ -980,6 +1007,10 @@ export async function importLightfunnelsOrders(params: {
 
       /** Liaison orpheline : « réparée » seulement si la commande est réellement recréée. */
       const recoversOrphan = mappingState === 'orphan'
+
+      // Attente avant chaque lecture réelle : les commandes déjà vérifiées ci-dessus n'ont
+      // déclenché aucun appel et ne consomment donc pas le quota.
+      await throttleOrderDetail()
 
       let detail: Awaited<ReturnType<typeof getLightfunnelsOrder>>
       try {
