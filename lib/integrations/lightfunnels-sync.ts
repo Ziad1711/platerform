@@ -872,10 +872,14 @@ export type LightfunnelsImportSummary = {
 /**
  * Import / rattrapage des commandes d'une boutique liée.
  *
- * Fonctionnement : parcours des commandes les plus récentes vers les plus anciennes
- * (`order_by:id order_dir:desc`), arrêt dès la date plancher ou dès qu'une page ne contient
- * plus aucune nouveauté — la reprise après interruption utilise le curseur enregistré,
- * `has_more` indiquant qu'il reste des pages à parcourir.
+ * Fonctionnement : parcours des pages (`order_by:id order_dir:desc`), arrêt uniquement en fin
+ * de pages (`hasNextPage = false`) ou au plafond `maxPages` — la reprise après interruption
+ * utilise le curseur enregistré, `has_more` indiquant qu'il reste des pages à parcourir.
+ *
+ * Aucun arrêt à la date plancher : le tri `order_by:id` de Lightfunnels n'est **pas**
+ * chronologique (une commande ancienne peut précéder des commandes récentes), donc s'arrêter
+ * au premier « avant date plancher » ferait manquer des ventes postérieures à cette date. Le
+ * filtre reste appliqué commande par commande (`BEFORE_SINCE_DATE`).
  */
 export async function importLightfunnelsOrders(params: {
   supabase: SupabaseLike
@@ -1033,7 +1037,6 @@ export async function importLightfunnelsOrders(params: {
       break
     }
 
-    let reachedSinceDate = false
     /** Interruption de page (limitation de débit ou commande bloquante) : reprise au début. */
     let pageAborted = false
 
@@ -1155,11 +1158,6 @@ export async function importLightfunnelsOrders(params: {
       skipped += 1
       const reason = result.reason || 'UNKNOWN'
       skippedReasons[reason] = (skippedReasons[reason] || 0) + 1
-
-      if (reason === 'BEFORE_SINCE_DATE') {
-        reachedSinceDate = true
-        break
-      }
     }
 
     if (pageAborted) break
@@ -1167,7 +1165,7 @@ export async function importLightfunnelsOrders(params: {
     cursor = page.endCursor
     hasMore = page.hasNextPage
 
-    if (reachedSinceDate || !page.hasNextPage) {
+    if (!page.hasNextPage) {
       hasMore = false
       cursor = null
       if (!(await persistImportProgress())) progressFailed = true
