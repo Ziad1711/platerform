@@ -375,6 +375,7 @@ export const LIGHTFUNNELS_ORDER_HEADLINE_FIELDS = `id
         fulfillment_status
         cancelled_at
         archived_at
+        date
         created_at
         updated_at
         phone
@@ -390,12 +391,18 @@ export const LIGHTFUNNELS_ORDER_HEADLINE_FIELDS = `id
 export const LIGHTFUNNELS_STORE_ID_FIELD = `
         store_id`
 
-function buildOrdersQuery(includeStoreId: boolean) {
+function buildOrdersQuery(includeStoreId: boolean, includeDate = true) {
+  // Le champ `date` (documenté pour les commandes) peut être refusé par un schéma plus ancien :
+  // le repli le retire pour ne pas bloquer tout l'import des commandes.
+  const headline = includeDate
+    ? LIGHTFUNNELS_ORDER_HEADLINE_FIELDS
+    : LIGHTFUNNELS_ORDER_HEADLINE_FIELDS.replace('\n        date', '')
+
   return `query JisraOrdersQuery($first: Int, $after: String, $query: String!) {
   orders(first: $first, after: $after, query: $query) {
     edges {
       node {
-        ${LIGHTFUNNELS_ORDER_HEADLINE_FIELDS}${includeStoreId ? LIGHTFUNNELS_STORE_ID_FIELD : ''}
+        ${headline}${includeStoreId ? LIGHTFUNNELS_STORE_ID_FIELD : ''}
       }
       cursor
     }
@@ -421,6 +428,12 @@ export type LightfunnelsOrderConnection = {
 let ordersQuerySupportsStoreId: boolean | null = null
 
 /**
+ * Le schéma installé accepte-t-il le champ `date` sur les commandes ? Mémorisé pour éviter de
+ * réessayer indéfiniment une sélection refusée (comme `store_id`).
+ */
+let ordersQuerySupportsDateField: boolean | null = null
+
+/**
  * Liste paginée des commandes (curseur). Le tri est imposé par Lightfunnels :
  * `order_by:id order_dir:desc` renvoie les commandes les plus récentes en premier.
  */
@@ -431,10 +444,10 @@ export async function listLightfunnelsOrders(params: {
 }) {
   const first = params.first || 25
 
-  const run = async (includeStoreId: boolean) => {
+  const run = async (includeStoreId: boolean, includeDate: boolean) => {
     const result = await lightfunnelsRawRequest<LightfunnelsOrderConnection>({
       accessToken: params.accessToken,
-      query: buildOrdersQuery(includeStoreId),
+      query: buildOrdersQuery(includeStoreId, includeDate),
       variables: {
         first,
         after: params.after || null,
@@ -453,26 +466,53 @@ export async function listLightfunnelsOrders(params: {
     }
   }
 
+  const includeDate = ordersQuerySupportsDateField !== false
+  const attempts: Array<{
+    includeStoreId: boolean
+    includeDate: boolean
+    warnings: string[]
+  }> = []
+
   if (ordersQuerySupportsStoreId !== false) {
-    const attempt = await run(true)
-    if (attempt.errors.length === 0) {
-      ordersQuerySupportsStoreId = true
-      return { ...attempt, storeIdAvailable: true, warnings: [] as string[] }
+    attempts.push({ includeStoreId: true, includeDate, warnings: [] })
+  }
+
+  attempts.push({
+    includeStoreId: false,
+    includeDate,
+    warnings: ['ORDERS_QUERY_WITHOUT_STORE_ID'],
+  })
+
+  if (includeDate) {
+    // Dernier repli : schéma sans le champ `date` — la date des commandes sera alors signalée
+    // comme non résoluble, jamais remplacée par la date du jour.
+    attempts.push({
+      includeStoreId: false,
+      includeDate: false,
+      warnings: ['ORDERS_QUERY_WITHOUT_STORE_ID', 'ORDERS_QUERY_WITHOUT_DATE'],
+    })
+  }
+
+  const errors: string[] = []
+
+  for (const attempt of attempts) {
+    const result = await run(attempt.includeStoreId, attempt.includeDate)
+
+    if (result.errors.length === 0) {
+      ordersQuerySupportsStoreId = attempt.includeStoreId
+      ordersQuerySupportsDateField = attempt.includeDate
+
+      return {
+        ...result,
+        storeIdAvailable: attempt.includeStoreId,
+        warnings: attempt.warnings,
+      }
     }
 
-    ordersQuerySupportsStoreId = false
+    errors.push(result.errors.join(' | ').slice(0, 220))
   }
 
-  const fallback = await run(false)
-  if (fallback.errors.length > 0) {
-    throw new Error(`LIGHTFUNNELS_GRAPHQL_ERROR:${fallback.errors.join(' | ')}`)
-  }
-
-  return {
-    ...fallback,
-    storeIdAvailable: false,
-    warnings: ['ORDERS_QUERY_WITHOUT_STORE_ID'],
-  }
+  throw new Error(`LIGHTFUNNELS_GRAPHQL_ERROR:${errors.join(' || ').slice(0, 900)}`)
 }
 
 /**
@@ -604,6 +644,12 @@ export async function listLightfunnelsProducts(params: {
         endCursor: pageInfo.endCursor ?? null,
         hasNextPage: Boolean(pageInfo.hasNextPage),
         storeIdAvailable: variant.stores,
+        /**
+         * Les options des variantes ont-elles pu être lues ? Avec un palier réduit (`details:
+         * false`), les variantes arrivent sans leurs options : impossible alors de distinguer une
+         * variante commerciale d'une variante technique — l'appelant doit refuser de deviner.
+         */
+        variantsOptionsAvailable: variant.details,
         warnings,
       }
     }
@@ -743,6 +789,7 @@ const LIGHTFUNNELS_ORDER_HEADLINE_WITHOUT_CUSTOMER = `id
         fulfillment_status
         cancelled_at
         archived_at
+        date
         created_at
         updated_at
         phone
@@ -755,6 +802,7 @@ const LIGHTFUNNELS_ORDER_HEADLINE_MINIMAL = `id
         _id
         name
         total
+        date
         created_at
         cancelled_at
         financial_status
@@ -1142,6 +1190,12 @@ export type LightfunnelsOrderLine = {
   variantId: string
   unitPrice: number
   optionsLabel: string | null
+  /**
+   * Le champ `options` a-t-il été **lu** ? Avec un palier de requête réduit il est absent :
+   * « options lues et vides » (produit simple, prouvé) et « options non lues » (choix
+   * peut-être perdu) ne doivent jamais être confondus.
+   */
+  optionsAvailable: boolean
 }
 
 /**
@@ -1174,6 +1228,8 @@ export function readLightfunnelsOrderLines(order: any): LightfunnelsOrderLine[] 
       variantId: readNonBlankString(item.variant_id) || '',
       unitPrice: Number.isFinite(Number(item.price)) ? Number(item.price) : 0,
       optionsLabel,
+      // `Array.isArray([])` est vrai : un tableau vide prouve que le champ a bien été lu.
+      optionsAvailable: Array.isArray(item.options),
     })
   }
 

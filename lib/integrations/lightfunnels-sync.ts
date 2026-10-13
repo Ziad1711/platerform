@@ -373,22 +373,6 @@ export async function findVariantBySku(params: { supabase: SupabaseLike; storeId
   return row?.id ? { variantId: String(row.id), productId: String(row.product_id) } : null
 }
 
-/** Variante de repli d'un produit : la variante par défaut si elle existe, sinon la première. */
-export async function findProductFallbackVariant(params: { supabase: SupabaseLike; productId: string }) {
-  const { data, error } = await params.supabase
-    .from('product_variants')
-    .select('id, is_default, sort_order')
-    .eq('product_id', params.productId)
-
-  if (error) throw error
-
-  const rows = (data || []) as Array<{ id: string; is_default: boolean; sort_order: number }>
-  if (rows.length === 0) return null
-
-  const preferred = rows.find((row) => row.is_default) || rows[0]
-  return String(preferred.id)
-}
-
 function normalizeTextKey(value: string) {
   return String(value || '')
     .normalize('NFD')
@@ -434,12 +418,34 @@ async function resolveLightfunnelsLineTarget(params: {
   const { supabase, integrationId, userId, storeId, line } = params
   const warnings: string[] = []
   const lineKey = resolveLightfunnelsLineKey(line)
-  const mappedVariantId = await readMappingInternalId({
-    supabase,
-    integrationId,
-    entityType: 'variant',
-    lightfunnelsId: line.variantId,
-  })
+  /**
+   * Une option réellement choisie par le client. Un `variant_id` Lightfunnels sans option est
+   * une variante **technique** : la rattacher créerait une variante Jisra que le client n'a pas
+   * choisie (et la ferait apparaître entre parenthèses dans Ventes). Dans ce cas la ligne reste
+   * rattachée au produit, `product_variant_id` nul — le suivi de stock gère ce cas.
+   */
+  const hasCommercialOption = String(line.optionsLabel || '').trim().length > 0
+  /**
+   * Ligne de variante dont le champ `options` n'a **pas** été lu (palier de requête réduit).
+   * Rien ne permet alors de dire si le client a choisi une option : le produit simple et la
+   * variante inconnue sont indistinguables. Une telle ligne n'est jamais devinée — la commande
+   * est bloquée et relue à la reprise (les bumps n'ont pas d'options : ils sont exclus).
+   */
+  const variantOptionsUnknown =
+    !line.optionsAvailable && line.itemTypeName !== 'OrderBumpSnapshot'
+  /**
+   * Liaison variante lue dès qu'une option est choisie **ou** que les options sont inconnues :
+   * une liaison existante prouve l'identité de la variante et évite tout blocage inutile.
+   */
+  const mappedVariantId =
+    hasCommercialOption || variantOptionsUnknown
+      ? await readMappingInternalId({
+          supabase,
+          integrationId,
+          entityType: 'variant',
+          lightfunnelsId: line.variantId,
+        })
+      : null
 
   if (mappedVariantId) {
     const { data, error } = await supabase
@@ -504,20 +510,56 @@ async function resolveLightfunnelsLineTarget(params: {
   }
 
   if (existingProductId) {
-    const skuVariant = await findVariantBySku({ supabase, storeId, sku: line.sku })
-    const variantId =
-      (skuVariant?.productId === existingProductId ? skuVariant?.variantId : null) ||
-      (await findProductFallbackVariant({ supabase, productId: existingProductId }))
+    if (!hasCommercialOption && !variantOptionsUnknown) {
+      // Aucune option (prouvée vide) : la ligne reste rattachée au produit, sans variante
+      // inventée.
+      await rememberMappings(existingProductId, null)
+      return { productId: existingProductId, variantId: null, warnings }
+    }
 
-    await rememberMappings(existingProductId, variantId || null)
-    return { productId: existingProductId, variantId: variantId || null, warnings }
+    const skuVariant = await findVariantBySku({ supabase, storeId, sku: line.sku })
+    const variantId = skuVariant?.productId === existingProductId ? skuVariant.variantId : null
+
+    if (!variantId && variantOptionsUnknown) {
+      // Options non lues et aucune identité de variante établie (liaison absente, SKU inconnu) :
+      // la commande est bloquée plutôt que rattachée à une variante devinée ou privée de sa
+      // variante. Elle sera relue à la reprise.
+      throw new Error(
+        `LIGHTFUNNELS_ORDER_LINE_AMBIGUOUS:${line.variantId || line.itemId || lineKey}`
+      )
+    }
+
+    if (!variantId) {
+      // Une option a été choisie mais aucune variante ne peut être identifiée (ni liaison, ni
+      // SKU). La variante **par défaut** du produit n'est jamais utilisée comme repli : elle
+      // peut correspondre à une autre option. La ligne reste rattachée au produit et l'ambiguïté
+      // est visible dans le bilan.
+      warnings.push(
+        `ORDER_VARIANT_NOT_IDENTIFIED:${line.variantId || line.optionsLabel || lineKey}`
+      )
+    }
+
+    await rememberMappings(existingProductId, variantId)
+    return { productId: existingProductId, variantId, warnings }
   }
 
-  const skuVariant = await findVariantBySku({ supabase, storeId, sku: line.sku })
+  const skuVariant =
+    hasCommercialOption || variantOptionsUnknown
+      ? await findVariantBySku({ supabase, storeId, sku: line.sku })
+      : null
 
   if (skuVariant) {
     await rememberMappings(skuVariant.productId, skuVariant.variantId)
     return { productId: skuVariant.productId, variantId: skuVariant.variantId, warnings }
+  }
+
+  if (variantOptionsUnknown) {
+    // Aucun produit ni variante n'existe déjà : créer ici reviendrait à décider à la place du
+    // client (produit simple ou variante ?). Rien n'est écrit — la commande est bloquée et
+    // relue à la reprise, sans laisser de produit orphelin.
+    throw new Error(
+      `LIGHTFUNNELS_ORDER_LINE_AMBIGUOUS:${line.variantId || line.itemId || lineKey}`
+    )
   }
 
   const unitPrice = Number.isFinite(line.unitPrice) ? line.unitPrice : 0
@@ -539,8 +581,16 @@ async function resolveLightfunnelsLineTarget(params: {
   if (productError) throw productError
   const productId = String(insertedProduct.id)
 
-  const variantName = line.optionsLabel ? `${line.title} — ${line.optionsLabel}` : line.title
+  if (!hasCommercialOption) {
+    // Produit créé depuis une vente sans option : **aucune** variante. Le client n'a rien
+    // choisi, Jisra ne doit donc pas fabriquer un choix (la ligne vise le produit).
+    await rememberMappings(productId, null)
+    return { productId, variantId: null, warnings }
+  }
+
+  const variantName = `${line.title} — ${line.optionsLabel}`
   const variantSku = line.sku || `lightfunnels:${line.variantId || line.itemId || productId}`
+  const optionValues = { Option: String(line.optionsLabel) }
 
   const { data: insertedVariant, error: variantError } = await supabase
     .from('product_variants')
@@ -551,13 +601,12 @@ async function resolveLightfunnelsLineTarget(params: {
       sku: variantSku,
       selling_price: unitPrice,
       purchase_cost: 0,
-      option_values: {},
+      // L'option réellement choisie est conservée : sans elle, la variante serait indistinguable
+      // d'une variante technique.
+      option_values: optionValues,
       is_default: true,
       sort_order: 0,
-      stock_multiplier: detectStockMultiplier({
-        name: variantName,
-        optionValues: line.optionsLabel ? { Option: line.optionsLabel } : null,
-      }),
+      stock_multiplier: detectStockMultiplier({ name: variantName, optionValues }),
     })
     .select('id')
     .single()
@@ -611,7 +660,11 @@ export async function upsertLightfunnelsOrderFromPayload(params: {
 
   if (!externalOrderId) return { status: 'skipped', reason: 'MISSING_ORDER_ID' }
 
-  const orderDate = parseLightfunnelsDate(order?.created_at)
+  // La date de la commande vient de `date` (champ documenté) puis, en repli, de `created_at`.
+  // Lightfunnels peut renvoyer ces champs en **relatif** (« 7 months ago ») : dans ce cas la
+  // date n'est pas résoluble et la commande est bloquée plus bas au lieu d'être datée du jour.
+  const orderDate =
+    parseLightfunnelsDate(order?.date) ?? parseLightfunnelsDate(order?.created_at)
   const since = params.sinceDate ? parseLightfunnelsDate(String(params.sinceDate)) : null
 
   if (since && orderDate && orderDate < since) {
@@ -699,6 +752,13 @@ export async function upsertLightfunnelsOrderFromPayload(params: {
 
   const address = readLightfunnelsAddress(order)
 
+  // Une date de commande non résoluble (Lightfunnels peut renvoyer `date`/`created_at` en
+  // relatif : « 7 months ago ») ne doit **jamais** produire une vente datée d'aujourd'hui : la
+  // commande est bloquée et sera relue à la reprise, comme toute donnée non devinable.
+  if (!orderDate) {
+    throw new Error(`LIGHTFUNNELS_ORDER_DATE_UNRESOLVABLE:${externalOrderId}`)
+  }
+
   // Contrôle de l'hypothèse « un snapshot = une unité » : le sous-total annoncé par
   // Lightfunnels doit correspondre à la somme des lignes reconstituées. Un écart signale
   // que la quantité réelle n'est pas représentable (l'import reste fait, l'écart est visible
@@ -732,7 +792,7 @@ export async function upsertLightfunnelsOrderFromPayload(params: {
       phone: normalizeMoroccanPhone(address.phone),
       address: address.address,
       city: address.city,
-      order_date: (orderDate || new Date()).toISOString(),
+      order_date: orderDate.toISOString(),
       total_selling_price: rounded.total,
       delivery_charge_to_customer: shipping,
       rounding_adjustment: rounded.adjustment,
@@ -1039,18 +1099,40 @@ export async function importLightfunnelsOrders(params: {
         warnings.push('ORDER_ADDRESSES_UNAVAILABLE')
       }
 
-      const result = await upsertLightfunnelsOrderFromPayload({
-        supabase,
-        integrationId,
-        userId,
-        binding,
-        order: { ...headline, ...(detail.order || {}) },
-        sinceDate,
-        roundOrderTotal,
-        storeCurrency,
-        // L'unicité du compte distant a été prouvée ci-dessus avant de parcourir la page.
-        allowMissingStoreId: !page.storeIdAvailable,
-      })
+      const result = await (async () => {
+        try {
+          return await upsertLightfunnelsOrderFromPayload({
+            supabase,
+            integrationId,
+            userId,
+            binding,
+            order: { ...headline, ...(detail.order || {}) },
+            sinceDate,
+            roundOrderTotal,
+            storeCurrency,
+            // L'unicité du compte distant a été prouvée ci-dessus avant de parcourir la page.
+            allowMissingStoreId: !page.storeIdAvailable,
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'ORDER_UPSERT_FAILED'
+          // Écriture bloquante (identité de variante impossible à établir, date non résoluble,
+          // etc.) : la page est relue depuis son début à la reprise — aucune commande n'est
+          // sautée ni importée de travers, et les compteurs déjà acquis sont conservés.
+          const isBlocking =
+            message.startsWith('LIGHTFUNNELS_ORDER_LINE_AMBIGUOUS') ||
+            message.startsWith('LIGHTFUNNELS_ORDER_DATE_UNRESOLVABLE')
+
+          failureReason = isBlocking ? message : `ORDER_UPSERT_BLOCKED:${message}`
+          cursor = pageStartCursor
+          hasMore = true
+          if (!warnings.includes(failureReason)) warnings.push(failureReason)
+          await persistImportProgress(failureReason)
+          pageAborted = true
+          return null
+        }
+      })()
+
+      if (!result) break
 
       if (result.status === 'created') {
         imported += 1

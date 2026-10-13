@@ -4,7 +4,6 @@ import {
 } from '@/lib/integrations/lightfunnels'
 import {
   findExistingProduct,
-  findProductFallbackVariant,
   findVariantBySku,
   readMappingInternalId,
   storeEntityMapping,
@@ -37,6 +36,13 @@ type NormalizedVariant = {
   price: number
   compareAtPrice: number | null
   optionValues: Record<string, string>
+  /**
+   * Option réellement choisissable chez la source. Un `variant_id` sans option (variante
+   * technique / `default_variant` du produit) ne doit **jamais** devenir une variante
+   * commerciale dans Jisra : elle apparaîtrait comme un choix client dans Produits et entre
+   * parenthèses dans Ventes alors que le client n'a rien choisi.
+   */
+  hasOptions: boolean
 }
 
 type NormalizedProduct = {
@@ -93,13 +99,16 @@ export function readLightfunnelsProduct(product: any): NormalizedProduct | null 
     const variantId = readText(variant?.id)
     if (!variantId) continue
 
+    const optionValues = readVariantOptionValues(variant)
+
     variants.push({
       externalId: variantId,
       title: readText(variant?.title) || readText(product?.title) || 'Variante',
       sku: readText(variant?.sku) || '',
       price: toAmount(variant?.price) ?? toAmount(product?.price) ?? 0,
       compareAtPrice: toAmount(variant?.compare_at_price),
-      optionValues: readVariantOptionValues(variant),
+      optionValues,
+      hasOptions: Object.values(optionValues).some((value) => String(value || '').trim().length > 0),
     })
   }
 
@@ -145,34 +154,20 @@ async function syncProductVariants(params: {
   let variantsCreated = 0
   let variantsUpdated = 0
 
-  if (product.variants.length === 0) {
-    // Un produit sans variante chez la source garde une variante par défaut dans Jisra :
-    // les lignes de commande s'appuient sur `product_variants`.
-    const fallback = await findProductFallbackVariant({ supabase, productId })
+  // Seules les variantes portant une option **réellement choisissable** sont commerciales : un
+  // `variant_id` technique (sans option) ou le `default_variant` du produit n'entre pas dans
+  // Jisra, sinon il apparaîtrait comme un choix client dans Produits et entre parenthèses dans
+  // Ventes. Les lignes de commande correspondantes restent rattachées au **produit**
+  // (`order_items.product_variant_id` nul, chemin de stock déjà pris en charge).
+  const commercialVariants = product.variants.filter((variant) => variant.hasOptions)
 
-    if (!fallback) {
-      const { error } = await supabase.from('product_variants').insert({
-        store_id: storeId,
-        product_id: productId,
-        name: product.title,
-        sku: product.sku || `lightfunnels:${product.externalId}`,
-        selling_price: product.price,
-        purchase_cost: 0,
-        option_values: {},
-        old_price: product.compareAtPrice,
-        is_default: true,
-        sort_order: 0,
-        stock_multiplier: detectStockMultiplier({ name: product.title }),
-      })
-
-      if (error) throw error
-      variantsCreated += 1
-    }
-
+  if (commercialVariants.length === 0) {
+    // Une variante déjà présente n'est jamais supprimée ici : sa suppression est une décision de
+    // données, pas un effet de bord d'import. Ce choix est visible dans le bilan (0 créée).
     return { variantsCreated, variantsUpdated }
   }
 
-  for (const [index, variant] of product.variants.entries()) {
+  for (const [index, variant] of commercialVariants.entries()) {
     const optionValues = variant.optionValues
     const optionLabel = Object.values(optionValues).filter(Boolean).join(' / ')
     const variantName = optionLabel ? `${product.title} — ${optionLabel}` : variant.title
@@ -520,8 +515,13 @@ export async function importLightfunnelsProducts(params: {
   try {
 
     while (pages < maxPages) {
+      // Curseur de début de page : un produit non classable est **relu** à la reprise, sinon
+      // l'avancement du curseur l'exclurait définitivement de Jisra.
+      const pageStartCursor = cursor
       const page = await listLightfunnelsProducts({ accessToken, first: pageSize, after: cursor })
       pages += 1
+
+      let unclassified = 0
 
       for (const warning of page.warnings) {
         if (!warnings.includes(warning)) warnings.push(warning)
@@ -556,6 +556,23 @@ export async function importLightfunnelsProducts(params: {
           continue
         }
 
+        // Variantes présentes mais options illisibles (palier de requête réduit) : impossible de
+        // distinguer une variante commerciale d'une variante technique. On refuse de deviner —
+        // le produit n'est ni créé ni modifié, et l'écart est signalé au lieu d'inventer une
+        // variante ou d'en perdre silencieusement.
+        if (!page.variantsOptionsAvailable && product.variants.length > 0) {
+          skipped += 1
+          unclassified += 1
+          skippedReasons['VARIANTS_OPTIONS_UNAVAILABLE'] =
+            (skippedReasons['VARIANTS_OPTIONS_UNAVAILABLE'] || 0) + 1
+
+          if (!warnings.includes('PRODUCTS_VARIANTS_OPTIONS_UNAVAILABLE')) {
+            warnings.push('PRODUCTS_VARIANTS_OPTIONS_UNAVAILABLE')
+          }
+
+          continue
+        }
+
         const outcome = await upsertProductFromLightfunnels({
           supabase,
           integrationId,
@@ -570,6 +587,16 @@ export async function importLightfunnelsProducts(params: {
 
         variantsCreated += outcome.variantsCreated
         variantsUpdated += outcome.variantsUpdated
+      }
+
+      if (unclassified > 0) {
+        // La page contient au moins un produit impossible à classer : le curseur **ne progresse
+        // pas** et l'import s'arrête proprement. « Reprendre » relira cette page (aucun produit
+        // n'est perdu) ; les produits déjà traités ne sont pas dupliqués (mappings).
+        cursor = pageStartCursor
+        hasMore = true
+        if (!(await persistProgress())) progressFailed = true
+        break
       }
 
       cursor = page.endCursor
