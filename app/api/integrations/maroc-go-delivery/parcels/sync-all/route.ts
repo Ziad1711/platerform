@@ -11,10 +11,7 @@ import {
   isExchangeFollowUpOrder,
 } from '@/lib/integrations/delivery/exchange-providers'
 
-// NB: 'confirmed' n'est volontairement PAS exclu : un colis peut être refusé,
-// livré ou annulé avant même la création du bon de ramassage, et doit alors
-// être reflété dans l'ERP.
-const EXCLUDED_ORDER_STATUSES = ['new', 'delivered', 'returned_not_stocked', 'returned_stocked', 'refused']
+const EXCLUDED_ORDER_STATUSES = ['new', 'delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
 
 export async function POST(request: NextRequest) {
   try {
