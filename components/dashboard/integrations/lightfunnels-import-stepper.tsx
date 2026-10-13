@@ -78,10 +78,30 @@ type OrderStepResult = {
   scanned: number
   imported: number
   alreadyImported: number
+  /** Liaisons ne pouvant pas être confirmées (commande d'un autre store) : à réparer. */
+  needsRepair?: number
   skipped: number
   skippedReasons?: Record<string, number>
   hasMore: boolean
   warnings?: string[]
+}
+
+/**
+ * Bilan transmis à l'assistant modal pour conclure le parcours.
+ * `completed` n'est vrai que si plus rien ne reste et qu'aucune anomalie n'est ouverte :
+ * une erreur, une reprise en attente ou une liaison incohérente interdit toute conclusion.
+ */
+export type LightfunnelsFlowState = {
+  step: 1 | 2 | 3
+  /** L'utilisateur a explicitement ignoré l'import des commandes. */
+  ordersSkipped: boolean
+  /** Commandes réellement créées pendant ce parcours. */
+  ordersImported: number
+  /** Commandes déjà présentes **et vérifiées** dans le store lié. */
+  alreadyVerified: number
+  /** Anomalie bloquante : erreur, import partiel, liaison de commande à réparer. */
+  hasIssues: boolean
+  completed: boolean
 }
 
 /**
@@ -160,8 +180,18 @@ function summarizeProducts(results: ProductStepResult[]) {
 
 function summarizeOrders(results: OrderStepResult[]) {
   const imported = results.reduce((total, row) => total + row.imported, 0)
+  const verified = results.reduce((total, row) => total + row.alreadyImported, 0)
   const skipped = results.reduce((total, row) => total + row.skipped, 0)
-  return `${imported} importée(s), ${skipped} ignorée(s)`
+  const toRepair = results.reduce((total, row) => total + (row.needsRepair || 0), 0)
+
+  // Le bilan sépare explicitement les quatre situations : importée, déjà présente **et
+  // vérifiée**, ignorée, à réparer. Rien n'est agrégé sous un « déjà présente » ambigu.
+  return [
+    `${imported} importée(s)`,
+    `${verified} déjà vérifiée(s)`,
+    `${skipped} ignorée(s)`,
+    ...(toRepair > 0 ? [`${toRepair} à réparer`] : []),
+  ].join(', ')
 }
 
 function mergeOrderBatch(byBinding: Map<string, OrderStepResult>, batch: OrderStepResult[]) {
@@ -181,6 +211,7 @@ function mergeOrderBatch(byBinding: Map<string, OrderStepResult>, batch: OrderSt
       scanned: current.scanned + result.scanned,
       imported: current.imported + result.imported,
       alreadyImported: current.alreadyImported + result.alreadyImported,
+      needsRepair: (current.needsRepair || 0) + (result.needsRepair || 0),
       skipped: current.skipped + result.skipped,
       skippedReasons: mergeReasons(current.skippedReasons, result.skippedReasons),
       hasMore: result.hasMore,
@@ -195,6 +226,12 @@ function mergeOrderBatch(byBinding: Map<string, OrderStepResult>, batch: OrderSt
  */
 const WARNING_LABELS: Record<string, string> = {
   HISTORY_UP_TO_DATE: 'Historique déjà à jour (aucune nouveauté détectée).',
+  ORDER_MAPPED_TO_OTHER_STORE:
+    'Commande déjà liée à un autre store : elle n’a été ni déplacée ni dupliquée, la liaison est à réparer.',
+  ORDER_MAPPING_NEEDS_REPAIR:
+    'Import non conclu : au moins une commande est déjà liée à un autre store, la liaison est à réparer.',
+  ORDER_MAPPING_ORPHANS_REPAIRED:
+    'Liaison(s) orpheline(s) réparée(s) : la vente avait été supprimée, la commande a été recréée.',
   LINES_SUBTOTAL_MISMATCH: 'Écart entre les lignes reconstituées et le sous-total source (absorbé par la remise).',
   MAPPING_PRODUCT_MISSING: 'Liaison produit introuvable : elle a été reconstruite.',
   MAPPING_VARIANT_MISSING: 'Liaison variante introuvable : elle a été reconstruite.',
@@ -236,6 +273,8 @@ export default function LightfunnelsImportStepper({
   connectAction = null,
   reconnectAction = null,
   showBindingActions = true,
+  showCompletionNotice = true,
+  onFlowStateChange,
 }: {
   status: LightfunnelsApiStatus
   onChanged: () => void | Promise<void>
@@ -252,6 +291,16 @@ export default function LightfunnelsImportStepper({
    * parcours de connexion initial ne doit exposer aucune action destructive.
    */
   showBindingActions?: boolean
+  /**
+   * Le message « Import terminé… » est masqué quand l'appelant conclut lui-même le parcours
+   * (assistant modal) — il reste affiché dans la page de réglages, qui ne se ferme jamais.
+   */
+  showCompletionNotice?: boolean
+  /**
+   * Bilan du parcours, remonté à chaque changement d'état : permet à l'assistant modal
+   * d'afficher une fiche de confirmation et de ne se fermer **que** sans anomalie.
+   */
+  onFlowStateChange?: (state: LightfunnelsFlowState) => void
 }) {
   const queryClient = useQueryClient()
   const { currentStoreId, setCurrentStoreId, accessibleStores, isStoresLoading } = useStore()
@@ -275,6 +324,35 @@ export default function LightfunnelsImportStepper({
   /** Progression du lot en cours (« lot 3 · 12 créé(s) · 25 analysé(s) »). */
   const [progressNote, setProgressNote] = useState('')
   const [error, setError] = useState('')
+
+  /**
+   * Bilan remonté à l'appelant : une conclusion n'est possible que si l'étape des commandes est
+   * résolue **et** qu'aucune anomalie n'est ouverte (erreur, import partiel, liaison de commande
+   * à réparer, commande non confirmée).
+   */
+  useEffect(() => {
+    if (!onFlowStateChange) return
+
+    const ordersImported = ordersResults.reduce((total, row) => total + row.imported, 0)
+    const alreadyVerified = ordersResults.reduce((total, row) => total + row.alreadyImported, 0)
+    const needsRepair = ordersResults.reduce((total, row) => total + (row.needsRepair || 0), 0)
+    const hasIssues =
+      productsState === 'error' ||
+      productsState === 'partial' ||
+      ordersState === 'error' ||
+      ordersState === 'partial' ||
+      needsRepair > 0 ||
+      ordersResults.some((row) => !row.ok)
+
+    onFlowStateChange({
+      step,
+      ordersSkipped: ordersState === 'skipped',
+      ordersImported,
+      alreadyVerified,
+      hasIssues,
+      completed: step === 3 && (ordersState === 'done' || ordersState === 'skipped') && !hasIssues,
+    })
+  }, [onFlowStateChange, step, productsState, ordersState, ordersResults])
 
   const targetStoreId = currentStoreId || selectedStoreId
   const storeBindings = status.bindings.filter((binding) => binding.store_id === targetStoreId)
@@ -492,10 +570,19 @@ export default function LightfunnelsImportStepper({
 
         const rows = Array.from(byBinding.values())
         const remaining = rows.some((row) => row.hasMore)
-        const failed = failedAny || rows.some((row) => !row.ok)
+        const toRepair = rows.reduce((total, row) => total + (row.needsRepair || 0), 0)
+        const failed = failedAny || rows.some((row) => !row.ok) || toRepair > 0
 
         setOrdersState(failed ? 'error' : remaining ? 'partial' : 'done')
-        if (failed) setError(errorText || 'Import des commandes interrompu.')
+        if (failed) {
+          // Le motif le plus actionnable passe en premier : une liaison incohérente ne doit pas
+          // être noyée dans une liste de codes techniques.
+          setError(
+            toRepair > 0
+              ? `${toRepair} commande(s) déjà liée(s) à un autre store : rien n’a été déplacé ni dupliqué, la liaison est à réparer.`
+              : errorText || 'Import des commandes interrompu.'
+          )
+        }
       }
 
       await refresh()
@@ -872,12 +959,18 @@ export default function LightfunnelsImportStepper({
             <button
               type="button"
               onClick={() => {
+                // Même règle qu'à l'étape des commandes : une synchronisation en échec ne doit
+                // pas être effacée par « Non ».
+                if (productsState === 'error' || productsState === 'partial') return
+
                 setError('')
                 setProductsState('skipped')
                 setProductsResults([])
                 setStep(3)
               }}
-              disabled={productsState === 'running'}
+              disabled={
+                productsState === 'running' || productsState === 'error' || productsState === 'partial'
+              }
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 sm:flex-1"
             >
               Non
@@ -991,11 +1084,18 @@ export default function LightfunnelsImportStepper({
             <button
               type="button"
               onClick={() => {
+                // « Non » ne conclut rien si un import a déjà signalé une anomalie : l'état
+                // d'erreur (ou l'import partiel) et son message sont conservés, sinon un
+                // incident deviendrait une confirmation trompeuse.
+                if (ordersState === 'error' || ordersState === 'partial') return
+
                 setError('')
                 setOrdersState('skipped')
                 setOrdersResults([])
               }}
-              disabled={ordersState === 'running'}
+              disabled={
+                ordersState === 'running' || ordersState === 'error' || ordersState === 'partial'
+              }
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 sm:flex-1"
             >
               Non
@@ -1033,8 +1133,14 @@ export default function LightfunnelsImportStepper({
                   <p>
                     <span className="font-medium text-foreground">{result.imported}</span> commande(s)
                     importée(s) sur {result.scanned} analysée(s) · {result.alreadyImported} déjà
-                    présente(s)
+                    présente(s) et vérifiée(s) dans ce store
                   </p>
+                  {result.needsRepair && result.needsRepair > 0 ? (
+                    <p className="flex items-center gap-1 text-red-500">
+                      <AlertTriangle className="h-3 w-3" /> {result.needsRepair} commande(s) déjà liée(s) à
+                      un autre store : ni déplacée(s) ni dupliquée(s), à réparer.
+                    </p>
+                  ) : null}
                   {result.skipped > 0 ? (
                     <p>
                       {result.skipped} ignorée(s)
@@ -1062,7 +1168,7 @@ export default function LightfunnelsImportStepper({
             </div>
           ) : null}
 
-          {ordersState === 'done' || ordersState === 'skipped' ? (
+          {showCompletionNotice && (ordersState === 'done' || ordersState === 'skipped') ? (
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400">
               {ordersState === 'skipped'
                 ? 'Étape ignorée : les ventes n’ont pas été importées. Vous pouvez fermer cette fenêtre.'

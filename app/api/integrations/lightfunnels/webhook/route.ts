@@ -7,7 +7,7 @@ import {
   verifyLightfunnelsWebhookSignature,
 } from '@/lib/integrations/lightfunnels'
 import {
-  hasLightfunnelsOrderMapping,
+  inspectLightfunnelsOrderMapping,
   resolveLightfunnelsAccessToken,
   upsertLightfunnelsOrderFromPayload,
   type LightfunnelsStoreBinding,
@@ -232,15 +232,30 @@ export async function POST(request: Request) {
       }
     }
 
-    // Idempotence : une commande déjà liée n'est jamais réécrite.
-    if (
-      await hasLightfunnelsOrderMapping({
-        supabase,
-        integrationId: integration.id,
-        lightfunnelsOrderId: externalOrderId,
-      })
-    ) {
+    // Idempotence : une commande déjà liée **et vérifiée dans ce store** n'est jamais réécrite.
+    // Le webhook s'exécute en `service_role` : la lecture n'est pas filtrée par la RLS, la
+    // réponse est donc définitive — une liaison orpheline (vente supprimée) est réimportée et
+    // une liaison d'un autre store est refusée au lieu d'être déplacée ou dupliquée.
+    const mappingState = await inspectLightfunnelsOrderMapping({
+      supabase,
+      integrationId: integration.id,
+      storeId: String(bindingRow.store_id),
+      lightfunnelsOrderId: externalOrderId,
+    })
+
+    if (mappingState === 'verified') {
       return NextResponse.json({ ok: true, status: 'already_imported' })
+    }
+
+    if (mappingState === 'other_store') {
+      console.warn('[lightfunnels][webhook] order already mapped to another store', {
+        requestId,
+        integrationId,
+        bindingId: bindingRow.id,
+        externalOrderId,
+      })
+
+      return NextResponse.json({ error: 'ORDER_MAPPED_TO_OTHER_STORE' }, { status: 409 })
     }
 
     const { data: storeRow } = await supabase

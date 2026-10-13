@@ -237,6 +237,7 @@ export async function POST(request: Request) {
           scanned: 0,
           imported: 0,
           alreadyImported: 0,
+          needsRepair: 0,
           skipped: 0,
           skippedReasons: {},
           warnings: [message],

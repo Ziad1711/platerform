@@ -1,10 +1,16 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Loader2, X, Zap } from 'lucide-react'
-import LightfunnelsImportStepper, { type LightfunnelsApiStatus } from './lightfunnels-import-stepper'
+import { AlertTriangle, CheckCircle2, Loader2, X, Zap } from 'lucide-react'
+import LightfunnelsImportStepper, {
+  type LightfunnelsApiStatus,
+  type LightfunnelsFlowState,
+} from './lightfunnels-import-stepper'
 import { useStore } from '@/lib/store-context'
+
+/** Délai de lecture de la fiche de confirmation avant fermeture automatique du modal. */
+const CONFIRMATION_CLOSE_DELAY_MS = 4000
 
 /**
  * Connexion Lightfunnels : consentement OAuth, puis liaison explicite des boutiques
@@ -19,6 +25,46 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
   const [isConnecting, setIsConnecting] = useState(false)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState<string[]>([])
+  const [flow, setFlow] = useState<LightfunnelsFlowState | null>(null)
+
+  /**
+   * Le bilan du parcours est republié par le stepper à chaque changement d'état : un état
+   * identique ne doit pas provoquer un nouveau rendu (et donc une nouvelle publication).
+   */
+  const handleFlowStateChange = useCallback((next: LightfunnelsFlowState) => {
+    setFlow((current) =>
+      current &&
+      current.completed === next.completed &&
+      current.hasIssues === next.hasIssues &&
+      current.ordersSkipped === next.ordersSkipped &&
+      current.ordersImported === next.ordersImported &&
+      current.alreadyVerified === next.alreadyVerified &&
+      current.step === next.step
+        ? current
+        : next
+    )
+  }, [])
+
+  // `onClose` est recréé par le parent à chaque rendu : le minuteur lit toujours la dernière
+  // version sans être annulé par un rendu intermédiaire.
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  /**
+   * Fermeture automatique **uniquement** quand le parcours est conclu sans anomalie : une
+   * erreur (y compris une relecture d'état ratée), un import partiel ou une commande
+   * incohérente laisse le modal ouvert. Le minuteur est annulé dès que l'état change ou au
+   * démontage.
+   */
+  useEffect(() => {
+    if (!flow?.completed || error) return
+
+    const timer = window.setTimeout(() => onCloseRef.current(), CONFIRMATION_CLOSE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [flow?.completed, error])
 
   // Le parcours est lié à un store : si « Tous les stores » est actif, on retient le premier
   // store accessible comme point de départ (modifiable à l'étape 1).
@@ -186,6 +232,10 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
             status={status}
             onChanged={loadStatus}
             showBindingActions={false}
+            // L'assistant conclut lui-même le parcours : il affiche la fiche de confirmation
+            // ci-dessous et gère la fermeture automatique.
+            showCompletionNotice={false}
+            onFlowStateChange={handleFlowStateChange}
             connectAction={
               <button
                 type="button"
@@ -219,6 +269,31 @@ export default function LightfunnelsConnectWizard({ onClose }: { onClose: () => 
               </button>
             }
           />
+        ) : null}
+
+        {/* Fiche de confirmation : elle n'apparaît qu'une fois le parcours réellement conclu et
+            sans erreur du wizard. Une anomalie (erreur, import partiel, commande incohérente)
+            garde le modal ouvert pour que l'utilisateur voie ce qui reste à corriger. */}
+        {flow?.completed && !error ? (
+          <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400">
+            <div className="flex items-center gap-2 font-medium">
+              <CheckCircle2 className="h-4 w-4" />
+              Lightfunnels est intégré
+            </div>
+            <p className="mt-1">
+              {flow.ordersSkipped
+                ? 'La boutique est associée. Vous avez choisi de ne pas importer les commandes : aucune vente n’a été créée.'
+                : `${flow.ordersImported} commande(s) importée(s)` +
+                  (flow.alreadyVerified > 0
+                    ? `, ${flow.alreadyVerified} déjà présente(s) et vérifiée(s) dans ce store`
+                    : '') +
+                  '. Retrouvez-les dans Ventes.'}
+            </p>
+            <p className="mt-1 text-xs">
+              Cette fenêtre se ferme automatiquement ; les réglages de l’intégration restent
+              disponibles pour relancer un import.
+            </p>
+          </div>
         ) : null}
 
         {warnings.length > 0 ? (

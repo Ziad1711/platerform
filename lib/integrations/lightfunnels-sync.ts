@@ -220,20 +220,63 @@ export async function readMappingInternalId(params: {
   return data?.internal_id ? String(data.internal_id) : null
 }
 
-/** Une commande déjà mappée n'est jamais relue : le rattrapage reste peu coûteux. */
-export async function hasLightfunnelsOrderMapping(params: {
+/**
+ * État d'une commande distante au regard de sa liaison locale.
+ *
+ *   * `none`        : aucune liaison connue, la commande est à importer ;
+ *   * `verified`    : la liaison pointe une commande **existante du store cible** — le seul cas
+ *                     où la commande est considérée comme réellement présente dans Ventes ;
+ *   * `orphan`      : la liaison pointe une commande disparue (vente supprimée sans que la
+ *                     liaison le soit) — la commande doit être **réimportée**, jamais comptée
+ *                     « déjà présente » ;
+ *   * `other_store` : la liaison appartient à un **autre store** (boutique distante rattachée
+ *                     ailleurs) : la vente existante n'est ni déplacée ni réécrite et aucun
+ *                     doublon n'est créé — la commande est signalée « à réparer ».
+ */
+export type LightfunnelsOrderMappingState = 'none' | 'verified' | 'orphan' | 'other_store'
+
+const ORDER_MAPPING_STATES: LightfunnelsOrderMappingState[] = [
+  'none',
+  'verified',
+  'orphan',
+  'other_store',
+]
+
+/**
+ * La seule présence d'une liaison ne prouve pas qu'une commande a été importée : elle doit
+ * pointer une commande **existante du store lié**. Un mapping orphelin (vente supprimée dans
+ * Ventes) bloquait toute reprise — la commande restait « déjà présente » sans exister.
+ *
+ * L'état est calculé en base par `lightfunnels_order_mapping_state` : une lecture côté client ne
+ * peut pas distinguer une commande supprimée d'une commande appartenant à un autre store, la RLS
+ * masquant les deux de la même façon.
+ */
+export async function inspectLightfunnelsOrderMapping(params: {
   supabase: SupabaseLike
   integrationId: string
+  storeId: string
   lightfunnelsOrderId: string
-}) {
-  const internalId = await readMappingInternalId({
-    supabase: params.supabase,
-    integrationId: params.integrationId,
-    entityType: 'order',
-    lightfunnelsId: params.lightfunnelsOrderId,
+}): Promise<LightfunnelsOrderMappingState> {
+  const { data, error } = await params.supabase.rpc('lightfunnels_order_mapping_state', {
+    p_integration_id: params.integrationId,
+    p_store_id: params.storeId,
+    p_external_order_id: params.lightfunnelsOrderId,
   })
 
-  return Boolean(internalId)
+  // Une lecture ratée doit faire échouer l'import : la traiter comme « nouvelle » créerait un
+  // doublon, la traiter comme « déjà présente » masquerait une commande manquante.
+  if (error) throw error
+
+  const state = String(data || '')
+
+  // Un état inconnu (fonction absente ou évolution non déployée) doit faire échouer l'import :
+  // le traduire en « à importer » créerait un doublon, en « déjà présente » masquerait une
+  // commande manquante.
+  if (!ORDER_MAPPING_STATES.includes(state as LightfunnelsOrderMappingState)) {
+    throw new Error(`LIGHTFUNNELS_MAPPING_STATE_UNKNOWN:${state || 'EMPTY'}`)
+  }
+
+  return state as LightfunnelsOrderMappingState
 }
 
 export async function storeEntityMapping(params: {
@@ -749,6 +792,11 @@ export type LightfunnelsImportSummary = {
   scanned: number
   imported: number
   alreadyImported: number
+  /**
+   * Commandes dont la liaison ne peut pas être confirmée (commande appartenant à un autre
+   * store) : ni « déjà présentes », ni importables sans collision — à réparer.
+   */
+  needsRepair: number
   skipped: number
   skippedReasons: Record<string, number>
   warnings: string[]
@@ -785,6 +833,10 @@ export async function importLightfunnelsOrders(params: {
   let imported = 0
   let alreadyImported = 0
   let skipped = 0
+  /** Liaisons incohérentes (commande d'un autre store) : jamais « déjà présente ». */
+  let needsRepair = 0
+  /** Liaisons orphelines réparées (vente supprimée) : commandes réellement recréées. */
+  let repairedOrphans = 0
   let progressFailed = false
 
   const { data: storeRow } = await supabase
@@ -880,6 +932,7 @@ export async function importLightfunnelsOrders(params: {
         scanned,
         imported,
         alreadyImported,
+        needsRepair,
         skipped,
         skippedReasons,
         warnings,
@@ -903,11 +956,30 @@ export async function importLightfunnelsOrders(params: {
       if (!orderId) continue
       scanned += 1
 
-      // Commande déjà liée : aucune requête de détail, aucune écriture.
-      if (await hasLightfunnelsOrderMapping({ supabase, integrationId, lightfunnelsOrderId: orderId })) {
+      // La liaison seule ne prouve rien : elle doit pointer une commande existante **du store
+      // lié**. Un mapping orphelin (vente supprimée) est réimporté, un mapping d'un autre store
+      // est signalé au lieu d'être compté « déjà présente ».
+      const mappingState = await inspectLightfunnelsOrderMapping({
+        supabase,
+        integrationId,
+        storeId: binding.store_id,
+        lightfunnelsOrderId: orderId,
+      })
+
+      if (mappingState === 'verified') {
         alreadyImported += 1
         continue
       }
+
+      if (mappingState === 'other_store') {
+        // La vente existante n'est ni déplacée ni dupliquée : la commande est comptée « à
+        // réparer ». Aucun identifiant distant n'est exposé, la quantité suffit au bilan.
+        needsRepair += 1
+        continue
+      }
+
+      /** Liaison orpheline : « réparée » seulement si la commande est réellement recréée. */
+      const recoversOrphan = mappingState === 'orphan'
 
       let detail: Awaited<ReturnType<typeof getLightfunnelsOrder>>
       try {
@@ -952,6 +1024,10 @@ export async function importLightfunnelsOrders(params: {
       if (result.status === 'created') {
         imported += 1
 
+        // La liaison orpheline n'est « réparée » qu'ici : une commande ignorée ou refusée
+        // ensuite reste un échec visible, jamais une réparation annoncée à tort.
+        if (recoversOrphan) repairedOrphans += 1
+
         for (const warning of result.warnings || []) {
           if (!warnings.includes(warning)) warnings.push(warning)
         }
@@ -995,23 +1071,47 @@ export async function importLightfunnelsOrders(params: {
     }
   }
 
+  // Liaisons incohérentes : elles empêchent de conclure l'import (le bilan n'est pas « ok »).
+  if (needsRepair > 0) {
+    warnings.push(`ORDER_MAPPED_TO_OTHER_STORE:${needsRepair}`)
+  }
+
+  // Liaisons orphelines réparées : des ventes supprimées ont été recréées, l'utilisateur doit
+  // le savoir (le nombre suffit, aucun identifiant distant n'est exposé sans utilité).
+  if (repairedOrphans > 0) {
+    warnings.push(`ORDER_MAPPING_ORPHANS_REPAIRED:${repairedOrphans}`)
+  }
+
   // Fin de parcours sans aucune nouveauté : l'historique est réellement à jour (le parcours
   // va jusqu'à la date plancher ou la fin des pages, jamais arrêté sur une page déjà connue —
-  // sinon une commande ancienne manquante resterait introuvable).
-  if (!hasMore && !progressFailed && !failureReason && imported === 0 && alreadyImported > 0) {
+  // sinon une commande ancienne manquante resterait introuvable). Une liaison incohérente
+  // (`needsRepair`) interdit de conclure : le bilan reste « à réparer ».
+  if (
+    !hasMore &&
+    !progressFailed &&
+    !failureReason &&
+    needsRepair === 0 &&
+    imported === 0 &&
+    alreadyImported > 0
+  ) {
     if (!warnings.includes('HISTORY_UP_TO_DATE')) warnings.push('HISTORY_UP_TO_DATE')
   }
 
   const summary: LightfunnelsImportSummary = {
-    ok: !progressFailed && !failureReason,
+    // Une liaison incohérente rend le bilan non concluant : `ok` reste faux pour que l'appelant
+    // ne présente ni « historique à jour » ni succès.
+    ok: !progressFailed && !failureReason && needsRepair === 0,
     ...(failureReason
       ? { reason: failureReason }
       : progressFailed
         ? { reason: 'IMPORT_PROGRESS_NOT_SAVED' }
-        : {}),
+        : needsRepair > 0
+          ? { reason: 'ORDER_MAPPING_NEEDS_REPAIR' }
+          : {}),
     scanned,
     imported,
     alreadyImported,
+    needsRepair,
     skipped,
     skippedReasons,
     warnings,
