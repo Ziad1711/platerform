@@ -38,13 +38,15 @@ export async function GET(request: Request) {
     const mapped = mapMarocGoDeliveryStateToOrderStatus(stateName)
 
     if (orderId) {
-      // Ne pas synchroniser si la commande est déjà dans un état final ou confirmée
+      // Ne pas synchroniser si la commande est déjà dans un état final.
+      // NB: 'confirmed' n'est volontairement PAS final : un colis peut être
+      // refusé, livré ou annulé avant la création du bon de ramassage.
       const { data: currentOrder } = await admin
         .from('orders')
         .select('status, exchange_status, exchange_original_order_id')
         .eq('id', orderId)
         .single()
-      const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused', 'confirmed']
+      const FINAL_ORDER_STATUSES = ['delivered', 'returned_not_stocked', 'returned_stocked', 'refused']
 
       // Une commande engagée dans un échange (ou sa commande de remplacement)
       // reste suivie : le transporteur doit pouvoir la faire basculer sur
