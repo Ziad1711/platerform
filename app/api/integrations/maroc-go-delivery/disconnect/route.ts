@@ -35,6 +35,16 @@ export async function POST(request: Request) {
     const { error: deleteConfigError } = await admin.from('maroc_go_delivery_configs').delete().eq('store_id', storeId)
     if (deleteConfigError && !isMissingDbObjectError(deleteConfigError)) throw deleteConfigError
 
+    // La société de livraison Maroc Go Delivery ne doit plus pouvoir être
+    // sélectionnée sur les nouvelles confirmations de commande.
+    const { error: deliveryCompanyError } = await admin
+      .from('delivery_companies')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('store_id', storeId)
+      .eq('api_provider', 'maroc-go-delivery')
+
+    if (deliveryCompanyError && !isMissingDbObjectError(deliveryCompanyError)) throw deliveryCompanyError
+
     if (integrationId) {
       const { data: remainingConfigs, error: remainingError } = await admin
         .from('maroc_go_delivery_configs')
