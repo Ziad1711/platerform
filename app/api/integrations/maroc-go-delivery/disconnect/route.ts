@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
 
-const isMissingDbObjectError = (error: any) => ['42P01', '42703'].includes(error?.code)
+// PostgREST renvoie `PGRST205`/`PGRST204` (objet absent du cache de schéma)
+// là où Postgres renvoie `42P01`/`42703` : les deux doivent être tolérés.
+const isMissingDbObjectError = (error: any) => ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error?.code)
 
 export async function POST(request: Request) {
   try {
