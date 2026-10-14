@@ -72,6 +72,7 @@ export default function AdsCostChart() {
   const plotRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [tooltipWidth, setTooltipWidth] = useState(170)
+  const [containerWidth, setContainerWidth] = useState(800)
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-ads-cost-chart', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
@@ -178,6 +179,19 @@ export default function AdsCostChart() {
 
   const points = data?.points || []
 
+  // Mesure de la largeur réelle du plot pour adapter le nombre de labels X.
+  useEffect(() => {
+    const el = plotRef.current
+    if (!el) return
+    setContainerWidth(el.clientWidth)
+    const ro = new ResizeObserver((entries) => {
+      const cw = entries[0]?.contentRect?.width
+      if (cw) setContainerWidth(cw)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [points.length])
+
   // Largeur réelle de l'infobulle (mesurée après affichage).
   useEffect(() => {
     if (hoveredIndex !== null && tooltipRef.current) {
@@ -193,8 +207,14 @@ export default function AdsCostChart() {
   }, [points])
   const yTicks = [maxY, maxY * 0.75, maxY * 0.5, maxY * 0.25, 0]
 
-  const labelStep = points.length > 0 ? Math.max(1, Math.ceil(points.length / 8)) : 1
-  const labelTicks = points.filter((_: { date: string; label: string; cpl: number; cpa: number }, index: number) => index % labelStep === 0 || index === points.length - 1)
+  const labelStep = useMemo(() => {
+    if (points.length === 0) return 1
+    const base = containerWidth >= 1024 ? 14 : containerWidth >= 768 ? 10 : 8
+    return Math.max(1, Math.ceil(points.length / base))
+  }, [points.length, containerWidth])
+  const labelTicks = points
+    .map((p: { date: string; label: string; cpl: number; cpa: number }, index: number) => ({ ...p, index }))
+    .filter((p: { index: number }) => p.index % labelStep === 0 || p.index === points.length - 1)
 
   const valueToY = (value: number) => {
     if (maxY === 0) return 50
@@ -218,16 +238,7 @@ export default function AdsCostChart() {
 
   // ── Premium chart extras ──
 
-  const pointToX = (index: number) => {
-    if (points.length <= 1) return 50
-    return (index / (points.length - 1)) * 100
-  }
 
-  const isCollision = (x1: number, x2: number, threshold = 18) => {
-    return Math.abs(x1 - x2) < threshold
-  }
-
-  // Find max CPL and max CPA points
   const maxCplPoint = useMemo(() => {
     if (!points || points.length < 2) return null
     let maxIdx = 0
@@ -255,44 +266,6 @@ export default function AdsCostChart() {
     if (maxVal <= 0 || !isFinite(maxVal)) return null
     return { index: maxIdx, value: maxVal }
   }, [points])
-
-  // Badge positions with collision avoidance
-  const badgePositions = useMemo(() => {
-    const positions: { key: string; x: number; y: number; value: number; label: string; color: string; offsetY: number }[] = []
-
-    if (maxCplPoint && showCpl) {
-      const x = pointToX(maxCplPoint.index)
-      const y = valueToY(maxCplPoint.value)
-      positions.push({
-        key: 'cpl',
-        x, y,
-        value: maxCplPoint.value,
-        label: 'Max CPL',
-        color: seriesConfig.cpl.color,
-        offsetY: 0,
-      })
-    }
-
-    if (maxCpaPoint && showCpa) {
-      const x = pointToX(maxCpaPoint.index)
-      const y = valueToY(maxCpaPoint.value)
-      let offsetY = 0
-      if (positions.length > 0 && isCollision(x, positions[0].x, 20)) {
-        offsetY = positions[0].y < y ? -8 : 8
-      }
-      positions.push({
-        key: 'cpa',
-        x, y,
-        value: maxCpaPoint.value,
-        label: 'Max CPA',
-        color: seriesConfig.cpa.color,
-        offsetY,
-      })
-    }
-
-    return positions
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxCplPoint, maxCpaPoint, showCpl, showCpa, points])
 
   return (
     <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
@@ -329,25 +302,33 @@ export default function AdsCostChart() {
         <>
           <div className="h-56 w-full border border-border rounded-lg p-3 bg-card overflow-hidden">
             <div className="relative w-full h-full pl-10">
-              <div className="absolute left-0 top-0 bottom-0 w-9 flex flex-col justify-between text-[10px] text-muted-foreground">
-                {yTicks.map((tick: number, idx: number) => (
-                  <span key={idx}>{formatAxisValue(tick)}</span>
-                ))}
+              <div className="absolute left-0 top-0 bottom-0 w-9 text-[10px] text-muted-foreground">
+                <div className="relative w-full h-full">
+                  {yTicks.map((tick: number, idx: number) => (
+                    <span key={idx} className="absolute left-0" style={{ top: `${valueToY(tick)}%`, transform: 'translateY(-50%)' }}>
+                      {formatAxisValue(tick)}
+                    </span>
+                  ))}
+                  {showCpl && maxCplPoint && (
+                    <span
+                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
+                      style={{ top: `${valueToY(maxCplPoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.cpl.color }}
+                    >
+                      {formatShortCurrency(maxCplPoint.value)}
+                    </span>
+                  )}
+                  {showCpa && maxCpaPoint && (
+                    <span
+                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
+                      style={{ top: `${valueToY(maxCpaPoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.cpa.color }}
+                    >
+                      {formatShortCurrency(maxCpaPoint.value)}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <svg ref={plotRef} viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
-                {yTicks.map((tick: number, idx: number) => (
-                  <line
-                    key={idx}
-                    x1="0"
-                    y1={valueToY(tick)}
-                    x2="100"
-                    y2={valueToY(tick)}
-                    stroke="var(--border)"
-                    strokeWidth="0.4"
-                  />
-                ))}
-
                 {showCpl && (
                   <path d={buildPath('cpl')} fill="none" stroke={seriesConfig.cpl.color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 )}
@@ -359,7 +340,45 @@ export default function AdsCostChart() {
                     hors du SVG pour éviter l'étirement horizontal
                     (preserveAspectRatio="none"). */}
 
-                {/* ── Vertical line (default last point, hover override) ── */}
+                {/* Lignes de sommet discrètes */}
+                {showCpl && maxCplPoint && (
+                  <line
+                    x1="0"
+                    y1={valueToY(maxCplPoint.value)}
+                    x2={(maxCplPoint.index / (points.length - 1)) * 100}
+                    y2={valueToY(maxCplPoint.value)}
+                    stroke={seriesConfig.cpl.color}
+                    strokeWidth="1"
+                    opacity="0.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+                {showCpa && maxCpaPoint && (
+                  <line
+                    x1="0"
+                    y1={valueToY(maxCpaPoint.value)}
+                    x2={(maxCpaPoint.index / (points.length - 1)) * 100}
+                    y2={valueToY(maxCpaPoint.value)}
+                    stroke={seriesConfig.cpa.color}
+                    strokeWidth="1"
+                    opacity="0.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+
+                {points.map((_, i) => (
+                  <line
+                    key={`v-${i}`}
+                    x1={(points.length === 1 ? 0 : (i / (points.length - 1)) * 100)}
+                    y1="0"
+                    x2={(points.length === 1 ? 0 : (i / (points.length - 1)) * 100)}
+                    y2="100"
+                    stroke="currentColor"
+                    className="text-foreground/15 dark:text-white/25"
+                    strokeWidth="0.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
                 {(hoveredIndex !== null ? hoveredIndex : points.length - 1) >= 0 && (
                   <line
                     x1={points.length === 1 ? 0 : (((hoveredIndex !== null ? hoveredIndex : points.length - 1)) / (points.length - 1)) * 100}
@@ -374,47 +393,6 @@ export default function AdsCostChart() {
                   />
                 )}
               </svg>
-
-              {/* ── Sommets (labels + badges) rendus en HTML pour rester nets
-                  malgré l'étirement horizontal du SVG ── */}
-              <div className="pointer-events-none absolute inset-y-0 right-0 left-10 z-[5]">
-                {maxCplPoint && showCpl && (
-                  <span
-                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
-                    style={{
-                      left: `${pointToX(maxCplPoint.index)}%`,
-                      top: `${valueToY(maxCplPoint.value)}%`,
-                      backgroundColor: seriesConfig.cpl.color,
-                    }}
-                  />
-                )}
-                {maxCpaPoint && showCpa && (
-                  <span
-                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
-                    style={{
-                      left: `${pointToX(maxCpaPoint.index)}%`,
-                      top: `${valueToY(maxCpaPoint.value)}%`,
-                      backgroundColor: seriesConfig.cpa.color,
-                    }}
-                  />
-                )}
-
-                {badgePositions.map((bp) => (
-                  <span
-                    key={`badge-${bp.key}`}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                    style={{
-                      left: `${bp.x}%`,
-                      top: `${bp.y + bp.offsetY}%`,
-                      color: bp.color,
-                      borderColor: `${bp.color}33`,
-                      backgroundColor: `${bp.color}14`,
-                    }}
-                  >
-                    {bp.label} • {formatShortCurrency(bp.value)} MAD
-                  </span>
-                ))}
-              </div>
 
               <div
                 className="absolute inset-0 z-10"
@@ -467,10 +445,23 @@ export default function AdsCostChart() {
             </div>
           </div>
 
-          <div className="mt-2 flex justify-between text-xs text-muted-foreground gap-2">
-            {labelTicks.map((p: { date: string; label: string }, i: number) => (
-              <span key={`${p.date}-${i}`} className="text-center">{p.label}</span>
-            ))}
+          <div className="relative mt-2 h-4 text-xs text-muted-foreground">
+            {/* Zone alignée sur le plot : mêmes retraits que le SVG (border 1px + p-3 12px + pl-10 40px à gauche,
+                border 1px + p-3 12px à droite). */}
+            <div className="absolute inset-y-0 left-[53px] right-[13px]">
+              {labelTicks.map((p: { date: string; label: string; index: number }) => {
+                const x = points.length === 1 ? 0 : (p.index / (points.length - 1)) * 100
+                return (
+                  <span
+                    key={`${p.date}-${p.index}`}
+                    className="absolute top-0 -translate-x-1/2 whitespace-nowrap"
+                    style={{ left: `${x}%` }}
+                  >
+                    {p.label}
+                  </span>
+                )
+              })}
+            </div>
           </div>
         </>
       )}

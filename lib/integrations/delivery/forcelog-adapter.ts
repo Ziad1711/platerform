@@ -62,8 +62,8 @@ export const forcelogAdapter: DeliveryProvider = {
     }
   },
 
-  async trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string): Promise<TrackParcelResult> {
-    const raw = await trackForceLogParcel(config.token, trackingNumber)
+  async trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string, options?: { signal?: AbortSignal }): Promise<TrackParcelResult> {
+    const raw = await trackForceLogParcel(config.token, trackingNumber, { signal: options?.signal })
     
     if ((raw as any)?.RESULT === 'ERROR') {
       throw new Error(`FORCELOG_TRACK_FAILED:${(raw as any)?.MESSAGE || 'Unknown error'}`)

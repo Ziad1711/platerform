@@ -37,7 +37,7 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center justify-center sm:justify-start gap-3 w-full sm:w-auto">
           <StoreSelector />
-          <PeriodFilter />
+          <PeriodFilter defaultPeriod="today" />
         </div>
       </div>
 

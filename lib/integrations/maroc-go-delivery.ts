@@ -1,4 +1,5 @@
 import { normalizeMoroccanPhone } from '@/lib/utils'
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
 
 const MAROC_GO_DELIVERY_API_BASE_URL = 'https://www.marocgodelivery.com/api/v1'
 
@@ -7,6 +8,7 @@ type MarocGoDeliveryRequestInit = {
   method?: 'GET' | 'POST'
   path: string
   body?: Record<string, unknown>
+  signal?: AbortSignal
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -21,6 +23,7 @@ async function marocGoDeliveryFetch<T>(params: MarocGoDeliveryRequestInit): Prom
         ...(params.body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: params.body ? JSON.stringify(params.body) : undefined,
+      signal: params.signal,
     })
 
     if (response.ok) {
@@ -32,21 +35,26 @@ async function marocGoDeliveryFetch<T>(params: MarocGoDeliveryRequestInit): Prom
       path: params.path,
       method: params.method || 'GET',
       status: response.status,
-      body: message,
     })
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Token API Maroc Go Delivery invalide ou expiré.')
+      throw carrierErrorFromStatus({ status: response.status, message: 'Token API Maroc Go Delivery invalide ou expire.' })
     }
-
+    if (response.status === 429) {
+      throw carrierErrorFromStatus({
+        status: response.status,
+        retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+        message: 'Maroc Go Delivery : trop de requetes.',
+      })
+    }
     if (response.status >= 500) {
       if (attempt < 2) {
         await sleep(400 * (attempt + 1))
         continue
       }
-      throw new Error('Serveur Maroc Go Delivery indisponible. Réessayez plus tard.')
+      throw carrierErrorFromStatus({ status: response.status, message: 'Serveur Maroc Go Delivery indisponible.' })
     }
 
-    throw new Error(message || `Erreur API Maroc Go Delivery (${response.status}).`)
+    throw carrierErrorFromStatus({ status: response.status, message: `Erreur API Maroc Go Delivery (${response.status}).` })
   }
 
   throw new Error('MAROC_GO_DELIVERY_REQUEST_FAILED')
@@ -207,8 +215,8 @@ export async function createMarocGoDeliveryParcel(token: string, payload: MarocG
   })
 }
 
-export async function trackMarocGoDeliveryParcel(token: string, trackingNumber: string) {
-  return marocGoDeliveryFetch<MarocGoDeliveryTrackingPayload>({ token, path: `/parcels/${encodeURIComponent(trackingNumber)}` })
+export async function trackMarocGoDeliveryParcel(token: string, trackingNumber: string, options?: { signal?: AbortSignal }) {
+  return marocGoDeliveryFetch<MarocGoDeliveryTrackingPayload>({ token, path: `/parcels/${encodeURIComponent(trackingNumber)}`, signal: options?.signal })
 }
 
 export async function createMarocGoDeliveryVoucher(token: string, payload: { shop: number; parcels: Array<string | number> }) {

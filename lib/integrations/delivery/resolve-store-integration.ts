@@ -46,6 +46,9 @@ export async function resolveStoreIntegration(
     .select('id, status')
     .eq('provider', provider)
     .eq('user_id', ownerUserId)
+    // Historique uniquement : une integration deja rattachee a un AUTRE store
+    // ne doit jamais etre utilisee pour ce store.
+    .is('store_id', null)
     .order('created_at', { ascending: true })
     .limit(1)
 

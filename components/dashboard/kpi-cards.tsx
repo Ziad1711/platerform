@@ -552,7 +552,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
                 )}
               </div>
               <div className="mt-4">
-                <div className="text-lg sm:text-2xl font-bold text-foreground dark:text-gray-100">{kpi.value}</div>
+                <div className="text-base sm:text-lg lg:text-xl font-bold text-foreground dark:text-gray-100">{kpi.value}</div>
                 <div className="text-sm text-muted-foreground dark:text-muted-foreground mt-1 flex items-center gap-1">
                   <span>{kpi.title}</span>
                   {kpi.infoText && (

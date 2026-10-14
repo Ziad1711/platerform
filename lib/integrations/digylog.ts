@@ -2,6 +2,8 @@
 // Client API Digylog — Tous les endpoints
 // ============================================================
 
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
+
 const DIGYLOG_BASE_URL = 'https://api.digylog.com/api/v2/seller'
 
 export type DigylogConfig = {
@@ -30,8 +32,12 @@ async function apiFetch<T = any>(
     headers: { ...headers(cfg), ...(options.headers as Record<string, string> || {}) },
   })
   if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`DIGYLOG_API_ERROR:${res.status}:${text.slice(0, 500)}`)
+    await res.text().catch(() => '')
+    throw carrierErrorFromStatus({
+      status: res.status,
+      retryAfterSeconds: parseRetryAfterSeconds(res.headers.get('retry-after')),
+      message: `DIGYLOG_API_ERROR:${res.status}`,
+    })
   }
   return res.json()
 }
@@ -98,8 +104,8 @@ export async function createOrders(cfg: DigylogConfig, payload: DigylogCreateOrd
   })
 }
 
-export async function getOrderInfos(cfg: DigylogConfig, tracking: string) {
-  return apiFetch(cfg, `/order/${encodeURIComponent(tracking)}/infos`)
+export async function getOrderInfos(cfg: DigylogConfig, tracking: string, options?: RequestInit) {
+  return apiFetch(cfg, `/order/${encodeURIComponent(tracking)}/infos`, options)
 }
 
 export async function getOrderMinInfos(cfg: DigylogConfig, tracking: string) {
@@ -282,6 +288,9 @@ export function mapDigylogStatusToOrderStatus(rawStatus: string, idStatus?: stri
   orderStatus: string | null
   deliveryStatus: string
   statusDateField: string | null
+  /** false UNIQUEMENT pour le repli inconnu : un etat connu sans changement
+   *  de statut reste reconnu (ex : idStatus 1 « en cours de traitement »). */
+  recognized?: boolean
 } {
   const id = String(idStatus ?? '').trim()
   const label = rawStatus.toLowerCase().trim()
@@ -308,5 +317,5 @@ export function mapDigylogStatusToOrderStatus(rawStatus: string, idStatus?: stri
   if (label.includes('pas de réponse') || label.includes('pas de reponse')) return { orderStatus: 'dl_no_answer', deliveryStatus: 'attempt_failed', statusDateField: 'dl_no_answer_at' }
   if (label.includes('report')) return { orderStatus: 'dl_postponed', deliveryStatus: 'postponed', statusDateField: 'dl_postponed_at' }
 
-  return { orderStatus: null, deliveryStatus: 'pending', statusDateField: null }
+  return { orderStatus: null, deliveryStatus: 'pending', statusDateField: null, recognized: false }
 }

@@ -44,55 +44,61 @@ export async function POST(request: Request) {
 async function handleEvent(body: any, request: Request) {
   const admin = createAdminClient()
 
-  // Extraire les infos du webhook
   const eventType = body.event || body.type || body.event_type || 'order_status'
   const eventKey = body.id || body.event_id || body.key || null
   const payload = body.data || body.payload || body
 
-  // Déterminer le store_id et integration_id
-  const storeId = body.store_id || payload?.store_id || request.headers.get('x-store-id') || ''
-  const integrationId = body.integration_id || payload?.integration_id || request.headers.get('x-integration-id') || ''
+  const tracking = String(payload?.tracking || payload?.traking || payload?.num || '').trim()
+  if (!tracking) {
+    return NextResponse.json({ ok: false, error: 'MISSING_TRACKING' }, { status: 400 })
+  }
 
-  if (!storeId || !integrationId) {
-    // Fallback: chercher l'intégration Digylog via le tracking
-    const tracking = payload?.tracking || payload?.num || ''
-    if (tracking) {
-      const { data: order } = await admin
-        .from('orders')
-        .select('store_id, delivery_company_id')
-        .eq('tracking_number', tracking)
-        .maybeSingle()
+  // 1. Cible resolue par la DONNEE, jamais par les identifiants du payload :
+  //    un appelant ne choisit ni le store ni l'integration.
+  const { data: order } = await admin
+    .from('orders')
+    .select('store_id, delivery_company_id')
+    .eq('tracking_number', tracking)
+    .maybeSingle()
 
-      if (order?.store_id) {
-        const { data: integration } = await admin
-          .from('integrations')
-          .select('id')
-          .eq('store_id', order.store_id)
-          .eq('provider', 'digylog')
-          .eq('status', 'connected')
-          .maybeSingle()
+  if (!order?.store_id) {
+    return NextResponse.json({ ok: false, error: 'ORDER_NOT_FOUND' }, { status: 404 })
+  }
 
-        if (integration?.id) {
-          const result = await processDigylogWebhook({
-            admin,
-            integrationId: integration.id,
-            storeId: order.store_id,
-            eventType,
-            eventKey,
-            payload,
-          })
-          return NextResponse.json(result)
-        }
-      }
-    }
+  const { data: integration } = await admin
+    .from('integrations')
+    .select('id')
+    .eq('store_id', order.store_id)
+    .eq('provider', 'digylog')
+    .eq('status', 'connected')
+    .maybeSingle()
 
-    return NextResponse.json({ ok: false, error: 'MISSING_STORE_OR_INTEGRATION' }, { status: 400 })
+  if (!integration?.id) {
+    return NextResponse.json({ ok: false, error: 'INTEGRATION_NOT_CONNECTED' }, { status: 404 })
+  }
+
+  // 2. Authenticite : refus par defaut tant qu'aucun secret n'est configure
+  //    (aucune ecriture sur un evenement non verifie).
+  const { data: config } = await admin
+    .from('digylog_configs')
+    .select('webhook_secret')
+    .eq('store_id', order.store_id)
+    .maybeSingle()
+
+  const expected = String(config?.webhook_secret || '').trim()
+  if (!expected) {
+    return NextResponse.json({ ok: false, error: 'WEBHOOK_NOT_CONFIGURED' }, { status: 503 })
+  }
+
+  const provided = String(request.headers.get('x-jisra-webhook-secret') || payload?.secret || '').trim()
+  if (provided !== expected) {
+    return NextResponse.json({ ok: false, error: 'INVALID_WEBHOOK_SECRET' }, { status: 401 })
   }
 
   const result = await processDigylogWebhook({
     admin,
-    integrationId,
-    storeId,
+    integrationId: integration.id,
+    storeId: order.store_id,
     eventType,
     eventKey,
     payload,

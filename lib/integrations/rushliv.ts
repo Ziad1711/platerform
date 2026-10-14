@@ -5,6 +5,7 @@
 // ============================================================
 
 import { normalizeMoroccanPhone } from '@/lib/utils'
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
 
 const RUSHLIV_API_BASE_URL = 'https://clients.rushliv.com'
 
@@ -54,6 +55,7 @@ async function rushlivFetch<T>(params: {
   path: string
   method?: 'GET' | 'POST'
   form?: Record<string, string | number | undefined | null>
+  signal?: AbortSignal
 }): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const isPost = (params.method || 'GET') === 'POST'
@@ -74,6 +76,7 @@ async function rushlivFetch<T>(params: {
       },
       body: isPost ? form.toString() : undefined,
       cache: 'no-store',
+      signal: params.signal,
     })
 
     if (response.ok) {
@@ -82,34 +85,40 @@ async function rushlivFetch<T>(params: {
       // (401/403 = token invalide ou non autorisé).
       const apiStatus = Number((payload as { status?: unknown })?.status)
       if (apiStatus === 401 || apiStatus === 403) {
-        throw new Error(
-          String((payload as { msg?: unknown })?.msg || 'Token API Rushliv invalide ou expiré.')
-        )
+        throw carrierErrorFromStatus({
+          status: apiStatus,
+          message: String((payload as { msg?: unknown })?.msg || 'Token API Rushliv invalide ou expire.'),
+        })
       }
       return payload
     }
 
-    const message = await response.text()
+    await response.text()
     console.error('Rushliv API error', {
       path: params.path,
       method: params.method || 'GET',
       status: response.status,
-      body: message,
     })
 
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Token API Rushliv invalide ou expiré.')
+      throw carrierErrorFromStatus({ status: response.status, message: 'Token API Rushliv invalide ou expire.' })
     }
-
+    if (response.status === 429) {
+      throw carrierErrorFromStatus({
+        status: response.status,
+        retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+        message: 'Rushliv : trop de requetes.',
+      })
+    }
     if (response.status >= 500) {
       if (attempt < 2) {
         await sleep(400 * (attempt + 1))
         continue
       }
-      throw new Error('Serveur Rushliv indisponible. Réessayez plus tard.')
+      throw carrierErrorFromStatus({ status: response.status, message: 'Serveur Rushliv indisponible.' })
     }
 
-    throw new Error(message || `Erreur API Rushliv (${response.status}).`)
+    throw carrierErrorFromStatus({ status: response.status, message: `Erreur API Rushliv (${response.status}).` })
   }
 
   throw new Error('RUSHLIV_REQUEST_FAILED')
@@ -192,12 +201,13 @@ export async function createRushlivParcel(token: string, payload: {
   return { ...raw, tracking }
 }
 
-export async function trackRushlivParcel(token: string, tracking: string): Promise<RushlivTrackingPayload> {
+export async function trackRushlivParcel(token: string, tracking: string, options?: { signal?: AbortSignal }): Promise<RushlivTrackingPayload> {
   const raw = await rushlivFetch<RushlivTrackingPayload>({
     token,
     path: '/api-parcels',
     method: 'POST',
     form: { action: 'track', tracking },
+    signal: options?.signal,
   })
 
   const status = raw?.status

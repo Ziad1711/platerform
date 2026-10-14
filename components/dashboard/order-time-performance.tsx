@@ -39,6 +39,18 @@ function formatPercent(value: number, total: number) {
   return `${((value / total) * 100).toFixed(1).replace('.', ',')} %`
 }
 
+function startOfDay(date: Date) {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function addDays(date: Date, days: number) {
+  const d = new Date(date)
+  d.setDate(d.getDate() + days)
+  return d
+}
+
 export default function OrderTimePerformance() {
   const {
     currentStoreId,
@@ -52,8 +64,22 @@ export default function OrderTimePerformance() {
   } = useStore()
   const supabase = createClient()
   const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
-  const startIso = periodRange.start ? periodRange.start.toISOString() : null
-  const endIso = periodRange.end ? periodRange.end.toISOString() : null
+
+  let periodStart = periodRange.start ? startOfDay(periodRange.start) : null
+  let periodEnd = periodRange.end ? startOfDay(periodRange.end) : null
+
+  if (selectedPeriod === 'today') {
+    const ref = startOfDay(new Date())
+    periodStart = addDays(ref, -6)
+    periodEnd = addDays(ref, 1)
+  } else if (selectedPeriod === 'yesterday') {
+    const ref = addDays(startOfDay(new Date()), -1)
+    periodStart = addDays(ref, -6)
+    periodEnd = addDays(ref, 1)
+  }
+
+  const startIso = periodStart ? periodStart.toISOString() : null
+  const endIso = periodEnd ? periodEnd.toISOString() : null
 
   const [viewMode, setViewMode] = useState<ViewMode>('day')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -350,58 +376,72 @@ export default function OrderTimePerformance() {
               )}
             </div>
 
-            <div className="h-64 flex items-end gap-1 sm:gap-2 border-b border-border">
-              {chartSeries.map((item, index) => {
-                const heightPct = maxValue > 0 ? (item.value / maxValue) * 100 : 0
-                const isHighlighted = index === displayIndex
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onMouseLeave={() => setActiveIndex(null)}
-                    onFocus={() => setActiveIndex(index)}
-                    onBlur={() => setActiveIndex(null)}
-                    onClick={() => handleBarClick(index)}
-                    aria-label={`${item.fullLabel} : ${item.value} commandes`}
-                    className="flex-1 h-full min-w-0 flex flex-col justify-end items-center gap-1 rounded-t-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    <span
-                      className={`text-[10px] sm:text-xs tabular-nums ${
-                        isHighlighted ? 'font-semibold text-foreground' : 'text-muted-foreground'
-                      }`}
-                    >
-                      {item.value > 0 ? item.value : ''}
-                    </span>
-                    <span
-                      className="w-full rounded-t-md transition-all duration-200"
-                      style={{
-                        height: `${item.value > 0 ? Math.max(heightPct, 2) : 0.6}%`,
-                        backgroundColor:
-                          item.value === 0
-                            ? 'hsl(var(--border))'
-                            : isHighlighted
-                            ? PRIMARY_COLOR
-                            : MUTED_BAR_COLOR,
-                      }}
-                    />
-                  </button>
-                )
-              })}
-            </div>
+            <div className="flex gap-2">
+              {/* Axe Y */}
+              <div className="flex flex-col justify-between text-[10px] sm:text-xs text-muted-foreground tabular-nums h-64 py-1">
+                <span>{Math.ceil(maxValue)}</span>
+                <span>{Math.round(maxValue / 2)}</span>
+                <span>0</span>
+              </div>
 
-            <div className="flex gap-1 sm:gap-2">
-              {chartSeries.map((item, index) => {
-                const showLabel = viewMode === 'day' || index % 3 === 0 || index === displayIndex
-                return (
-                  <span
-                    key={`label-${item.key}`}
-                    className="flex-1 min-w-0 text-center text-[10px] sm:text-xs text-muted-foreground"
-                  >
-                    {showLabel ? item.label : ''}
-                  </span>
-                )
-              })}
+              {/* Zone graphique */}
+              <div className="flex-1 relative">
+                {/* Lignes de grille */}
+                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none z-0">
+                  <div className="border-t border-border/20 w-full" />
+                  <div className="border-t border-border/20 w-full" />
+                  <div className="border-b border-border/40 w-full" />
+                </div>
+
+                {/* Barres */}
+                <div className="relative h-64 flex items-end gap-1 sm:gap-2 z-10">
+                  {chartSeries.map((item, index) => {
+                    const heightPct = maxValue > 0 ? (item.value / maxValue) * 100 : 0
+                    const isHighlighted = index === displayIndex
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onMouseLeave={() => setActiveIndex(null)}
+                        onFocus={() => setActiveIndex(index)}
+                        onBlur={() => setActiveIndex(null)}
+                        onClick={() => handleBarClick(index)}
+                        aria-label={`${item.fullLabel} : ${item.value} commandes`}
+                        className="flex-1 h-full min-w-0 flex flex-col justify-end items-center gap-1 rounded-t-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <span
+                          className="w-full rounded-t-md transition-all duration-200"
+                          style={{
+                            height: `${item.value > 0 ? Math.max(heightPct, 2) : 0.6}%`,
+                            backgroundColor:
+                              item.value === 0
+                                ? 'hsl(var(--border))'
+                                : isHighlighted
+                                ? PRIMARY_COLOR
+                                : MUTED_BAR_COLOR,
+                          }}
+                        />
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Labels X */}
+                <div className="flex gap-1 sm:gap-2 mt-1">
+                  {chartSeries.map((item, index) => {
+                    const showLabel = viewMode === 'day' || index % 3 === 0 || index === displayIndex
+                    return (
+                      <span
+                        key={`label-${item.key}`}
+                        className="flex-1 min-w-0 text-center text-[10px] sm:text-xs text-muted-foreground"
+                      >
+                        {showLabel ? item.label : ''}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
             <div className="text-xs text-muted-foreground">{detailLabel}</div>

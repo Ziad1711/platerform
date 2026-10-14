@@ -4,6 +4,7 @@
 // ============================================================
 
 import { resolveAmeexStatus } from './ameex-status'
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
 
 export { AMEEX_STATUS_MAP, resolveAmeexStatus } from './ameex-status'
 export type { AmeexResolvedStatus, AmeexStatusMapEntry } from './ameex-status'
@@ -200,7 +201,7 @@ export async function deleteAmeexParcel(apiId: string, apiKey: string, parcelCod
   return response.json()
 }
 
-export async function trackAmeexParcel(apiId: string, apiKey: string, parcelCode: string): Promise<AmeexTrackingResponse> {
+export async function trackAmeexParcel(apiId: string, apiKey: string, parcelCode: string, options?: { signal?: AbortSignal }): Promise<AmeexTrackingResponse> {
   const url = `${AMEEX_API_BASE_URL}/customer/Delivery/Parcels/Tracking?ParcelCode=${encodeURIComponent(parcelCode)}`
   const response = await fetch(url, {
     method: 'GET',
@@ -208,10 +209,15 @@ export async function trackAmeexParcel(apiId: string, apiKey: string, parcelCode
       'C-Api-Id': apiId,
       'C-Api-Key': apiKey,
     },
+    signal: options?.signal,
   })
   if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`AMEEX_API_ERROR:${response.status}:${text}`)
+    await response.text()
+    throw carrierErrorFromStatus({
+      status: response.status,
+      retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+      message: `AMEEX_API_ERROR:${response.status}`,
+    })
   }
   return response.json() as Promise<AmeexTrackingResponse>
 }

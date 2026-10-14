@@ -83,6 +83,7 @@ export default function RevenueChart() {
   const plotRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [tooltipWidth, setTooltipWidth] = useState(170)
+  const [containerWidth, setContainerWidth] = useState(800)
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
@@ -282,6 +283,19 @@ export default function RevenueChart() {
 
   const points = data?.points || []
 
+  // Mesure de la largeur réelle du plot pour adapter le nombre de labels X.
+  useEffect(() => {
+    const el = plotRef.current
+    if (!el) return
+    setContainerWidth(el.clientWidth)
+    const ro = new ResizeObserver((entries) => {
+      const cw = entries[0]?.contentRect?.width
+      if (cw) setContainerWidth(cw)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [points.length])
+
   // Largeur réelle de l'infobulle (mesurée après affichage).
   useEffect(() => {
     if (hoveredIndex !== null && tooltipRef.current) {
@@ -292,8 +306,14 @@ export default function RevenueChart() {
   const tooltipLeft = getTooltipLeft(hoveredIndex, points.length, plotRef.current, tooltipWidth)
 
   const activeKeys = (Object.keys(visibleSeries) as SeriesKey[]).filter((k) => visibleSeries[k])
-  const labelStep = points.length > 0 ? Math.max(1, Math.ceil(points.length / 8)) : 1
-  const labelTicks = points.filter((_, index) => index % labelStep === 0 || index === points.length - 1)
+  const labelStep = useMemo(() => {
+    if (points.length === 0) return 1
+    const base = containerWidth >= 1024 ? 14 : containerWidth >= 768 ? 10 : 8
+    return Math.max(1, Math.ceil(points.length / base))
+  }, [points.length, containerWidth])
+  const labelTicks = points
+    .map((p, index) => ({ ...p, index }))
+    .filter((p) => p.index % labelStep === 0 || p.index === points.length - 1)
   const conversion = data?.conversion
   const baseOrders = conversion?.totalOrders || 0
   const waitingPickupOrders = conversion?.waitingPickupOrders || 0
@@ -458,58 +478,6 @@ export default function RevenueChart() {
     return { index: maxIdx, value: maxVal }
   }, [points])
 
-  // Compute x positions for badges/labels
-  const pointToX = (index: number) => {
-    if (points.length <= 1) return 50
-    return (index / (points.length - 1)) * 100
-  }
-
-  // Check if two x positions are too close (collision detection)
-  const isCollision = (x1: number, x2: number, threshold = 18) => {
-    return Math.abs(x1 - x2) < threshold
-  }
-
-  // Determine badge positions with collision avoidance
-  const badgePositions = useMemo(() => {
-    const positions: { key: string; x: number; y: number; value: number; label: string; color: string; offsetY: number }[] = []
-
-    if (maxRevenuePoint && visibleSeries.revenue) {
-      const x = pointToX(maxRevenuePoint.index)
-      const y = valueToY(maxRevenuePoint.value)
-      positions.push({
-        key: 'revenue',
-        x,
-        y,
-        value: maxRevenuePoint.value,
-        label: 'Max CA',
-        color: seriesConfig.revenue.color,
-        offsetY: 0,
-      })
-    }
-
-    if (maxProfitPoint && visibleSeries.profit) {
-      const x = pointToX(maxProfitPoint.index)
-      const y = valueToY(maxProfitPoint.value)
-      // Check collision with revenue badge
-      let offsetY = 0
-      if (positions.length > 0 && isCollision(x, positions[0].x, 20)) {
-        offsetY = positions[0].y < y ? -8 : 8
-      }
-      positions.push({
-        key: 'profit',
-        x,
-        y,
-        value: maxProfitPoint.value,
-        label: 'Max Profit',
-        color: seriesConfig.profit.color,
-        offsetY,
-      })
-    }
-
-    return positions
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxRevenuePoint, maxProfitPoint, visibleSeries, points])
-
   return (
     <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
 
@@ -544,10 +512,30 @@ export default function RevenueChart() {
         <div className="space-y-3">
           <div className="h-80 w-full border border-border rounded-lg p-3 bg-card overflow-hidden">
             <div className="relative w-full h-full pl-10">
-              <div className="absolute left-0 top-0 bottom-0 w-9 flex flex-col justify-between text-[10px] text-muted-foreground">
-                {yTicks.map((tick, idx) => (
-                  <span key={idx}>{formatAxisValue(tick)}</span>
-                ))}
+              <div className="absolute left-0 top-0 bottom-0 w-9 text-[10px] text-muted-foreground">
+                <div className="relative w-full h-full">
+                  {yTicks.map((tick, idx) => (
+                    <span key={idx} className="absolute left-0" style={{ top: `${valueToY(tick)}%`, transform: 'translateY(-50%)' }}>
+                      {formatAxisValue(tick)}
+                    </span>
+                  ))}
+                  {visibleSeries.revenue && maxRevenuePoint && (
+                    <span
+                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
+                      style={{ top: `${valueToY(maxRevenuePoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.revenue.color }}
+                    >
+                      {formatShortCurrency(maxRevenuePoint.value)}
+                    </span>
+                  )}
+                  {visibleSeries.profit && maxProfitPoint && (
+                    <span
+                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
+                      style={{ top: `${valueToY(maxProfitPoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.profit.color }}
+                    >
+                      {formatShortCurrency(maxProfitPoint.value)}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <svg ref={plotRef} viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
@@ -586,6 +574,45 @@ export default function RevenueChart() {
                     hors du SVG pour éviter l'étirement horizontal
                     (preserveAspectRatio="none"). */}
 
+                {/* Lignes de sommet discrètes */}
+                {visibleSeries.revenue && maxRevenuePoint && (
+                  <line
+                    x1="0"
+                    y1={valueToY(maxRevenuePoint.value)}
+                    x2={(maxRevenuePoint.index / (points.length - 1)) * 100}
+                    y2={valueToY(maxRevenuePoint.value)}
+                    stroke={seriesConfig.revenue.color}
+                    strokeWidth="1"
+                    opacity="0.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+                {visibleSeries.profit && maxProfitPoint && (
+                  <line
+                    x1="0"
+                    y1={valueToY(maxProfitPoint.value)}
+                    x2={(maxProfitPoint.index / (points.length - 1)) * 100}
+                    y2={valueToY(maxProfitPoint.value)}
+                    stroke={seriesConfig.profit.color}
+                    strokeWidth="1"
+                    opacity="0.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+
+                {points.map((_, i) => (
+                  <line
+                    key={`v-${i}`}
+                    x1={(points.length === 1 ? 0 : (i / (points.length - 1)) * 100)}
+                    y1="0"
+                    x2={(points.length === 1 ? 0 : (i / (points.length - 1)) * 100)}
+                    y2="100"
+                    stroke="currentColor"
+                    className="text-foreground/15 dark:text-white/25"
+                    strokeWidth="0.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
                 {/* ── Vertical line (default last point, hover override) ── */}
                 {(hoveredIndex !== null ? hoveredIndex : points.length - 1) >= 0 && (
                   <line
@@ -601,47 +628,6 @@ export default function RevenueChart() {
                   />
                 )}
               </svg>
-
-              {/* ── Sommets (labels + badges) rendus en HTML pour rester nets
-                  malgré l'étirement horizontal du SVG ── */}
-              <div className="pointer-events-none absolute inset-y-0 right-0 left-10 z-[5]">
-                {maxRevenuePoint && visibleSeries.revenue && (
-                  <span
-                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
-                    style={{
-                      left: `${pointToX(maxRevenuePoint.index)}%`,
-                      top: `${valueToY(maxRevenuePoint.value)}%`,
-                      backgroundColor: seriesConfig.revenue.color,
-                    }}
-                  />
-                )}
-                {maxProfitPoint && visibleSeries.profit && (
-                  <span
-                    className="absolute h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-70"
-                    style={{
-                      left: `${pointToX(maxProfitPoint.index)}%`,
-                      top: `${valueToY(maxProfitPoint.value)}%`,
-                      backgroundColor: seriesConfig.profit.color,
-                    }}
-                  />
-                )}
-
-                {badgePositions.map((bp) => (
-                  <span
-                    key={`badge-${bp.key}`}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                    style={{
-                      left: `${bp.x}%`,
-                      top: `${bp.y + bp.offsetY}%`,
-                      color: bp.color,
-                      borderColor: `${bp.color}33`,
-                      backgroundColor: `${bp.color}14`,
-                    }}
-                  >
-                    {bp.label} • {formatShortCurrency(bp.value)} MAD
-                  </span>
-                ))}
-              </div>
 
               <div
                 className="absolute inset-0 z-10"
@@ -715,12 +701,23 @@ export default function RevenueChart() {
             </div>
           </div>
 
-          <div className="flex justify-between text-xs text-muted-foreground gap-2">
-            {labelTicks.map((p, i) => (
-              <span key={`${p.date}-${i}`} className="text-center">
-                {p.label}
-              </span>
-            ))}
+          <div className="relative h-4 text-xs text-muted-foreground">
+            {/* Zone alignée sur le plot : mêmes retraits que le SVG (border 1px + p-3 12px + pl-10 40px à gauche,
+                border 1px + p-3 12px à droite). */}
+            <div className="absolute inset-y-0 left-[53px] right-[13px]">
+              {labelTicks.map((p) => {
+                const x = points.length === 1 ? 0 : (p.index / (points.length - 1)) * 100
+                return (
+                  <span
+                    key={`${p.date}-${p.index}`}
+                    className="absolute top-0 -translate-x-1/2 whitespace-nowrap"
+                    style={{ left: `${x}%` }}
+                  >
+                    {p.label}
+                  </span>
+                )
+              })}
+            </div>
           </div>
 
         </div>

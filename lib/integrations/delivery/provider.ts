@@ -30,7 +30,7 @@ export interface DeliveryProvider {
   createVoucher(config: DeliveryIntegrationConfig, input: VoucherCreationInput): Promise<CreateVoucherResult>
 
   /** Track un colis par son numéro de suivi */
-  trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string): Promise<TrackParcelResult>
+  trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string, options?: { signal?: AbortSignal }): Promise<TrackParcelResult>
 
   /** Récupère les détails d'un voucher */
   getVoucher(config: DeliveryIntegrationConfig, voucherKey: string): Promise<unknown>

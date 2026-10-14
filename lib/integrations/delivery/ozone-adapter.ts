@@ -190,9 +190,9 @@ export const ozoneAdapter: DeliveryProvider = {
     }
   },
 
-  async trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string): Promise<TrackParcelResult> {
+  async trackParcel(config: DeliveryIntegrationConfig, trackingNumber: string, options?: { signal?: AbortSignal }): Promise<TrackParcelResult> {
     const ozoneConfig = parseOzoneConfig(config.token)
-    const raw = await trackOzoneParcel(ozoneConfig, trackingNumber)
+    const raw = await trackOzoneParcel(ozoneConfig, trackingNumber, { signal: options?.signal })
 
     const item = extractOzoneTrackingItems(raw)[0]
     const rawStatus = getOzoneRawStatus(item)

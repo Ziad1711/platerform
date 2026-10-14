@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Calendar, ChevronDown } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import type { DashboardPeriod } from '@/lib/utils'
@@ -31,7 +31,16 @@ const periodLabels: Record<DashboardPeriod, string> = {
   custom: 'Période personnalisée',
 }
 
-export default function PeriodFilter() {
+type PeriodFilterProps = {
+  /**
+   * Période appliquée par défaut à l'ouverture de la page. Sans cette prop, la
+   * période globale courante est conservée. Ex. : le Dashboard ouvre sur
+   * « Aujourd'hui ».
+   */
+  defaultPeriod?: DashboardPeriod
+}
+
+export default function PeriodFilter({ defaultPeriod }: PeriodFilterProps = {}) {
   const {
     selectedPeriod,
     setSelectedPeriod,
@@ -41,6 +50,15 @@ export default function PeriodFilter() {
     setCustomEndDate,
   } = useStore()
   const [isOpen, setIsOpen] = useState(false)
+  const appliedDefaultRef = useRef(false)
+
+  // Applique la période par défaut une seule fois par montage de la page :
+  // l'utilisateur reste libre de la changer ensuite.
+  useEffect(() => {
+    if (appliedDefaultRef.current || !defaultPeriod) return
+    appliedDefaultRef.current = true
+    setSelectedPeriod(defaultPeriod)
+  }, [defaultPeriod, setSelectedPeriod])
 
   const selectedLabel = selectedPeriod === 'custom' && customStartDate && customEndDate
     ? `${customStartDate} → ${customEndDate}`

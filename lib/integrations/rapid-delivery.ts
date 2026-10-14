@@ -1,4 +1,5 @@
 import { normalizeMoroccanPhone } from '@/lib/utils'
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
 
 const RAPID_DELIVERY_API_BASE_URL = 'https://www.rapiddelivery.ma/api/v1'
 
@@ -7,6 +8,7 @@ type RapidDeliveryRequestInit = {
   method?: 'GET' | 'POST'
   path: string
   body?: Record<string, unknown>
+  signal?: AbortSignal
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -21,6 +23,7 @@ async function rapidDeliveryFetch<T>(params: RapidDeliveryRequestInit): Promise<
         ...(params.body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: params.body ? JSON.stringify(params.body) : undefined,
+      signal: params.signal,
     })
 
     if (response.ok) {
@@ -32,21 +35,26 @@ async function rapidDeliveryFetch<T>(params: RapidDeliveryRequestInit): Promise<
       path: params.path,
       method: params.method || 'GET',
       status: response.status,
-      body: message,
     })
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Token API Rapid Delivery invalide ou expiré.')
+      throw carrierErrorFromStatus({ status: response.status, message: 'Token API Rapid Delivery invalide ou expire.' })
     }
-
+    if (response.status === 429) {
+      throw carrierErrorFromStatus({
+        status: response.status,
+        retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+        message: 'Rapid Delivery : trop de requetes.',
+      })
+    }
     if (response.status >= 500) {
       if (attempt < 2) {
         await sleep(400 * (attempt + 1))
         continue
       }
-      throw new Error('Serveur Rapid Delivery indisponible. Réessayez plus tard.')
+      throw carrierErrorFromStatus({ status: response.status, message: 'Serveur Rapid Delivery indisponible.' })
     }
 
-    throw new Error(message || `Erreur API Rapid Delivery (${response.status}).`)
+    throw carrierErrorFromStatus({ status: response.status, message: `Erreur API Rapid Delivery (${response.status}).` })
   }
 
   throw new Error('RAPID_DELIVERY_REQUEST_FAILED')
@@ -207,8 +215,8 @@ export async function createRapidDeliveryParcel(token: string, payload: RapidDel
   })
 }
 
-export async function trackRapidDeliveryParcel(token: string, trackingNumber: string) {
-  return rapidDeliveryFetch<RapidDeliveryTrackingPayload>({ token, path: `/parcels/${encodeURIComponent(trackingNumber)}` })
+export async function trackRapidDeliveryParcel(token: string, trackingNumber: string, options?: { signal?: AbortSignal }) {
+  return rapidDeliveryFetch<RapidDeliveryTrackingPayload>({ token, path: `/parcels/${encodeURIComponent(trackingNumber)}`, signal: options?.signal })
 }
 
 export async function createRapidDeliveryVoucher(token: string, payload: { shop: number; parcels: Array<string | number> }) {

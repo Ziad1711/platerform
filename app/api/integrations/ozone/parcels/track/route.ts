@@ -67,6 +67,7 @@ export async function GET(request: Request) {
       provider: ozoneAdapter,
       config: { integrationId: integration.id, token, baseUrl: null, userId: user.id, storeId: resolvedStoreId },
       trackingNumber,
+      storeId: resolvedStoreId,
       orderId: orderId || undefined,
       logger,
     })

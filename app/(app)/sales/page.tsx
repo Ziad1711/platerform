@@ -2037,21 +2037,40 @@ export default function VentesPage() {
     },
   })
 
-  const syncAllRapidDeliveryMutation = useMutation({
+  // Synchronisation partagee du suivi livraison (tous les transporteurs du
+  // store courant). Le rattrapage automatique vit desormais dans l'espace
+  // protege (cron serveur + ouverture du dashboard) : ceci est le declencheur
+  // manuel explicite, qui reutilise exactement le meme mecanisme serveur.
+  const syncDeliveryTrackingMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/integrations/rapid-delivery/parcels/sync-all', {
+      if (!currentStoreId) throw new Error('Aucun store selectionne.')
+      const response = await fetch('/api/integrations/delivery/tracking/sync', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: currentStoreId, force: true }),
       })
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null
-      if (!response.ok) throw new Error(payload?.error || 'RAPID_DELIVERY_SYNC_ALL_FAILED')
+      const payload = (await response.json().catch(() => null)) as { error?: string; changed?: number } | null
+      if (!response.ok) throw new Error(payload?.error || 'DELIVERY_TRACKING_SYNC_FAILED')
       return payload
     },
-    onSuccess: async () => {
-      await invalidateOrderViews()
-      setFormError('')
+    onSuccess: async (payload: any) => {
+      // Un resultat partiel ou en echec reste affiche : un HTTP 200 ne signifie
+      // pas que tous les colis ont ete traites.
+      const changed = payload?.changed || 0
+      const failed = payload?.failed || 0
+      const remaining = payload?.pending ?? 0
+      if (failed > 0 || remaining > 0) {
+        setFormError(
+          `Suivi partiel : ${changed} mis a jour, ${failed} en erreur, ${remaining} colis restants.`
+        )
+      } else {
+        setFormError('')
+      }
+      // Invalidation ciblee uniquement si des commandes ont reellement change.
+      if (changed > 0) await invalidateOrderViews()
     },
     onError: (error: any) => {
-      setFormError(error?.message || 'Erreur synchronisation Rapid Delivery')
+      setFormError(error?.message || 'Erreur synchronisation du suivi livraison')
     },
   })
 
@@ -2112,24 +2131,6 @@ export default function VentesPage() {
     },
   })
 
-  const syncAllMarocGoDeliveryMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch('/api/integrations/maroc-go-delivery/parcels/sync-all', {
-        method: 'POST',
-      })
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null
-      if (!response.ok) throw new Error(payload?.error || 'MAROC_GO_DELIVERY_SYNC_ALL_FAILED')
-      return payload
-    },
-    onSuccess: async () => {
-      await invalidateOrderViews()
-      setFormError('')
-    },
-    onError: (error: any) => {
-      setFormError(error?.message || 'Erreur synchronisation Maroc Go Delivery')
-    },
-  })
-
   const createRushlivParcelMutation = useMutation({
     mutationFn: async () => {
       if (!currentStoreId || !rushlivOrder?.id) throw new Error('Commande introuvable.')
@@ -2174,26 +2175,6 @@ export default function VentesPage() {
     },
     onError: (error: any) => {
       setFormError(error?.message || 'Erreur suivi Rushliv')
-    },
-  })
-
-  const syncAllRushlivMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch('/api/integrations/rushliv/parcels/sync-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId: currentStoreId }),
-      })
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null
-      if (!response.ok) throw new Error(payload?.error || 'RUSHLIV_SYNC_ALL_FAILED')
-      return payload
-    },
-    onSuccess: async () => {
-      await invalidateOrderViews()
-      setFormError('')
-    },
-    onError: (error: any) => {
-      setFormError(error?.message || 'Erreur synchronisation Rushliv')
     },
   })
 
@@ -2406,25 +2387,6 @@ export default function VentesPage() {
 
     bulkDuplicateOrdersMutation.mutate(selectedOrderIds)
   }
-
-  useEffect(() => {
-    if (!rapidDeliveryIntegration || rapidDeliveryIntegration.status !== 'connected') return
-    syncAllRapidDeliveryMutation.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rapidDeliveryIntegration?.id, rapidDeliveryIntegration?.status])
-
-  useEffect(() => {
-    if (!marocGoDeliveryIntegration || marocGoDeliveryIntegration.status !== 'connected') return
-    syncAllMarocGoDeliveryMutation.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marocGoDeliveryIntegration?.id, marocGoDeliveryIntegration?.status])
-
-  useEffect(() => {
-    if (!rushlivIntegration || rushlivIntegration.status !== 'connected') return
-    if (!rushlivConfig?.store_id || !currentStoreId) return
-    syncAllRushlivMutation.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rushlivIntegration?.id, rushlivIntegration?.status, rushlivConfig?.store_id, currentStoreId])
 
   const isOrderLinkedToApiProvider = (order: any) => {
     // Même règle que l'API /api/orders/status : une commande encore au statut
@@ -5270,17 +5232,12 @@ export default function VentesPage() {
             <button
               type="button"
               onClick={() => {
-                if (rapidDeliveryIntegration?.status === 'connected') syncAllRapidDeliveryMutation.mutate()
-                if (marocGoDeliveryIntegration?.status === 'connected') syncAllMarocGoDeliveryMutation.mutate()
-                if (rushlivIntegration?.status === 'connected' && rushlivConfig?.store_id && currentStoreId) syncAllRushlivMutation.mutate()
+                if (currentStoreId) syncDeliveryTrackingMutation.mutate()
               }}
-              disabled={
-                (syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending || syncAllRushlivMutation.isPending)
-                || (rapidDeliveryIntegration?.status !== 'connected' && marocGoDeliveryIntegration?.status !== 'connected' && !(rushlivIntegration?.status === 'connected' && rushlivConfig?.store_id))
-              }
+              disabled={!currentStoreId || syncDeliveryTrackingMutation.isPending}
               className="inline-flex items-center justify-center border border-border hover:bg-secondary text-foreground text-sm font-medium p-2 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
             >
-              <RefreshCw className={`w-4 h-4 ${(syncAllRapidDeliveryMutation.isPending || syncAllMarocGoDeliveryMutation.isPending || syncAllRushlivMutation.isPending) ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${syncDeliveryTrackingMutation.isPending ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline ml-1">Resynchroniser</span>
             </button>
             <button

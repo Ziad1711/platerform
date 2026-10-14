@@ -3,6 +3,8 @@
 // Auth: X-API-Key header
 // ============================================================
 
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
+
 const FORCELOG_API_BASE_URL = 'https://api.forcelog.ma'
 
 export type ForceLogParcelPayload = {
@@ -89,7 +91,7 @@ export function normalizeForceLogPhone(value: string): string {
   return String(value || '').replace(/\s+/g, '').trim()
 }
 
-async function forcelogFetch<T>(apiKey: string, path: string, options?: { method?: 'GET' | 'POST'; body?: Record<string, unknown> }): Promise<T> {
+async function forcelogFetch<T>(apiKey: string, path: string, options?: { method?: 'GET' | 'POST'; body?: Record<string, unknown>; signal?: AbortSignal }): Promise<T> {
   const url = `${FORCELOG_API_BASE_URL}${path}${options?.method === 'GET' && options?.body ? '?' + new URLSearchParams(options.body as Record<string, string>).toString() : ''}`
   
   const response = await fetch(url, {
@@ -99,11 +101,16 @@ async function forcelogFetch<T>(apiKey: string, path: string, options?: { method
       ...(options?.body && options?.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(options?.body && options?.method !== 'GET' ? { body: JSON.stringify(options.body) } : {}),
+    signal: options?.signal,
   })
 
   if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`FORCELOG_API_ERROR:${response.status}:${text}`)
+    await response.text()
+    throw carrierErrorFromStatus({
+      status: response.status,
+      retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+      message: `FORCELOG_API_ERROR:${response.status}`,
+    })
   }
 
   return response.json() as Promise<T>
@@ -129,8 +136,8 @@ export async function createForceLogParcel(apiKey: string, payload: ForceLogParc
   })
 }
 
-export async function trackForceLogParcel(apiKey: string, code: string): Promise<ForceLogTrackingResponse> {
-  return forcelogFetch<ForceLogTrackingResponse>(apiKey, `/customer/Parcels/GetParcel?Code=${encodeURIComponent(code)}`)
+export async function trackForceLogParcel(apiKey: string, code: string, options?: { signal?: AbortSignal }): Promise<ForceLogTrackingResponse> {
+  return forcelogFetch<ForceLogTrackingResponse>(apiKey, `/customer/Parcels/GetParcel?Code=${encodeURIComponent(code)}`, { signal: options?.signal })
 }
 
 export async function createForceLogPickupRequest(apiKey: string, payload: ForceLogPickupPayload): Promise<ForceLogPickupResponse> {

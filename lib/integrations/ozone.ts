@@ -4,6 +4,8 @@
 // Payload: form-data (multipart)
 // ============================================================
 
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
+
 const OZONE_API_BASE_URL = 'https://api.ozonexpress.ma'
 
 export type OzoneConfig = {
@@ -149,15 +151,20 @@ function toFormData(payload: Record<string, string | number | undefined>): FormD
   return fd
 }
 
-async function ozoneFetch<T>(url: string, formData?: FormData): Promise<T> {
+async function ozoneFetch<T>(url: string, formData?: FormData, options?: { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(url, {
     method: formData ? 'POST' : 'GET',
     ...(formData ? { body: formData } : {}),
+    signal: options?.signal,
   })
 
   if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`OZONE_API_ERROR:${response.status}:${text}`)
+    await response.text()
+    throw carrierErrorFromStatus({
+      status: response.status,
+      retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+      message: `OZONE_API_ERROR:${response.status}`,
+    })
   }
 
   return response.json() as Promise<T>
@@ -200,10 +207,10 @@ export async function getOzoneParcelInfo(config: OzoneConfig, trackingNumber: st
  * POST /customers/{id}/{key}/tracking
  * Supporte: single tracking-number (form-data) ou bulk (JSON body)
  */
-export async function trackOzoneParcel(config: OzoneConfig, trackingNumber: string): Promise<OzoneTrackingResponse> {
+export async function trackOzoneParcel(config: OzoneConfig, trackingNumber: string, options?: { signal?: AbortSignal }): Promise<OzoneTrackingResponse> {
   const url = buildUrl(config, '/tracking')
   const fd = toFormData({ 'tracking-number': trackingNumber })
-  return ozoneFetch<OzoneTrackingResponse>(url, fd)
+  return ozoneFetch<OzoneTrackingResponse>(url, fd, { signal: options?.signal })
 }
 
 /**

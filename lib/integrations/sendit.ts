@@ -1,3 +1,5 @@
+import { carrierErrorFromStatus, parseRetryAfterSeconds } from './delivery/carrier-error'
+
 const SENDIT_API_BASE_URL = 'https://app.sendit.ma/api/v1'
 
 export type SenditCredentials = { publicKey: string; secretKey: string; token: string }
@@ -30,7 +32,7 @@ export type SenditDelivery = {
 
 export type SenditResponse<T> = { success?: boolean; message?: string; data?: T; error?: string }
 
-async function senditFetch<T>(token: string, path: string, options?: { method?: string; body?: unknown }): Promise<T> {
+async function senditFetch<T>(token: string, path: string, options?: { method?: string; body?: unknown; signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${SENDIT_API_BASE_URL}${path}`, {
     method: options?.method || 'GET',
     headers: {
@@ -39,12 +41,17 @@ async function senditFetch<T>(token: string, path: string, options?: { method?: 
       Accept: 'application/json',
     },
     body: options?.body ? JSON.stringify(options.body) : undefined,
+    signal: options?.signal,
   })
 
   const text = await response.text()
   const payload = text ? JSON.parse(text) : null
   if (!response.ok) {
-    throw new Error(`SENDIT_API_ERROR:${response.status}:${text}`)
+    throw carrierErrorFromStatus({
+      status: response.status,
+      retryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+      message: `SENDIT_API_ERROR:${response.status}`,
+    })
   }
   return payload as T
 }
@@ -66,8 +73,8 @@ export async function createSenditParcel(token: string, payload: SenditParcelPay
   return senditFetch<SenditResponse<SenditDelivery>>(token, '/deliveries', { method: 'POST', body: payload })
 }
 
-export async function trackSenditParcel(token: string, code: string) {
-  return senditFetch<SenditResponse<SenditDelivery>>(token, `/deliveries/${encodeURIComponent(code)}`)
+export async function trackSenditParcel(token: string, code: string, options?: { signal?: AbortSignal }) {
+  return senditFetch<SenditResponse<SenditDelivery>>(token, `/deliveries/${encodeURIComponent(code)}`, { signal: options?.signal })
 }
 
 export async function getSenditLabels(token: string, codes: string[], printFormat = 1) {
