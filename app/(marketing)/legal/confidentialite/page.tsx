@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { LegalPage } from '@/components/marketing/legal/legal-page'
+import { AnalyticsConsentControl } from '@/components/analytics/analytics-consent-control'
 
 export const metadata: Metadata = {
   title: 'Politique de confidentialité',
@@ -12,7 +13,7 @@ export default function PrivacyPage() {
     <LegalPage
       eyebrow="Légal"
       title="Politique de confidentialité"
-      updatedAt="17 septembre 2026"
+      updatedAt="14 octobre 2026"
       sections={[
         {
           title: 'Champ d’application et responsable du traitement',
@@ -29,6 +30,7 @@ export default function PrivacyPage() {
             'Données d’entreprise et d’exploitation : nom du business, boutiques ou stores rattachés, pays, fuseau horaire, produits, stocks, fournisseurs, dépenses, commandes et leurs statuts, informations de livraison et de rentabilité.',
             'Données issues des intégrations : lors de la connexion d’un outil tiers (plateforme e-commerce, transporteur, régie publicitaire), nous traitons les identifiants techniques et jetons d’accès nécessaires à la synchronisation, ainsi que les données d’activité renvoyées par ces services.',
             'Données techniques et d’usage : horodatage des requêtes, type d’appareil et de navigateur, journaux d’erreurs et événements de sécurité strictement nécessaires au fonctionnement et à la protection du service.',
+            'Données de mesure d’audience : uniquement si vous l’avez accepté, la fréquentation du site marketing est mesurée de façon agrégée (pages consultées, provenance, type d’appareil) via Google Analytics 4, sans identifiant utilisateur, sans adresse email et sans donnée d’exploitation.',
             'Échanges avec le support : contenu des messages que vous nous adressez, afin de traiter vos demandes et d’améliorer le produit.',
           ],
         },
@@ -54,8 +56,10 @@ export default function PrivacyPage() {
           title: 'Cookies et traceurs',
           content: [
             'Le site utilise des cookies et un stockage local limités à des finalités essentielles : maintien de votre session authentifiée, mémorisation de vos préférences d’interface (par exemple le choix exprimé dans le bandeau de consentement) et protection contre les abus.',
-            'Aucun cookie publicitaire ni traceur de profilage marketing n’est déposé par le site marketing à ce jour. Si des outils de mesure d’audience venaient à être ajoutés, ils seraient présentés dans cette politique et soumis à votre consentement préalable.',
+            'Mesure d’audience (Google Analytics 4) : le site charge Google Analytics 4, fourni par Google LLC, uniquement si vous l’avez accepté. Cet outil produit des statistiques de fréquentation à l’aide des cookies de mesure `_ga`. Il est configuré sans page vue automatique, sans identifiant utilisateur, sans adresse email et sans donnée de votre activité commerciale : les adresses sont nettoyées (paramètres de requête supprimés, identifiants et jetons masqués) et le titre de la page n’est pas transmis dans l’espace applicatif privé.',
+            'Aucun cookie publicitaire ni traceur de profilage marketing n’est déposé. Si vous refusez la mesure d’audience ou retirez votre consentement, aucun script de mesure n’est chargé, la collecte est arrêtée et les cookies de mesure déjà déposés sont supprimés.',
             'Vous pouvez à tout moment supprimer ou bloquer les cookies et le stockage local depuis les réglages de votre navigateur. Le blocage des cookies strictement nécessaires peut toutefois empêcher la connexion à la plateforme.',
+            <AnalyticsConsentControl key="analytics-consent-control" />,
           ],
         },
         {

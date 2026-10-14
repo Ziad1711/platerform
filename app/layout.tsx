@@ -4,6 +4,7 @@ import './globals.css'
 import { Providers } from '@/components/providers'
 import { SITE_URL } from '@/lib/marketing/site-url'
 import HashErrorHandler from '@/components/marketing/hash-error-handler'
+import { GoogleAnalytics } from '@/components/analytics/google-analytics'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -42,6 +43,7 @@ export default function RootLayout({
         <Providers>
           {children}
           <HashErrorHandler />
+          <GoogleAnalytics />
         </Providers>
       </body>
     </html>

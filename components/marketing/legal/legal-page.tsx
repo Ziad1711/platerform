@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import { Fragment } from 'react'
 import { Container } from '@/components/marketing/shared/container'
 import { PageHero } from '@/components/marketing/shared/page-hero'
 import { MotionSection } from '@/components/marketing/shared/motion-section'
@@ -7,7 +9,7 @@ type LegalPageProps = {
   eyebrow: string
   title: string
   updatedAt: string
-  sections: Array<{ title: string; content: string[] }>
+  sections: Array<{ title: string; content: ReactNode[] }>
 }
 
 export function LegalPage({ eyebrow, title, updatedAt, sections }: LegalPageProps) {
@@ -20,9 +22,13 @@ export function LegalPage({ eyebrow, title, updatedAt, sections }: LegalPageProp
             <Card3D key={section.title} className="p-8">
               <h2 className="text-2xl font-semibold text-jisra-cream">{section.title}</h2>
               <div className="mt-4 space-y-4 text-sm leading-7 text-jisra-cream/70">
-                {section.content.map((paragraph) => (
-                  <p key={paragraph}>{paragraph}</p>
-                ))}
+                {section.content.map((paragraph, index) =>
+                  typeof paragraph === 'string' ? (
+                    <p key={index}>{paragraph}</p>
+                  ) : (
+                    <Fragment key={index}>{paragraph}</Fragment>
+                  ),
+                )}
               </div>
             </Card3D>
           ))}

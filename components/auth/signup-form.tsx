@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, Lock, Mail, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { trackEvent } from '@/lib/analytics/gtag'
 
 const passwordLevels = [
   { label: 'Faible', color: 'bg-red-500', test: (v: string) => v.length >= 8 },
@@ -85,13 +86,26 @@ export default function SignupForm() {
         throw error
       }
 
+      // Protection contre l'énumération : quand l'e-mail est déjà utilisé,
+      // Supabase renvoie un utilisateur sans identité et aucun compte n'est
+      // créé — la conversion ne doit donc pas être comptée.
+      const accountCreated = !(Array.isArray(data.user?.identities) && data.user?.identities.length === 0)
+
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
 
+        // Conversion : compte créé et session ouverte (aucune donnée identifiante).
+        if (accountCreated) {
+          trackEvent('sign_up', { method: 'email' }, { beacon: true })
+        }
         window.location.href = next ? nextPath : '/dashboard?onboarding=1'
         return
       }
 
+      // Conversion : compte créé, email de confirmation en attente.
+      if (accountCreated) {
+        trackEvent('sign_up', { method: 'email' })
+      }
       setPendingEmailConfirmation(email.trim())
       setSuccess('Compte créé. Vérifiez votre email pour activer votre accès.')
     } catch (err: any) {
