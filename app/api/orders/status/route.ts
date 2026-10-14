@@ -86,6 +86,12 @@ export async function POST(request: Request) {
       /** Ville Maroc Go Delivery choisie manuellement (repli quand l'auto-détection échoue). */
       marocGoCityKey?: string | number
       marocGoCityName?: string
+      /** Ville Rapid Delivery choisie manuellement (repli quand l'auto-détection échoue). */
+      rapidCityKey?: string | number
+      rapidCityName?: string
+      /** Ville Rushliv choisie manuellement (repli quand l'auto-détection échoue). */
+      rushlivCityKey?: string | number
+      rushlivCityName?: string
       /** La ville a déjà été normalisée en amont (confirmation) : ne pas la recalculer. */
       cityAlreadyNormalized?: boolean
     }
@@ -241,7 +247,15 @@ export async function POST(request: Request) {
 
       if (canAutoCreateRapid && integration?.id) {
         try {
-          if (!cityAlreadyNormalized) {
+          const manualRapidCityKey = Number(body.rapidCityKey || 0) || 0
+          if (manualRapidCityKey) {
+            // Ville choisie manuellement par l'agent : elle prime sur
+            // l'auto-détection et est enregistrée sur la commande.
+            await admin
+              .from('orders')
+              .update({ delivery_city_external_id: manualRapidCityKey, updated_at: now })
+              .eq('id', orderId)
+          } else if (!cityAlreadyNormalized) {
             await normalizeOrderCityById(orderId, admin, 'rapid-delivery')
           }
           // Recharger la commande pour avoir delivery_city_external_id à jour
@@ -408,7 +422,15 @@ export async function POST(request: Request) {
 
         if (canAutoCreateRushliv && rushlivIntegration?.id && rushlivConfig) {
           try {
-            if (!cityAlreadyNormalized) {
+            const manualRushlivCityKey = String(body.rushlivCityKey || '').trim()
+            if (manualRushlivCityKey) {
+              // Ville choisie manuellement par l'agent : elle prime sur
+              // l'auto-détection et est enregistrée sur la commande.
+              await admin
+                .from('orders')
+                .update({ delivery_city_external_id: manualRushlivCityKey, updated_at: now })
+                .eq('id', orderId)
+            } else if (!cityAlreadyNormalized) {
               await normalizeOrderCityById(orderId, admin, 'rushliv')
             }
             const { data: freshOrder } = await admin

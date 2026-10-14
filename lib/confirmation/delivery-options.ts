@@ -20,6 +20,8 @@ export type ConfirmationDeliveryProvider =
   | 'sendit'
   | 'digylog'
   | 'maroc-go-delivery'
+  | 'rapid-delivery'
+  | 'rushliv'
 
 export type ConfirmationDeliveryOptions = {
   ozoneCityKey?: number
@@ -56,6 +58,12 @@ export type ConfirmationDeliveryOptions = {
   /** Ville Maroc Go Delivery choisie manuellement : repli quand l'auto-détection échoue. */
   marocGoCityKey?: string
   marocGoCityName?: string
+  /** Ville Rapid Delivery choisie manuellement : repli quand l'auto-détection échoue. */
+  rapidCityKey?: string
+  rapidCityName?: string
+  /** Ville Rushliv choisie manuellement : repli quand l'auto-détection échoue. */
+  rushlivCityKey?: string
+  rushlivCityName?: string
 }
 
 export type DeliveryOptionsErrorCode =
@@ -70,6 +78,8 @@ const PROVIDER_SLUGS: ConfirmationDeliveryProvider[] = [
   'sendit',
   'digylog',
   'maroc-go-delivery',
+  'rapid-delivery',
+  'rushliv',
 ]
 
 const PROVIDER_FIELDS: Record<ConfirmationDeliveryProvider, (keyof ConfirmationDeliveryOptions)[]> = {
@@ -105,6 +115,8 @@ const PROVIDER_FIELDS: Record<ConfirmationDeliveryProvider, (keyof ConfirmationD
     'digylogPort',
   ],
   'maroc-go-delivery': ['marocGoCityKey', 'marocGoCityName'],
+  'rapid-delivery': ['rapidCityKey', 'rapidCityName'],
+  rushliv: ['rushlivCityKey', 'rushlivCityName'],
 }
 
 
@@ -119,6 +131,8 @@ const CITY_FIELDS: Partial<
   ameex: { key: 'ameexCityKey', name: 'ameexCityName' },
   sendit: { key: 'senditCityKey', name: 'senditCityName' },
   'maroc-go-delivery': { key: 'marocGoCityKey', name: 'marocGoCityName' },
+  'rapid-delivery': { key: 'rapidCityKey', name: 'rapidCityName' },
+  rushliv: { key: 'rushlivCityKey', name: 'rushlivCityName' },
 }
 
 export function resolveDeliveryProvider(
@@ -282,6 +296,16 @@ export function sanitizeDeliveryOptions(
     options.marocGoCityName = toText(input.marocGoCityName, 120)
   }
 
+  if (provider === 'rapid-delivery') {
+    options.rapidCityKey = toText(input.rapidCityKey, 60)
+    options.rapidCityName = toText(input.rapidCityName, 120)
+  }
+
+  if (provider === 'rushliv') {
+    options.rushlivCityKey = toText(input.rushlivCityKey, 60)
+    options.rushlivCityName = toText(input.rushlivCityName, 120)
+  }
+
   const cleaned: ConfirmationDeliveryOptions = {}
   for (const key of PROVIDER_FIELDS[provider]) {
     const value = options[key]
@@ -302,6 +326,8 @@ export function deliveryCityKeyOf(
   if (provider === 'ameex') return options.ameexCityKey || null
   if (provider === 'sendit') return options.senditCityKey || null
   if (provider === 'maroc-go-delivery') return options.marocGoCityKey || null
+  if (provider === 'rapid-delivery') return options.rapidCityKey || null
+  if (provider === 'rushliv') return options.rushlivCityKey || null
   return null
 }
 
