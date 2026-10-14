@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient, getServerUser } from '@/lib/supabase/server'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
+import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
 import { resolvePostLoginRedirect } from '@/lib/auth/redirects'
 import { getUserAccess } from '@/lib/auth/access'
 
@@ -101,6 +102,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </p>
         </div>
       </div>
+
+      <CookieBanner />
     </div>
   )
 }

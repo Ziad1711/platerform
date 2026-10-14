@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, RefreshCcw, Settings2, ShieldAlert, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText, ChevronLeft, ChevronRight, CreditCard, type LucideIcon } from 'lucide-react'
+import { Lock, RefreshCcw, Settings2, ShieldAlert, ShieldCheck, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText, ChevronLeft, ChevronRight, CreditCard, type LucideIcon } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
 import StoresSection from '@/components/settings/stores-section'
 import TeamSection from '@/components/settings/team-section'
 import ConfirmationSettingsSection from '@/components/settings/confirmation-settings-section'
 import InvoicingSettingsSection from '@/components/settings/invoicing-settings-section'
 import JisraBillingSection from '@/components/settings/jisra-billing-section'
+import { AnalyticsConsentControl } from '@/components/analytics/analytics-consent-control'
 import { useTheme } from '@/components/providers'
 import { createClient } from '@/lib/supabase/client'
 
@@ -24,6 +25,7 @@ type SettingsSectionId =
   | 'personal'
   | 'security'
   | 'preferences'
+  | 'privacy'
   | 'rates'
   | 'blacklist'
   | 'confirmation'
@@ -46,6 +48,7 @@ const SECTION_GROUPS: { label: string; items: SettingsSection[] }[] = [
       { id: 'personal', label: 'Informations personnelles', description: 'Nom, photo de profil et coordonnées', icon: User2 },
       { id: 'security', label: 'Sécurité', description: 'Mot de passe et accès au compte', icon: Lock },
       { id: 'preferences', label: 'Préférences', description: 'Devise, langue, fuseau horaire et thème', icon: Settings2 },
+      { id: 'privacy', label: 'Confidentialité', description: 'Mesure d’audience et consentement', icon: ShieldCheck },
     ],
   },
   {
@@ -484,6 +487,14 @@ export default function SettingsPage() {
               </div>
             </div>
             <button onClick={savePreferences} disabled={savingKey === 'preferences'} className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{savingKey === 'preferences' ? 'Enregistrement...' : 'Sauvegarder les préférences'}</button>
+            </section>}
+
+            {activeSection === 'privacy' && <section id="privacy" className="rounded-2xl border bg-card p-6 scroll-mt-32">
+            <h2 className="text-lg font-semibold">Confidentialité</h2>
+            <p className="mt-2 text-sm text-muted-foreground">La mesure d’audience (Google Analytics) n’est activée qu’avec votre accord et vous pouvez le retirer à tout moment.</p>
+            <div className="mt-4">
+              <AnalyticsConsentControl variant="app" />
+            </div>
             </section>}
 
             {activeSection === 'rates' && <section id="rates" className="rounded-2xl border bg-card p-6 scroll-mt-32">

@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient, getServerUser } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
+import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
 import { resolvePostLoginRedirect } from '@/lib/auth/redirects'
 import { getUserAccess } from '@/lib/auth/access'
 
@@ -123,6 +124,8 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
           </div>
         </div>
       </div>
+
+      <CookieBanner />
     </div>
   )
 }

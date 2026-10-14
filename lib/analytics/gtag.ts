@@ -79,16 +79,22 @@ export function setAnalyticsCollectionDisabled(disabled: boolean): void {
  * paramètres de requête et ancre retirés, identifiants/ jetons masqués.
  * Ex. `/invite/3f9c1e7a-…` → `/invite/[id]`, `/sales?tab=…` → `/sales`.
  */
+const OPAQUE_SEGMENT_PATTERNS: RegExp[] = [
+  /^\d+$/, // identifiant numérique
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, // UUID
+  /^[0-9a-f]{8,}$/i, // chaîne hexadécimale (jeton d'invitation, empreinte)
+  /^(?=.*\d)(?=.*[a-z])[a-z0-9]{6,}$/i, // lettres + chiffres : jeton court, clé de colis
+  /[A-Za-z0-9_-]{16,}/, // segment long : jamais un mot de route
+  /[@=+%]/, // donnée encodée (e-mail, clé=valeur)
+]
+
 export function sanitizeTrackingPath(pathname: string): string {
   const raw = String(pathname || '/').split(/[?#]/)[0]
   const cleaned = raw
     .split('/')
     .filter(Boolean)
     .map((segment) => {
-      if (/^\d+$/.test(segment)) return '[id]'
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)) return '[id]'
-      // Jetons d'invitation, clés de colis, slugs longs : jamais transmis en clair.
-      if (segment.length >= 16) return '[id]'
+      if (OPAQUE_SEGMENT_PATTERNS.some((pattern) => pattern.test(segment))) return '[id]'
       return segment.toLowerCase()
     })
     .join('/')
@@ -140,11 +146,16 @@ function applyGlobalPageContext(pathname: string): void {
   if (!gtag || typeof document === 'undefined') return
 
   const path = sanitizeTrackingPath(pathname)
+  const referrer = sanitizeReferrer()
+
   gtag('set', {
     page_path: path,
     page_location: `${window.location.origin}${path}`,
     // Titre neutre dans l'espace privé : il peut contenir le nom d'une boutique.
     page_title: isProtectedAppRoute(pathname) ? 'Jisra' : document.title || '',
+    // Référent nettoyé : les hits automatiques enverraient sinon l'URL brute
+    // de la page précédente (avec ses paramètres).
+    ...(referrer ? { page_referrer: referrer } : {}),
   })
 }
 

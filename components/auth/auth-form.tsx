@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -21,6 +21,9 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  // Un seul envoi à la fois : évite un `login`/`sign_up` compté deux fois quand
+  // le formulaire est soumis une seconde fois avant la fin de la requête.
+  const submittingRef = useRef(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -44,13 +47,17 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submittingRef.current) return
+    submittingRef.current = true
     setLoading(true)
     setError(null)
     setSuccess(null)
 
     // Supabase renvoie un utilisateur sans identité quand l'e-mail est déjà
-    // utilisé (protection contre l'énumération) : aucun compte n'est créé.
-    let signupEmailAlreadyUsed = false
+    // utilisé (protection contre l'énumération), et peut répondre sans
+    // utilisateur : dans les deux cas aucun compte n'est créé et la conversion
+    // ne doit donc pas être comptée.
+    let signupAccountCreated = false
 
     try {
       if (mode === 'recovery') {
@@ -94,7 +101,8 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
         if (error) throw error
 
         const identities = data?.user?.identities
-        signupEmailAlreadyUsed = Array.isArray(identities) && identities.length === 0
+        signupAccountCreated =
+          Boolean(data?.user?.id) && !(Array.isArray(identities) && identities.length === 0)
       }
 
       if (mode === 'login') {
@@ -113,7 +121,7 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       } else if (mode === 'signup') {
         // Conversion : compte créé avec succès (jamais quand l'e-mail est déjà
         // associé à un compte, ni lors d'une seconde soumission du formulaire).
-        if (!signupEmailAlreadyUsed) {
+        if (signupAccountCreated) {
           trackEvent('sign_up', { method: 'email' })
         }
         router.refresh()
@@ -121,6 +129,7 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
     } catch (err: any) {
       setError(err.message || 'Une erreur est survenue')
     } finally {
+      submittingRef.current = false
       setLoading(false)
     }
   }

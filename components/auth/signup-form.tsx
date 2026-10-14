@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, Lock, Mail, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -37,6 +37,9 @@ export default function SignupForm() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [pendingEmailConfirmation, setPendingEmailConfirmation] = useState<string | null>(null)
+  // Un seul envoi à la fois : `loading` n'a pas encore désactivé le bouton quand
+  // la touche Entrée soumet le formulaire une seconde fois.
+  const submittingRef = useRef(false)
 
   const passwordStrength = useMemo(() => {
     let score = 0
@@ -48,6 +51,8 @@ export default function SignupForm() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (submittingRef.current) return
+    submittingRef.current = true
     setLoading(true)
     setError(null)
     setSuccess(null)
@@ -87,9 +92,12 @@ export default function SignupForm() {
       }
 
       // Protection contre l'énumération : quand l'e-mail est déjà utilisé,
-      // Supabase renvoie un utilisateur sans identité et aucun compte n'est
-      // créé — la conversion ne doit donc pas être comptée.
-      const accountCreated = !(Array.isArray(data.user?.identities) && data.user?.identities.length === 0)
+      // Supabase renvoie un utilisateur sans identité ; une réponse sans
+      // utilisateur ne crée rien non plus. Dans ces deux cas la conversion ne
+      // doit donc pas être comptée.
+      const identities = data.user?.identities
+      const accountCreated =
+        Boolean(data.user?.id) && !(Array.isArray(identities) && identities.length === 0)
 
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
@@ -111,6 +119,7 @@ export default function SignupForm() {
     } catch (err: any) {
       setError(err.message || 'Une erreur est survenue')
     } finally {
+      submittingRef.current = false
       setLoading(false)
     }
   }

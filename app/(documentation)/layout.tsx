@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { JisraMark, JisraWordmark } from '@/components/logo'
+import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
 
 export const metadata: Metadata = {
   title: {
@@ -65,6 +66,8 @@ export default function DocumentationLayout({ children }: { children: ReactNode 
           </div>
         </footer>
       </main>
+
+      <CookieBanner />
     </div>
   )
 }
