@@ -14,6 +14,9 @@ import {
 type DeliveryProviderFieldsProps = {
   provider: ConfirmationDeliveryProvider
   storeId: string | null
+  /** Commande concernée : sert à pré-remplir la ville Maroc Go (auto-détection). */
+  orderId?: string | null
+  orderCity?: string | null
   value: ConfirmationDeliveryOptions
   onChange: (next: ConfirmationDeliveryOptions) => void
   onConfigError: (code: DeliveryOptionsErrorCode | null) => void
@@ -23,6 +26,7 @@ const CITY_PROVIDER_LABEL: Partial<Record<ConfirmationDeliveryProvider, string>>
   ozone: 'Ville OZONE',
   ameex: 'Ville AMEEX',
   sendit: 'Ville Sendit',
+  'maroc-go-delivery': 'Ville Maroc Go Delivery',
 }
 
 const PROVIDER_TITLE: Record<ConfirmationDeliveryProvider, string> = {
@@ -31,6 +35,7 @@ const PROVIDER_TITLE: Record<ConfirmationDeliveryProvider, string> = {
   ameex: 'Options colis AMEEX',
   sendit: 'Options colis Sendit',
   digylog: 'Paramètres Digylog',
+  'maroc-go-delivery': 'Ville Maroc Go Delivery',
 }
 
 const inputClass =
@@ -75,6 +80,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 export default function DeliveryProviderFields({
   provider,
   storeId,
+  orderId,
+  orderCity,
   value,
   onChange,
   onConfigError,
@@ -84,10 +91,11 @@ export default function DeliveryProviderFields({
   const [pickupQuery, setPickupQuery] = useState('')
   const pickupPrefilledRef = useRef(false)
   const digylogPrefilledRef = useRef(false)
+  const marocGoPrefilledRef = useRef(false)
 
   const catalogueId = deliveryProviderCatalogueId(provider)
 
-  const { data: cities = [] } = useQuery<DeliveryCityOption[]>({
+  const { data: catalogueCities = [] } = useQuery<DeliveryCityOption[]>({
     queryKey: ['confirmation-delivery-cities', catalogueId],
     enabled: Boolean(catalogueId),
     queryFn: async () => {
@@ -113,6 +121,46 @@ export default function DeliveryProviderFields({
       return Array.from(options.values())
     },
   })
+
+  // Villes Maroc Go Delivery : le provider n'a pas d'id de catalogue statique, on
+  // le résout par son slug puis on lit ses tarifs dans `delivery_rates`.
+  const { data: marocGoCities = [] } = useQuery<DeliveryCityOption[]>({
+    queryKey: ['confirmation-maroc-go-delivery-cities'],
+    enabled: provider === 'maroc-go-delivery',
+    queryFn: async () => {
+      const { data: providerRow, error: providerError } = await supabase
+        .from('integration_providers')
+        .select('id')
+        .eq('slug', 'maroc-go-delivery')
+        .maybeSingle()
+
+      if (providerError) throw providerError
+      if (!providerRow?.id) return []
+
+      const { data, error } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, city_name, price')
+        .eq('provider_id', providerRow.id)
+        .order('city_name', { ascending: true })
+
+      if (error) throw error
+      const options = new Map<string, DeliveryCityOption>()
+      for (const rate of (data || []) as Array<{
+        external_city_key: unknown
+        city_name: string | null
+        price: number | null
+      }>) {
+        options.set(String(rate.external_city_key), {
+          city_key: String(rate.external_city_key),
+          city_name: rate.city_name,
+          price: rate.price,
+        })
+      }
+      return Array.from(options.values())
+    },
+  })
+
+  const cities = provider === 'maroc-go-delivery' ? marocGoCities : catalogueCities
 
   const { data: senditConfig } = useQuery<{ default_pickup_district_id: string | null } | null>({
     queryKey: ['confirmation-sendit-config', storeId],
@@ -182,6 +230,41 @@ export default function DeliveryProviderFields({
     })
   }, [provider, digylogConfig, digylogError, onChange, value])
 
+  // Maroc Go Delivery : la ville est normalement détectée automatiquement. On
+  // tente la résolution côté serveur pour pré-remplir le sélecteur ; si elle
+  // échoue, le champ reste vide et l'agent doit choisir la ville manuellement.
+  useEffect(() => {
+    if (provider !== 'maroc-go-delivery' || marocGoPrefilledRef.current) return
+    const rawCity = String(orderCity || '').trim()
+    if (!rawCity || !orderId) return
+    marocGoPrefilledRef.current = true
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch('/api/orders/normalize-city', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ city: rawCity, orderId, providerSlug: 'maroc-go-delivery' }),
+        })
+        const payload = (await response.json().catch(() => null)) as {
+          cityKey?: string | null
+          cityName?: string | null
+        } | null
+        if (cancelled) return
+        const key = payload?.cityKey ? String(payload.cityKey) : ''
+        if (!key) return
+        const name = String(payload?.cityName || rawCity)
+        setCityQuery(name)
+        onChange({ ...value, marocGoCityKey: key, marocGoCityName: name })
+      } catch {
+        // Non bloquant : repli sur le choix manuel de la ville.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [provider, orderId, orderCity, onChange, value])
+
   const update = (partial: Partial<ConfirmationDeliveryOptions>) => onChange({ ...value, ...partial })
 
   const cityKey =
@@ -193,7 +276,9 @@ export default function DeliveryProviderFields({
         ? value.ameexCityKey || ''
         : provider === 'sendit'
           ? value.senditCityKey || ''
-          : ''
+          : provider === 'maroc-go-delivery'
+            ? value.marocGoCityKey || ''
+            : ''
 
   const selectCity = (city: DeliveryCityOption) => {
     const key = String(city.city_key)
@@ -202,6 +287,7 @@ export default function DeliveryProviderFields({
     if (provider === 'ozone') update({ ozoneCityKey: Number(key) || undefined, ozoneCityName: name })
     if (provider === 'ameex') update({ ameexCityKey: key, ameexCityName: name })
     if (provider === 'sendit') update({ senditCityKey: key, senditCityName: name })
+    if (provider === 'maroc-go-delivery') update({ marocGoCityKey: key, marocGoCityName: name })
   }
 
   const changeCityQuery = (next: string) => {
@@ -209,18 +295,29 @@ export default function DeliveryProviderFields({
     if (provider === 'ozone') update({ ozoneCityKey: undefined, ozoneCityName: undefined })
     if (provider === 'ameex') update({ ameexCityKey: undefined, ameexCityName: undefined })
     if (provider === 'sendit') update({ senditCityKey: undefined, senditCityName: undefined })
+    if (provider === 'maroc-go-delivery') update({ marocGoCityKey: undefined, marocGoCityName: undefined })
   }
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
       <div className="text-sm font-medium text-foreground">{PROVIDER_TITLE[provider]}</div>
 
-      {provider === 'ozone' || provider === 'ameex' || provider === 'sendit' ? (
+      {provider === 'ozone' || provider === 'ameex' || provider === 'sendit' || provider === 'maroc-go-delivery' ? (
         <DeliveryCityPicker
           label={CITY_PROVIDER_LABEL[provider] as string}
-          placeholder={`Tapez pour rechercher une ville ${provider.toUpperCase()}...`}
+          placeholder={
+            provider === 'maroc-go-delivery'
+              ? 'Tapez pour rechercher une ville Maroc Go...'
+              : `Tapez pour rechercher une ville ${provider.toUpperCase()}...`
+          }
           required
-          hint={provider === 'ozone' ? 'OZONE nécessite un choix manuel de la ville.' : undefined}
+          hint={
+            provider === 'ozone'
+              ? 'OZONE nécessite un choix manuel de la ville.'
+              : provider === 'maroc-go-delivery'
+                ? 'Ville détectée automatiquement si possible ; choisissez-la dans la liste si elle est vide.'
+                : undefined
+          }
           cities={cities}
           query={cityQuery}
           selectedKey={cityKey}

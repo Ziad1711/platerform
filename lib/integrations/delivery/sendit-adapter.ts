@@ -3,7 +3,7 @@ import { getSenditCredentials } from '@/lib/integrations/sendit-credentials'
 import { resolveDeliveryFee } from '@/lib/integrations/delivery/delivery-fee-resolver'
 import { createSenditParcel, getSenditLabels, mapSenditStatusToOrderStatus, normalizeSenditPhone, trackSenditParcel } from '@/lib/integrations/sendit'
 import { createDeliveryLogger } from '@/lib/integrations/delivery/logger'
-import { buildOrderItemArticleLabel } from '@/lib/integrations/delivery/order-article'
+import { buildOrderArticleLabel } from '@/lib/integrations/delivery/order-article'
 import type { DeliveryIntegrationConfig, ParcelCreationInput, VoucherCreationInput, CreateParcelResult, CreateVoucherResult, TrackParcelResult } from './types'
 import type { DeliveryProvider } from './provider'
 
@@ -97,8 +97,9 @@ export async function createSenditParcelForOrder(params: {
   logger.info('parcel-creating', 'Création colis Sendit', { orderId, district, amount: order.total_selling_price })
   const credentials = await getSenditCredentials(admin, integrationId)
   const { data: cfg } = await admin.from('sendit_configs').select('*').eq('store_id', storeId).maybeSingle()
-  // Nom du produit accompagné de la variante achetée : « Produit (Variante) x2 »
-  const products = (order.order_items || []).map((i: any) => `${buildOrderItemArticleLabel(i) || 'Produit'} x${i?.quantity || 1}`).join(', ')
+  // Nom du produit accompagné de la variante achetée : « x2 Produit (Variante), Produit 2 ».
+  // La quantité n'est préfixée que si elle est > 1 (jamais « x1 »).
+  const products = buildOrderArticleLabel(order.order_items, 'Produit')
   const deliveryFee = await resolveDeliveryFee({ supabase: admin, storeId, cityKey: district, integrationId, providerSlug: 'sendit' })
   logger.info('parcel-calling-api', 'Appel API Sendit', { district, amount: order.total_selling_price })
   const raw = await createSenditParcel(credentials.token, {

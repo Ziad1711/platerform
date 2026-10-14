@@ -377,6 +377,8 @@ export default function ConfirmOrderDialog({
                 key={deliveryChoice}
                 provider={providerSlug}
                 storeId={storeId}
+                orderId={order?.id ?? null}
+                orderCity={order?.city ?? null}
                 value={deliveryOptions}
                 onChange={handleDeliveryOptionsChange}
                 onConfigError={setProviderIssue}

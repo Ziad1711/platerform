@@ -83,6 +83,9 @@ export async function POST(request: Request) {
       digylogCheckDuplicate?: 0 | 1
       digylogOpenProduct?: 1 | 2
       digylogPort?: 1 | 2
+      /** Ville Maroc Go Delivery choisie manuellement (repli quand l'auto-détection échoue). */
+      marocGoCityKey?: string | number
+      marocGoCityName?: string
       /** La ville a déjà été normalisée en amont (confirmation) : ne pas la recalculer. */
       cityAlreadyNormalized?: boolean
     }
@@ -319,7 +322,15 @@ export async function POST(request: Request) {
 
         if (canAutoCreateMarocGo && marocGoIntegration?.id && marocGoConfig) {
           try {
-            if (!cityAlreadyNormalized) {
+            const manualMarocGoCityKey = Number(body.marocGoCityKey || 0) || 0
+            if (manualMarocGoCityKey) {
+              // Ville choisie manuellement par l'agent : elle prime sur
+              // l'auto-détection et est enregistrée sur la commande.
+              await admin
+                .from('orders')
+                .update({ delivery_city_external_id: manualMarocGoCityKey, updated_at: now })
+                .eq('id', orderId)
+            } else if (!cityAlreadyNormalized) {
               await normalizeOrderCityById(orderId, admin, 'maroc-go-delivery')
             }
             // Recharger la commande pour avoir delivery_city_external_id à jour

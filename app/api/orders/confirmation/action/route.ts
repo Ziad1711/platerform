@@ -438,7 +438,10 @@ async function runConfirmationActionCore(
 
       if (willCreateParcel) {
         const normalizationSlug = resolveCityNormalizationSlug(resolvedApiProvider)
-        if (normalizationSlug) {
+        // Ville choisie manuellement pour Maroc Go Delivery : ne pas la recalculer.
+        const hasManualMarocGoCity =
+          resolvedProvider === 'maroc-go-delivery' && Boolean(deliveryOptions.marocGoCityKey)
+        if (normalizationSlug && !hasManualMarocGoCity) {
           report('city_search')
           try {
             await normalizeOrderCityById(orderId, createAdminClient(), normalizationSlug, () =>

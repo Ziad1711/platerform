@@ -13,7 +13,13 @@ export const DELIVERY_PROVIDER_IDS = {
   sendit: '5998e563-96ed-47cc-881a-43f41827f858',
 } as const
 
-export type ConfirmationDeliveryProvider = 'ozone' | 'forcelog' | 'ameex' | 'sendit' | 'digylog'
+export type ConfirmationDeliveryProvider =
+  | 'ozone'
+  | 'forcelog'
+  | 'ameex'
+  | 'sendit'
+  | 'digylog'
+  | 'maroc-go-delivery'
 
 export type ConfirmationDeliveryOptions = {
   ozoneCityKey?: number
@@ -47,6 +53,9 @@ export type ConfirmationDeliveryOptions = {
   digylogCheckDuplicate?: 0 | 1
   digylogOpenProduct?: 1 | 2
   digylogPort?: 1 | 2
+  /** Ville Maroc Go Delivery choisie manuellement : repli quand l'auto-détection échoue. */
+  marocGoCityKey?: string
+  marocGoCityName?: string
 }
 
 export type DeliveryOptionsErrorCode =
@@ -60,6 +69,7 @@ const PROVIDER_SLUGS: ConfirmationDeliveryProvider[] = [
   'ameex',
   'sendit',
   'digylog',
+  'maroc-go-delivery',
 ]
 
 const PROVIDER_FIELDS: Record<ConfirmationDeliveryProvider, (keyof ConfirmationDeliveryOptions)[]> = {
@@ -94,6 +104,7 @@ const PROVIDER_FIELDS: Record<ConfirmationDeliveryProvider, (keyof ConfirmationD
     'digylogOpenProduct',
     'digylogPort',
   ],
+  'maroc-go-delivery': ['marocGoCityKey', 'marocGoCityName'],
 }
 
 
@@ -107,6 +118,7 @@ const CITY_FIELDS: Partial<
   ozone: { key: 'ozoneCityKey', name: 'ozoneCityName' },
   ameex: { key: 'ameexCityKey', name: 'ameexCityName' },
   sendit: { key: 'senditCityKey', name: 'senditCityName' },
+  'maroc-go-delivery': { key: 'marocGoCityKey', name: 'marocGoCityName' },
 }
 
 export function resolveDeliveryProvider(
@@ -265,6 +277,11 @@ export function sanitizeDeliveryOptions(
     options.digylogPort = Number(input.digylogPort) === 1 ? 1 : 2
   }
 
+  if (provider === 'maroc-go-delivery') {
+    options.marocGoCityKey = toText(input.marocGoCityKey, 60)
+    options.marocGoCityName = toText(input.marocGoCityName, 120)
+  }
+
   const cleaned: ConfirmationDeliveryOptions = {}
   for (const key of PROVIDER_FIELDS[provider]) {
     const value = options[key]
@@ -284,6 +301,7 @@ export function deliveryCityKeyOf(
   if (provider === 'ozone') return options.ozoneCityKey ? String(options.ozoneCityKey) : null
   if (provider === 'ameex') return options.ameexCityKey || null
   if (provider === 'sendit') return options.senditCityKey || null
+  if (provider === 'maroc-go-delivery') return options.marocGoCityKey || null
   return null
 }
 

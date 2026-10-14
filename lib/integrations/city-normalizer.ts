@@ -21,7 +21,7 @@ type NormalizeCityParams = {
 export type NormalizeCityResult = {
   cityName: string
   cityKey: string | null
-  source: 'exact_match' | 'common_alias' | 'alias_cache' | 'ai_learned' | 'ai_not_found' | 'ai_invalid' | 'ai_failed' | 'no_provider_cities'
+  source: 'exact_match' | 'common_alias' | 'alias_cache' | 'partial_match' | 'ai_learned' | 'ai_not_found' | 'ai_invalid' | 'ai_failed' | 'no_provider_cities'
   learned: boolean
   /** Étape finale atteinte dans le pipeline de normalisation */
   finalStage: string
@@ -484,6 +484,57 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
       source: 'alias_cache',
       learned: false,
       finalStage: 'alias_cache',
+    }
+  }
+
+  // 3b. Correspondance partielle : un nom de ville connu apparaît n'importe où
+  // dans la ville brute (début, milieu ou fin), en mot entier — ex.
+  // « Boumia tichiait », « tichiait Boumia », « Villa Boumia 12 » → « BOUMIA ».
+  // `normalizeAlias` ne conserve que lettres/chiffres/espaces : le motif est donc
+  // borné par des espaces, sans échappement nécessaire. On n'accepte qu'une
+  // correspondance unique pour éviter toute ambiguïté (sinon DeepSeek tranche).
+  const partialMatches = cities.filter((city) => {
+    const cityNorm = normalizeAlias(city.city_name)
+    if (cityNorm.length < 3) return false
+    return new RegExp(`(?:^| )${cityNorm}(?: |$)`).test(normalizedAlias)
+  })
+
+  if (partialMatches.length === 1) {
+    const match = partialMatches[0]
+    const cityKey = String(match.city_key || '') || null
+
+    console.log('[city-normalizer] partial-match', {
+      rawCity,
+      matchedCity: match.city_name,
+      cityKey,
+    })
+
+    await persistAliasForProvider({
+      supabase,
+      alias: normalizedAlias,
+      canonicalCityName: match.city_name,
+      cityKey,
+      orderId: params.orderId,
+      source: 'partial_match',
+      confidenceScore: 0.9,
+      providerSlug: params.providerSlug,
+    })
+
+    if (params.orderId) {
+      await persistOrderDeliveryCity({
+        supabase,
+        orderId: params.orderId,
+        cityName: match.city_name,
+        cityKey,
+      })
+    }
+
+    return {
+      cityName: match.city_name,
+      cityKey,
+      source: 'partial_match',
+      learned: true,
+      finalStage: 'partial_match',
     }
   }
 

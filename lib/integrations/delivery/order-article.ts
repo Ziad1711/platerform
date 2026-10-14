@@ -13,6 +13,7 @@ export type OrderItemArticleSource = {
   product_name_override?: string | null
   products?: Relation<{ name?: string | null }>
   product_variants?: Relation<{ name?: string | null }>
+  quantity?: number | string | null
 }
 
 /** PostgREST renvoie tantôt un objet, tantôt un tableau pour une relation to-one. */
@@ -54,13 +55,18 @@ export function buildOrderItemArticleLabel(item: OrderItemArticleSource | null |
   return `${productName} (${variantName})`
 }
 
-/** Libellé complet d'une commande : « Produit A (V1), Produit B (V2) ». */
+/** Libellé complet d'une commande : « x2 Produit A (V1), Produit B (V2) ». La quantité est préfixée uniquement lorsqu'elle est > 1. */
 export function buildOrderArticleLabel(
   items: OrderItemArticleSource[] | null | undefined,
   fallback?: string | null
 ) {
   const labels = (items || [])
-    .map((item) => buildOrderItemArticleLabel(item))
+    .map((item) => {
+      const label = buildOrderItemArticleLabel(item)
+      if (!label) return ''
+      const quantity = Number(item?.quantity)
+      return Number.isFinite(quantity) && quantity > 1 ? `x${quantity} ${label}` : label
+    })
     .filter(Boolean)
 
   return labels.join(', ') || String(fallback || '').trim()
