@@ -5,6 +5,7 @@ import { Providers } from '@/components/providers'
 import { SITE_URL } from '@/lib/marketing/site-url'
 import HashErrorHandler from '@/components/marketing/hash-error-handler'
 import { GoogleAnalytics } from '@/components/analytics/google-analytics'
+import { VercelAnalytics } from '@/components/analytics/vercel-analytics'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -43,6 +44,9 @@ export default function RootLayout({
         <Providers>
           {children}
           <HashErrorHandler />
+          {/* Mesure agrégée sans cookie (aucun consentement requis) */}
+          <VercelAnalytics />
+          {/* Mesure détaillée GA4, chargée uniquement après consentement */}
           <GoogleAnalytics />
         </Providers>
       </body>

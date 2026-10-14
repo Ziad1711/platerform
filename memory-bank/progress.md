@@ -518,3 +518,12 @@
 - User can create and switch between stores
 - Dashboard shows real data from Supabase
 - User can create and manage orders and products
+
+### ✅ Mesure d'audience Vercel Web Analytics (implemente et pousse)
+- `@vercel/analytics@^2.0.1` — sans cookie ni stockage local, donnees agregees, actif sans consentement et independant de GA4.
+- `lib/analytics/sanitize.ts` (nettoyage d'URL partage) + `components/analytics/vercel-analytics.tsx` (`beforeSend` : URL masquee, `null` sur les routes non anonymisables).
+- Routes exclues : `/auth/*`, `/invite/*`, `/delivery/vouchers/*` (egalement exclues de GA4).
+- `app/layout.tsx`, politique de confidentialite, bandeau cookies et controle de consentement mis a jour.
+- Verification : `npx tsc --noEmit` OK, `npm run build` OK, page d'accueil sans script GA sans consentement ni `Set-Cookie`.
+- Reste a faire : activer Web Analytics dans le tableau de bord Vercel et verifier le script `/_vercel/insights/script.js` en production (aucun outil MCP pour l'activation).
+

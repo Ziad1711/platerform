@@ -10,6 +10,8 @@
  * - aucune URL brute n'est transmise : le chemin est nettoyé (paramètres de
  *   requête retirés, identifiants remplacés) et le titre est omis dans
  *   l'espace applicatif privé ;
+ * - les pages dont l'URL ne peut pas être anonymisée de façon fiable ne sont
+ *   jamais mesurées (`lib/analytics/sanitize.ts`) ;
  * - le contexte global est réécrit à chaque changement de route
  *   (`applyGlobalPageContext`) afin que les évènements collectés
  *   automatiquement par la librairie (défilement, clics sortants, changements
@@ -17,6 +19,7 @@
  */
 
 import { hasAnalyticsConsent } from './consent'
+import { isUntrackableRoute, sanitizeReferrer, sanitizeTrackingPath } from './sanitize'
 import { isProtectedAppRoute } from '@/lib/auth/redirects'
 
 /** Identifiant de mesure GA4 ; vide = mesure désactivée. */
@@ -75,44 +78,9 @@ export function setAnalyticsCollectionDisabled(disabled: boolean): void {
 }
 
 /**
- * Nettoie un chemin avant transmission :
- * paramètres de requête et ancre retirés, identifiants/ jetons masqués.
- * Ex. `/invite/3f9c1e7a-…` → `/invite/[id]`, `/sales?tab=…` → `/sales`.
+ * Nettoyage des URL et filtrage des pages non anonymisables : implémentation
+ * partagée avec Vercel Web Analytics dans `lib/analytics/sanitize.ts`.
  */
-const OPAQUE_SEGMENT_PATTERNS: RegExp[] = [
-  /^\d+$/, // identifiant numérique
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, // UUID
-  /^[0-9a-f]{8,}$/i, // chaîne hexadécimale (jeton d'invitation, empreinte)
-  /^(?=.*\d)(?=.*[a-z])[a-z0-9]{6,}$/i, // lettres + chiffres : jeton court, clé de colis
-  /[A-Za-z0-9_-]{16,}/, // segment long : jamais un mot de route
-  /[@=+%]/, // donnée encodée (e-mail, clé=valeur)
-]
-
-export function sanitizeTrackingPath(pathname: string): string {
-  const raw = String(pathname || '/').split(/[?#]/)[0]
-  const cleaned = raw
-    .split('/')
-    .filter(Boolean)
-    .map((segment) => {
-      if (OPAQUE_SEGMENT_PATTERNS.some((pattern) => pattern.test(segment))) return '[id]'
-      return segment.toLowerCase()
-    })
-    .join('/')
-
-  return cleaned ? `/${cleaned}`.slice(0, 120) : '/'
-}
-
-/** Référent nettoyé : origine seule si la navigation vient du site lui-même. */
-function sanitizeReferrer(): string {
-  if (typeof document === 'undefined' || !document.referrer) return ''
-
-  try {
-    const referrer = new URL(document.referrer)
-    return referrer.origin === window.location.origin ? window.location.origin : `${referrer.origin}${referrer.pathname}`
-  } catch {
-    return ''
-  }
-}
 
 /** Contexte de page transmis avec chaque hit : version nettoyée, sans donnée métier. */
 function buildPageContext(pathname: string): GtagParams {
@@ -167,6 +135,9 @@ export function trackEvent(
 ): void {
   if (!isAnalyticsEnabled()) return
 
+  // Page non anonymisable : aucun évènement, même avec un contexte nettoyé.
+  if (typeof window !== 'undefined' && isUntrackableRoute(window.location.pathname)) return
+
   const gtag = getGtag()
   if (!gtag) return
 
@@ -211,6 +182,9 @@ export function initializeAnalytics(): void {
  */
 export function trackPageView(pathname: string): boolean {
   if (!isAnalyticsEnabled()) return false
+
+  // Page non anonymisable : aucune page vue, même nettoyée.
+  if (isUntrackableRoute(pathname)) return false
 
   const gtag = getGtag()
   if (!gtag) return false

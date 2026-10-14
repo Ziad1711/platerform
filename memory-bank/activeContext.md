@@ -302,6 +302,16 @@ Refonte complète de l'assistant IA terminée :
 - Les requêtes d'import dans sales/page.tsx (importStoreProducts, importRapidDeliveryConfig, importConfirmationAgents, importDeliveryCompanies) utilisent encore currentStoreId uniquement - c'est intentionnel car l'import CSV nécessite un store spécifique
 
 ## Recent Technical Changes
+### Mesure d'audience Vercel Web Analytics (14 octobre 2026)
+- `@vercel/analytics@^2.0.1` ajouté : aucun cookie et aucun stockage sur l'appareil, statistiques agrégées → mesure active sans consentement, indépendante du choix GA4.
+- Nouveau `lib/analytics/sanitize.ts` : `sanitizeTrackingPath` / `sanitizeTrackingUrl` / `sanitizeReferrer` extraits de `lib/analytics/gtag.ts`, plus `UNTRACKABLE_ROUTE_PREFIXES` (`/auth`, `/invite`, `/delivery/vouchers`).
+- Nouveau `components/analytics/vercel-analytics.tsx` : `<Analytics beforeSend>` masque l'URL (`[id]`, sans requête ni ancre) et annule l'envoi (`null`) sur les routes non anonymisables.
+- `app/layout.tsx` monte `<VercelAnalytics />` à côté de `<GoogleAnalytics />`.
+- GA4 : `trackPageView` et `trackEvent` ne mesurent plus les routes non anonymisables (règle partagée).
+- Textes reformulés (politique de confidentialité, bandeau cookies, contrôle de consentement) : Vercel Analytics = agrégé sans cookie, GA4 = détaillé sur consentement.
+- Interruption de session : `lib/analytics/sanitize.ts` et `components/analytics/vercel-analytics.tsx` avaient été perdus (imports cassés) ; recréés à l'identique puis vérifiés (`npx tsc --noEmit` EXIT=0, `npm run build` EXIT=0, serveur de production relancé sur le port 3000 : page d'accueil 200, aucun `Set-Cookie`, aucun script `googletagmanager` sans consentement, le chunk client contient bien `delivery/vouchers` et `insights/script.js`).
+
+
 - Mise à jour SQL de `allocate_ads_cost_for_day()` pour préserver les valeurs importées depuis CSV en absence de lignes `ad_spend_daily`.
 - Mise à jour SQL de `rpc_dashboard_ads_cost_chart()` pour fallback vers la somme de `orders.ads_cost_allocated` par bucket.
 - Mise à jour frontend de `components/dashboard/kpi-cards.tsx` pour que "Dépense publicitaire" utilise aussi ce fallback.

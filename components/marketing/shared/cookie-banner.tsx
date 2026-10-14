@@ -37,7 +37,7 @@ export function CookieBanner() {
               <div>
                 <p className="text-sm font-semibold">Cookies et mesure d’audience</p>
                 <p className="mt-1 text-sm leading-6 text-jisra-cream/64">
-                  Les cookies nécessaires au fonctionnement et à la sécurité restent actifs. La mesure d’audience (Google Analytics) n’est activée qu’avec votre accord, et vous pouvez le retirer à tout moment depuis la{' '}
+                  Les cookies nécessaires au fonctionnement et à la sécurité restent actifs. Une mesure d’audience agrégée, sans cookie et sans adresse IP (Vercel Analytics), est active en permanence. La mesure d’audience détaillée (Google Analytics), qui utilise des cookies, n’est activée qu’avec votre accord, et vous pouvez le retirer à tout moment depuis la{' '}
                   <Link
                     href="/legal/confidentialite"
                     className="underline decoration-white/30 underline-offset-2 transition-colors hover:text-jisra-cream"

@@ -53,10 +53,10 @@ export function AnalyticsConsentControl({
   const status = !ready
     ? 'Vérification de votre choix…'
     : consent === 'granted'
-      ? 'Mesure d’audience activée. Vous pouvez la désactiver à tout moment.'
+      ? 'Mesure d’audience détaillée activée. Vous pouvez la désactiver à tout moment.'
       : consent === 'denied'
-        ? 'Mesure d’audience refusée. Aucune donnée d’audience n’est collectée.'
-        : 'Aucun choix enregistré : la mesure d’audience reste désactivée.'
+        ? 'Mesure d’audience détaillée refusée. Seule la mesure agrégée sans cookie reste active.'
+        : 'Aucun choix enregistré : la mesure d’audience détaillée reste désactivée.'
 
   return (
     <div className={styles.container}>
@@ -68,7 +68,7 @@ export function AnalyticsConsentControl({
           disabled={consent === 'granted'}
           className={styles.accept}
         >
-          Accepter la mesure d’audience
+          Accepter la mesure détaillée
         </button>
         <button
           type="button"
