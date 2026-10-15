@@ -47,6 +47,10 @@ export function StoreProvider({
   // (changement d'identité), plus aucun écriture de sélection persistée.
   const disposedRef = useRef(false)
   useEffect(() => {
+    // Réactiver la garde à chaque installation : Strict Mode exécute
+    // installation → nettoyage → installation, et le setter doit rester actif
+    // après ce cycle tant que le composant est monté.
+    disposedRef.current = false
     return () => {
       disposedRef.current = true
     }

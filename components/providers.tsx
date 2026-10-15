@@ -98,6 +98,22 @@ export function Providers({ children }: { children: React.ReactNode }) {
   )
 }
 
+type AuthErrorLike = { name?: string; code?: string; status?: number } | null | undefined
+
+/** Miroir de la classification serveur : session définitivement invalide ≠ panne. */
+function isDefinitiveUnauthenticated(error: AuthErrorLike): boolean {
+  if (!error) return false
+  if (error.name === 'AuthSessionMissingError' || error.code === 'session_not_found') return true
+  if (error.name === 'AuthInvalidJwtError' || error.code === 'invalid_jwt' || error.code === 'bad_jwt') return true
+  if (
+    error.code === 'session_expired' ||
+    error.code === 'refresh_token_not_found' ||
+    error.code === 'refresh_token_already_used' ||
+    error.code === 'user_not_found'
+  ) return true
+  return false
+}
+
 function PrivateApp({ userId, children }: { userId: string; children: React.ReactNode }) {
   // Un QueryClient NEUF par identité : changer de compte abandonne l'ancien cache,
   // aucune donnée de A n'est réutilisable par B (même pour un magasin partagé).
@@ -135,7 +151,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     | { status: 'init' }
     | { status: 'connected'; userId: string }
     | { status: 'disconnected' }
+    | { status: 'unavailable' }
   >({ status: 'init' })
+  const [retryKey, setRetryKey] = useState(0)
   const currentUserIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -167,8 +185,31 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     // session initiale, puis les événements suivants la mettent à jour. Cette
     // identité n'autorise RIEN : la RLS et les gardes serveur restent seules à
     // décider de l'accès aux données.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return
+
+      // `INITIAL_SESSION` avec session null peut résulter d'une panne de lecture
+      // ou de renouvellement (pas d'une vraie déconnexion) : revérifier la session
+      // locale et distinguer panne / absence réelle.
+      if (event === 'INITIAL_SESSION' && !session) {
+        supabase.auth
+          .getSession()
+          .then(({ data, error }) => {
+            if (!active) return
+            if (data.session?.user?.id) {
+              applyIdentity(data.session.user.id)
+            } else if (error && !isDefinitiveUnauthenticated(error)) {
+              setAuth({ status: 'unavailable' })
+            } else {
+              applyIdentity(null)
+            }
+          })
+          .catch(() => {
+            if (active) setAuth({ status: 'unavailable' })
+          })
+        return
+      }
+
       applyIdentity(session?.user?.id ?? null)
     })
 
@@ -176,7 +217,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       active = false
       subscription.unsubscribe()
     }
-  }, [supabase])
+  }, [supabase, retryKey])
 
   // Aucun contenu privé tant que l'identité initiale n'est pas connue.
   if (auth.status === 'init') {
@@ -202,6 +243,30 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
           >
             Se reconnecter
           </a>
+        </div>
+      </div>
+    )
+  }
+
+  // Indisponible (panne temporaire lors de la lecture/renouvellement de session) :
+  // ne jamais rendre l'espace privé, proposer un réessai.
+  if (auth.status === 'unavailable') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+        <div className="mx-auto w-full max-w-md rounded-2xl border bg-card p-8 text-center shadow-lg">
+          <h1 className="text-lg font-semibold">
+            Service d&apos;authentification indisponible
+          </h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Impossible de vérifier votre session pour le moment.
+          </p>
+          <button
+            type="button"
+            onClick={() => setRetryKey((key) => key + 1)}
+            className="mt-5 inline-block rounded-xl bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
+          >
+            Réessayer
+          </button>
         </div>
       </div>
     )
