@@ -1,4 +1,4 @@
-import { getServerUser } from '@/lib/supabase/server'
+import { getServerUserResult } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import KpiCards from '@/components/dashboard/kpi-cards'
 import RevenueChart from '@/components/dashboard/revenue-chart'
@@ -12,7 +12,13 @@ import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 
 export default async function DashboardPage() {
-  const user = await getServerUser()
+  const { user, authUnavailable } = await getServerUserResult()
+
+  // Le layout protégé affiche déjà l'état d'indisponibilité Auth ; ici on ne
+  // redirige vers /login que pour une vraie absence de session.
+  if (authUnavailable) {
+    return null
+  }
 
   if (!user) {
     redirect('/login')

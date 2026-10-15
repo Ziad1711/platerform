@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import type { User } from '@supabase/supabase-js'
 
 export const createClient = async () => {
   const cookieStore = await cookies()
@@ -29,6 +30,25 @@ export const createClient = async () => {
 }
 
 /**
+ * Résultat d'une vérification d'identité côté serveur, distinguant
+ * « aucun utilisateur connecté » d'une indisponibilité temporaire de
+ * l'API Auth. Un appelant ne doit jamais confondre les deux : une panne
+ * Supabase ne doit pas faire passer un compte connecté pour anonyme.
+ */
+export type ServerUserResult = {
+  user: User | null
+  /** true quand l'API Auth est momentanément injoignable/indisponible (pas une absence de session). */
+  authUnavailable: boolean
+}
+
+function isSessionMissingError(
+  error: { name?: string; code?: string; status?: number } | null | undefined
+): boolean {
+  if (!error) return false
+  return error.name === 'AuthSessionMissingError' || error.code === 'session_not_found'
+}
+
+/**
  * Récupère l'utilisateur connecté côté serveur.
  *
  * L'identité ne vient jamais d'un décodage local du cookie : elle est
@@ -36,28 +56,68 @@ export const createClient = async () => {
  * En cas d'échec de la première vérification, le repli relit le jeton
  * d'accès (et non l'objet `user`) puis le resoumet à l'API : un cookie
  * forgé ne peut donc pas authentifier.
- *
- * Justification du repli : l'ancien code l'expliquait par des
- * « incohérences de cookies SSR (notamment sur Safari) ». Ce cas n'est ni
- * documenté ni reproduit (aucune trace dans memory-bank) : le repli est
- * donc conservé comme simple seconde tentative vérifiée, sans prétendre
- * corriger un bug identifié.
+ */
+export async function getServerUserResult(): Promise<ServerUserResult> {
+  const supabase = await createClient().catch(() => null)
+  if (!supabase) return { user: null, authUnavailable: true }
+
+  // 1. Vérification serveur du JWT (source de vérité).
+  let user: User | null = null
+  let firstError: { name?: string; code?: string; status?: number } | null = null
+  try {
+    const { data, error } = await supabase.auth.getUser()
+    user = data.user ?? null
+    firstError = error ?? null
+  } catch {
+    // Erreur inattendue : ne pas conclure à une déconnexion.
+    return { user: null, authUnavailable: true }
+  }
+
+  if (user && !firstError) return { user, authUnavailable: false }
+
+  // 2. Repli : jeton d'accès relu du cookie, puis revérifié par l'API Auth.
+  let session: { access_token?: string } | null = null
+  try {
+    session = (await supabase.auth.getSession()).data.session ?? null
+  } catch {
+    return { user: null, authUnavailable: true }
+  }
+
+  if (session?.access_token) {
+    let verifiedUser: User | null = null
+    let verifyError: { name?: string; code?: string; status?: number } | null = null
+    try {
+      const { data, error } = await supabase.auth.getUser(session.access_token)
+      verifiedUser = data.user ?? null
+      verifyError = error ?? null
+    } catch {
+      return { user: null, authUnavailable: true }
+    }
+
+    if (verifiedUser && !verifyError) return { user: verifiedUser, authUnavailable: false }
+
+    // Un jeton existe mais l'API ne le confirme pas : soit la session a été
+    // révoquée (déconnecté), soit l'API Auth est momentanément indisponible.
+    if (isSessionMissingError(verifyError)) return { user: null, authUnavailable: false }
+    return { user: null, authUnavailable: true }
+  }
+
+  // Aucun jeton d'accès exploitable.
+  if (!firstError) return { user: null, authUnavailable: false }
+  if (isSessionMissingError(firstError)) return { user: null, authUnavailable: false }
+  // Toute autre erreur sans jeton exploitable est traitée comme une panne,
+  // jamais comme une absence de session.
+  return { user: null, authUnavailable: true }
+}
+
+/**
+ * Récupère l'utilisateur connecté côté serveur (compatibilité : null sur
+ * absence de session comme sur indisponibilité Auth). Pour distinguer ces
+ * deux états, utiliser `getServerUserResult()`.
  */
 export async function getServerUser() {
-  const supabase = await createClient()
-
-  // 1. Vérification serveur du JWT (source de vérité)
-  const { data: { user }, error } = await supabase.auth.getUser()
-  if (user && !error) return user
-
-  // 2. Repli : jeton d'accès relu du cookie, puis revérifié par l'API Auth
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.access_token) return null
-
-  const { data: { user: verifiedUser } } = await supabase.auth.getUser(
-    session.access_token
-  )
-  return verifiedUser ?? null
+  const { user } = await getServerUserResult()
+  return user
 }
 
 /**
