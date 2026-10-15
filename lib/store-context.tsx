@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { DashboardPeriod } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -43,6 +43,14 @@ export function StoreProvider({
   initialAuthReady: boolean
 }) {
   const supabase = useMemo(() => createClient(), [])
+  // Garde contre les callbacks tardifs d'un compte précédent : après démontage
+  // (changement d'identité), plus aucun écriture de sélection persistée.
+  const disposedRef = useRef(false)
+  useEffect(() => {
+    return () => {
+      disposedRef.current = true
+    }
+  }, [])
   // undefined = pas encore initialisé, null = "Tous les stores" (choix explicite)
   const [currentStoreId, setCurrentStoreIdState] = useState<string | null | undefined>(undefined)
   const [localStorageLoaded, setLocalStorageLoaded] = useState(false)
@@ -60,6 +68,9 @@ export function StoreProvider({
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
 
   const setCurrentStoreId = (storeId: string | null) => {
+    // Un callback tardif (ex. mutation de création de store du compte A) ne doit
+    // plus écrire dans la sélection persistée du compte courant.
+    if (disposedRef.current) return
     setCurrentStoreIdState(storeId)
     if (typeof window !== 'undefined') {
       if (storeId) {

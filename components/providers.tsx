@@ -99,10 +99,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 
 function PrivateApp({ userId, children }: { userId: string; children: React.ReactNode }) {
-  // Un QueryClient NEUF par identité : changer de compte détruit l'ancien cache,
-  // aucune donnée de A n'est réutilisable par B (même pour un magasin partagé),
-  // et les requêtes obsolètes de l'ancien client n'ont plus d'observateur.
+  // Un QueryClient NEUF par identité : changer de compte abandonne l'ancien cache,
+  // aucune donnée de A n'est réutilisable par B (même pour un magasin partagé).
   const [queryClient] = useState(() => new QueryClient())
+
+  // Au démontage (changement d'identité), annuler les requêtes en vol et vider
+  // le cache privé : aucune réponse ni effet de bord tardif de A ne survit.
+  useEffect(() => {
+    return () => {
+      queryClient.cancelQueries()
+      queryClient.clear()
+    }
+  }, [queryClient])
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -123,23 +131,23 @@ function PrivateApp({ userId, children }: { userId: string; children: React.Reac
  */
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createClient(), [])
-  const [auth, setAuth] = useState<{ userId: string | null; ready: boolean }>({
-    userId: null,
-    ready: false,
-  })
+  const [auth, setAuth] = useState<
+    | { status: 'init' }
+    | { status: 'connected'; userId: string }
+    | { status: 'disconnected' }
+  >({ status: 'init' })
   const currentUserIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     let active = true
-    let eventSeen = false
 
-    const handleIdentity = (nextUserId: string | null) => {
+    const applyIdentity = (nextUserId: string | null) => {
       const previous = currentUserIdRef.current
       currentUserIdRef.current = nextUserId
 
       // On quitte un compte (déconnexion ou changement A → B) : purger la
       // sélection persistée AVANT le prochain rendu, pour que le compte suivant
-      // ne la réutilise jamais. Le cache privé est abandonné par la destruction
+      // ne la réutilise jamais. Le cache privé est abandonné par le démontage
       // du QueryClient de PrivateApp (remonté via key ci-dessous).
       if (previous !== null && previous !== nextUserId) {
         if (typeof window !== 'undefined') {
@@ -148,41 +156,21 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         }
       }
 
-      setAuth({ userId: nextUserId, ready: true })
+      setAuth(
+        nextUserId
+          ? { status: 'connected', userId: nextUserId }
+          : { status: 'disconnected' },
+      )
     }
 
+    // Source unique d'identité d'UI : l'événement `INITIAL_SESSION` fournit la
+    // session initiale, puis les événements suivants la mettent à jour. Cette
+    // identité n'autorise RIEN : la RLS et les gardes serveur restent seules à
+    // décider de l'accès aux données.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      eventSeen = true
       if (!active) return
-      handleIdentity(session?.user?.id ?? null)
+      applyIdentity(session?.user?.id ?? null)
     })
-
-    // Résolution initiale : ignorée si un événement Auth est déjà survenu
-    // (réponse asynchrone obsolète après un changement de compte inter-onglet).
-    supabase.auth
-      .getUser()
-      .then(({ data }) => {
-        if (!active || eventSeen) return
-        if (data.user) {
-          handleIdentity(data.user.id)
-          return
-        }
-        // Pas d'utilisateur vérifié : relire la session locale (identité d'UI
-        // uniquement, la RLS garde les données) pour ne pas afficher « déconnecté »
-        // sur une erreur réseau temporaire.
-        supabase.auth
-          .getSession()
-          .then(({ data: sessionData }) => {
-            if (!active || eventSeen) return
-            handleIdentity(sessionData.session?.user?.id ?? null)
-          })
-          .catch(() => {
-            // lecture impossible : l'identité reste pilotée par les événements Auth
-          })
-      })
-      .catch(() => {
-        // lecture impossible : l'identité reste pilotée par les événements Auth
-      })
 
     return () => {
       active = false
@@ -190,8 +178,8 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     }
   }, [supabase])
 
-  // Aucun contenu privé tant que l'identité n'est pas résolue.
-  if (!auth.ready) {
+  // Aucun contenu privé tant que l'identité initiale n'est pas connue.
+  if (auth.status === 'init') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -199,8 +187,8 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // Déconnecté (ou identité non vérifiée) : ne jamais rendre l'espace privé.
-  if (!auth.userId) {
+  // Déconnecté : ne jamais rendre l'espace privé.
+  if (auth.status === 'disconnected') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
         <div className="mx-auto w-full max-w-md rounded-2xl border bg-card p-8 text-center shadow-lg">
@@ -219,7 +207,11 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // Remonter le sous-arbre privé (et son cache) à chaque identité.
+  // Remonter le sous-arbre privé (et son cache) à chaque identité. La
+  // revalidation des droits/appartenances d'un même compte repose sur le
+  // refetch au focus de fenêtre (défaut React Query) et les invalidations
+  // explicites après CRUD de store — aucun événement Auth n'est prétendu
+  // signaler une révocation.
   return (
     <PrivateApp key={auth.userId} userId={auth.userId}>
       {children}

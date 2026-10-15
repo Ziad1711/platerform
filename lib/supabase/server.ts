@@ -49,6 +49,13 @@ function isDefinitiveUnauthenticated(
   if (error.name === 'AuthSessionMissingError' || error.code === 'session_not_found') return true
   // Jeton invalide (signature/formats) : définitif, ce n'est pas une panne.
   if (error.name === 'AuthInvalidJwtError' || error.code === 'invalid_jwt' || error.code === 'bad_jwt') return true
+  // Session expirée, refresh révoqué/réutilisé, utilisateur supprimé : définitif.
+  if (
+    error.code === 'session_expired' ||
+    error.code === 'refresh_token_not_found' ||
+    error.code === 'refresh_token_already_used' ||
+    error.code === 'user_not_found'
+  ) return true
   return false
 }
 
@@ -108,12 +115,16 @@ export async function getServerUserResult(): Promise<ServerUserResult> {
     return { user: null, authUnavailable: !isDefinitiveUnauthenticated(verifyError) }
   }
 
-  // Aucun jeton exploitable : classer selon la première erreur, ou celle de
-  // getSession. Une absence réelle de session n'est jamais une panne.
-  const decisiveError = firstError ?? sessionError
-  if (!decisiveError) return { user: null, authUnavailable: false }
-  if (isDefinitiveUnauthenticated(decisiveError)) return { user: null, authUnavailable: false }
-  return { user: null, authUnavailable: true }
+  // Aucun jeton exploitable. Priorité : toute erreur « définitive » (session
+  // révoquée/expirée/absente) est décisive ; sinon toute autre erreur est une
+  // panne temporaire ; sinon c'est une absence réelle de session.
+  if (isDefinitiveUnauthenticated(sessionError) || isDefinitiveUnauthenticated(firstError)) {
+    return { user: null, authUnavailable: false }
+  }
+  if (sessionError || firstError) {
+    return { user: null, authUnavailable: true }
+  }
+  return { user: null, authUnavailable: false }
 }
 
 /**
