@@ -5,6 +5,15 @@ import { getFirstAllowedRoute, hasPermission, MENU_PERMISSIONS } from '@/lib/aut
 import { isProtectedAppRoute } from '@/lib/auth/redirects'
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
+  // Page d'accueil publique : aucun traitement Auth ni appel Supabase requis
+  // pour son affichage. Le renouvellement de session reste assuré lors du
+  // prochain accès à une route protégée ou à la page de connexion.
+  if (pathname === '/') {
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -27,7 +36,6 @@ export async function middleware(request: NextRequest) {
   // Refresh session (getUser vérifie le JWT via API)
   const { data: { user } } = await supabase.auth.getUser()
   const sessionUser = user ?? (await supabase.auth.getSession()).data.session?.user ?? null
-  const pathname = request.nextUrl.pathname
 
   // Permission guards uniquement si l'utilisateur est connecté
   // (le blocage des routes sans session est géré par app/(app)/layout.tsx côté serveur)

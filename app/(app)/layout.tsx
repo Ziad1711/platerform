@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getServerUser } from '@/lib/supabase/server'
+import { AppProviders } from '@/components/providers'
 import AppLayoutClient from './layout-client'
 
 export default async function AppLayout({
@@ -13,5 +14,9 @@ export default async function AppLayout({
     redirect('/login')
   }
 
-  return <AppLayoutClient>{children}</AppLayoutClient>
+  return (
+    <AppProviders>
+      <AppLayoutClient>{children}</AppLayoutClient>
+    </AppProviders>
+  )
 }

@@ -92,11 +92,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeContext.Provider value={{ theme, setTheme }}>
-        <StoreProvider>
-          <ThemeLoader />
-          {children}
-        </StoreProvider>
+        {children}
       </ThemeContext.Provider>
     </QueryClientProvider>
+  )
+}
+
+/**
+ * Contexte applicatif réservé à l'espace protégé : magasins accessibles et
+ * préférence de thème issue du profil utilisateur. Monté uniquement dans le
+ * layout protégé afin que les pages publiques (homepage, login) s'affichent
+ * immédiatement, sans attendre l'initialisation des magasins ni aucune
+ * lecture Supabase (store_members, stores, profiles).
+ */
+export function AppProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <StoreProvider>
+      <ThemeLoader />
+      {children}
+    </StoreProvider>
   )
 }

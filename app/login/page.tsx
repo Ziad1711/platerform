@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { createClient, getServerUser } from '@/lib/supabase/server'
+import { createClient, getServerUser, hasSessionCookie } from '@/lib/supabase/server'
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
@@ -13,7 +13,13 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {}
-  const user = await getServerUser()
+
+  // Visite anonyme : sans cookie de session Supabase, le formulaire s'affiche
+  // directement sans interroger l'API Auth. La simple présence du cookie ne
+  // prouve rien : elle indique seulement qu'une vérification serveur est
+  // pertinente (utilisateur potentiellement connecté ou cookie expiré).
+  const sessionCookiePresent = await hasSessionCookie()
+  const user = sessionCookiePresent ? await getServerUser() : null
 
   if (user && params.recovery !== '1') {
     const supabase = await createClient()

@@ -59,3 +59,19 @@ export async function getServerUser() {
   )
   return verifiedUser ?? null
 }
+
+/**
+ * Indique si un cookie de session Supabase est présent.
+ *
+ * Les cookies de session `@supabase/ssr` sont nommés `sb-<ref>-auth-token`
+ * et peuvent être découpés en fragments suffixés (`.0`, `.1`, …). On teste
+ * donc un préfixe et un marqueur, sans jamais lire la valeur : la simple
+ * présence d'un cookie n'authentifie personne. Elle sert uniquement d'indice
+ * pour savoir si une vérification serveur (`getUser`) est pertinente.
+ */
+export async function hasSessionCookie(): Promise<boolean> {
+  const cookieStore = await cookies()
+  return cookieStore
+    .getAll()
+    .some((cookie) => cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token'))
+}
