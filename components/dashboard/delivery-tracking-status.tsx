@@ -142,6 +142,20 @@ export default function DeliveryTrackingStatus() {
     currentStoreRef.current = currentStoreId
   }, [currentStoreId])
 
+  // Nettoyage au démontage (dont changement d'identité, qui remonte ce composant) :
+  // invalider les générations (monotones, jamais recyclées), annuler les requêtes
+  // en vol et stopper le polling afin qu'aucune réponse obsolète ne réécrive l'état.
+  useEffect(() => {
+    return () => {
+      loadGenerationRef.current += 1
+      catchUpGenerationRef.current += 1
+      loadAbortRef.current?.abort()
+      catchUpAbortRef.current?.abort()
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
   const refreshAffectedViews = useCallback(() => {
     for (const key of AFFECTED_QUERY_KEYS) {
       queryClient.invalidateQueries({ queryKey: key })

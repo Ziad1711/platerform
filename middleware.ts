@@ -25,15 +25,30 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
+          // 1. Propager les cookies renouvelés à la requête : le rendu serveur
+          //    doit lire la session à jour, pas un JWT périmé.
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+
+          // 2. Reconstruire la réponse à partir de la requête mise à jour, en
+          //    conservant les cookies déjà écrits par un appel setAll précédent
+          //    (écritures cumulatives, jamais écrasées).
+          const previousCookies = response.cookies.getAll()
+          response = NextResponse.next({ request })
+          previousCookies.forEach((cookie) =>
+            response.cookies.set(cookie.name, cookie.value, cookie)
+          )
+
+          // 3. Écrire les cookies renouvelés sur la réponse.
+          cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
-          })
+          )
         },
       },
     }
   )
 
-  // Refresh session (getUser vérifie le JWT via API)
+  // getUser vérifie le JWT via l'API Auth et renouvelle la session si nécessaire
+  // (les cookies éventuels sont écrits via setAll ci-dessus).
   const { data: { user } } = await supabase.auth.getUser()
   const sessionUser = user ?? (await supabase.auth.getSession()).data.session?.user ?? null
 
@@ -54,18 +69,35 @@ export async function middleware(request: NextRequest) {
       const defaultRoute = getFirstAllowedRoute(member?.role as any)
 
       if ((error || !member) && pathname !== defaultRoute) {
-        return NextResponse.redirect(new URL(defaultRoute, request.url))
+        return redirectWithSessionCookies(request, response, defaultRoute)
       }
 
       // Vérifier les permissions spécifiques à la route
       const routePerms = MENU_PERMISSIONS[pathname]
       if (member && routePerms && !routePerms.some((p) => hasPermission(member.role as any, p)) && pathname !== defaultRoute) {
-        return NextResponse.redirect(new URL(defaultRoute, request.url))
+        return redirectWithSessionCookies(request, response, defaultRoute)
       }
     }
   }
 
   return response
+}
+
+/**
+ * Construit une redirection en reportant les cookies de session déjà présents
+ * sur `response` (y compris un éventuel renouvellement) : sans cela, une
+ * session renouvelée pendant `getUser()` serait perdue sur la redirection.
+ */
+function redirectWithSessionCookies(
+  request: NextRequest,
+  response: NextResponse,
+  path: string
+) {
+  const redirectResponse = NextResponse.redirect(new URL(path, request.url))
+  response.cookies.getAll().forEach((cookie) => {
+    redirectResponse.cookies.set(cookie.name, cookie.value, cookie)
+  })
+  return redirectResponse
 }
 
 export const config = {
