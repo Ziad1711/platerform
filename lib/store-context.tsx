@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import type { DashboardPeriod } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 
@@ -33,11 +33,16 @@ interface StoreContextType {
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined)
 
-export function StoreProvider({ children }: { children: ReactNode }) {
+export function StoreProvider({
+  children,
+  initialUserId,
+  initialAuthReady,
+}: {
+  children: ReactNode
+  initialUserId: string | null
+  initialAuthReady: boolean
+}) {
   const supabase = useMemo(() => createClient(), [])
-  const queryClient = useQueryClient()
-  const [authReady, setAuthReady] = useState(false)
-  const [userId, setUserId] = useState<string | null>(null)
   // undefined = pas encore initialisé, null = "Tous les stores" (choix explicite)
   const [currentStoreId, setCurrentStoreIdState] = useState<string | null | undefined>(undefined)
   const [localStorageLoaded, setLocalStorageLoaded] = useState(false)
@@ -67,52 +72,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  useEffect(() => {
-    let active = true
-
-    const loadUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!active) return
-      setUserId(user?.id ?? null)
-      setAuthReady(true)
-    }
-
-    void loadUser()
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      const nextUserId = session?.user?.id ?? null
-      setUserId(nextUserId)
-      setAuthReady(true)
-      void queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
-
-      if (!nextUserId) {
-        setCurrentStoreId(null)
-      }
-    })
-
-    return () => {
-      active = false
-      subscription.unsubscribe()
-    }
-  }, [queryClient, supabase])
-
   const { data: accessibleStores = [], isLoading } = useQuery({
-    queryKey: ['accessible-stores', userId],
-    enabled: authReady && Boolean(userId),
+    queryKey: ['accessible-stores', initialUserId],
+    enabled: initialAuthReady && Boolean(initialUserId),
     queryFn: async () => {
-      if (!userId) {
+      if (!initialUserId) {
         return [] as AccessibleStore[]
       }
 
       const { data: memberships, error: membershipsError } = await supabase
         .from('store_members')
         .select('store_id')
-        .eq('user_id', userId)
+        .eq('user_id', initialUserId)
         .eq('status', 'active')
 
       if (membershipsError) {
@@ -138,7 +109,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
   })
 
-  const isStoresLoading = !authReady || (Boolean(userId) && isLoading)
+  const isStoresLoading = !initialAuthReady || (Boolean(initialUserId) && isLoading)
 
   useEffect(() => {
     if (isStoresLoading) return
@@ -197,8 +168,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setCustomStartDate,
         customEndDate,
         setCustomEndDate,
-        userId,
-        authReady,
+        userId: initialUserId,
+        authReady: initialAuthReady,
       }}
     >
       {children}

@@ -1,7 +1,7 @@
 'use client'
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState, createContext, useContext, useEffect } from 'react'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { useState, createContext, useContext, useEffect, useMemo, useRef } from 'react'
 import { StoreProvider, useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 
@@ -106,8 +106,92 @@ export function Providers({ children }: { children: React.ReactNode }) {
  * lecture Supabase (store_members, stores, profiles).
  */
 export function AppProviders({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient()
+  const supabase = useMemo(() => createClient(), [])
+  const [auth, setAuth] = useState<{ userId: string | null; ready: boolean }>({
+    userId: null,
+    ready: false,
+  })
+  const currentUserIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    let eventSeen = false
+
+    const handleIdentity = (nextUserId: string | null) => {
+      const previous = currentUserIdRef.current
+      currentUserIdRef.current = nextUserId
+
+      // On quitte un compte (déconnexion ou changement A → B) : purger le cache
+      // privé et la sélection AVANT le prochain rendu, pour qu'aucune donnée du
+      // compte précédent ne puisse être relue, même brièvement.
+      if (previous !== null && previous !== nextUserId) {
+        void queryClient.cancelQueries()
+        queryClient.clear()
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('current-store-id')
+          document.cookie = 'current-store-id=; path=/; max-age=0'
+        }
+      }
+
+      setAuth({ userId: nextUserId, ready: true })
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      eventSeen = true
+      if (!active) return
+      handleIdentity(session?.user?.id ?? null)
+
+      // Revalider droits/appartenances uniquement sur les événements susceptibles
+      // de les modifier (jamais sur un simple renouvellement de jeton).
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
+        queryClient.invalidateQueries({ queryKey: ['member-role'] })
+      }
+    })
+
+    // Résolution initiale : ignorée si un événement Auth est déjà survenu
+    // (réponse asynchrone obsolète après un changement de compte inter-onglet).
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        if (!active || eventSeen) return
+        if (data.user) {
+          handleIdentity(data.user.id)
+          return
+        }
+        // Pas d'utilisateur vérifié : relire la session locale (identité d'UI
+        // uniquement, la RLS garde les données) pour ne pas afficher « déconnecté »
+        // sur une erreur réseau temporaire.
+        supabase.auth
+          .getSession()
+          .then(({ data: sessionData }) => {
+            if (!active || eventSeen) return
+            handleIdentity(sessionData.session?.user?.id ?? null)
+          })
+          .catch(() => {
+            // lecture impossible : l'identité reste pilotée par les événements Auth
+          })
+      })
+      .catch(() => {
+        // lecture impossible : l'identité reste pilotée par les événements Auth
+      })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [supabase, queryClient])
+
+  // Remonter le sous-arbre privé à chaque identité : les états locaux
+  // (formulaires, filtres, sélection, suivi livraison) repartent de zéro,
+  // aucune donnée du compte précédent ne survit au passage à B.
   return (
-    <StoreProvider>
+    <StoreProvider
+      key={auth.userId ?? 'signed-out'}
+      initialUserId={auth.userId}
+      initialAuthReady={auth.ready}
+    >
       <ThemeLoader />
       {children}
     </StoreProvider>
