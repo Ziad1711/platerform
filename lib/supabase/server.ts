@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
 import type { User } from '@supabase/supabase-js'
 
 export const createClient = async () => {
@@ -28,6 +29,17 @@ export const createClient = async () => {
     }
   )
 }
+
+/**
+ * Client serveur de la requête courante.
+ *
+ * `cache()` (React, portée rendu serveur) mutualise l'instance entre le layout
+ * protégé, la page et le bootstrap d'une MÊME requête : les cookies sont lus une
+ * fois et l'instance n'est jamais partagée entre deux requêtes. Hors rendu RSC
+ * (Route Handler, action), React appelle simplement `createClient` : aucun cache
+ * n'y est partagé.
+ */
+export const getRequestClient = cache(createClient)
 
 /**
  * Résultat d'une vérification d'identité côté serveur, distinguant
@@ -68,8 +80,8 @@ function isDefinitiveUnauthenticated(
  * d'accès (et non l'objet `user`) puis le resoumet à l'API : un cookie
  * forgé ne peut donc pas authentifier.
  */
-export async function getServerUserResult(): Promise<ServerUserResult> {
-  const supabase = await createClient().catch(() => null)
+async function resolveServerUserResult(): Promise<ServerUserResult> {
+  const supabase = await getRequestClient().catch(() => null)
   if (!supabase) return { user: null, authUnavailable: true }
 
   // 1. Vérification serveur du JWT (source de vérité).
@@ -126,6 +138,14 @@ export async function getServerUserResult(): Promise<ServerUserResult> {
   }
   return { user: null, authUnavailable: false }
 }
+
+/**
+ * Vérification d'identité mutualisée sur la requête RSC courante : le layout
+ * protégé, la page et le bootstrap partagent le même résultat (et donc la même
+ * vérification Auth) au lieu de la répéter. Hors rendu RSC, `cache` se contente
+ * d'appeler la fonction : aucune valeur n'est partagée entre requêtes.
+ */
+export const getServerUserResult = cache(resolveServerUserResult)
 
 /**
  * Indique si un cookie de session Supabase est présent.

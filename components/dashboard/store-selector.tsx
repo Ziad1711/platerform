@@ -1,11 +1,11 @@
 'use client'
 
-import { useStore } from '@/lib/store-context'
+import { useStore, publishStoreAccessChange } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Store, AlertCircle, Loader2, Sparkles, Globe2, Building2, Plus, X, Settings } from 'lucide-react'
 import Link from 'next/link'
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { describeQuotaError } from '@/lib/billing/quota'
 
 const categories = [
@@ -48,6 +48,12 @@ export default function StoreSelector() {
   })
   const supabase = useMemo(() => createClient(), [])
   const queryClient = useQueryClient()
+  // Valeurs par défaut géographiques chargées seulement à l'ouverture du
+  // formulaire de création (jamais au démarrage de l'espace applicatif).
+  const geoDefaultsLoadedRef = useRef(false)
+  // Magasin créé en attente de confirmation par la relecture des accès : il n'est
+  // sélectionné qu'une fois réellement présent dans les appartenances actives.
+  const [pendingSelectId, setPendingSelectId] = useState<string | null>(null)
 
   // Bloquer le scroll du body quand le modal est ouvert
   useEffect(() => {
@@ -62,6 +68,11 @@ export default function StoreSelector() {
   }, [isCreateOpen])
 
   useEffect(() => {
+    // Les valeurs par défaut géographiques ne concernent que le formulaire de
+    // création : elles ne sont plus chargées à l'ouverture de l'espace applicatif
+    // (aucune requête inutile au démarrage), ni rechargées à chaque ouverture.
+    if (!isCreateOpen || geoDefaultsLoadedRef.current) return
+
     let active = true
 
     const loadGeoDefaults = async () => {
@@ -80,6 +91,8 @@ export default function StoreSelector() {
         }))
       } catch {
         // ignore geo defaults failure
+      } finally {
+        if (active) geoDefaultsLoadedRef.current = true
       }
     }
 
@@ -87,7 +100,16 @@ export default function StoreSelector() {
     return () => {
       active = false
     }
-  }, [])
+  }, [isCreateOpen])
+
+  // Sélection différée : le magasin vient juste d'être créé, on attend qu'il soit
+  // confirmé par la relecture des appartenances avant de le sélectionner.
+  useEffect(() => {
+    if (!pendingSelectId) return
+    if (!stores.some((store) => store.id === pendingSelectId)) return
+    setCurrentStoreId(pendingSelectId)
+    setPendingSelectId(null)
+  }, [pendingSelectId, stores, setCurrentStoreId])
 
   const currentStore = stores?.find(store => store.id === currentStoreId)
 
@@ -116,7 +138,10 @@ export default function StoreSelector() {
     },
     onSuccess: async (store) => {
       await queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
-      setCurrentStoreId(store.id)
+      // La sélection attend la confirmation : un magasin n'est jamais sélectionné
+      // avant d'apparaître dans les appartenances actives relues.
+      setPendingSelectId(store.id)
+      publishStoreAccessChange()
       setIsCreateOpen(false)
       setCreateError(null)
       setForm((prev) => ({

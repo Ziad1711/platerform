@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Store, Trash2, Pencil, Plus, Building2, Loader2, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/lib/auth/use-permissions'
-import { useStore } from '@/lib/store-context'
+import { useStore, publishStoreAccessChange } from '@/lib/store-context'
 import { describeQuotaError } from '@/lib/billing/quota'
 
 interface StoreItem {
@@ -36,10 +36,7 @@ export default function StoresSection() {
   const [editForm, setEditForm] = useState({ name: '', currency: 'MAD', country: '', roundOrderTotal: false })
 
 
-  const currentStoreId = typeof window !== 'undefined'
-    ? localStorage.getItem('current-store-id')
-    : null
-
+  const { currentStoreId } = useStore()
   const { can } = usePermissions(currentStoreId)
 
   const { data: storesPayload, isLoading } = useQuery({
@@ -59,6 +56,7 @@ export default function StoresSection() {
       }))
       await queryClient.invalidateQueries({ queryKey: ['my-stores'] })
       await queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
+      publishStoreAccessChange()
       setShowCreate(false)
       setCreateForm({ name: '', currency: 'MAD', country: '' })
     } catch (e) {
@@ -95,6 +93,7 @@ export default function StoresSection() {
       await toJson(await fetch(`/api/stores/${showDelete.id}`, { method: 'DELETE' }))
       await queryClient.invalidateQueries({ queryKey: ['my-stores'] })
       await queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
+      publishStoreAccessChange()
       setShowDelete(null)
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erreur')

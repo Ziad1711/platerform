@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Users, Plus, Trash2, Loader2, X, Mail, Shield } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/lib/auth/use-permissions'
+import { useStore, publishStoreAccessChange } from '@/lib/store-context'
 import { INVITABLE_ROLES, ROLE_LABELS } from '@/lib/auth/permissions'
 
 interface Member {
@@ -39,7 +40,7 @@ export default function TeamSection() {
   const [assignments, setAssignments] = useState<{ storeId: string; role: string }[]>([])
   const [saving, setSaving] = useState(false)
 
-  const currentStoreId = typeof window !== 'undefined' ? localStorage.getItem('current-store-id') : null
+  const { currentStoreId } = useStore()
   const { can } = usePermissions(currentStoreId)
 
   const { data: membersPayload, isLoading: membersLoading } = useQuery({
@@ -97,6 +98,10 @@ export default function TeamSection() {
         body: JSON.stringify({ role: newRole }),
       }))
       await queryClient.invalidateQueries({ queryKey: ['team-members'] })
+      // Le rôle modifié peut être le sien : les accès (et donc les permissions
+      // affichées) doivent être relus, ici comme dans les autres onglets.
+      await queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
+      publishStoreAccessChange()
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erreur')
     }
@@ -107,6 +112,8 @@ export default function TeamSection() {
     try {
       await toJson(await fetch(`/api/team/members/${storeId}/${userId}`, { method: 'DELETE' }))
       await queryClient.invalidateQueries({ queryKey: ['team-members'] })
+      await queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
+      publishStoreAccessChange()
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erreur')
     }

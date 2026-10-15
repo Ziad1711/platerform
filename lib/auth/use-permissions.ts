@@ -1,57 +1,59 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
-import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
 import { Permission, hasPermission, Role } from './permissions'
 
+/**
+ * Rôle de l'utilisateur courant, dérivé du contexte magasins.
+ *
+ * Aucune requête dédiée n'est nécessaire : le rôle vient de l'appartenance
+ * active déjà lue (bootstrap serveur, puis revalidation). Un changement de rôle
+ * devient donc visible dès que la revalidation des accès a réussi, sans lecture
+ * supplémentaire au changement de magasin.
+ *
+ * Ces informations servent à AFFICHER l'interface : elles ne remplacent jamais
+ * les contrôles serveur, API et RLS des opérations sensibles.
+ */
 export function usePermissions(storeId: string | null) {
-  const supabase = createClient()
-  const { userId } = useStore()
+  const { accessibleStores, isStoresLoading } = useStore()
 
-  const { data: role, isLoading } = useQuery({
-    queryKey: ['member-role', storeId, userId],
-    enabled: !!userId,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-    queryFn: async () => {
-      if (!userId) return null
+  const role = ((): Role | null => {
+    // Magasin précis : son rôle (un identifiant non accessible n'accorde rien).
+    if (storeId) {
+      return accessibleStores.find((store) => store.id === storeId)?.role ?? null
+    }
 
-      if (storeId) {
-        // Mode store spécifique
-        const { data } = await supabase
-          .from('store_members')
-          .select('role')
-          .eq('store_id', storeId)
-          .eq('user_id', userId)
-          .eq('status', 'active')
-          .maybeSingle()
-        return (data?.role as Role | null | undefined) ?? null
-      }
+    // Argument `null` : rôle GLOBAL parmi les appartenances actives, quel que soit
+    // le magasin actuellement sélectionné. Contrat historique conservé (écrans de
+    // facturation, quotas, abonnement) : le rôle global ne doit pas disparaître
+    // parce qu'un magasin précis est sélectionné. Règle du rôle le plus élevé
+    // conservée à l'identique.
+    const roles = accessibleStores
+      .map((store) => store.role)
+      .filter((value): value is Role => Boolean(value))
+    if (roles.length === 0) return null
 
-      // Mode "Tous les stores" : on prend le rôle le plus élevé
-      const { data: memberships } = await supabase
-        .from('store_members')
-        .select('role')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-
-      if (!memberships || memberships.length === 0) return null
-
-      const roleHierarchy: Role[] = ['owner', 'admin', 'marketer', 'accountant', 'stock_manager', 'delivery', 'confirmation', 'viewer']
-      const roles = memberships.map(m => m.role as Role)
-      for (const r of roleHierarchy) {
-        if (roles.includes(r)) return r
-      }
-      return 'viewer'
-    },
-  })
+    const roleHierarchy: Role[] = [
+      'owner',
+      'admin',
+      'marketer',
+      'accountant',
+      'stock_manager',
+      'delivery',
+      'confirmation',
+      'viewer',
+    ]
+    for (const candidate of roleHierarchy) {
+      if (roles.includes(candidate)) return candidate
+    }
+    return 'viewer'
+  })()
 
   return {
-    role: role ?? null,
-    can: (permission: Permission) => hasPermission(role ?? null, permission),
+    role,
+    can: (permission: Permission) => hasPermission(role, permission),
     isAdminOrOwner: role === 'owner' || role === 'admin',
-    /** true tant que le rôle n'est pas résolu : `can()` vaut alors false par défaut. */
-    isLoading: Boolean(userId) && isLoading,
+    /** true tant que le contexte magasins n'est pas confirmé : `can()` vaut false. */
+    isLoading: isStoresLoading && accessibleStores.length === 0,
   }
 }

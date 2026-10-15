@@ -123,11 +123,32 @@ function formatRelative(value: string | null) {
 
 export default function DeliveryTrackingStatus() {
   const { currentStoreId } = useStore()
+  // Chaque sélection (store précis ou « Tous les magasins ») possède son propre
+  // état, remonté à chaque changement : aucune donnée, erreur, spinner, timer ou
+  // requête d'une sélection précédente ne peut persister.
+  const selectionKey = currentStoreId ?? 'all'
+  return (
+    <DeliveryTrackingStatusBySelection
+      key={selectionKey}
+      currentStoreId={currentStoreId}
+    />
+  )
+}
+
+function DeliveryTrackingStatusBySelection({
+  currentStoreId,
+}: {
+  currentStoreId: string | null
+}) {
   const queryClient = useQueryClient()
   const [stores, setStores] = useState<StoreFreshness[]>([])
   const [detail, setDetail] = useState<StoreDetail | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  // Sélection à laquelle appartiennent `detail`/`stores` affichés : tant que la
+  // donnée ne correspond pas à la sélection courante, elle est masquée (le rendu
+  // n'affiche jamais un état appartenant à une sélection précédente).
+  const [loadedFor, setLoadedFor] = useState<string | null | undefined>(undefined)
   const pollsRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const versionRef = useRef<Map<string, string>>(new Map())
@@ -140,6 +161,26 @@ export default function DeliveryTrackingStatus() {
 
   useEffect(() => {
     currentStoreRef.current = currentStoreId
+    // Changement de sélection (y compris vers/depuis « Tous les stores ») :
+    // invalider les générations et annuler les opérations en vol afin qu'une
+    // réponse d'une sélection précédente (ex. rattrapage global) ne réécrive
+    // jamais l'état affiché ni n'invalide des vues à tort.
+    loadGenerationRef.current += 1
+    catchUpGenerationRef.current += 1
+    loadAbortRef.current?.abort()
+    catchUpAbortRef.current?.abort()
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = null
+    pollsRef.current = 0
+    // Ne pas laisser un « syncing » orphelin d'un rattrapage de la sélection
+    // précédente (son finally est ignoré car génération périmée).
+    setSyncing(false)
+    // Rattacher l'état affiché à la sélection : aucun statut ni message de
+    // l'ancienne sélection ne doit rester visible pendant le chargement.
+    setDetail(null)
+    setStores([])
+    setErrorMessage('')
+    setLoadedFor(undefined)
   }, [currentStoreId])
 
   // Nettoyage au démontage (dont changement d'identité, qui remonte ce composant) :
@@ -195,16 +236,20 @@ export default function DeliveryTrackingStatus() {
       if (generation !== loadGenerationRef.current) return null
       if (requestedStore !== currentStoreRef.current) return null
       if (!response.ok) {
+        setLoadedFor(requestedStore)
         setErrorMessage(payload?.error || 'DELIVERY_TRACKING_STATUS_FAILED')
         return null
       }
+      setLoadedFor(requestedStore)
       setErrorMessage('')
       if (payload?.stores) applyFreshness(payload.stores)
       setDetail(payload?.store ?? null)
       return payload
     } catch {
       if (generation !== loadGenerationRef.current) return null
+      if (requestedStore !== currentStoreRef.current) return null
       // Un echec de lecture n'est jamais silencieux.
+      setLoadedFor(requestedStore)
       setErrorMessage('Suivi indisponible (lecture impossible)')
       return null
     }
@@ -327,19 +372,25 @@ export default function DeliveryTrackingStatus() {
   }, [currentStoreId, loadStatus, catchUp, startPolling])
 
   // ---- Rendu -------------------------------------------------------------
-  const providers = detail?.providers || []
-  const staleStores = stores.filter((store) => store.storeId !== currentStoreId && store.stale)
+  // Masquer immédiatement toute donnée appartenant à une sélection précédente :
+  // le rendu ne s'appuie que sur des données chargées pour la sélection courante.
+  const dataMatchesSelection = loadedFor === currentStoreId
+  const visibleDetail = dataMatchesSelection ? detail : null
+  const visibleStores = dataMatchesSelection ? stores : []
+
+  const providers = visibleDetail?.providers || []
+  const staleStores = visibleStores.filter((store) => store.storeId !== currentStoreId && store.stale)
   const blocked = providers.reduce((total, provider) => total + provider.coverage.blocked, 0)
   const unrecognized = providers.reduce((total, provider) => total + provider.coverage.unresolved, 0)
-  const pending = detail?.providers.reduce((total, provider) => total + provider.coverage.remaining, 0) || 0
+  const pending = visibleDetail?.providers.reduce((total, provider) => total + provider.coverage.remaining, 0) || 0
   const failedProviders = providers.filter((provider) => provider.outcome === 'failed')
   // Ne JAMAIS deduire « jamais suivi » d'une liste vide (mode tous les stores).
   const neverSynced = providers.length > 0 && providers.every((provider) => !provider.lastSuccessAt)
 
   // Rien a afficher si ce store ne suit aucun colis ni en cours ni connu.
   const hasSomething = currentStoreId
-    ? Boolean(detail && detail.configuredProviders > 0)
-    : stores.some((store) => store.providers.length > 0)
+    ? Boolean(visibleDetail && visibleDetail.configuredProviders > 0)
+    : visibleStores.some((store) => store.providers.length > 0)
 
   if (!hasSomething && !errorMessage) return null
 
@@ -349,19 +400,19 @@ export default function DeliveryTrackingStatus() {
       ? 'Synchronisation du suivi...'
       : failedProviders.length > 0
         ? `Suivi en echec (${failedProviders.map((provider) => provider.provider).join(', ')})`
-        : detail?.inProgress
+        : visibleDetail?.inProgress
           ? 'Suivi en cours'
           : neverSynced
             ? 'Suivi jamais effectue'
             : blocked > 0 || unrecognized > 0 || pending > 0
               ? `Suivi incomplet (${pending} colis)`
-              : stallsLabel(detail)
+              : stallsLabel(visibleDetail)
 
   const tone = errorMessage
     ? 'text-amber-600 bg-amber-500/10 border-amber-500/20'
     : failedProviders.length > 0
       ? 'text-red-600 bg-red-500/10 border-red-500/20'
-      : syncing || detail?.inProgress
+      : syncing || visibleDetail?.inProgress
         ? 'text-[#1fa971] bg-[#1fa971]/10 border-[#1fa971]/20'
         : blocked > 0 || unrecognized > 0 || pending > 0 || neverSynced
           ? 'text-amber-600 bg-amber-500/10 border-amber-500/20'
@@ -399,7 +450,7 @@ export default function DeliveryTrackingStatus() {
         disabled={syncing || (!currentStoreId && staleStores.length === 0)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-70 ${tone}`}
       >
-        {syncing || detail?.inProgress ? (
+        {syncing || visibleDetail?.inProgress ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : failedProviders.length > 0 ? (
           <TriangleAlert className="h-3.5 w-3.5" />

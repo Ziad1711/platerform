@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Store, Globe2, Building2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -33,12 +33,22 @@ const timezones = [
 export default function OnboardingModal() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
-  const { userId, authReady } = useStore()
+  const { userId, authReady, accessibleStores, isStoresLoading, storesError } = useStore()
+  // Les magasins viennent du contexte (bootstrap serveur, puis revalidation) :
+  // aucune redétection n'est relancée ici.
+  const hasStores = accessibleStores.length > 0
   const [checking, setChecking] = useState(true)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Une seule évaluation par (utilisateur, décision magasins) : évite de rejouer
+  // les appels secondaires à chaque revalidation du contexte.
+  const evaluatedRef = useRef('')
+  // Décision impossible (recherche d'invitation indisponible ou illisible) : un
+  // réessai explicite est proposé, jamais un formulaire de création ouvert à tort.
+  const [decisionError, setDecisionError] = useState(false)
+  const [retryKey, setRetryKey] = useState(0)
   const [form, setForm] = useState({
     category: categories[0],
     storeName: '',
@@ -51,10 +61,23 @@ export default function OnboardingModal() {
 
   useEffect(() => {
     if (!authReady || !userId) return
+    // Tant que les accès ne sont pas confirmés (chargement ou erreur), aucune
+    // décision d'onboarding n'est prise : une erreur n'est pas « aucun magasin ».
+    if (isStoresLoading || storesError) return
+
+    const evaluationKey = `${userId}:${hasStores ? 'stores' : 'none'}`
+    if (evaluatedRef.current === evaluationKey) return
+
+    // Une nouvelle tentative démarre : l'avertissement précédent est levé.
+    setDecisionError(false)
 
     let active = true
 
     const load = async () => {
+      // L'évaluation n'est acquise qu'une fois une décision RÉELLEMENT prise :
+      // une exécution interrompue (Strict Mode, changement de dépendance) ou une
+      // recherche d'invitation en échec ne doit jamais bloquer les suivantes.
+      let decided = false
       try {
         const [geoResponse] = await Promise.all([
           fetch('/api/geo', { cache: 'no-store' }).catch(() => null),
@@ -63,36 +86,64 @@ export default function OnboardingModal() {
         if (!active) return
 
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)
+        if (!active) return
 
-        const [storesResponse, profileResponse] = await Promise.all([
-          fetch('/api/stores', { cache: 'no-store' }).catch(() => null),
+        const [profileResponse, pendingRes] = await Promise.all([
           supabase
             .from('profiles')
             .select('company, country, timezone, main_currency, preferred_currency')
             .eq('id', userId)
             .maybeSingle(),
+          fetch('/api/team/invitations/pending', { cache: 'no-store' }).catch(() => null),
         ])
-
-        const profile = profileResponse.data
-        const geo = geoResponse && geoResponse.ok ? await geoResponse.json() : null
-        const storesPayload = storesResponse && storesResponse.ok ? await storesResponse.json() : null
-        const hasStores = storesPayload?.hasStores === true
-        const canDecideOnStores = typeof storesPayload?.hasStores === 'boolean'
-
-        // Check pending invitation first
-        const pendingRes = await fetch('/api/team/invitations/pending', { cache: 'no-store' }).catch(() => null)
-        // Ne pas afficher l'onboarding si la recherche d'invitation echoue.
-        if (!pendingRes?.ok) return
-        const pendingPayload = await pendingRes.json()
-        const pendingToken = pendingPayload?.invitation?.token || null
 
         if (!active) return
 
+        // Ne pas afficher l'onboarding si la recherche d'invitation échoue : une
+        // réponse indisponible ou illisible ne vaut PAS « aucune invitation ».
+        if (!pendingRes?.ok) throw new Error('INVITATION_LOOKUP_FAILED')
+        const rawPayload: unknown = await pendingRes.json().catch(() => null)
+        if (!active) return
+        // Contrat de la route : `{ invitation: null }` ou une invitation portant un
+        // token non vide. Toute autre forme est illisible et doit être réessayée.
+        if (
+          !rawPayload ||
+          typeof rawPayload !== 'object' ||
+          Array.isArray(rawPayload) ||
+          !('invitation' in rawPayload)
+        ) {
+          throw new Error('INVITATION_LOOKUP_FAILED')
+        }
+        const rawInvitation = (rawPayload as { invitation: unknown }).invitation
+        let pendingToken: string | null = null
+        if (rawInvitation !== null) {
+          const token =
+            typeof rawInvitation === 'object' && rawInvitation !== null
+              ? (rawInvitation as { token?: unknown }).token
+              : undefined
+          if (typeof token !== 'string' || token.length === 0) {
+            throw new Error('INVITATION_LOOKUP_FAILED')
+          }
+          pendingToken = token
+        }
+
         if (pendingToken) {
+          decided = true
           setChecking(false)
           router.push('/invite/' + pendingToken)
           return
         }
+
+        // Un magasin confirmé (y compris créé ailleurs) ferme l'onboarding.
+        if (hasStores) {
+          decided = true
+          setOpen(false)
+          return
+        }
+
+        const profile = profileResponse.data
+        const geo = geoResponse && geoResponse.ok ? await geoResponse.json() : null
+        if (!active) return
 
         setForm((prev) => ({
           ...prev,
@@ -103,9 +154,17 @@ export default function OnboardingModal() {
 
         // Ne pas ouvrir si l'utilisateur a déjà cliqué sur "Je le ferai après"
         const skipped = typeof window !== 'undefined' && window.localStorage.getItem('onboarding_skipped') === 'true'
-        setOpen(canDecideOnStores && !skipped ? !hasStores : false)
+        setOpen(!skipped)
+        decided = true
+      } catch {
+        // Décision impossible : aucun formulaire n'est ouvert, un réessai explicite
+        // est proposé et l'évaluation n'est PAS marquée comme acquise.
+        if (active) setDecisionError(true)
       } finally {
-        if (active) setChecking(false)
+        if (active) {
+          if (decided) evaluatedRef.current = evaluationKey
+          setChecking(false)
+        }
       }
     }
 
@@ -113,9 +172,37 @@ export default function OnboardingModal() {
     return () => {
       active = false
     }
-  }, [supabase])
+  }, [supabase, userId, authReady, isStoresLoading, storesError, hasStores, router, retryKey])
 
-  const canShow = useMemo(() => !checking && open, [checking, open])
+  // Le formulaire n'est affiché que si l'absence de magasin est CONFIRMÉE : un
+  // magasin apparu ailleurs (création, invitation acceptée) ferme immédiatement
+  // l'onboarding, sans attendre les appels secondaires ni une recherche
+  // d'invitation qui pourrait échouer.
+  const canShow = useMemo(
+    () => !checking && open && !hasStores && !isStoresLoading && !storesError && !decisionError,
+    [checking, open, hasStores, isStoresLoading, storesError, decisionError],
+  )
+
+  // Décision impossible : un bandeau discret propose de réessayer, plutôt que
+  // d'afficher un formulaire de création potentiellement injustifié.
+  if (decisionError && !hasStores) {
+    return (
+      <div className="fixed bottom-4 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-600 shadow-sm">
+        <span>Vérification de vos invitations impossible pour le moment.</span>
+        <button
+          type="button"
+          onClick={() => {
+            setDecisionError(false)
+            setChecking(true)
+            setRetryKey((key) => key + 1)
+          }}
+          className="underline underline-offset-2 hover:opacity-80"
+        >
+          Réessayer
+        </button>
+      </div>
+    )
+  }
 
   const handleChange = (key: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }))

@@ -8,6 +8,37 @@ import { Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react'
 import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 import { trackEvent } from '@/lib/analytics/gtag'
 
+/**
+ * Message utilisateur d'une erreur Auth : une panne réseau ou de service ne doit
+ * jamais être présentée comme un identifiant incorrect (et inversement). Les
+ * messages métier de Supabase (identifiants invalides, email déjà utilisé…) sont
+ * conservés tels quels.
+ */
+function describeAuthError(error: unknown): string {
+  const message = error instanceof Error ? error.message : ''
+  const status = (error as { status?: number } | null)?.status
+  const normalized = message.toLowerCase()
+
+  const looksLikeNetworkFailure =
+    normalized.includes('failed to fetch') ||
+    normalized.includes('networkerror') ||
+    normalized.includes('network error') ||
+    normalized.includes('load failed') ||
+    normalized.includes('fetch failed') ||
+    normalized.includes('timed out') ||
+    normalized.includes('timeout') ||
+    normalized.includes('aborted')
+
+  const looksLikeServiceFailure =
+    typeof status === 'number' && (status === 0 || status >= 500)
+
+  if (looksLikeNetworkFailure || looksLikeServiceFailure) {
+    return 'Service de connexion momentanément indisponible. Vérifiez votre connexion, puis réessayez dans quelques instants.'
+  }
+
+  return message || 'Une erreur est survenue'
+}
+
 type AuthFormProps = {
   defaultMode?: 'login' | 'signup' | 'reset-request' | 'recovery'
 }
@@ -126,8 +157,9 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
         }
         router.refresh()
       }
-    } catch (err: any) {
-      setError(err.message || 'Une erreur est survenue')
+    } catch (err) {
+      // Panne réseau/service distinguée d'un identifiant incorrect.
+      setError(describeAuthError(err))
     } finally {
       submittingRef.current = false
       setLoading(false)
