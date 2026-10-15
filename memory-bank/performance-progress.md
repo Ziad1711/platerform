@@ -3,6 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
+**Dernière mise à jour :** 16 octobre 2026 — Lots 0 et 1 exécutés en local (aucun push, aucun déploiement) ; voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -101,13 +102,15 @@ Ces lots constituent une séquence de validation et d'optimisation complémentai
 
 | Lot opérationnel | Objectif | Statut initial |
 |---|---|---|
-| Lot 0 | Figer le dépôt et établir la baseline | PLANNED |
-| Lot 1 | Valider le bootstrap existant | PLANNED |
+| Lot 0 | Figer le dépôt et établir la baseline | CHECKPOINT FAIT — BASELINE INFRA ÉTABLIE — SHA DÉPLOYÉ NON ÉTABLI ⇒ NON VALIDÉ |
+| Lot 1 | Valider le bootstrap existant | TESTS TECHNIQUES PASSÉS — SCOPES FONCTIONNELS NON EXÉCUTÉS ⇒ NEEDS HUMAN REVIEW |
 | Lot 2 | Mutualiser les lectures de facturation | PLANNED — CONDITIONNEL |
 | Lot 3 | Paralléliser les périodes KPI | PLANNED — CONDITIONNEL |
 | Lot 4 | Corriger la période initiale du dashboard | PLANNED — CONDITIONNEL |
 
 **Lots actuellement autorisés pour préparation et exécution contrôlée : Lot 0 et Lot 1 uniquement.**
+
+> **Exécutés le 16 octobre 2026 (voir §7).** Le Lot 3 reste bloqué sur des prérequis non satisfaits : la version déployée n'est pas identifiée et aucune mesure navigateur (`T_data`, `N_supabase`) n'existe. Aucun lot n'est `VALIDATED` ni `DEPLOYED`.
 
 Les Lots 2, 3 et 4 nécessitent une nouvelle décision après analyse des résultats.
 
@@ -160,6 +163,122 @@ Toute opération non prévue présentant un risque doit recevoir une autorisatio
 ## 7. Journal d'exécution
 
 Chaque nouvelle exécution doit ajouter une entrée selon ce modèle.
+
+### Exécution — 2026-10-15 23:35 → 23:58 UTC (16 octobre 2026, 00:35 → 00:58 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `4e4aa617494b0607d3edda159b0dbb8c845959e9`
+**Lot :** Lot opérationnel 0 (figer le périmètre + baseline) puis Lot opérationnel 1 (valider le bootstrap existant)
+**Environnement :** Local (dépôt Windows, build de production sur le port 3000) + Supabase production observé en lecture seule (journaux de logs). Aucun déploiement, aucune écriture.
+
+#### État réellement atteint
+
+- **Lot 0 : PARTIELLEMENT ATTEINT.** Périmètre figé et checkpoint créé ; baseline *infrastructure* établie et reproduite ; **critère d'acceptation non satisfait** : la version déployée sur Vercel reste **non identifiée**, donc aucune capture ne peut porter de SHA déployé.
+- **Lot 1 : TESTS TECHNIQUES PASSÉS, VALIDATION FONCTIONNELLE NON ATTEINTE.** `tsc` et `build` OK, comportement anonyme observé ; les scénarios d'identité, de rôles et multi-boutiques **n'ont pas été exécutés** (session authentifiée et navigateur indisponibles) ⇒ `NEEDS HUMAN REVIEW`.
+- Aucun lot n'est déclaré `VALIDATED` ni `DEPLOYED`.
+
+#### Modifications réalisées
+
+Aucune modification de code applicatif. Aucune réécriture du bootstrap.
+
+| Chemin | Nature |
+|---|---|
+| — | Aucun fichier applicatif modifié |
+| `memory-bank/performance-progress.md` | Mise à jour du suivi (ce document) |
+
+Classification du périmètre appliquée au checkpoint (18 fichiers) : `app/(app)/layout.tsx`, `app/(app)/layout-client.tsx`, `components/providers.tsx`, `components/auth/auth-form.tsx`, `components/dashboard/{onboarding-modal,store-selector,delivery-tracking-status}.tsx`, `components/settings/{stores,team}-section.tsx`, `lib/auth/use-permissions.ts`, `lib/auth/store-{access,bootstrap,bootstrap.server}.ts`, `lib/store-selection.ts`, `lib/store-context.tsx`, `lib/supabase/server.ts`, `memory-bank/performance-{optimization-plan,progress}.md`.
+
+Exclus volontairement (non écrasés, laissés dans l'arbre de travail) : `components/marketing/pricing/pricing-card.tsx` (changement marketing étranger, apparu pendant l'audit), `tsconfig.tsbuildinfo` et `next-env.d.ts` (générés), `nul` (artefact 0 octet).
+
+#### Tests effectués
+
+| Test | Méthode | Résultat observé | Statut |
+|---|---|---|---|
+| Vérification TypeScript | `npx tsc --noEmit --incremental false --pretty false` | code de sortie 0, 0 ligne de sortie | PASS |
+| Build de production | `npm run build` | « ✓ Compiled successfully in 16.8s », « Finished TypeScript in 15.7s », 150 pages générées, table des routes complète, `.next/BUILD_ID = iRvTJPPq-PiZ0xzrRN97K`, 0 erreur | PASS |
+| Avertissements de build | lecture du journal de build | 2 avertissements Next.js uniquement : convention `middleware` dépréciée (→ `proxy`), et runtime edge désactivant la génération statique d'une page | PASS (sans impact) |
+| Démarrage de la version construite | `npm run start` (port 3000) | « ✓ Ready in 300ms », écoute sur `0.0.0.0:3000` (PID 37160) | PASS |
+| Pages publiques anonymes | `curl` : `/`, `/login`, `/signup` | HTTP 200 ; 0,132 s / 0,126 s / 0,025 s | PASS |
+| Routes protégées anonymes | `curl` : `/dashboard`, `/settings`, `/sales` | HTTP 307 → `location: /login` ; 0,035 s / 0,025 s / 0,039 s | PASS |
+| Journal serveur local | lecture du journal de `next start` | aucune erreur applicative | PASS |
+| Trafic Supabase des tests anonymes | `edge_logs` filtrés par IP d'émission locale (`cf_connecting_ip = 41.251.25.43`) | **0 requête** : aucune vérification Auth, aucune lecture REST déclenchée | PASS |
+
+| Traces bootstrap — Auth RSC partagée | lecture de `lib/supabase/server.ts`, `app/(app)/layout.tsx`, `app/(app)/dashboard/page.tsx` | `getServerUserResult = cache(resolveServerUserResult)` et `getRequestClient = cache(createClient)` ; layout **et** page appellent la même fonction mémoïsée | PASS (statique) |
+| Traces bootstrap — lecture groupée des accès | lecture de `lib/auth/store-access.ts` | une seule requête `store_members` + `stores!inner`, filtrée `user_id` / `status = 'active'` ; repli en deux lectures **uniquement** si `PGRST200`/`PGRST201` | PASS (statique) |
+| Traces bootstrap — pas de relecture au montage | lecture de `lib/store-context.tsx` | `initialData` + `initialDataUpdatedAt` issus du bootstrap, `refetchOnMount: false`, `staleTime: 0`, `retry: false`, revalidation focus/reconnexion conservée | PASS (statique) |
+| Traces bootstrap — permissions sans requête dédiée | lecture de `lib/auth/use-permissions.ts` + inventaire des 15 appels | rôle dérivé de `accessibleStores` ; aucune requête dans le hook | PASS (statique) |
+| Scénarios d'identité (0 / 1 / plusieurs boutiques, invité, préférence invalide) | — | non exécutable sans session authentifiée | BLOCKED |
+| Authentification (login A → B, refresh, session expirée, logout) | — | non exécutable sans comptes de test | BLOCKED |
+| Multi-tenant et rôles (révocation, rétrogradation) | — | non exécutable sans comptes de test | BLOCKED |
+| Pannes simulées (Auth, lecture des accès, stockage navigateur) | — | exige une preview isolée et DevTools | BLOCKED |
+| Captures navigateur (`T_login`, `T_auth`, `T_shell`, `T_data`, `N_supabase`) | — | aucun navigateur instrumenté dans cette session | BLOCKED |
+
+#### Métriques
+
+| Métrique | Avant | Après | Conclusion |
+|---|---|---|---|
+| T_login | Non mesuré | Non mesuré | Navigateur indisponible |
+| T_auth | Non mesuré | Non mesuré | Dépend d'une session authentifiée |
+| T_shell | Non mesuré | Non mesuré | Idem |
+| T_data | Non mesuré | Non mesuré | Idem |
+| N_supabase (navigateur) | Non mesuré | Non mesuré | Idem |
+| Erreurs 5xx | Incident du 15/10 : 96 à 413 5xx/h sur `/auth/v1/*` (18 h → 20 h UTC) | **0 5xx** sur `edge_logs` à partir de 22:10 UTC, 23:00 → 23:55 incluses | Infrastructure saine et stable après restauration |
+
+**Baseline infrastructure** (lecture seule, source `edge_logs`, fenêtre réellement disponible : 2026-10-14 23:37:39 → 2026-10-15 23:55:54 UTC). Reproduction de la méthode du plan (chemins `/auth/v1/*` et code HTTP) :
+
+| Heure UTC (15/10) | Requêtes totales | dont `/auth/v1/*` | 5xx Auth | 5xx toutes routes |
+|---|---:|---:|---:|---:|
+| 18 h | 177 | 100 | 96 | 128 |
+| 19 h | 308 | 196 | 195 | 260 |
+| 20 h | 541 | 416 | 413 | 505 |
+| 21 h | 1 430 | 162 | 14 | 61 |
+| 22 h | 786 | 51 | 5 | 8 |
+| 23 h | 184 | 12 | 0 | 0 |
+
+Cette agrégation reproduit la table du plan (§2.1) aux écarts d'ingestion près : la méthode de capture de la baseline est donc confirmée. Le détail à 10 minutes situe la fin de la dégradation entre 21:30 et 21:40 UTC, puis des tranches propres (0 5xx) de 22:10 à 23:55 UTC. Codes d'erreur `auth_logs` sur la fenêtre : `request_timeout` 21 (max 28 890 ms), `refresh_token_not_found` 11, `unexpected_failure` 2, `session_not_found` 1, `conflict` 1, `invalid_credentials` 1.
+
+**Piège d'unité relevé :** le champ `duration` de `auth_logs` est exprimé en **nanosecondes** ; toute lecture en millisecondes sans division par 10⁶ surestime d'un facteur 1 000.
+
+**Références de latence côté Supabase** (fenêtre 21:00 UTC → fin, toutes routes et tous utilisateurs confondus, valeurs `response.origin_time` telles que rapportées ; **non comparables** à un temps de chargement de dashboard) : `rpc_dashboard_top_products` 93 appels, `rpc_dashboard_kpi_metrics` 59, `rpc_billing_status` 53 (2 écarts 5xx, fenêtre chevauchant la fin de l'incident), `store_members` 205, `/auth/v1/user` 175.
+
+#### Sécurité et régressions
+
+- Aucune donnée ni permission modifiée ; aucune politique RLS, aucun RPC et aucun index touchés.
+- Les routes protégées restent inaccessibles sans session (`307` → `/login`) : le refus serveur est inchangé.
+- Les tests anonymes locaux **ne génèrent aucun appel Supabase** : le parcours public ne reçoit aucune vérification supplémentaire.
+- Aucun défaut d'isolation multi-tenant n'a été recherché ni démontré dans cette exécution (scénarios `BLOCKED`).
+- Les modifications étrangères du dépôt n'ont été ni écrasées ni indexées.
+
+#### Git et déploiement
+
+**Commit créé :** `e049d96` — « chore(perf): checkpoint du bootstrap dashboard et de la selection de boutique » (18 fichiers, +2 326 / −240) ; mise à jour du suivi documentaire dans un second commit local
+**Push :** Non
+**Merge :** Non
+**Déploiement :** Aucun
+
+Empreinte de l'arbre de travail relevée avant et après le relevé, identique (`a592f4e66c2aeda96819bb6611cd1a1b3dda6234`) : aucune modification concurrente pendant l'opération. `git diff --check` ne signale aucune erreur d'espace, uniquement des avertissements `LF → CRLF` sans impact.
+
+#### Limitations et blocages
+
+1. **Version déployée sur Vercel non identifiable.** Le rattachement local existe (`.vercel/project.json` : `prj_h26koUauo1YWLE1a4dPs9LAiUr5l`, `team_z5xI8PExqzr3TirSUSQwpQ8H`, projet `platerform`), mais la CLI `vercel` n'est pas installée (`npx` s'arrête faute de paquet) et aucun jeton `VERCEL_TOKEN` n'est exposé dans la session. Aucune comparaison déployé/local n'a donc pu être établie.
+2. **Aucun navigateur instrumenté** : pas de DevTools, pas de trace Performance, pas de capture réseau. Les métriques `T_*` et `N_supabase` restent non mesurées.
+3. **Aucune session authentifiée** : les scénarios d'identité, de rôles, de multi-tenant et de pannes restent non exécutés.
+4. Les journaux Supabase sont disponibles sur environ 24 heures et présentent un décalage d'ingestion de plusieurs minutes.
+5. Les deux 5xx `504` observés sur `/rest/v1/store_members` (18:58 et 19:00 UTC) proviennent d'appels `curl` directs d'un audit antérieur (IP `196.127.37.123`), **hors** fenêtre saine et **sans lien** avec les tests de cette exécution.
+6. Un serveur `chrome-devtools-mcp` (headless, isolé) tourne sur la machine, mais **aucun outil de navigateur n'est exposé** dans cette session : les captures restent impossibles côté agent. L'exposition de cet outil lèverait le blocage n° 2 sans modifier l'application.
+
+#### Décision
+
+**Lot 0 : PARTIELLEMENT ATTEINT — non validé au sens strict** (checkpoint conforme et baseline infrastructure établie, mais aucune capture ne porte de SHA déployé).
+**Lot 1 : TESTS TECHNIQUES PASSÉS — VALIDATION FONCTIONNELLE NON ATTEINTE — `NEEDS HUMAN REVIEW`.**
+**Aucun `VALIDATED`, aucun `DEPLOYED`.**
+
+#### Prochaine action
+
+Ne pas engager les Lots 2, 3 ou 4. Deux interventions humaines sont requises :
+1. fournir le **SHA réellement déployé** (tableau de bord Vercel, ou `vercel ls` / `vercel inspect` avec un jeton) afin de rattacher les futurs relevés à une version identifiée ;
+2. fournir un **compte de test non sensible** (idéalement deux comptes et une boutique) ainsi qu'une **preview isolée**, pour exécuter les scénarios d'identité, de rôles et de changement de boutique.
 
 ### Exécution — [DATE / HEURE UTC]
 
