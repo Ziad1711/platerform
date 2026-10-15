@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { createClient, getServerUser } from '@/lib/supabase/server'
+import { createClient, getServerUserResult } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
@@ -13,7 +13,9 @@ type SignupPageProps = {
 
 export default async function SignupPage({ searchParams }: SignupPageProps) {
   const params = (await searchParams) ?? {}
-  const user = await getServerUser()
+  // Page publique : en cas de panne Auth, user vaut null et le formulaire
+  // s'affiche — aucune redirection d'un compte non vérifié.
+  const { user } = await getServerUserResult()
 
   if (user) {
     const supabase = await createClient()

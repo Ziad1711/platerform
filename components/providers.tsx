@@ -1,6 +1,6 @@
 'use client'
 
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, createContext, useContext, useEffect, useMemo, useRef } from 'react'
 import { StoreProvider, useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
@@ -98,6 +98,22 @@ export function Providers({ children }: { children: React.ReactNode }) {
   )
 }
 
+function PrivateApp({ userId, children }: { userId: string; children: React.ReactNode }) {
+  // Un QueryClient NEUF par identité : changer de compte détruit l'ancien cache,
+  // aucune donnée de A n'est réutilisable par B (même pour un magasin partagé),
+  // et les requêtes obsolètes de l'ancien client n'ont plus d'observateur.
+  const [queryClient] = useState(() => new QueryClient())
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <StoreProvider initialUserId={userId} initialAuthReady>
+        <ThemeLoader />
+        {children}
+      </StoreProvider>
+    </QueryClientProvider>
+  )
+}
+
 /**
  * Contexte applicatif réservé à l'espace protégé : magasins accessibles et
  * préférence de thème issue du profil utilisateur. Monté uniquement dans le
@@ -106,7 +122,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
  * lecture Supabase (store_members, stores, profiles).
  */
 export function AppProviders({ children }: { children: React.ReactNode }) {
-  const queryClient = useQueryClient()
   const supabase = useMemo(() => createClient(), [])
   const [auth, setAuth] = useState<{ userId: string | null; ready: boolean }>({
     userId: null,
@@ -122,12 +137,11 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       const previous = currentUserIdRef.current
       currentUserIdRef.current = nextUserId
 
-      // On quitte un compte (déconnexion ou changement A → B) : purger le cache
-      // privé et la sélection AVANT le prochain rendu, pour qu'aucune donnée du
-      // compte précédent ne puisse être relue, même brièvement.
+      // On quitte un compte (déconnexion ou changement A → B) : purger la
+      // sélection persistée AVANT le prochain rendu, pour que le compte suivant
+      // ne la réutilise jamais. Le cache privé est abandonné par la destruction
+      // du QueryClient de PrivateApp (remonté via key ci-dessous).
       if (previous !== null && previous !== nextUserId) {
-        void queryClient.cancelQueries()
-        queryClient.clear()
         if (typeof window !== 'undefined') {
           localStorage.removeItem('current-store-id')
           document.cookie = 'current-store-id=; path=/; max-age=0'
@@ -137,17 +151,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       setAuth({ userId: nextUserId, ready: true })
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       eventSeen = true
       if (!active) return
       handleIdentity(session?.user?.id ?? null)
-
-      // Revalider droits/appartenances uniquement sur les événements susceptibles
-      // de les modifier (jamais sur un simple renouvellement de jeton).
-      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-        queryClient.invalidateQueries({ queryKey: ['accessible-stores'] })
-        queryClient.invalidateQueries({ queryKey: ['member-role'] })
-      }
     })
 
     // Résolution initiale : ignorée si un événement Auth est déjà survenu
@@ -181,19 +188,41 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       active = false
       subscription.unsubscribe()
     }
-  }, [supabase, queryClient])
+  }, [supabase])
 
-  // Remonter le sous-arbre privé à chaque identité : les états locaux
-  // (formulaires, filtres, sélection, suivi livraison) repartent de zéro,
-  // aucune donnée du compte précédent ne survit au passage à B.
+  // Aucun contenu privé tant que l'identité n'est pas résolue.
+  if (!auth.ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  // Déconnecté (ou identité non vérifiée) : ne jamais rendre l'espace privé.
+  if (!auth.userId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+        <div className="mx-auto w-full max-w-md rounded-2xl border bg-card p-8 text-center shadow-lg">
+          <h1 className="text-lg font-semibold">Session terminée</h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Votre session a expiré ou vous avez été déconnecté.
+          </p>
+          <a
+            href="/login"
+            className="mt-5 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Se reconnecter
+          </a>
+        </div>
+      </div>
+    )
+  }
+
+  // Remonter le sous-arbre privé (et son cache) à chaque identité.
   return (
-    <StoreProvider
-      key={auth.userId ?? 'signed-out'}
-      initialUserId={auth.userId}
-      initialAuthReady={auth.ready}
-    >
-      <ThemeLoader />
+    <PrivateApp key={auth.userId} userId={auth.userId}>
       {children}
-    </StoreProvider>
+    </PrivateApp>
   )
 }

@@ -14,10 +14,29 @@ import { JisraMark } from '@/components/logo'
 export default async function DashboardPage() {
   const { user, authUnavailable } = await getServerUserResult()
 
-  // Le layout protégé affiche déjà l'état d'indisponibilité Auth ; ici on ne
-  // redirige vers /login que pour une vraie absence de session.
+  // Le layout protégé affiche normalement déjà l'état d'indisponibilité ; ce
+  // repli couvre le cas où seul ce contrôle échoue (panne intermittente) :
+  // afficher un écran de réessai plutôt qu'un contenu vide.
   if (authUnavailable) {
-    return null
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+        <div className="mx-auto w-full max-w-md rounded-2xl border bg-card p-8 text-center shadow-lg">
+          <h1 className="text-lg font-semibold">
+            Service d&apos;authentification indisponible
+          </h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Impossible de vérifier votre session pour le moment. Veuillez réessayer
+            dans quelques instants.
+          </p>
+          <a
+            href="/login"
+            className="mt-5 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Réessayer
+          </a>
+        </div>
+      </div>
+    )
   }
 
   if (!user) {

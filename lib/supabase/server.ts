@@ -41,11 +41,15 @@ export type ServerUserResult = {
   authUnavailable: boolean
 }
 
-function isSessionMissingError(
+function isDefinitiveUnauthenticated(
   error: { name?: string; code?: string; status?: number } | null | undefined
 ): boolean {
   if (!error) return false
-  return error.name === 'AuthSessionMissingError' || error.code === 'session_not_found'
+  // Session manquante ou révoquée.
+  if (error.name === 'AuthSessionMissingError' || error.code === 'session_not_found') return true
+  // Jeton invalide (signature/formats) : définitif, ce n'est pas une panne.
+  if (error.name === 'AuthInvalidJwtError' || error.code === 'invalid_jwt' || error.code === 'bad_jwt') return true
+  return false
 }
 
 /**
@@ -77,8 +81,11 @@ export async function getServerUserResult(): Promise<ServerUserResult> {
 
   // 2. Repli : jeton d'accès relu du cookie, puis revérifié par l'API Auth.
   let session: { access_token?: string } | null = null
+  let sessionError: { name?: string; code?: string; status?: number } | null = null
   try {
-    session = (await supabase.auth.getSession()).data.session ?? null
+    const { data, error } = await supabase.auth.getSession()
+    session = data.session ?? null
+    sessionError = error ?? null
   } catch {
     return { user: null, authUnavailable: true }
   }
@@ -96,28 +103,17 @@ export async function getServerUserResult(): Promise<ServerUserResult> {
 
     if (verifiedUser && !verifyError) return { user: verifiedUser, authUnavailable: false }
 
-    // Un jeton existe mais l'API ne le confirme pas : soit la session a été
-    // révoquée (déconnecté), soit l'API Auth est momentanément indisponible.
-    if (isSessionMissingError(verifyError)) return { user: null, authUnavailable: false }
-    return { user: null, authUnavailable: true }
+    // Un jeton existe mais l'API ne le confirme pas : session révoquée/invalide
+    // (déconnecté) ou panne temporaire.
+    return { user: null, authUnavailable: !isDefinitiveUnauthenticated(verifyError) }
   }
 
-  // Aucun jeton d'accès exploitable.
-  if (!firstError) return { user: null, authUnavailable: false }
-  if (isSessionMissingError(firstError)) return { user: null, authUnavailable: false }
-  // Toute autre erreur sans jeton exploitable est traitée comme une panne,
-  // jamais comme une absence de session.
+  // Aucun jeton exploitable : classer selon la première erreur, ou celle de
+  // getSession. Une absence réelle de session n'est jamais une panne.
+  const decisiveError = firstError ?? sessionError
+  if (!decisiveError) return { user: null, authUnavailable: false }
+  if (isDefinitiveUnauthenticated(decisiveError)) return { user: null, authUnavailable: false }
   return { user: null, authUnavailable: true }
-}
-
-/**
- * Récupère l'utilisateur connecté côté serveur (compatibilité : null sur
- * absence de session comme sur indisponibilité Auth). Pour distinguer ces
- * deux états, utiliser `getServerUserResult()`.
- */
-export async function getServerUser() {
-  const { user } = await getServerUserResult()
-  return user
 }
 
 /**
