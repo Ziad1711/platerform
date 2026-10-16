@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — contrôles Vercel pré-publication : production `4a420b6` (dpl_HQDHrTUT…) confirmée, **2 cibles de rollback READY**, aucune variable de production masquée, périmètre du candidat conforme ; **preview non isolée** (Supabase partagé) et `LIGHTFUNNELS_*` production-only ⇒ **promotion de preview écartée** ⇒ **GO conditionnel** (vérifications M1–M4 restantes). Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — déploiement contrôlé, Phases 1–2 : candidat `ee79b3b` confirmé, copie propre, 2 cibles de rollback READY, bundle vérifié (aucune URL factice, bon projet Supabase, **aucun secret serveur côté client**) ; **build Production local impossible** (20 variables `sensitive` illisibles ⇒ `[SENSITIVE]` ⇒ `ERR_INVALID_URL`) ⇒ route révisée `vercel deploy --prod --skip-domain` ; **arrêté avant publication**. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -767,6 +767,75 @@ Restent à couvrir **avant la promotion** : M1, M2, M3 (et M4 recommandé) ; M5 
 #### Prochaine action
 
 Exécuter M1, M2, M3 (+ M4) sur **localhost**, me communiquer les résultats, puis m'autoriser explicitement la publication. Aucune publication, promotion, migration ou correction ne sera effectuée avant cet accord.
+
+### Déploiement contrôlé — Phases 1 et 2 — 2026-10-16 02:00 → 02:35 UTC (03:00 → 03:35 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `a8e0bb4`
+**Lot :** vérifications finales + préparation du build Production (arrêt avant publication)
+**Environnement :** copie Git propre hors dépôt, CLI Vercel 64.3.1 authentifiée (`ziadzerouala11-8743`), API Vercel en lecture seule.
+
+#### Phase 1 — Vérifications finales
+
+| # | Contrôle | Résultat observé | Statut |
+|---|---|---|---|
+| 1 | SHA candidat | `ee79b3b22bbaab4682a5ae5a690e6d41f362a6e0` — conforme, 17 fichiers du périmètre aux empreintes attendues | **PASS** |
+| 2 | Copie Git propre | `next-env.d.ts` (fichier **généré**) était modifié par les builds successifs ; restauré depuis le SHA → `git status` **vide** | **PASS** (après restauration d'un artefact généré) |
+| 3 | Cible de rollback | `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` (SHA `4a420b6`) **READY / production** ; second candidat `dpl_WyrE2oQzgwU5eaQ4kvc3nikcMS1x` (SHA `dc5cc6d`) **READY / production** | **PASS** |
+| 4 | Variables de production | 44 variables récupérées par `vercel pull` ; `hiddenProductionEnvCount: 0` ; **aucune valeur affichée** (type `sensitive` = non lisible) | **PASS** (noms et portées) |
+| 5 | Risques résiduels documentés | M5 (révocation / rôle / panne Auth non testables sans isolation) et alertes ESLint H1/H3 (refs lues/écrites pendant le rendu) | **DOCUMENTÉ** |
+
+#### Phase 2 — Préparation du build Production
+
+**Tentative A — `vercel build --prod` (build local avec les variables de production) : ÉCHEC, cause racine identifiée.**
+
+```
+✓ Compiled successfully in 13.0s
+Error: Failed to collect configuration for /_not-found
+  [cause]: TypeError: Invalid URL { code: 'ERR_INVALID_URL', input: '[SENSITIVE]' }
+BUILD_EXIT=1
+```
+
+Preuve de la cause, obtenue sans révéler de valeur :
+
+- `vercel pull --environment=production` a écrit **20 variables secrètes sous la forme littérale `[SENSITIVE]` (11 caractères)** — y compris `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` ;
+- `vercel env run -e production` confirme : « **20 Secret values cannot be pulled from the `production` Environment. Define them in a local .env file.** » et les quatre clés testées reviennent **vides** (`length=0`).
+
+**Conclusion :** l'échec provient du **caractère non lisible des variables de type `sensitive`** de Vercel, **pas du code candidat** — le même code compile et construit avec succès dès que l'URL factice est remplacée par une valeur valide (build neutralisé : `BUILD_EXIT=0`). **Un build Production local est donc impossible pour ce projet**, quelle que soit la méthode (`pull` comme `env run`).
+
+**Tentative B — build de vérification (avec l'environnement local, qui pointe le projet Supabase de production `attvfeoqgbxsnnsllatt`) : SUCCÈS.**
+
+| Contrôle | Résultat observé | Statut |
+|---|---|---|
+| Build | `BUILD_EXIT=0`, table de routes complète, **0 erreur**, `.next/BUILD_ID = qKct02MMHRJQI7vcWtIKM` | **PASS** |
+| Aucune URL de validation | `127.0.0.1:9` **absent** de tout l'artefact | **PASS** |
+| Bon projet Supabase | référence de production `attvfeoqgbxsnnsllatt` **présente** dans les assets client | **PASS** |
+| Aucun secret serveur côté client | **17 valeurs serveur** testées : aucune présente dans `.next/static` | **PASS** |
+| Noms de variables serveur côté client | 8 noms sensibles vérifiés (`SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `INTEGRATIONS_ENCRYPTION_KEY`, secrets YouCan/Facebook/Lightfunnels, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) : **aucun présent** | **PASS** |
+
+*Cette vérification porte sur 69 fichiers client et 2 654 fichiers serveur. Elle prouve la propriété demandée (aucune fuite client, bon projet Supabase) sans jamais exposer de valeur secrète.*
+
+**Hygiène appliquée :** `.env.local` (copié pour le contrôle) et `.vercel/.env.production.local` (qui contenait un jeton OIDC et 20 placeholders) **supprimés** de la copie ; fichiers générés restaurés ; `git status` **vide** ; `HEAD` toujours `ee79b3b`. Seuls `.vercel/project.json` et `.vercel/output/` subsistent (ignorés par Git, ligne 7 de `.gitignore`).
+
+#### Phase 3 — Arrêt obligatoire (aucune publication)
+
+**Procédure révisée** — la route `vercel deploy --prebuilt --prod` est **inutilisable** : elle exige un build local avec les variables de production, impossible ici (20 variables `sensitive` non lisibles, prouvé en Phase 2). La route retenue construit **sur l'infrastructure Vercel** avec les variables de production natives, **sans** modifier `jisra.io` :
+
+```bash
+cd "c:/Users/HP-EXE/Documents/erp ecom/jisra-deploy-candidate"
+git status --short        # DOIT être vide
+git rev-parse HEAD        # DOIT être ee79b3b22bbaab4682a5ae5a690e6d41f362a6e0
+vercel deploy --prod --skip-domain        # build distant, variables de PRODUCTION, domaine NON modifié
+# → relever l'ID et l'URL du déploiement créé, puis le contrôler avant mise en service
+vercel promote <deployment-id-ou-url>     # attribue jisra.io à ce déploiement
+```
+
+Aucune preview n'intervient : le déploiement est ciblé **production**, donc construit avec les variables natives (une preview aurait été privée de `LIGHTFUNNELS_*`).
+
+**Rollback (inchangé, immédiat) :** `vercel rollback` → `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` (SHA `4a420b6`) ; alternative `dpl_WyrE2oQzgwU5eaQ4kvc3nikcMS1x` (SHA `dc5cc6d`).
+
+**État : arrêté avant publication. Aucun déploiement créé, aucun domaine modifié, aucun push, aucun merge, aucune correction.**
 
 ### Exécution — [DATE / HEURE UTC]
 
