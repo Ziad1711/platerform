@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — finalisation pré-déploiement du candidat `ee79b3b` : copie propre + lockfile du SHA, TypeScript **PASS**, build neutralisé **PASS**, 23 tests automatisés **PASS** ; ESLint périmètre **24 erreurs classées** ; vérification Vercel **BLOCKED** ⇒ décision **NO-GO conditionnel**. Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — contrôles Vercel pré-publication : production `4a420b6` (dpl_HQDHrTUT…) confirmée, **2 cibles de rollback READY**, aucune variable de production masquée, périmètre du candidat conforme ; **preview non isolée** (Supabase partagé) et `LIGHTFUNNELS_*` production-only ⇒ **promotion de preview écartée** ⇒ **GO conditionnel** (vérifications M1–M4 restantes). Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -635,6 +635,138 @@ Aucune correction applicative ne sera engagée sans autorisation. Les Lots 2, 3 
 3. décider du traitement des alertes H1/H3 (après déploiement) et de la dette ESLint.
 
 Aucune publication, promotion, migration ou correction ne sera effectuée sans autorisation explicite.
+
+### Contrôles Vercel pré-publication — 2026-10-16 01:25 → 01:50 UTC (02:25 → 02:50 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `2c8ab6adf9fd8c19dd86a4932e48f99ee5d5c948`
+**Lot :** vérifications préalables à la publication (aucune publication, promotion, migration ou correction)
+**Environnement :** API Vercel en lecture seule + dépôt local. Aucun secret affiché.
+
+#### 1. Déploiement associé à jisra.io — établi
+
+| Élément | Valeur vérifiée |
+|---|---|
+| Alias | `jisra.io`, `www.jisra.io`, `platerform.vercel.app` + URL projet |
+| Déploiement | **`dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`** |
+| `readyState` / `target` / région | **READY** / **production** / `iad1` |
+| SHA Git | **`4a420b6037b8d6d192ccbffc24fac6a5a0f95655`** (branche `main`) |
+| Message | « feat(analytics): Vercel Web Analytics sans cookie… » |
+
+À l'instant du relevé, **la production ne contient donc pas** le travail du candidat : elle correspond encore à l'état de `main`.
+
+#### 2. Cible de rollback — disponible immédiatement
+
+| Déploiement | SHA | État | `target` | Rollback |
+|---|---|---|---|---|
+| `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` | `4a420b6…` | READY | production | **`isRollbackCandidate: true`** |
+| `dpl_WyrE2oQzgwU5eaQ4kvc3nikcMS1x` | `dc5cc6d…` | READY | production | **`isRollbackCandidate: true`** |
+
+Deux déploiements de production `READY` sont éligibles au rollback : la version stable actuelle et la précédente. **Le retour arrière est donc immédiat** après publication d'un nouveau déploiement.
+
+#### 3. Variables de production — vérifiées sans révélation de valeur
+
+Toutes les valeurs sont revenues **chiffrées ou vides** (`decrypted: false`), aucune n'a été reproduite. `hiddenProductionEnvCount: 0` : aucune variable de production n'est masquée.
+
+| Variable | Portées déclarées |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | preview + production |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | preview + production |
+| `SUPABASE_SERVICE_ROLE_KEY` | preview + production |
+| `INTEGRATIONS_ENCRYPTION_KEY` | preview + production |
+| `CRON_SECRET` | production + preview |
+| `NEXT_PUBLIC_SITE_URL` | production + preview |
+| `LIGHTFUNNELS_CLIENT_ID` | **production uniquement** |
+| `LIGHTFUNNELS_CLIENT_SECRET` | **production uniquement** |
+| `LIGHTFUNNELS_REDIRECT_URI` | **production uniquement** |
+| `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET`, `FACEBOOK_REDIRECT_URI` | preview + production |
+| `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` | preview + production |
+| `OPENAI_MODEL`, `OPENAI_API_KEY` | preview + production |
+| `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` | preview + production |
+| `ASSISTANT_PROVIDER` | preview + production |
+| `YOUCAN_CLIENT_ID`, `YOUCAN_CLIENT_SECRET`, `YOUCAN_REDIRECT_URI` | preview + production |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | preview + production |
+
+**Deux conséquences majeures :**
+
+1. **Aucune isolation entre preview et production** : `NEXT_PUBLIC_SUPABASE_URL`, la clé anonyme et **la clé `service_role`** sont partagées par `preview` et `production`. Une preview peut donc lire **et écrire** la base de production — cela confirme l'anomalie A1 et **interdit d'utiliser une preview comme banc de test**.
+2. **La promotion d'une preview est dangereuse ici** : `LIGHTFUNNELS_*` n'existent **que** en production. Une preview est donc construite **sans** ces variables, et la promotion Vercel **ne reconstruit pas** le bundle : promouvoir une preview livrerait en production un artefact privé de la configuration Lightfunnels. **La route preview → promotion est écartée.**
+
+#### 4. Périmètre du candidat — conforme
+
+Delta complet `4a420b6` → `ee79b3b` : **22 fichiers** (16 modifiés, 4 ajoutés dans `lib/`, 2 documents ajoutés).
+
+| Zone sensible | Fichiers modifiés |
+|---|---|
+| `supabase/` (migrations, RLS) | **0** |
+| `.github/` | **0** |
+| `vercel.json` (crons) | **0** |
+| `next.config.*` | **0** |
+| `package.json`, `package-lock.json` | **0** |
+| `middleware.ts` | 1 (attendu : ce chantier) |
+
+Aucune migration de base n'est donc requise, et les ajouts locaux non commités (ESLint, icônes PWA, carte marketing) **ne seront pas** dans l'artefact déployé.
+
+**Compatibilité base :** `loadStoreAccess` s'appuie sur l'embarquement PostgREST `store_members` → `stores!inner`, qui dépend de la clé étrangère `store_members.store_id → stores.id` (vérifiée précédemment) ; un repli en deux lectures existe si PostgREST renvoie `PGRST200`/`PGRST201`.
+
+#### 5. Procédure de publication retenue (à n'exécuter qu'après autorisation)
+
+**Route retenue : build ciblé Production via la CLI Vercel, sans push ni merge.**
+
+```bash
+npm i -g vercel
+vercel login                 # ou fournir VERCEL_TOKEN (accès au projet)
+cd "c:/Users/HP-EXE/Documents/erp ecom/jisra-deploy-candidate"
+git status --short           # DOIT être vide
+git rev-parse HEAD           # DOIT être ee79b3b22bbaab4682a5ae5a690e6d41f362a6e0
+grep -rl '127.0.0.1:9' .next 2>/dev/null || echo "aucune trace du build de validation"
+vercel pull --yes --environment=production    # récupère le rattachement + les variables de PRODUCTION
+vercel build --prod                           # l'artefact est construit avec les variables de Production
+vercel deploy --prebuilt --prod --yes         # publication en production
+```
+
+**Routes écartées et pourquoi :**
+- *Push → preview → promotion* : écartée. Les variables `LIGHTFUNNELS_*` sont **production uniquement** ; une preview serait construite sans elles et la promotion **ne reconstruit pas** l'artefact.
+- *Merge dans `main` + push* : écartée (merge interdit sans autorisation) ; c'est pourtant ce qui déclencherait un build Production par Git.
+
+**Contrôles avant publication** : rattachement au bon projet (`prj_h26koUauo1YWLE1a4dPs9LAiUr5l`), arbre vide, SHA exact, aucune trace d'URL factice, `vercel build --prod` confirmé avec les variables de Production.
+
+**Rollback (immédiat) :**
+```bash
+vercel rollback                          # ou tableau de bord → Instant Rollback
+```
+Cible 1 : **`dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`** (SHA `4a420b6`, READY, production).
+Cible 2 : **`dpl_WyrE2oQzgwU5eaQ4kvc3nikcMS1x`** (SHA `dc5cc6d`, READY, production).
+Puis revérifier `jisra.io` et les parcours public/privé. Le rollback n'annule pas les écritures métier effectuées après publication ; aucune migration n'étant incluse, aucun rollback SQL n'est nécessaire.
+
+#### 6. Vérifications de sécurité et de session encore indispensables
+
+| # | Vérification | Étapes | Attendu |
+|---|---|---|---|
+| M1 | Logout et retour arrière | Se déconnecter, puis bouton « Précédent » puis rouvrir directement `/dashboard` | Redirection `/login`, **aucun** contenu privé, aucune donnée en cache |
+| M2 | Refus serveur pour rôle limité | Avec un compte `viewer`, ouvrir directement `/finances` (URL saisie) | Refus **côté serveur** (page inaccessible) ; pas seulement un menu masqué |
+| M3 | Session et rafraîchissement | Recharger `/dashboard` plusieurs fois, attendre le renouvellement de jeton, puis naviguer | Aucune boucle de redirection, aucun rechargement en boucle, session conservée |
+| M4 | Étanchéité en mode « Tous les magasins » | Comparer les chiffres d'une boutique précise puis de « Tous les magasins » | Chiffres cohérents avec la sélection ; aucune donnée d'une boutique non sélectionnée |
+| M5 | **Non testable sans isolation** — révocation / rétrogradation / panne Auth | Exige une modification réelle de rôle et une panne simulée | À **accepter explicitement** ou à différer après publication sur un compte jetable |
+
+Rappel : les tests manuels réussis (A → B et changement de boutique) portaient sur le contenu du candidat (fichiers identiques, vérifiés par empreinte), mais ils s'exécutaient en local **connecté à la base de production** — les écritures éventuelles sont donc réelles (anomalie A1).
+
+#### Décision
+
+**GO conditionnel.** Tous les prérequis d'infrastructure et d'artefact sont désormais satisfaits :
+
+- déploiement de production et **deux cibles de rollback `READY`** identifiés ;
+- aucune variable de production masquée ; périmètre des portées vérifié ;
+- artefact candidat reconstruit depuis le lockfile du SHA : TypeScript, build et 23 tests automatisés **PASS**, sans aucune trace d'URL de production ;
+- delta limité aux fichiers autorisés, **aucune** modification de migration, RLS, `vercel.json`, `next.config` ou dépendances ;
+- **risque de promotion d'une preview identifié et écarté** de la procédure.
+
+Restent à couvrir **avant la promotion** : M1, M2, M3 (et M4 recommandé) ; M5 doit être explicitement acceptée. La dette ESLint (24 erreurs classées, dont H1/H3 « risque réel non bloquant ») et **l'absence de gain de performance mesuré** restent documentées : le déploiement se justifie par les correctifs fonctionnels, pas par une performance démontrée.
+
+#### Prochaine action
+
+Exécuter M1, M2, M3 (+ M4) sur **localhost**, me communiquer les résultats, puis m'autoriser explicitement la publication. Aucune publication, promotion, migration ou correction ne sera effectuée avant cet accord.
 
 ### Exécution — [DATE / HEURE UTC]
 
