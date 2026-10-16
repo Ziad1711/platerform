@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — validation légère des Lots 0 et 1 : `tsc`, build neutralisé et banc de mocks **PASS** ; **A1 : le poste local écrit dans la production** (preuve par journaux) ; mesures `T_*` et F01 → F15 toujours bloqués ; lots **NON VALIDÉS**. Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — validation légère des Lots 0 et 1 : `tsc`, banc de mocks **13/13**, build neutralisé et test HTTP anonyme concluant (port 3000 réservé puis rendu) **PASS** ; **A1 : le poste local écrit dans la production** (preuve par journaux) ; mesures `T_*` et F01 → F15 toujours bloqués ; lots **NON VALIDÉS**. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -434,7 +434,7 @@ Le succès du build avec une URL Supabase injoignable démontre que **la compila
 | `GET /dashboard` | **HTTP 307 → `location: /login`** | route privée inaccessible sans session | **PASS** |
 | `GET /settings` | **HTTP 307** | idem | **PASS** |
 
-**Limitations de ce test :** l'instance utilisée est en **mode développement** (pas le build de production) et charge le `.env.local` réel (production). Les temps relevés sont des temps HTTP locaux, **pas** des `T_login`/`T_data`. Aucune attribution fiable « zéro appel Supabase » n'a pu être établie depuis les journaux, car la même machine génère par ailleurs un trafic authentifié de production (voir ci-dessous) : c'est pourquoi ce critère reste **non concluant ici** et non « PASS ».
+**Limitations de ce premier passage :** l'instance utilisée était en **mode développement** (pas le build de production) et chargeait le `.env.local` réel (production). Les temps relevés sont des temps HTTP locaux, **pas** des `T_login`/`T_data`, et aucune attribution fiable « zéro appel Supabase » n'était possible, la même machine générant par ailleurs un trafic authentifié de production. Ce passage a donc été **complété par le test sur build neutralisé** (section « Test HTTP concluant »), qui apporte la preuve concluante.
 
 #### Analyse des journaux (lecture seule)
 
@@ -455,11 +455,41 @@ Le succès du build avec une URL Supabase injoignable démontre que **la compila
 | A3 | `react-hooks/set-state-in-effect` (6), `no-unused-vars` (6), `no-explicit-any` (6), `exhaustive-deps` (4) dans le périmètre ; 937 problèmes au total dans le dépôt | **faible à moyenne (style/conformité)** | logs ESLint | Aucune correction. La config ESLint vient d'être ajoutée : ces constats sont majoritairement préexistants et couvrent tout le dépôt |
 | A4 | `next-env.d.ts` réécrit automatiquement par l'instance `next dev` | informatif | `git status` | Aucune action ; fichier généré, déjà exclu du périmètre |
 
+#### Test HTTP concluant sur build neutralisé (port 3000 réservé)
+
+**Comment :** arrêt temporaire du `next dev` (PID 668) et d'un `next start` résiduel (PID 36748) — **autorisé par l'utilisateur** —, suppression du cache `.next` (artefact généré), puis `npm run build` et `npm run start` avec `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9` et clés factices **pour ces seuls processus** (aucun fichier modifié).
+
+| Contrôle | Résultat observé | Statut |
+|---|---|---|
+| Build neutralisé | compilé en 13,9 s, table de routes complète, **0 erreur**, `.next/BUILD_ID = bfSQB47JhpVt3_FTi1hOB` | **PASS** |
+| Neutralisation du bundle | **116 fichiers** contiennent l'URL factice, **0 fichier** contient l'URL de production dans `.next/server` + `.next/static` | **PASS** |
+| `GET /` | HTTP 200, 0,129 s | **PASS** |
+| `GET /login` | HTTP 200, 0,136 s | **PASS** |
+| `GET /signup` | HTTP 200, 0,032 s | **PASS** |
+| `GET /dashboard` | **HTTP 307 → `location: /login`** | **PASS** |
+| `GET /settings`, `GET /sales` | HTTP 307 | **PASS** |
+| Tentatives d'appel sortant | **0 occurrence** de `ECONNREFUSED`, `127.0.0.1:9` ou `error` dans le journal serveur | **PASS** |
+| Contrôle croisé Supabase | **0 requête** depuis l'IP locale après 00:30 UTC (`edge_logs`) | **PASS** |
+
+**Conclusion :** avec une URL Supabase **injoignable dès le build**, les pages publiques répondent correctement et les routes privées redirigent — **aucun appel Supabase n'est même tenté**. Le parcours anonyme/public est donc indépendant de Supabase. **Ceci ne valide aucun scénario authentifié.**
+
+**Restauration de l'environnement :** serveur de validation arrêté, port 3000 libéré, **serveur de développement de l'utilisateur redémarré** (PID 36480, « Ready in 788ms », `.env.local` rechargé).
+
+#### Inventaire ESLint du périmètre (détaillé — aucune correction)
+
+24 erreurs / 11 avertissements :
+
+- **16 erreurs React Hooks** (`react-hooks/refs`, `react-hooks/set-state-in-effect`) : `lib/store-context.tsx` 268, 288, 383, 491, 494 (×4), 496, 498, 501 ; `components/providers.tsx` 81, 328 ; `components/dashboard/store-selector.tsx` 111 ; `components/dashboard/delivery-tracking-status.tsx` 177 ; `components/auth/auth-form.tsx` 66.
+- **6 erreurs `no-explicit-any`** : `onboarding-modal.tsx` 233, 270 ; `team-section.tsx` 63, 199 ; `middleware.ts` 69, 77.
+- **1 erreur `react/no-unescaped-entities`** : `auth-form.tsx` 305.
+- **1 erreur** de variable déclarée non utilisée : `delivery-tracking-status.tsx` 306.
+- **11 avertissements** : variables non utilisées (`store-selector` 5, 6 ; `stores-section` 29, 30 ; `team-section` 37, 51), `react-hooks/exhaustive-deps` (`providers` 406 ; `store-context` 267 ×3), `no-img-element` (`stores-section` 123).
+
+Ces règles proviennent de la configuration ESLint ajoutée **pendant** la session (937 problèmes au total dans le dépôt) : les constats sont donc largement transverses. **Aucune correction n'a été appliquée.**
+
 #### Environnement de validation
 
-- Une instance **`next dev` (PID 668)** occupait le port 3000 pendant les tests ; elle n'a **pas** été interrompue, faute d'autorisation.
-- En conséquence, la variante la plus concluante du test HTTP — **démarrage du build neutralisé (`NEXT_PUBLIC_SUPABASE_URL` injoignable) puis requêtes anonymes** — n'a pas pu être exécutée : elle exige le port 3000 et l'usage exclusif de `.next`.
-- `.next` a d'ailleurs été modifié pendant la session (`.next/server` vidé, `.next/dev` actif) : **le build de validation n'est plus présent sur disque**, sa réussite reste toutefois prouvée par son journal.
+Blocage précédent **levé** : le port 3000 et `.next` ont été réservés le temps du test, puis rendus à l'utilisateur. Le build de validation n'est plus sur disque (remplacé par les artefacts du serveur de développement redémarré) ; sa réussite est prouvée par son journal, son `BUILD_ID` et la vérification du bundle.
 
 #### Métriques
 
@@ -482,22 +512,27 @@ Le succès du build avec une URL Supabase injoignable démontre que **la compila
 
 #### Reste bloqué
 
-- Test HTTP sur **build de production neutralisé** (port 3000 occupé par l'instance de développement).
-- Attribution exacte `N_supabase` (navigateur et serveur) et mesures `T_*`.
+- Attribution exacte `N_supabase` (navigateur et serveur) et mesures `T_*` : aucun navigateur instrumenté.
 - Scénarios F01 → F15 : comptes synthétiques, environnement isolé et navigateur instrumenté absents (voir la phase préparatoire).
-- Décision sur la conformité ESLint du périmètre (24 erreurs) : corriger le code, ou acter que ces règles ne sont pas bloquantes pour ce lot.
+- Décision sur la conformité ESLint du périmètre (24 erreurs, inventaire détaillé ci-dessus) : corriger le code, ou acter que ces règles ne sont pas bloquantes — **aucune correction n'a été appliquée**.
 - Vérification du périmètre des variables Vercel Preview/Production.
+- Comportement réel en production : le candidat reste **non déployé**, donc non observé.
 
 #### Décision
 
-**Lots 0 et 1 : NON VALIDÉS** — les critères obligatoires de mesure restent non satisfaits. Aucun `DEPLOYED`. Les validations techniques sont concluantes, mais **une compilation réussie et des tests unitaires sur mocks ne remplacent pas des mesures ni des scénarios authentifiés**.
+**Lots 0 et 1 : NON VALIDÉS** — les critères obligatoires de **mesure** et de **scénarios authentifiés** restent non satisfaits.
+
+Validations désormais **acquises** (avec preuves) : état figé inchangé, TypeScript, build de production neutralisé, absence de dépendance du parcours anonyme à Supabase, logique des modules (13/13 mocks), infrastructure saine.
+Validations **non acquises** : `T_*`, `N_supabase`, F01 → F15, conformité ESLint du périmètre.
+**Aucun `DEPLOYED`.**
 
 #### Prochaine action
 
-Trois décisions humaines sont nécessaires, dans cet ordre :
-1. **Transport du build de validation** : autoriser l'arrêt temporaire du `next dev` (PID 668) sur le port 3000 pour démarrer le build neutralisé et exécuter les requêtes anonymes concluantes ;
-2. **Conformité ESLint** : décider si les 24 erreurs du périmètre (dont `react-hooks/refs`) doivent être corrigées, ou si elles sont hors critères d'acceptation de ce lot ;
-3. **Isolation** : sans projet Supabase dédié, les scénarios F01 → F15 resteront `BLOCKED`, et aucun test destructif ne doit être exécuté sur l'environnement local, **puisqu'il écrit dans la production**. Aucune correction applicative ne sera engagée sans autorisation.
+Deux décisions humaines restent nécessaires :
+1. **Conformité ESLint** : corriger les 24 erreurs du périmètre (dont 16 React Hooks, cluster `refs` de `lib/store-context.tsx`) ou les déclarer hors critères d'acceptation de ce lot ;
+2. **Isolation** : sans projet Supabase dédié, F01 → F15 resteront `BLOCKED` — et **aucun test destructif ne doit être lancé sur l'environnement local, puisqu'il écrit dans la production** (anomalie A1).
+
+Aucune correction applicative ne sera engagée sans autorisation. Les Lots 2, 3 et 4 restent non entamés.
 
 ### Exécution — [DATE / HEURE UTC]
 
