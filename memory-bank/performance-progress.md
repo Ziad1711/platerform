@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — validation légère des Lots 0 et 1 : `tsc`, banc de mocks **13/13**, build neutralisé et test HTTP anonyme concluant (port 3000 réservé puis rendu) **PASS** ; **A1 : le poste local écrit dans la production** (preuve par journaux) ; mesures `T_*` et F01 → F15 toujours bloqués ; lots **NON VALIDÉS**. Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — finalisation pré-déploiement du candidat `ee79b3b` : copie propre + lockfile du SHA, TypeScript **PASS**, build neutralisé **PASS**, 23 tests automatisés **PASS** ; ESLint périmètre **24 erreurs classées** ; vérification Vercel **BLOCKED** ⇒ décision **NO-GO conditionnel**. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -533,6 +533,108 @@ Deux décisions humaines restent nécessaires :
 2. **Isolation** : sans projet Supabase dédié, F01 → F15 resteront `BLOCKED` — et **aucun test destructif ne doit être lancé sur l'environnement local, puisqu'il écrit dans la production** (anomalie A1).
 
 Aucune correction applicative ne sera engagée sans autorisation. Les Lots 2, 3 et 4 restent non entamés.
+
+### Finalisation pré-déploiement — 2026-10-16 00:35 → 01:05 UTC (01:35 → 02:05 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `ee79b3b22bbaab4682a5ae5a690e6d41f362a6e0`
+**Lot :** contrôles pré-déploiement des optimisations existantes (aucune réimplémentation, aucun déploiement)
+**Environnement :** copie Git propre hors dépôt + Supabase et Vercel observés en lecture seule.
+
+#### Candidat et copie propre
+
+| Élément | Valeur |
+|---|---|
+| SHA candidat retenu | **`ee79b3b22bbaab4682a5ae5a690e6d41f362a6e0`** (HEAD) |
+| Code applicatif | identique à `e049d96` (les 4 commits suivants sont documentaires) |
+| Copie | worktree détaché `c:/Users/HP-EXE/Documents/erp ecom/jisra-deploy-candidate`, `git status` vide |
+| Arbre local | **préservé** : carte marketing, `package.json`, `package-lock.json`, `eslint.config.mjs`, icônes PWA, `tsconfig.tsbuildinfo`, `nul` — inchangés |
+| Identité des 17 fichiers du périmètre | **contenu identique** entre le SHA et l'arbre local (même hash Git, ex. `components/dashboard/delivery-tracking-status.tsx` = `5221d3e7…`) ; seule différence : fins de ligne (CRLF dans la copie), confirmée par `diff --strip-trailing-cr` → aucune différence |
+
+#### Résultats vérifiés
+
+| Contrôle | Méthode | Résultat observé | Statut |
+|---|---|---|---|
+| Dépendances du SHA | `npm ci` dans la copie (lockfile du SHA) | 207 paquets, `NPMCI_EXIT=0` — après **deux échecs `ENOTEMPTY`** (particularité Windows sur `node_modules` partiel), résolus en supprimant `node_modules` | **PASS** |
+| TypeScript | `npx tsc --noEmit --incremental false --pretty false` dans la copie | `TSC_EXIT=0`, 0 ligne | **PASS** |
+| Build | `npm run build` dans la copie, credentials **neutralisés** (`NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9`) | compilé, table de routes complète, **0 erreur**, `.next/BUILD_ID = TdxPtacUTaiFxOFTge3To` | **PASS** |
+| Neutralisation de l'artefact | recherche des URL dans la sortie du build de la copie | **116 fichiers** avec l'URL factice, **0 fichier** avec l'URL de production | **PASS** |
+| ESLint (référence) | dans l'arbre local, 17 fichiers du périmètre | **35 problèmes : 24 erreurs, 11 avertissements** | **FAIL de conformité** |
+| ESLint (copie) | même invocation `--config` avec chemins absolus hors projet | 17 problèmes : **0 erreur**, 17 avertissements | **ARTEFACT DE PORTÉE** — voir ci-dessous |
+| Contrôle de l'artefact ESLint | même invocation `--config` sur les **fichiers locaux** | **35 problèmes : 24 erreurs** — identique à la référence | **PASS** (l'écart vient de la localisation des fichiers, hors périmètre de la config Next) |
+| Banc de mocks n°1 | modules du **candidat** compilés puis exercés avec un faux client Supabase, sans I/O | **13/13 PASS**, `EXIT=0` | **PASS** |
+| Banc de mocks n°2 | `lib/auth/permissions.ts` + `lib/auth/redirects.ts` du **candidat** | **10/10 PASS**, `EXIT=0` (anti-boucle de redirection, refus viewer/confirmation, redirections ouvertes neutralisées, `/welcome` jamais accordé sur demande ni après lecture ratée) | **PASS** |
+
+**Conclusion ESLint :** le résultat applicable au candidat est bien **24 erreurs / 11 avertissements** ; le « 0 erreur » obtenu en lintant des fichiers hors projet ne doit pas être présenté comme une preuve, la localisation modifiant la portée de la configuration Next.
+
+#### Classement des alertes React Hooks (16 erreurs) — aucune correction appliquée
+
+| # | Emplacement | Nature | Classement et justification |
+|---|---|---|---|
+| H1 | `lib/store-context.tsx` 494-501 (lecture de `prevAccessRef.current` et `isRevoking`) | `react-hooks/refs` — ref lue **pendant le rendu** | **Risque réel mais non bloquant.** Violation de pureté du rendu : sous rendu concurrent, la valeur lue n'est pas garantie → l'écran « révocation en cours » peut être manqué ou retardé. **L'isolation ne dépend pas de ce drapeau** : dans le même rendu, `accessibleStores` et `effectiveSelection = reconcileSelection(selection, accessibleStores)` excluent déjà la boutique révoquée. Impact résiduel : affichage transitoire de données en cache, corrigé par la purge (`removeQueries`) et le remontage `accessVersion`. À corriger **après** déploiement |
+| H2 | `lib/store-context.tsx` 268 (`latestStoresRef.current = accessibleStores`) | `react-hooks/refs` — écriture de ref pendant le rendu | **Risque faible.** Même classe de violation, mais la valeur ne sert qu'à **refuser** une sélection non confirmée ; une valeur d'un rendu non validé ne peut pas élargir les droits (RLS serveur reste l'autorité) |
+| H3 | `components/providers.tsx` 328 (`applyIdentityRef.current = applyIdentity`) | `react-hooks/refs` | **Risque réel, non bloquant.** L'identité appliquée par la vérification de secours pourrait provenir d'un rendu non validé. Aucune fonctionnalité concurrente n'étant utilisée aujourd'hui, le comportement observé reste correct. À corriger après déploiement (déplacement en effet, avec retest du parcours A → B) |
+| H4 | `lib/store-context.tsx` 286-289 (`setSelection(reconcileSelection(...))`) | `react-hooks/set-state-in-effect` | **Non bloquant — boucle exclue.** Vérifié dans le code : `reconcileSelection` **renvoie l'objet courant inchangé** quand rien ne change (mode `none` sans magasin, mode `store` encore autorisé, mode `all`) → `setSelection` avec la même référence déclenche un bail-out React ; sinon le résultat converge en un rendu |
+| H5 | `lib/store-context.tsx` 364-391 (application d'une intention externe) | `react-hooks/set-state-in-effect` | **Non bloquant — boucle exclue.** Gardes explicites : retour si lecture en cours, en erreur, si aucun instantané confirmé, si aucune intention ; l'intention est consommée (`pendingSelectionRef = null`) avant l'incrément de `persistenceRevision` |
+| H6 | `components/dashboard/delivery-tracking-status.tsx` 161-186 (réinitialisation à chaque changement de sélection) | `react-hooks/set-state-in-effect` | **Non bloquant.** Effet dépendant uniquement de `currentStoreId` → une exécution par changement. C'est le mécanisme d'isolation des états par sélection ; un rendu supplémentaire est attendu |
+| H7 | `components/dashboard/store-selector.tsx` 107-112 (sélection différée après création) | `react-hooks/set-state-in-effect` | **Non bloquant.** Gardes `!pendingSelectId` et présence du magasin dans la liste confirmée ; l'état est remis à `null` → convergence immédiate |
+| H8 | `components/auth/auth-form.tsx` 65-69 (`setMode`/`setError`/`setSuccess` sur `[defaultMode]`) | `react-hooks/set-state-in-effect` | **Non bloquant.** Synchronisation du formulaire avec le mode par défaut de la route ; une exécution par changement de `defaultMode`. Amélioration possible (état dérivé ou `key`), sans défaut fonctionnel constaté |
+| H9 | `components/providers.tsx` 78-83 (`setTheme` depuis `localStorage`) | `react-hooks/set-state-in-effect` | **Non bloquant.** Hydratation unique du thème ; déclenche au plus un rendu supplémentaire |
+| W1 | `components/providers.tsx` 406 (`applyIdentity` absent des dépendances) | `react-hooks/exhaustive-deps` (avertissement) | **Non bloquant — intentionnel** : l'effet utilise `applyIdentityRef` pour éviter de se réabonner à chaque rendu |
+| W2 | `lib/store-context.tsx` 267 (×3) | `react-hooks/exhaustive-deps` (avertissements) | **Non bloquant.** Expression logique recréée uniquement quand les données changent (référence stable de React Query) ; impact limité à une réexécution d'effet |
+| W3 | `onboarding-modal.tsx` 233, 270 ; `team-section.tsx` 63, 199 ; `middleware.ts` 69, 77 | `@typescript-eslint/no-explicit-any` (6 erreurs) | **Dette de typage, non bloquante** ; `middleware.ts` est toutefois sur le chemin des permissions |
+| W4 | `auth-form.tsx` 305 ; `delivery-tracking-status.tsx` 306 ; variables non utilisées et `no-img-element` | règles diverses (1 erreur + 11 avertissements) | **Non bloquant** ; constats de propreté |
+
+**Observation supplémentaire (hors périmètre, non corrigée) :** `components/providers.tsx` 42 appelle `createClient()` **pendant le rendu**, ce qui recrée un client Supabase à chaque rendu et fait de `supabase` une dépendance d'effet instable (`ThemeLoader`, 46-68). Cela peut produire des **relectures répétées de `theme_preference`** — point à rapprocher du constat P2 du plan (« plusieurs lectures partielles de `profiles` »), à traiter dans un lot ultérieur.
+
+#### Vérification Vercel (lecture seule) — BLOCKED
+
+| Tentative | Résultat |
+|---|---|
+| Outils Vercel (API) dans cette session | **Indisponibles** : l'outillage Vercel n'est plus exposé (réponse d'outil inexistant) |
+| CLI Vercel locale | **Absente** (`which vercel` → introuvable ; installation `npx` impossible) |
+| CLI alternatives globales | `bun`, `pnpm`, `claude-code`, `gemini-cli` présents ; aucune CLI Vercel |
+| Observation HTTP publique | `https://jisra.io` → **HTTP 200**, `Server: Vercel`, `X-Vercel-Cache: HIT`, `Age: 93909` ; `https://www.jisra.io` → 308. **`X-Vercel-Id` contient l'horodatage de la requête, pas l'identifiant du déploiement** → n'identifie pas la version servie |
+
+**Dernière identification certaine (session précédente, via l'API Vercel)** : alias `jisra.io` → déploiement **`dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`**, `target: production`, région `iad1`, **SHA `4a420b6037b8d6d192ccbffc24fac6a5a0f95655`**, `readyState: READY`, protection SSO activée pour les previews.
+
+**Conséquence :** la cible de rollback **reste à reconfirmer** auprès de Vercel avant publication. Je ne dispose d'aucun moyen, dans cette session, de certifier le déploiement actuellement servi ni son association au SHA stable.
+
+#### Reste bloqué
+
+- **Confirmation Vercel** : déploiement servi, disponibilité de la cible de rollback, périmètre des variables Preview/Production.
+- **Tests manuels authentifiés (F01 → F15)** : aucun environnement isolé, donc risque réel d'écriture en production (anomalie A1 prouvée).
+- **Mesures** `T_login`, `T_auth`, `T_shell`, `T_data`, `N_supabase` : aucun navigateur instrumenté → **aucun gain démontré**, ce qui reste acceptable séparément du déploiement fonctionnel.
+- **ESLint** : 24 erreurs du périmètre, classées ci-dessus (aucune non bloquante au sens sécurité, mais H1 et H3 sont des risques réels à traiter après déploiement).
+
+#### Décision
+
+**NO-GO à cet instant**, pour deux motifs précis et non techniques :
+1. la **cible de rollback n'est pas reconfirmée** (aucun accès Vercel dans cette session) ;
+2. les **scénarios authentifiés critiques** (A → B, logout, sélection multi-boutiques, refus serveur) ne sont pas prouvés par des preuves reproductibles — seuls des tests manuels rapportés par l'utilisateur existent, sans couverture précisée.
+
+**GO conditionnel** dès que : (a) le déploiement de production et la cible de rollback sont confirmés côté Vercel, (b) les scénarios manuels critiques sont exécutés **ou** l'acceptation du risque est explicite, (c) l'artefact est construit depuis le SHA candidat avec les variables de Production.
+
+**Éléments déjà prêts** : code candidat identifié et isolé, dépendances installées depuis le lockfile du SHA, TypeScript PASS, build PASS sans aucune URL de production, artefact neutralisé vérifié, 23 tests automatisés PASS (13 + 10), aucune migration Supabase, aucune modification de RLS/permissions, aucun fichier applicatif modifié par les contrôles.
+
+#### Procédure de publication et de rollback (à n'exécuter qu'après autorisation explicite)
+
+1. **Vérifier** : `vercel ls` / tableau de bord → déploiement de production courant + SHA ; confirmer que `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` est toujours `READY`. Relever le déploiement stable comme **cible de rollback**.
+2. **Préparer** : dans la copie propre `c:/Users/HP-EXE/Documents/erp ecom/jisra-deploy-candidate`, `git status` vide, `HEAD = ee79b3b`, `npm ci` déjà effectué.
+3. **Construire** : déploiement Vercel ciblant **Production** depuis ce SHA, avec les variables de Production, **sans attribution immédiate des domaines** ; attendre `READY` et relever l'ID + le SHA.
+4. **Contrôler** : confirmer que l'artefact ne contient aucune URL factice (aucun `127.0.0.1:9`, aucune clé de validation).
+5. **Publier** : promotion du déploiement sur les domaines, puis vérifier `jisra.io`.
+6. **Vérifier immédiatement** : `/`, `/login`, `/signup` en anonyme ; route privée anonyme → redirection ; connexion réelle, dashboard, sélection de boutique, actualisation, déconnexion ; surveillance des logs Vercel/Supabase (Auth, 5xx, 429, hausse inexpliquée des requêtes).
+7. **Rollback** : **Instant Rollback** vers la cible relevée à l'étape 1, puis revérifier les domaines et les parcours public/privé. Ne pas promouvoir une preview construite avec d'autres variables : la promotion ne reconstruit pas le bundle. Le rollback n'annule pas les écritures métier effectuées après publication ; aucune migration n'étant incluse, aucun rollback SQL n'est requis.
+
+#### Prochaine action
+
+1. me confirmer l'accès Vercel (CLI ou tableau de bord) ou réaliser les trois relevés de l'étape 1 ;
+2. préciser la couverture de tes tests manuels, puis exécuter les scénarios critiques sur **localhost** (jamais sur la production) ;
+3. décider du traitement des alertes H1/H3 (après déploiement) et de la dette ESLint.
+
+Aucune publication, promotion, migration ou correction ne sera effectuée sans autorisation explicite.
 
 ### Exécution — [DATE / HEURE UTC]
 
