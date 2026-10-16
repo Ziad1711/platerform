@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — Lots 0 et 1 exécutés en local (aucun push, aucun déploiement) ; voir §7
+**Dernière mise à jour :** 16 octobre 2026 — Lots 0 et 1 exécutés en local, puis phase préparatoire de clôture : environnement local **non isolé** (Supabase = production) confirmé et F01 → F15 bloqués ; voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -279,6 +279,98 @@ Empreinte de l'arbre de travail relevée avant et après le relevé, identique (
 Ne pas engager les Lots 2, 3 ou 4. Deux interventions humaines sont requises :
 1. fournir le **SHA réellement déployé** (tableau de bord Vercel, ou `vercel ls` / `vercel inspect` avec un jeton) afin de rattacher les futurs relevés à une version identifiée ;
 2. fournir un **compte de test non sensible** (idéalement deux comptes et une boutique) ainsi qu'une **preview isolée**, pour exécuter les scénarios d'identité, de rôles et de changement de boutique.
+
+### Phase préparatoire — clôture des Lots 0 et 1 — 2026-10-16 00:00 → 00:15 UTC (01:00 → 01:15 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `644af0a96cbc61d5f52e1440d56d6b5304e557fe`
+**Lot :** préparation de la clôture des Lots opérationnels 0 et 1 (aucun test authentifié, aucun déploiement, aucune donnée modifiée)
+**Environnement :** poste local + lecture seule des métadonnées Vercel/Supabase. Aucune exécution applicative, aucun appel métier.
+
+#### Objet
+
+Vérifier les prérequis de la clôture avant toute validation : configuration des environnements, existence d'un Supabase réellement isolé, outils navigateur disponibles, prérequis des tests F01 → F15.
+
+#### Constats vérifiés — environnements
+
+| # | Constat | Portée |
+|---|---|---|
+| 1 | Un seul fichier d'environnement présent : `.env.local` (26 variables, **noms relevés, valeurs non reproduites**). Aucun `.env`, `.env.test`, `.env.preview`, `.env.staging`, `.env.example` | Aucune configuration de test versionnée ou locale disponible |
+| 2 | `NEXT_PUBLIC_SUPABASE_URL` local = projet `attvfeoqgbxsnnsllatt`, **identique au projet de production** déjà observé dans les journaux | **L'environnement local n'est pas isolé** : toute validation authentifiée locale lirait et écrirait la production |
+| 3 | `.env.local` contient `SUPABASE_SERVICE_ROLE_KEY`, `INTEGRATIONS_ENCRYPTION_KEY` et plusieurs secrets d'intégration (YouCan, Facebook, Lightfunnels, IA) | Une exécution locale authentifiée disposerait d'un accès privilégié à la production |
+| 4 | Aucune stack Supabase locale : `supabase/` ne contient que `migrations/`, **pas de `config.toml`** | Le lancement d'une base locale n'est pas préparé |
+| 5 | `.gitignore` ligne 3 ignore `.env.local` | Aucun secret d'environnement suivi par Git (aucune fuite par le dépôt) |
+| 6 | Périmètre des variables Vercel (Preview vs Production) **non vérifié volontairement** : la lecture des valeurs n'entre pas dans la consigne « sans révéler de secrets » | À confirmer par l'utilisateur |
+
+#### Constats vérifiés — outils navigateur et interception
+
+| # | Constat | Conséquence |
+|---|---|---|
+| 7 | Aucun outil E2E installé : ni `playwright`, ni `puppeteer`, ni `cypress`, ni `selenium`, aucun binaire correspondant dans `node_modules/.bin` | Aucune capture automatisable en local |
+| 8 | Un serveur `chrome-devtools-mcp@1.11.0 --headless --isolated` est en cours d'exécution, mais **aucun outil navigateur n'est exposé** dans ma session ; aucune configuration MCP dans le dépôt (`.mcp.json` et `.vscode/` absents) | La configuration est côté client : l'exposition de l'outil dépend de l'utilisateur |
+| 9 | `docker` et `python` disponibles ; `mitmproxy` absent | L'interception réseau du rendu serveur (F12/F13 côté RSC) exigerait une installation ou un conteneur, donc une autorisation explicite |
+
+#### Constats vérifiés — dépôt (changements concurrents, hors périmètre)
+
+Depuis la vérification précédente, l'arbre de travail a de nouveau changé **sans intervention de l'agent** : `package.json` et `package-lock.json` modifiés (`lint` passe de `next lint` à `eslint .`, ajout de `eslint@^9.39.5` et `eslint-config-next@^16.2.4`), nouveaux fichiers `eslint.config.mjs`, `public/icons/icon-192.png` et `public/icons/icon-512.png`. S'y ajoutent `components/marketing/pricing/pricing-card.tsx`, `tsconfig.tsbuildinfo` et `nul`, déjà connus.
+
+Aucun de ces fichiers n'appartient au périmètre perf : **aucun n'a été modifié, indexé ni inclus** dans le checkpoint `e049d96`. HEAD reste `644af0a` et les documents de suivi étaient identiques au commit avant cette mise à jour. **Conséquence : les mesures techniques précédentes (`tsc`, `build`) ne correspondent plus exactement à l'état courant de l'arbre** ; toute revalidation technique devra être relancée sur l'état figé au moment du test.
+
+#### Prérequis F01 → F15 — état vérifié
+
+**Contrôles d'accès identifiés (servent de critères PASS/FAIL exacts) :**
+
+| Élément | Comportement vérifié dans le code | Conséquence pour les tests |
+|---|---|---|
+| `lib/auth/require-permission.ts` | `requireAuth()` → `UNAUTHORIZED` ; `requirePermission(storeId, perm)` → `UNAUTHORIZED` / `FORBIDDEN` ; `requireAnyPermission(perm)` (pages sans cookie de boutique) ; `getMemberRole` filtre `status = 'active'` | Le refus attendu dépend de l'endpoint : `UNAUTHORIZED`, `FORBIDDEN` ou erreur RPC |
+| `GET /api/stores/list` | `requireAuth()` puis RPC `get_my_stores` | En F06, avec le compte B, la réponse **ne doit contenir que les boutiques de B** |
+| `PATCH` / `DELETE /api/team/members/[storeId]/[userId]` | `requireAuth()` puis RPC `change_member_role` / `remove_member` ; toute erreur est convertie en **HTTP 500** avec message technique | En F06/F07, un refus d'autorisation est attendu sous forme **d'erreur RPC remontée en 500**, et non en 403 : le critère PASS est « aucune donnée ni effet sur la boutique étrangère », pas un code HTTP précis |
+| `requireAnyPermission` | Utilisé pour les pages accessibles sans cookie de boutique (ex. `/finances`) : propriété du store ou permission sur une appartenance active | En F07, l'accès direct à `/finances` par un `viewer` doit être refusé côté serveur, pas seulement masqué dans le menu |
+
+**État des prérequis :**
+
+| Prérequis | État | Motif |
+|---|---|---|
+| Environnement Supabase isolé | **ABSENT** | Local = production (`attvfeoqgbxsnnsllatt`) ; pas de stack locale ; périmètre Preview Vercel non vérifié |
+| Comptes synthétiques A0 / A1 / A2 / B / M / I± / O | **ABSENT** | Aucun compte de test fourni ou documenté |
+| Données et KPI marqués par boutique | **ABSENT** | Aucune fixture identifiée |
+| Navigateur instrumenté (DevTools ou outil exposé) | **ABSENT** | Aucun outil E2E installé ; aucun outil navigateur exposé dans la session |
+| Interception réseau du serveur Next (F12/F13 côté RSC) | **ABSENT** | Aucun proxy installé ; `docker`/`python` présents mais non préparés |
+| Baseline de production sans écriture | **NON RÉSOLU** | Le dashboard peut déclencher des écritures automatiques ; décision humaine requise |
+| Corrections à apporter | **AUCUNE CONNUE** | Aucun défaut applicatif reproduit à ce stade |
+
+**Conséquence : F01 → F15 restent BLOCKED.** Aucun test de ces scénarios ne peut être exécuté sans franchir au moins un des prérequis ci-dessus.
+
+#### Exécutable immédiatement (sans production, sans compte, sans autorisation supplémentaire)
+
+1. **Revalidation technique locale sur l'état figé** : `npx tsc --noEmit --incremental false --pretty false`, `npm run build`, puis démarrage sur le port 3000. Aucun appel Supabase n'est déclenché par ces étapes.
+2. **Preuve que le parcours anonyme ne dépend pas de Supabase, sans toucher la production** : lancer le serveur local en surchargeant **uniquement pour ce processus** `NEXT_PUBLIC_SUPABASE_URL` vers une adresse injoignable (variable d'environnement en ligne de commande, **aucun fichier modifié**), puis vérifier que `/`, `/login`, `/signup` répondent 200 et que `/dashboard`, `/settings`, `/sales` répondent 307 vers `/login`. Si ces réponses restent identiques, la preuve est directe et ne dépend plus d'une inférence par IP.
+3. **Relevés de métadonnées en lecture seule** : SHA de production via l'alias Vercel et santé Supabase, à refaire juste avant et juste après la future fenêtre de mesure.
+
+#### Reste bloqué
+
+- Baseline navigateur de production et comparaison R/C ;
+- `T_login`, `T_auth`, `T_shell`, `T_data`, `N_supabase` ;
+- F01 → F15 ;
+- attribution exacte des appels Supabase serveur.
+
+#### Interventions humaines nécessaires
+
+1. **Confirmer le périmètre des variables Vercel** — commande sûre car elle n'affiche que les noms : `vercel env ls preview` et `vercel env ls production`. Je n'ai pas exécuté de lecture de valeurs, pour ne pas exposer de secret. Si Preview partage le Supabase de production, **aucune preview ne peut servir de banc de test**.
+2. **Choisir la stratégie d'isolement** : (a) projet Supabase de test dédié, ou (b) stack Supabase locale (initialisation + Docker). Les deux créent un environnement et exigent ton autorisation explicite. Dans les deux cas : schéma et RLS identiques, **aucune donnée client**, aucun credential d'intégration réelle.
+3. **Fournir les comptes synthétiques** dans cet environnement : A0 (zéro boutique), A1 (une boutique), A2 (deux boutiques), B (compte totalement distinct), M (membre rétrogradable puis révocable), O (administrateur de test), I− / I+ (invités sans et avec mot de passe).
+4. **Exposer l'outil navigateur** (chrome-devtools-mcp est actif mais non exposé dans ma session), ou réaliser les captures DevTools toi-même.
+5. **Trancher la baseline de production** : captures existantes d'un usage normal et autorisé, ou maintien du blocage sous la contrainte « aucune modification de production ».
+6. **Autoriser, seulement si nécessaire, un outil d'interception réseau local** pour valider F12/F13 côté rendu serveur (aucun proxy installé actuellement).
+
+#### Décision
+
+**Phase préparatoire terminée. Lots 0 et 1 : toujours NON VALIDÉS, NON DÉPLOYÉS.** Aucun test F01 → F15 exécuté, aucun défaut applicatif reproduit, aucune correction nécessaire identifiée. Aucun push, aucun merge, aucun déploiement, aucune donnée modifiée.
+
+#### Prochaine action
+
+Aucune validation supplémentaire sans les décisions ci-dessus. Seules les trois actions de la section « Exécutable immédiatement » peuvent être menées sans nouvelle autorisation.
 
 ### Exécution — [DATE / HEURE UTC]
 
