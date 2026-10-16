@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — Lots 0 et 1 exécutés en local, puis phase préparatoire de clôture : environnement local **non isolé** (Supabase = production) confirmé et F01 → F15 bloqués ; voir §7
+**Dernière mise à jour :** 16 octobre 2026 — validation légère des Lots 0 et 1 : `tsc`, build neutralisé et banc de mocks **PASS** ; **A1 : le poste local écrit dans la production** (preuve par journaux) ; mesures `T_*` et F01 → F15 toujours bloqués ; lots **NON VALIDÉS**. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -371,6 +371,133 @@ Aucun de ces fichiers n'appartient au périmètre perf : **aucun n'a été modif
 #### Prochaine action
 
 Aucune validation supplémentaire sans les décisions ci-dessus. Seules les trois actions de la section « Exécutable immédiatement » peuvent être menées sans nouvelle autorisation.
+
+### Validation légère des Lots 0 et 1 — 2026-10-16 00:00 → 00:35 UTC (01:00 → 01:35 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `0d72a806e16101513fd87a8b42aa8e54f5951ae3`
+**Lot :** validations possibles des Lots 0 et 1 sans mettre en danger la production
+**Environnement :** poste local ; build de validation à credentials neutralisés ; Supabase production lu en lecture seule ; **aucun test authentifié exécuté par l'agent**.
+
+#### Méthode et état figé
+
+Empreintes relevées au début : `git diff` → `2addd033e08b7a7a3ddf8225bd696334a9f67861`, `git status --porcelain` → `a6102f909ed67f22c33b17a7e2d598ffee8c2ea2`. Les huit fichiers du périmètre portent des empreintes identiques avant et après les tests (ex. `lib/auth/store-access.ts` = `2d90cd4e…`, `lib/store-context.tsx` = `25174985…`, `components/providers.tsx` = `ae5e72d4…`) : **aucun fichier applicatif modifié**.
+
+Le seul changement apparu pendant la session est `next-env.d.ts`, réécrit par l'instance `next dev` en cours d'exécution. Aucun fichier n'a été créé ni modifié dans le dépôt par cette exécution ; le banc de tests a été écrit **hors dépôt** (`%TEMP%\jisra-mock\`).
+
+#### Tests techniques
+
+| Test | Méthode | Résultat observé | Preuve | Statut |
+|---|---|---|---|---|
+| TypeScript | `npx tsc --noEmit --incremental false --pretty false` sur l'état figé | code de sortie 0, 0 ligne de sortie | journal vide, code retour | **PASS** |
+| ESLint — dépôt entier | `npx eslint . --no-cache` (première exécution : la config ESLint a été ajoutée par l'utilisateur pendant la session) | **937 problèmes : 831 erreurs, 106 avertissements** ; aucune correction appliquée | `/tmp/jisra-lint.log` | **FAIL de conformité globale — hors périmètre du lot** |
+| ESLint — périmètre perf | même commande sur les 17 fichiers du bootstrap/providers | **35 problèmes : 24 erreurs, 11 avertissements** ; règles principales : `react-hooks/refs` 10, `react-hooks/set-state-in-effect` 6, `@typescript-eslint/no-unused-vars` 6, `no-explicit-any` 6, `react-hooks/exhaustive-deps` 4 | `/tmp/jisra-lint-perimetre.log` | **FAIL de conformité — anomalies à arbitrer, aucune correction** |
+| Build de validation | `npm run build` avec `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9` et clés factices **pour ce seul processus** | compilation réussie en 20,1 s, table de routes complète (150 pages), **0 erreur**, 2 avertissements Next.js connus | `/tmp/jisra-build2.log` | **PASS** |
+| Neutralisation effective du build | recherche de l'URL factice et de l'URL de production dans la sortie de build | URL factice **présente** dans `.next/server/chunks/ssr/*` ; URL de production présente uniquement dans le **cache `dev`** résiduel | inspection `.next` | **PASS** |
+
+Le succès du build avec une URL Supabase injoignable démontre que **la compilation ne dépend pas d'un accès vivant à Supabase** : aucun appel de production n'est nécessaire pour construire l'application.
+
+#### Tests automatisés avec mocks (aucune I/O réseau)
+
+**Comment :** les trois modules réels (`lib/auth/store-access.ts`, `lib/auth/store-bootstrap.ts`, `lib/store-selection.ts`) ont été compilés en JavaScript dans un dossier temporaire, puis exercés par un faux client Supabase chaînable qui **enregistre les requêtes** au lieu de les émettre. Aucun accès réseau, aucune base, aucun crédential.
+
+**Résultat réellement observé : 13/13 PASS** (`%TEMP%\jisra-mock\harness.cjs`, code de sortie 0).
+
+| Cas | Attendu | Observé |
+|---|---|---|
+| T00 borne de lecture des accès | `STORE_ACCESS_TIMEOUT_MS` = 12 000 | conforme |
+| T01 succès normal | **une seule** lecture groupée `store_members` + `stores!inner`, filtres `user_id` + `status = 'active'`, rôles normalisés, ordre stable par `created_at` puis `id` | conforme ; rôle inconnu → `null` (aucun droit) |
+| T02 réponse malformée | erreur `STORE_ACCESS_MALFORMED_RESPONSE` | conforme — **jamais** un succès vide |
+| T03 erreur non relationnelle | erreur propagée, **aucun repli** | conforme (1 seule lecture) |
+| T04 erreur de relation `PGRST200` | repli en 2 lectures, filtres conservés, rôles appliqués | conforme (3 lectures, `.in('id', …)`) |
+| T05 signal déjà annulé | `STORE_ACCESS_ABORTED` | conforme — **jamais** un succès vide |
+| T06 identifiant absent | `STORE_ACCESS_MISSING_USER`, aucune lecture | conforme |
+| T07 repli sans appartenance | liste vide légitime, pas de 3ᵉ lecture | conforme |
+| T08 normalisation des rôles | valeur inconnue → aucun droit | conforme |
+| T09 référence de session | `session_id` lu ; absence/illisible → `''` | conforme |
+| T10 préférence persistée | version, structure, UUID et taille invalides rejetés sans exception | conforme (9 cas) |
+| T11 sélection effective | une préférence **n'est jamais** une autorisation | conforme : boutique inaccessible et préférence d'un autre compte → repli |
+| T12 carte d'accès | `id → rôle`, base de la détection de révocation | conforme |
+
+**Ce que ces tests ne prouvent pas :** ni le comportement réel de React/Next (rendu RSC, hydratation, Strict Mode), ni les cookies et le renouvellement Auth, ni les politiques RLS, ni les permissions effectives. Ils valident la **logique** des modules, pas le système.
+
+#### Tests HTTP anonymes (sans écriture Supabase)
+
+**Comment :** requêtes `curl` **sans aucun cookie** sur l'instance Next déjà en écoute sur le port 3000 (instance `next dev` lancée par l'utilisateur, PID 668). Aucun compte, aucune session, aucune écriture.
+
+| Requête | Résultat observé | Critère PASS | Statut |
+|---|---|---|---|
+| `GET /` | HTTP 200, 0,013 s | page publique servie sans erreur | **PASS** |
+| `GET /login` | HTTP 200, 0,044 s | formulaire servi | **PASS** |
+| `GET /signup` | HTTP 200, 0,042 s | page servie | **PASS** |
+| `GET /dashboard` | **HTTP 307 → `location: /login`** | route privée inaccessible sans session | **PASS** |
+| `GET /settings` | **HTTP 307** | idem | **PASS** |
+
+**Limitations de ce test :** l'instance utilisée est en **mode développement** (pas le build de production) et charge le `.env.local` réel (production). Les temps relevés sont des temps HTTP locaux, **pas** des `T_login`/`T_data`. Aucune attribution fiable « zéro appel Supabase » n'a pu être établie depuis les journaux, car la même machine génère par ailleurs un trafic authentifié de production (voir ci-dessous) : c'est pourquoi ce critère reste **non concluant ici** et non « PASS ».
+
+#### Analyse des journaux (lecture seule)
+
+| Mesure | Fenêtre UTC | Résultat observé |
+|---|---|---|
+| Santé Supabase, minute par minute | 2026-10-15 23:55 → 2026-10-16 00:23 | **0 erreur 5xx** sur toute la fenêtre ; pics légitimes (00:13-00:15 et 00:20) liés à un usage réel |
+| Requêtes Auth `/auth/v1/*` | même fenêtre | 0 en dehors des minutes d'usage authentifié |
+| Erreurs | même fenêtre | aucune 5xx, aucun 429 observé |
+
+**Baseline infrastructure maintenue :** la plateforme est **saine** sur cette fenêtre, ce qui confirme que les observations de l'incident du 15/10 ne doivent pas être extrapolées.
+
+#### Anomalies détectées
+
+| # | Anomalie | Gravité | Preuve | Action |
+|---|---|---|---|---|
+| A1 | **La machine locale écrit dans la production.** Sur la seule minute 00:20 UTC, l'IP d'émission locale a généré un trafic complet de dashboard authentifié : `POST /rest/v1/profiles`, `POST /rest/v1/rpc/claim_delivery_tracking_batch`, `POST /rest/v1/rpc/reserve_delivery_tracking_slot`, `POST /rest/v1/rpc/release_delivery_tracking_lock`, `POST /rest/v1/delivery_tracking_state`, 17 × `/auth/v1/user`, 10 × `store_members`, 18 × `integrations`, RPC KPI et facturation | **élevée (risque opérationnel)** | journaux `edge_logs` filtrés par IP locale (41.251.25.43) | Confirme que **le développement local n'est pas isolé** et justifie de ne pas exécuter de scénarios destructifs (révocation, rôles, A→B) dans cet environnement. Aucune action de correction demandée dans ce lot |
+| A2 | `react-hooks/refs` (10 erreurs) : lecture d'une ref pendant le rendu dans `lib/store-context.tsx` (~lignes 491-499) pour calculer `isRevoking`, puis rendu conditionnel d'un écran de chargement | **moyenne (à confirmer)** | ESLint périmètre ; lecture du code | **Non corrigé** (hors autorisation). Risque : la valeur lue au rendu n'est pas garantie par React (rendu concurrent) → l'écran de « révocation en cours » peut être manqué ou retardé. À reproduire en conditions réelles avant toute correction |
+| A3 | `react-hooks/set-state-in-effect` (6), `no-unused-vars` (6), `no-explicit-any` (6), `exhaustive-deps` (4) dans le périmètre ; 937 problèmes au total dans le dépôt | **faible à moyenne (style/conformité)** | logs ESLint | Aucune correction. La config ESLint vient d'être ajoutée : ces constats sont majoritairement préexistants et couvrent tout le dépôt |
+| A4 | `next-env.d.ts` réécrit automatiquement par l'instance `next dev` | informatif | `git status` | Aucune action ; fichier généré, déjà exclu du périmètre |
+
+#### Environnement de validation
+
+- Une instance **`next dev` (PID 668)** occupait le port 3000 pendant les tests ; elle n'a **pas** été interrompue, faute d'autorisation.
+- En conséquence, la variante la plus concluante du test HTTP — **démarrage du build neutralisé (`NEXT_PUBLIC_SUPABASE_URL` injoignable) puis requêtes anonymes** — n'a pas pu être exécutée : elle exige le port 3000 et l'usage exclusif de `.next`.
+- `.next` a d'ailleurs été modifié pendant la session (`.next/server` vidé, `.next/dev` actif) : **le build de validation n'est plus présent sur disque**, sa réussite reste toutefois prouvée par son journal.
+
+#### Métriques
+
+| Métrique | Avant | Après | Conclusion |
+|---|---|---|---|
+| T_login | Non mesuré | Non mesuré | Aucun navigateur instrumenté |
+| T_auth | Non mesuré | Non mesuré | Exige une session authentifiée |
+| T_shell | Non mesuré | Non mesuré | Idem |
+| T_data | Non mesuré | Non mesuré | Idem |
+| N_supabase | Non mesuré | Non mesuré | Idem |
+| Erreurs 5xx | 0 sur 23:55 → 00:23 UTC | 0 sur la même fenêtre | Infrastructure saine, aucun incident nouveau |
+
+#### Git et déploiement
+
+**Commit créé :** documentaire uniquement (suivi) — aucun commit applicatif
+**Push :** Non
+**Merge :** Non
+**Déploiement :** Aucun
+**Fichiers applicatifs modifiés :** aucun (empreintes du périmètre identiques avant/après)
+
+#### Reste bloqué
+
+- Test HTTP sur **build de production neutralisé** (port 3000 occupé par l'instance de développement).
+- Attribution exacte `N_supabase` (navigateur et serveur) et mesures `T_*`.
+- Scénarios F01 → F15 : comptes synthétiques, environnement isolé et navigateur instrumenté absents (voir la phase préparatoire).
+- Décision sur la conformité ESLint du périmètre (24 erreurs) : corriger le code, ou acter que ces règles ne sont pas bloquantes pour ce lot.
+- Vérification du périmètre des variables Vercel Preview/Production.
+
+#### Décision
+
+**Lots 0 et 1 : NON VALIDÉS** — les critères obligatoires de mesure restent non satisfaits. Aucun `DEPLOYED`. Les validations techniques sont concluantes, mais **une compilation réussie et des tests unitaires sur mocks ne remplacent pas des mesures ni des scénarios authentifiés**.
+
+#### Prochaine action
+
+Trois décisions humaines sont nécessaires, dans cet ordre :
+1. **Transport du build de validation** : autoriser l'arrêt temporaire du `next dev` (PID 668) sur le port 3000 pour démarrer le build neutralisé et exécuter les requêtes anonymes concluantes ;
+2. **Conformité ESLint** : décider si les 24 erreurs du périmètre (dont `react-hooks/refs`) doivent être corrigées, ou si elles sont hors critères d'acceptation de ce lot ;
+3. **Isolation** : sans projet Supabase dédié, les scénarios F01 → F15 resteront `BLOCKED`, et aucun test destructif ne doit être exécuté sur l'environnement local, **puisqu'il écrit dans la production**. Aucune correction applicative ne sera engagée sans autorisation.
 
 ### Exécution — [DATE / HEURE UTC]
 
