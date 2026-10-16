@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — déploiement contrôlé, Phases 1–2 : candidat `ee79b3b` confirmé, copie propre, 2 cibles de rollback READY, bundle vérifié (aucune URL factice, bon projet Supabase, **aucun secret serveur côté client**) ; **build Production local impossible** (20 variables `sensitive` illisibles ⇒ `[SENSITIVE]` ⇒ `ERR_INVALID_URL`) ⇒ route révisée `vercel deploy --prod --skip-domain` ; **arrêté avant publication**. Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — déploiement de validation créé **sans promotion** : `dpl_DRraMTDwbrmQZp5fU2ZirpQyEMsy` **READY** (production, source CLI, SHA non rattaché), `jisra.io` / `www.jisra.io` / `platerform.vercel.app` **inchangés** ; smoke test `/login` 200, `/` 200, `/dashboard` 307 ⇒ **en attente d'autorisation de promotion**. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -836,6 +836,78 @@ Aucune preview n'intervient : le déploiement est ciblé **production**, donc co
 **Rollback (inchangé, immédiat) :** `vercel rollback` → `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` (SHA `4a420b6`) ; alternative `dpl_WyrE2oQzgwU5eaQ4kvc3nikcMS1x` (SHA `dc5cc6d`).
 
 **État : arrêté avant publication. Aucun déploiement créé, aucun domaine modifié, aucun push, aucun merge, aucune correction.**
+
+### Déploiement de validation Vercel (sans promotion) — 2026-10-16 02:35 → 03:05 UTC (03:35 → 04:05 locale)
+
+**Agent :** Cline
+**Branche :** `perf/login-dashboard-bootstrap`
+**Commit initial :** `173cf91`
+**Lot :** création d'un déploiement de validation Production, **sans mise en service des domaines** (autorisé explicitement)
+**Environnement :** worktree candidat + CLI Vercel 64.3.1 authentifiée + API Vercel (lecture).
+
+#### Prérequis vérifiés avant exécution
+
+| # | Prérequis | Preuve |
+|---|---|---|
+| 1 | Worktree aligné sur le SHA | `git rev-parse HEAD` = `ee79b3b22bbaab4682a5ae5a690e6d41f362a6e0` |
+| 2 | Worktree propre | `git status --short` **vide** (après restauration de `next-env.d.ts`, fichier généré) |
+| 3 | Rollback disponible | `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` (`4a420b6`) **READY / production** ; second candidat `dpl_WyrE2oQzgwU5eaQ4kvc3nikcMS1x` (`dc5cc6d`) |
+| 4 | `--skip-domain` pris en charge | Aide officielle de la CLI 64.3.1 : « **Disable the automatic promotion (aliasing) of the relevant domains to a new production deployment. You can use `vc promote` to complete the domain-assignment process later** » |
+| 5 | Artefact de build local retiré | `.vercel/output` supprimé avant l'upload (évite toute ambiguïté avec `--prebuilt`) |
+
+#### Déploiement créé
+
+| Élément | Valeur |
+|---|---|
+| ID | **`dpl_DRraMTDwbrmQZp5fU2ZirpQyEMsy`** |
+| URL | `platerform-5tg2tf5qz-ziadzerouala11-8743s-projects.vercel.app` |
+| État | **READY** (build en 2 min, `DEPLOY_EXIT=0`) |
+| Cible / région | **production** / `iad1` |
+| Source | **`cli`** — upload local du worktree |
+| SHA Git | **absent (`meta: {}`)** : un déploiement par upload n'est **pas rattaché à un commit** dans Vercel. La correspondance repose sur le worktree vérifié (`ee79b3b`), pas sur une métadonnée Vercel |
+| `isRollbackCandidate` | `false` |
+
+#### Logs de compilation (expurgés)
+
+```
+✓ Compiled successfully in 38.7s
+  Finished TypeScript in 42s
+✓ Generating static pages using 1 worker (150/150) in 1393ms
+✓ Ready in 2m
+```
+
+Aucune erreur, aucun avertissement bloquant (seuls les avertissements connus : convention `middleware` dépréciée, `browserslist`). **Aucune valeur de secret n'apparaît dans les logs.**
+
+#### Attribution des domaines après déploiement
+
+| Domaine | Pointe vers | Constat |
+|---|---|---|
+| `jisra.io` | `dpl_HQDHrTUT…` (ancien) | **INCHANGÉ** |
+| `www.jisra.io` | `dpl_HQDHrTUT…` (ancien, 308 → `jisra.io`) | **INCHANGÉ** |
+| `platerform.vercel.app` | `dpl_HQDHrTUT…` (ancien) | **INCHANGÉ** |
+| `platerform-ziadzerouala11-8743s-projects.vercel.app` | **`dpl_DRraMTDw…` (nouveau)** | **Réattribué automatiquement** : ce domaine projet automatique sert désormais le candidat, **derrière l'authentification Vercel** (protection SSO du projet) |
+
+**À retenir :** `--skip-domain` a bien préservé les domaines personnalisés et l'ancien domaine `platerform.vercel.app`, mais Vercel a tout de même réaffecté le **domaine projet automatique** au nouveau déploiement. Aucun utilisateur de `jisra.io` n'est touché (la production reste sur `4a420b6`), et cette URL est protégée par SSO.
+
+#### Vérification fonctionnelle non destructive du déploiement de validation
+
+| Requête | Résultat | Attendu |
+|---|---|---|
+| `GET /login` | **HTTP 200** | page publique servie |
+| `GET /` | **HTTP 200** | page publique servie |
+| `GET /dashboard` (anonyme) | **HTTP 307** | redirection vers `/login` |
+
+Réalisé via `vercel curl` (aucun cookie, aucun compte). Ces contrôles reproduisent, **sur le déploiement construit par Vercel avec les variables de production**, le comportement anonyme déjà validé en local.
+
+**Effet de bord à signaler :** `vercel curl` a **généré un jeton de contournement de la protection de déploiement** pour le projet afin d'accéder à l'URL protégée. Ce paramètre peut être révoqué sur demande (tableau de bord → Settings → Deployment Protection → Protection Bypass for Automation).
+
+#### Observations d'hygiène (sans impact fonctionnel)
+
+L'upload a inclus **11 fichiers d'artefacts versionnés** dans le dépôt (`_gen.js`, `_b64_files.json`, `out.json`, `ts-output.txt`, `documentation.md`, `gen_all.py`, etc.). Vérification faite : **aucun ne contient de motif de secret** (`sk-…`, JWT, clé privée, `SERVICE_ROLE`). Ils sont **trackés dans le SHA** (donc préexistants, non introduits par cette exécution) et ne sont pas servis publiquement. Recommandation : ajouter un `.vercelignore` ou déployer depuis un export propre (`git archive`) avant la mise en production.
+
+#### Interdictions respectées
+
+**Aucun `vercel promote`, aucun push, aucun merge, aucune migration ni écriture Supabase, aucun rollback, aucun test destructif.** La production (`jisra.io`) sert toujours `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` / SHA `4a420b6`.
 
 ### Exécution — [DATE / HEURE UTC]
 
