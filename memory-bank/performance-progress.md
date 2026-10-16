@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — déploiement de validation créé **sans promotion** : `dpl_DRraMTDwbrmQZp5fU2ZirpQyEMsy` **READY** (production, source CLI, SHA non rattaché), `jisra.io` / `www.jisra.io` / `platerform.vercel.app` **inchangés** ; smoke test `/login` 200, `/` 200, `/dashboard` 307 ⇒ **en attente d'autorisation de promotion**. Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — correctif **H1/H3** appliqué (commit `a0f97cb`, refs au rendu supprimées ; `react-hooks/refs` 10 → 1 sur les fichiers corrigés), revalidation complète **PASS** (tsc, build `uhX-Q1dy…`, bundle 4 contrôles, mocks 13/13 + 10/10) et **nouveau déploiement de validation** `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE` **READY** ; `jisra.io` **inchangé** ⇒ **en attente d'autorisation de promotion**. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -945,6 +945,76 @@ C'est le comportement voulu par le chantier (garde serveur au lieu d'une coquill
 #### État
 
 **Aucune promotion, aucun push, aucun merge, aucune écriture Supabase, aucun rollback.** La production sert toujours `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`. **En attente de l'acceptation explicite des risques M5 et H1/H3 et de l'autorisation de mise en production.**
+
+### Correctif H1/H3 et nouveau déploiement de validation — 2026-10-16 03:05 → 03:35 UTC (04:05 → 04:35 locale)
+
+**Agent :** Cline
+**Commit initial :** `ad6dd51`
+**Lot :** correction ciblée des refs lues/écrites pendant le rendu, puis revalidation complète et nouveau déploiement de validation (**aucune promotion**)
+**Autorisation :** choix explicite de l'utilisateur « Corriger H1/H3 d'abord ; M5 reste accepté comme risque résiduel »
+
+#### Correctif appliqué — commit isolé `a0f97cb`
+
+| Fichier | Modification | Justification |
+|---|---|---|
+| `lib/store-context.tsx` | `prevAccessRef` (ref) remplacée par l'état `prevConfirmedAccess` : la comparaison d'accès reste identique mais lit **l'état** au rendu, plus une ref ; l'effet mémorise la nouvelle référence après la purge (`setPrevConfirmedAccess(currentAccess)`) et la déclare en dépendance | Supprime la lecture de ref pendant le rendu, sans changer la sémantique (la carte du dernier accès confirmé reste la référence de comparaison) |
+| `components/providers.tsx` | `applyIdentityRef.current = applyIdentity` déplacée dans un `useEffect` (au lieu du corps du rendu) | Rendu pur ; la vérification de secours lit toujours la dernière identité appliquée, après le commit |
+
+**Procédé exact** : modification des deux fichiers, `git add` **explicite** des deux seuls chemins, commit `a0f97cb`. Aucun autre fichier n'est concerné par ce commit (les changements locaux hors périmètre restent non commités).
+**Aucune boucle de rendu introduite** : `prevConfirmedAccess` mis à jour uniquement au premier chargement ou après un changement réel ; sinon l'effet sort sans écrire d'état (convergence immédiate).
+
+#### Effet mesuré sur ESLint (fichiers corrigés)
+
+| Mesure | Avant | Après |
+|---|---|---|
+| `react-hooks/refs` | **10** | **1** |
+| `react-hooks/set-state-in-effect` | 3 | 4 |
+| `react-hooks/exhaustive-deps` (avertissements) | 4 | 4 |
+| Total problèmes sur ces 2 fichiers | 17 (13 erreurs) | **9 (5 erreurs, 4 avertissements)** |
+
+La seule erreur `react-hooks/refs` restante est **`lib/store-context.tsx:268`** (`latestStoresRef.current = accessibleStores`) : c'est **H2**, classé « risque faible » et **hors du périmètre corrigé**. L'avertissement `set-state-in-effect` supplémentaire (ligne 430) appartient à la même classe que les trois préexistants (mémorisation de la référence initiale).
+
+#### Chaîne de validation sur le correctif (`a0f97cb`)
+
+| Contrôle | Résultat | Statut |
+|---|---|---|
+| TypeScript | `tsc --noEmit --incremental false` : `EXIT=0`, 0 ligne | **PASS** |
+| Build local (avec l'environnement pointant le Supabase de production) | `BUILD_EXIT=0`, 150/150 pages, `.next/BUILD_ID = uhX-Q1dyjTsuIxk0Xpm-U` | **PASS** |
+| Bundle : URL de validation absente | `127.0.0.1:9` : **0 occurrence** | **PASS** |
+| Bundle : bon projet Supabase côté client | `attvfeoqgbxsnnsllatt` **présent** | **PASS** |
+| Bundle : aucun secret serveur côté client | **17 valeurs serveur** testées : aucune dans `.next/static` | **PASS** |
+| Bundle : noms de variables serveur côté client | 8 noms sensibles vérifiés : aucun présent | **PASS** |
+| Banc de mocks n°1 (accès/sélection) | **13/13 PASS** sur les sources du correctif | **PASS** |
+| Banc de mocks n°2 (permissions/redirections) | **10/10 PASS** sur les sources du correctif | **PASS** |
+
+**Limite explicite :** les deux bancs ne couvrent pas le rendu React ; le correctif H1/H3 est couvert par TypeScript, le build, la mesure ESLint et le test anonyme ci-dessous. Le **chemin de révocation lui-même reste non testé** (M5, risque résiduel accepté).
+
+#### Nouveau déploiement de validation
+
+| Élément | Valeur |
+|---|---|
+| ID | **`dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE`** |
+| URL | `platerform-fd5ihlrr6-ziadzerouala11-8743s-projects.vercel.app` |
+| État / cible / région | **READY** / production / `iad1` |
+| Source | `cli` (upload local de la copie **propre**, `HEAD = a0f97cb`, aucun fichier `.env` présent) |
+| SHA Git | **absent** (`meta: {}`) — comme pour le déploiement précédent |
+| Build distant | `✓ Compiled successfully in 29.7s`, `Finished TypeScript in 26.0s`, 150/150 pages statiques, `DEPLOY_EXIT=0` |
+| Smoke test non destructif | `/login` **200**, `/` **200**, `/dashboard` anonyme **307** (`Location: /login`) |
+
+#### Attribution des domaines (production toujours intacte)
+
+| Domaine | Pointe vers |
+|---|---|
+| `jisra.io` | `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` — **INCHANGÉ** |
+| `www.jisra.io` | `dpl_HQDHrTUT…` — **INCHANGÉ** |
+| `platerform.vercel.app` | `dpl_HQDHrTUT…` — **INCHANGÉ** |
+| `platerform-ziadzerouala11-8743s-projects.vercel.app` | **`dpl_7iwnrVYB…` (nouveau)** — réaffecté automatiquement, derrière l'authentification Vercel |
+
+Le précédent déploiement de validation (`dpl_DRraMTDw…`, sans le correctif) reste `READY` mais est **superseded** : le candidat à promouvoir est désormais **`dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE`**.
+
+#### État
+
+**Aucune promotion, aucun push, aucun merge, aucune écriture Supabase, aucun rollback.** Production sur `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` (SHA `4a420b6`). **En attente de l'autorisation explicite de promotion du correctif.**
 
 ### Exécution — [DATE / HEURE UTC]
 
