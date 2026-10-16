@@ -909,6 +909,43 @@ L'upload a inclus **11 fichiers d'artefacts versionnés** dans le dépôt (`_gen
 
 **Aucun `vercel promote`, aucun push, aucun merge, aucune migration ni écriture Supabase, aucun rollback, aucun test destructif.** La production (`jisra.io`) sert toujours `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` / SHA `4a420b6`.
 
+### Préparation de la promotion en production — 2026-10-16 02:45 → 03:10 UTC (03:45 → 04:10 locale)
+
+**Agent :** Cline
+**Commit initial :** `8093cf4`
+**Lot :** vérification des préconditions de promotion — **aucune promotion exécutée** (autorisation explicite requise)
+**Environnement :** API Vercel en lecture seule + Supabase en lecture seule + HTTP public sur `jisra.io`.
+
+#### Préconditions vérifiées
+
+| # | Précondition | Résultat observé | Statut |
+|---|---|---|---|
+| 1 | Candidat toujours READY | `dpl_DRraMTDwbrmQZp5fU2ZirpQyEMsy` — **READY**, `target: production`, région `iad1` | **PASS** |
+| 2 | Rollback toujours READY et disponible | `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` — **READY**, `target: production`, détient encore `jisra.io`, `www.jisra.io`, `platerform.vercel.app` | **PASS** |
+| 3 | `jisra.io` pointe toujours vers l'ancien déploiement | alias `jisra.io` → **`dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`** (SHA `4a420b6`), inchangé | **PASS** |
+| 4 | Aucun incident Supabase en cours | Dernière fenêtre journalisée exploitable **00:30 → 01:13 UTC** : **0 erreur 5xx, 0 × 429**, trafic normal (2 à 406 req/5 min), requêtes Auth servies | **PASS avec réserve** (voir limitation) |
+
+**Limitation du contrôle n° 4 :** les journaux Supabase ne sont ingérés que jusqu'à **01:13 UTC** (décalage d'ingestion d'environ 1 h 40). **Les 100 dernières minutes ne sont donc pas vérifiables** par les journaux. Contrôle de substitution en temps réel : `jisra.io` → **200**, `/login` → **200** (1,34 s), `/dashboard` anonyme → 200 — aucune indisponibilité constatée.
+
+#### Changement de comportement attendu après promotion (vérifié des deux côtés)
+
+| Route (anonyme) | Production actuelle `4a420b6` | Candidat `dpl_DRraMTDw…` |
+|---|---|---|
+| `/dashboard` | **200** — coquille applicative (13 290 octets, `animate-spin`) avec redirection **côté client** | **307** — `Location: /login`, redirection **côté serveur** |
+
+C'est le comportement voulu par le chantier (garde serveur au lieu d'une coquille puis redirection client). **À contrôler après promotion** : `/dashboard` anonyme doit passer de 200 à **307**. Aucun `Location` ni cookie n'est exposé par la production actuelle.
+
+#### Risques explicitement NON validés (à accepter par l'utilisateur)
+
+- **M5 — non testé** : révocation de boutique, rétrogradation de rôle et panne Auth. Aucun environnement isolé n'existe ; ces scénarios ne peuvent pas être exécutés sans modifier des données réelles. **État : NON VALIDÉ, non PASS.**
+- **H1/H3 — non corrigés** : lecture/écriture de `ref` pendant le rendu (`lib/store-context.tsx` 268 et 491-501, `components/providers.tsx` 328). Risque réel mais **non bloquant** : l'isolation ne dépend pas du drapeau `isRevoking` (la liste et la sélection sont réconciliées dans le même rendu). **État : NON VALIDÉ, non PASS.**
+- **Aucun gain de performance mesuré** ; la promotion se justifie par les correctifs fonctionnels.
+- **Traçabilité** : le déploiement candidat n'a pas de SHA Git rattaché (`meta: {}`).
+
+#### État
+
+**Aucune promotion, aucun push, aucun merge, aucune écriture Supabase, aucun rollback.** La production sert toujours `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`. **En attente de l'acceptation explicite des risques M5 et H1/H3 et de l'autorisation de mise en production.**
+
 ### Exécution — [DATE / HEURE UTC]
 
 **Agent :** [Nom]  
