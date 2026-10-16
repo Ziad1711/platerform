@@ -89,10 +89,7 @@ export function PricingCard({ plan, featured, index }: PricingCardProps) {
         ))}
       </ul>
 
-      <MarketingLink
-        href={plan.price === 0 ? '/auth/register' : `/auth/register?plan=${plan.name.toLowerCase()}`}
-        className="mt-8 w-full"
-      >
+      <MarketingLink href="/signup" className="mt-8 w-full">
         {plan.price === 0 ? 'Commencer gratuitement' : 'Choisir ce plan'}
       </MarketingLink>
     </motion.div>
