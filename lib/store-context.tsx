@@ -415,17 +415,21 @@ export function StoreProvider({
   // plus, ou que le rôle de l'utilisateur a changé pour un store conservé, on
   // vide toute la frontière privée et on remonte les consommateurs pour vider
   // leurs états locaux.
-  const prevAccessRef = useRef<Record<string, Role | null> | null>(null)
+  // Dernier accès CONFIRMÉ, conservé en état (et non dans une ref) : le rendu
+  // peut ainsi le comparer sans lire de ref pendant le rendu (règle React).
+  const [prevConfirmedAccess, setPrevConfirmedAccess] = useState<Record<string, Role | null> | null>(null)
 
   useEffect(() => {
     if (isStoresLoading || isStoresError) return
 
     const currentAccess = toAccessMap(accessibleStores)
-    const previousAccess = prevAccessRef.current
-    prevAccessRef.current = currentAccess
+    const previousAccess = prevConfirmedAccess
 
-    // Premier chargement réussi : rien à purger.
-    if (previousAccess === null) return
+    // Premier chargement réussi : on mémorise la référence, rien à purger.
+    if (previousAccess === null) {
+      setPrevConfirmedAccess(currentAccess)
+      return
+    }
 
     // Un accès retiré (id absent) ou un rôle modifié (ex. rétrogradation)
     // sont traités de la même façon : les données lues avec l'ancien droit
@@ -447,7 +451,9 @@ export function StoreProvider({
     // Renouvelle la frontière privée : remonter les consommateurs (tables, KPI,
     // graphiques, suivi) pour vider leurs états locaux et relire le contexte.
     setAccessVersion((version) => version + 1)
-  }, [accessibleStores, isStoresLoading, isStoresError, queryClient])
+    // Nouvelle référence confirmée : le rendu suivant n'est plus « en révocation ».
+    setPrevConfirmedAccess(currentAccess)
+  }, [accessibleStores, prevConfirmedAccess, isStoresLoading, isStoresError, queryClient])
 
   // Chargement : uniquement s'il n'existe AUCUN instantané confirmé (le serveur
   // en fournit un au premier rendu ; sinon une revalidation est en cours).
@@ -488,14 +494,13 @@ export function StoreProvider({
   // confirme un changement d'accès (magasin retiré OU rôle modifié), AVANT
   // l'effet de purge : le rendu ne doit jamais montrer un état privé lu avec
   // un droit qui n'est plus valide.
-  const previousConfirmedAccess = prevAccessRef.current
   const currentConfirmedAccess = toAccessMap(accessibleStores)
   const isRevoking =
     !isStoresLoading &&
     !isStoresError &&
-    previousConfirmedAccess !== null &&
-    Object.keys(previousConfirmedAccess).some(
-      (id) => previousConfirmedAccess[id] !== currentConfirmedAccess[id]
+    prevConfirmedAccess !== null &&
+    Object.keys(prevConfirmedAccess).some(
+      (id) => prevConfirmedAccess[id] !== currentConfirmedAccess[id]
     )
 
   if (isRevoking) {

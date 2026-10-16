@@ -325,7 +325,11 @@ export function AppProviders({
   // Référence lue par la vérification de secours (effet séparé) : elle pointe
   // toujours sur l'application d'identité en vigueur.
   const applyIdentityRef = useRef(applyIdentity)
-  applyIdentityRef.current = applyIdentity
+  // Mise à jour APRÈS le rendu (jamais pendant) : le rendu reste pur, et la
+  // vérification de secours lit toujours la dernière identité appliquée.
+  useEffect(() => {
+    applyIdentityRef.current = applyIdentity
+  })
 
   // Demande de vérification d'identité de secours : elle est POSÉE par l'écoute
   // Auth mais EXÉCUTÉE par un effet dédié, hors du callback du SDK. Rappeler une
