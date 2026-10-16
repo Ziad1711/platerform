@@ -3,7 +3,7 @@
 **Projet :** Jisra  
 **Document :** Suivi permanent des optimisations de performance  
 **Dernière mise à jour initiale :** 15 octobre 2026  
-**Dernière mise à jour :** 16 octobre 2026 — correctif **H1/H3** appliqué (commit `a0f97cb`, refs au rendu supprimées ; `react-hooks/refs` 10 → 1 sur les fichiers corrigés), revalidation complète **PASS** (tsc, build `uhX-Q1dy…`, bundle 4 contrôles, mocks 13/13 + 10/10) et **nouveau déploiement de validation** `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE` **READY** ; `jisra.io` **inchangé** ⇒ **en attente d'autorisation de promotion**. Voir §7
+**Dernière mise à jour :** 16 octobre 2026 — **MISE EN PRODUCTION EFFECTUÉE** : `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE` (correctif H1/H3, commit `a0f97cb`) promu, `jisra.io` / `www.jisra.io` / `platerform.vercel.app` basculés ; parcours publics 200, routes privées anonymes 307 ; **0 erreur runtime Vercel, 0 × 5xx / 0 × 429 Supabase** après promotion ; aucun rollback nécessaire. Rollback prêt : `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`. Risques résiduels : **M5 (accepté)**, H2 (faible), aucun gain de performance mesuré. Voir §7
 **Source de référence :** `memory-bank/performance-optimization-plan.md`
 
 ## 1. Objectif
@@ -1015,6 +1015,83 @@ Le précédent déploiement de validation (`dpl_DRraMTDw…`, sans le correctif)
 #### État
 
 **Aucune promotion, aucun push, aucun merge, aucune écriture Supabase, aucun rollback.** Production sur `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` (SHA `4a420b6`). **En attente de l'autorisation explicite de promotion du correctif.**
+
+#### Accès aux tests manuels (aucune promotion)
+
+L'utilisateur a choisi de tester lui-même le déploiement de validation avant toute promotion.
+
+| Élément | Valeur |
+|---|---|
+| URL testée | `https://platerform-fd5ihlrr6-ziadzerouala11-8743s-projects.vercel.app` |
+| Lien de partage créé | `? _vercel_share=…` (généré via l'API Vercel, **expire le 17/10/2026 à 00:26 locale**) |
+| Alternative | ouvrir l'URL dans un navigateur connecté au compte Vercel propriétaire (l'authentification Vercel laisse passer) |
+| Déploiement évalué | `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE` (correctif H1/H3) |
+
+**Rappels importants transmis à l'utilisateur :** ce déploiement utilise **la même base Supabase que la production** (les tests écrivent réellement) ; `jisra.io` reste sur l'ancien déploiement ; `/dashboard` anonyme renvoie désormais **307** (garde serveur) au lieu de 200.
+
+Protocole demandé : login → dashboard → changement de boutique (« Tous les magasins » ↔ boutique) → logout puis retour arrière/URL privée → (si possible) second compte A → B. Critères d'arrêt immédiat : données d'un autre compte ou d'une autre boutique, contenu privé après déconnexion, boucle de redirection, connexion impossible.
+
+**Promotion toujours en attente d'un verdict explicite.**
+
+### Promotion en production — 2026-10-16 01:21:57 UTC (02:21:57 locale)
+
+**Agent :** Cline
+**Autorisation :** explicite de l'utilisateur (« J'autorise la promotion de `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE` en production, avec M5 accepté comme risque résiduel »)
+**Commande exécutée :** `vercel promote dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE --yes` → **`Success! platerform was promoted … [3s]`**, `PROMOTE_EXIT=0`
+
+#### Précontrôles immédiatement avant promotion
+
+| Contrôle | Résultat |
+|---|---|
+| Candidat `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE` | **READY** (production, `iad1`) |
+| Rollback `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY` | **READY**, détenait encore les domaines |
+| `jisra.io` avant promotion | HTTP 200, pointait sur l'ancien déploiement |
+
+#### Attribution des domaines après promotion — bascule confirmée
+
+| Domaine | Pointe désormais vers |
+|---|---|
+| `jisra.io` | **`dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE`** (bascule confirmée via l'API) |
+| `www.jisra.io` | **`dpl_7iwnrVYB…`** (308 → `jisra.io`) |
+| `platerform.vercel.app` | **`dpl_7iwnrVYB…`** |
+| `platerform-ziadzerouala11-8743s-projects.vercel.app` | `dpl_7iwnrVYB…` |
+
+#### Vérifications HTTP publiques après promotion
+
+| Route | Résultat |
+|---|---|
+| `/` | **200** (0,77 s) |
+| `/login` | **200** (0,33 s) |
+| `/signup` | **200** (0,33 s) |
+| `/pricing` | **200** (0,69 s) |
+| `/dashboard` (anonyme) | **307 → `Location: /login`** — comportement serveur attendu |
+| `/settings`, `/sales` (anonymes) | **307** |
+| `www.jisra.io` | **308** (→ `jisra.io`) |
+
+Le passage attendu `200 → 307` sur `/dashboard` anonyme est **confirmé en production**.
+
+#### Surveillance (aucune anomalie)
+
+| Source | Fenêtre | Résultat |
+|---|---|---|
+| Erreurs runtime Vercel | 30 min (couvre la promotion) | **aucune erreur** |
+| Logs Vercel `error`/`fatal` | 15 min (couvre la promotion) | **aucun log d'erreur** |
+| Supabase `edge_logs` | tranche 01:25 UTC (post-promotion) | **473 requêtes — 0 × 5xx, 0 × 429**, 34 requêtes Auth servies |
+
+**Aucun rollback n'a été nécessaire** : la procédure de retour arrière reste disponible (`vercel rollback` → `dpl_HQDHrTUT4GmnsrDF3QhyBfFy67fY`, SHA `4a420b6`).
+
+#### Risques résiduels après mise en production (inchangés, non validés)
+
+- **M5** : révocation de boutique, rétrogradation de rôle, panne Auth — **non testés**, acceptés explicitement comme risque résiduel.
+- **H2** : `lib/store-context.tsx:268` (écriture de ref pendant le rendu), classé risque faible, **hors périmètre corrigé**.
+- **Aucun gain de performance mesuré** : la mise en production se justifie par les correctifs fonctionnels (garde serveur, isolation des accès, sélection validée).
+- **Traçabilité** : déploiement de production issu d'un upload CLI, **sans SHA Git rattaché** (`meta: {}`) ; correspondance établie par le worktree vérifié `a0f97cb`.
+- **Lien de partage** créé pour les tests manuels : actif jusqu'au 17/10/2026 00:26 locale, révocable sur demande.
+- Le déploiement précédent `dpl_DRraMTDw…` (sans correctif) reste READY : **`isRollbackCandidate: false`**, non éligible au rollback automatique.
+
+#### État
+
+**Production sur `dpl_7iwnrVYB9eu2XqdwWbuVguLpPbpE`.** Aucun push, aucun merge, aucune écriture Supabase, aucune migration.
 
 ### Exécution — [DATE / HEURE UTC]
 
