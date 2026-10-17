@@ -1,9 +1,13 @@
 import type { Metadata } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { LegalPage } from '@/components/marketing/legal/legal-page'
 
 export const metadata: Metadata = {
   title: 'Mentions légales',
   description: 'Mentions légales initiales du site marketing jisra.',
+  alternates: {
+    canonical: `${SITE_URL}/legal/mentions`,
+  },
 }
 
 export default function MentionsPage() {

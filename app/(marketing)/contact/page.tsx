@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { PageHero } from '@/components/marketing/shared/page-hero'
 import { Container } from '@/components/marketing/shared/container'
 import { MotionSection } from '@/components/marketing/shared/motion-section'
@@ -8,6 +9,9 @@ import { AnimatedButton } from '@/components/marketing/shared/animated-button'
 export const metadata: Metadata = {
   title: 'Contact',
   description: 'Parlez à l’équipe jisra pour cadrer votre déploiement et vos besoins opérationnels.',
+  alternates: {
+    canonical: `${SITE_URL}/contact`,
+  },
 }
 
 export default function ContactPage() {

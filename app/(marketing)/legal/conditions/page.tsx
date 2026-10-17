@@ -1,10 +1,14 @@
 import type { Metadata } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { LegalPage } from '@/components/marketing/legal/legal-page'
 
 export const metadata: Metadata = {
   title: 'Conditions d’utilisation',
   description:
     'Conditions d’utilisation de jisra : accès à la plateforme, abonnement, obligations de l’utilisateur, intégrations tierces, responsabilité et résiliation.',
+  alternates: {
+    canonical: `${SITE_URL}/legal/conditions`,
+  },
 }
 
 export default function ConditionsPage() {

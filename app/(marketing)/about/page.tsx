@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { PageHero } from '@/components/marketing/shared/page-hero'
 import { Container } from '@/components/marketing/shared/container'
 import { MotionSection } from '@/components/marketing/shared/motion-section'
@@ -7,6 +8,9 @@ import { Card3D } from '@/components/marketing/shared/card-3d'
 export const metadata: Metadata = {
   title: 'À propos',
   description: 'Découvrez la mission de jisra et sa vision pour les e-commerçants marocains.',
+  alternates: {
+    canonical: `${SITE_URL}/about`,
+  },
 }
 
 const values = [

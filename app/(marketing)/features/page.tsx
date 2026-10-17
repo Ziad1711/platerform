@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Image from 'next/image'
 import Link from 'next/link'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { featurePages, integrations, modules } from '@/lib/marketing/site'
 import { PageHero } from '@/components/marketing/shared/page-hero'
 import { Container } from '@/components/marketing/shared/container'
@@ -10,6 +11,9 @@ import { MotionSection } from '@/components/marketing/shared/motion-section'
 export const metadata: Metadata = {
   title: 'Fonctionnalités',
   description: 'Explorez les modules jisra : ventes, publicité, livraison, stock, assistant IA et multi-stores.',
+  alternates: {
+    canonical: `${SITE_URL}/features`,
+  },
 }
 
 export default function FeaturesPage() {

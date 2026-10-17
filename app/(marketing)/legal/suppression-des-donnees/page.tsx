@@ -1,10 +1,14 @@
 import type { Metadata } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { LegalPage } from '@/components/marketing/legal/legal-page'
 
 export const metadata: Metadata = {
   title: 'Instructions de suppression des données',
   description:
     'Comment demander la suppression de vos données personnelles chez jisra : depuis la plateforme, en révoquant l’accès Facebook/Meta ou par email.',
+  alternates: {
+    canonical: `${SITE_URL}/legal/suppression-des-donnees`,
+  },
 }
 
 export default function DataDeletionPage() {

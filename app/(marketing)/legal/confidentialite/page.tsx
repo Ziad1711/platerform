@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { LegalPage } from '@/components/marketing/legal/legal-page'
 import { AnalyticsConsentControl } from '@/components/analytics/analytics-consent-control'
 
@@ -6,6 +7,9 @@ export const metadata: Metadata = {
   title: 'Politique de confidentialité',
   description:
     'Politique de confidentialité de jisra : données collectées, finalités, cookies, sous-traitants, sécurité, conservation et droits des utilisateurs.',
+  alternates: {
+    canonical: `${SITE_URL}/legal/confidentialite`,
+  },
 }
 
 export default function PrivacyPage() {

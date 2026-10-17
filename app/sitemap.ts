@@ -3,7 +3,6 @@ import { SITE_URL } from '@/lib/marketing/site-url'
 
 const routes = [
   '',
-  '/login',
   '/pricing',
   '/features',
   '/features/ventes',
@@ -18,6 +17,7 @@ const routes = [
   '/legal/conditions',
   '/legal/confidentialite',
   '/legal/mentions',
+  '/legal/suppression-des-donnees',
 ]
 
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -25,7 +25,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   return routes.map((route) => ({
     url: `${baseUrl}${route}`,
-    lastModified: new Date(),
     changeFrequency: route === '' ? 'weekly' : 'monthly',
     priority: route === '' ? 1 : 0.7,
   }))

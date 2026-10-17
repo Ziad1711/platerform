@@ -1,6 +1,7 @@
 import Image from 'next/image'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { SITE_URL } from '@/lib/marketing/site-url'
 import { featurePages } from '@/lib/marketing/site'
 import { PageHero } from '@/components/marketing/shared/page-hero'
 import { Container } from '@/components/marketing/shared/container'
@@ -23,6 +24,9 @@ export async function generateMetadata({ params }: FeaturePageProps): Promise<Me
   return {
     title: feature.title,
     description: feature.description,
+    alternates: {
+      canonical: `${SITE_URL}/features/${feature.slug}`,
+    },
   }
 }
 
