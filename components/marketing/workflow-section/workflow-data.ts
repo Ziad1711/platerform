@@ -45,7 +45,7 @@ export const nodes: WorkflowNode[] = [
     logo: '/icons/youcan-shop-icon-filled-256.png',
     position: { x: 200, y: 150 },
     type: 'provider',
-    tooltip: 'YouCan, Shopify ou LightFunnels — la commande arrive automatiquement',
+    tooltip: 'YouCan ou LightFunnels — la commande arrive automatiquement',
   },
   {
     id: 'jisra-receive',

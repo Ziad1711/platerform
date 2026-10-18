@@ -1,16 +1,23 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { ShoppingBag, Zap, Layers, Globe, ShieldCheck } from 'lucide-react'
+import { ShoppingBag, Zap, Layers, ShieldCheck } from 'lucide-react'
 import NextImage from 'next/image'
 import { Container } from '@/components/marketing/shared/container'
 import { fadeUp } from '@/lib/marketing/motion'
 
-const stores = [
+type StoreBadge = {
+  name: string
+  logo: string
+  color: string
+  border: string
+  soon?: boolean
+}
+
+const stores: StoreBadge[] = [
   { name: 'YouCan', logo: '/icons/youcan-shop-icon-filled-256.png', color: 'bg-[#000000]/10', border: 'border-white/10' },
-  { name: 'Shopify', logo: '/icons/shopify.png', color: 'bg-[#95BF47]/10', border: 'border-[#95BF47]/20' },
+  { name: 'Shopify', logo: '/icons/shopify.png', color: 'bg-[#95BF47]/10', border: 'border-[#95BF47]/20', soon: true },
   { name: 'LightFunnels', logo: '/icons/unnamed.png', color: 'bg-blue-500/10', border: 'border-blue-500/20' },
-  { name: 'WooCommerce', logo: '/icons/icon-192.svg', color: 'bg-[#96588A]/10', border: 'border-[#96588A]/20' },
 ]
 
 export function StoreIntegrationSection() {
@@ -35,10 +42,10 @@ export function StoreIntegrationSection() {
                 Multi-Store Sync
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-                Vos boutiques, synchronisées en 2 minutes.
+                Vos boutiques, synchronisées dans un seul flux.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                Que vous vendiez sur YouCan, Shopify ou via des funnels LightFunnels, jisra centralise toutes vos commandes dans un flux unique. Fini les exports CSV et les erreurs de saisie manuelle.
+                Que vous vendiez sur YouCan ou via des funnels LightFunnels, jisra centralise vos commandes dans un flux unique, sans ressaisie manuelle.
               </p>
             </motion.div>
 
@@ -49,7 +56,7 @@ export function StoreIntegrationSection() {
                 </div>
                 <div>
                   <h4 className="font-semibold text-jisra-cream">Import Automatique Direct</h4>
-                  <p className="text-sm text-jisra-cream/50">Dès qu'une commande est créée sur votre store, elle apparaît instantanément dans jisra.</p>
+                  <p className="text-sm text-jisra-cream/50">Les commandes créées sur vos boutiques connectées sont centralisées dans jisra, sans ressaisie.</p>
                 </div>
               </div>
               <div className="flex items-start gap-4">
@@ -58,23 +65,33 @@ export function StoreIntegrationSection() {
                 </div>
                 <div>
                   <h4 className="font-semibold text-jisra-cream">Gestion Multi-Stores</h4>
-                  <p className="text-sm text-jisra-cream/50">Pilotez 10 stores YouCan et 5 boutiques Shopify depuis un seul compte consolidé.</p>
+                  <p className="text-sm text-jisra-cream/50">Pilotez plusieurs boutiques depuis un seul compte consolidé.</p>
                 </div>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-4">
               {stores.map((store) => (
-                <div key={store.name} className={`flex items-center gap-2 rounded-2xl border ${store.border} ${store.color} px-4 py-2`}>
+                <div
+                  key={store.name}
+                  className={`flex items-center gap-2 rounded-2xl border ${store.border} ${store.color} px-4 py-2 ${store.soon ? 'opacity-60' : ''}`}
+                >
                   <div className="relative h-5 w-5">
-                    <NextImage src={store.logo} alt={store.name} fill className="object-contain" />
+                    <NextImage
+                      src={store.logo}
+                      alt={store.soon ? `${store.name} (bientôt disponible)` : store.name}
+                      fill
+                      className="object-contain"
+                    />
                   </div>
                   <span className="text-xs font-medium text-jisra-cream/80">{store.name}</span>
+                  {store.soon ? (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.15em] text-jisra-cream/50">
+                      Bientôt
+                    </span>
+                  ) : null}
                 </div>
               ))}
-              <div className="flex items-center gap-2 rounded-2xl border border-white/5 bg-white/5 px-4 py-2 opacity-50">
-                <span className="text-xs font-medium text-jisra-cream/40">+ Magento, PrestaShop</span>
-              </div>
             </div>
           </div>
 
@@ -109,9 +126,12 @@ export function StoreIntegrationSection() {
               <motion.div 
                 animate={{ y: [0, 10, 0] }}
                 transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-                className="absolute bottom-16 right-12 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#95BF47] border border-white/10 shadow-xl shadow-black/20"
+                className="absolute bottom-16 right-12 flex flex-col items-center gap-1"
               >
-                <NextImage src="/icons/shopify.png" alt="Shopify" width={32} height={32} />
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-[#95BF47] opacity-40 shadow-xl shadow-black/20">
+                  <NextImage src="/icons/shopify.png" alt="Shopify (bientôt disponible)" width={32} height={32} />
+                </div>
+                <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-jisra-cream/40">Bientôt</span>
               </motion.div>
 
               <motion.div 

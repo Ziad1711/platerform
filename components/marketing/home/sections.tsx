@@ -1,6 +1,7 @@
 'use client'
 
 import Image from 'next/image'
+import Link from 'next/link'
 import {
   ArrowRight,
   FileSpreadsheet,
@@ -82,6 +83,13 @@ const moduleIcons = [
   Users,
   Bot,
 ]
+
+const moduleLinks: Record<string, string> = {
+  'Ventes & commandes': '/features/ventes',
+  'Stock & inventaire': '/features/stock',
+  Livraison: '/features/livraison',
+  'Publicité & ROI': '/features/publicite',
+}
 
 const homePlanFeatures: Record<string, string[]> = {
   Gratuit: [
@@ -249,14 +257,28 @@ export function HomeSections() {
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {modules.map((module, i) => {
               const Icon = moduleIcons[i]
+              const href = moduleLinks[module]
+              const content = (
+                <>
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-jisra-green/10">
+                    <Icon className="h-6 w-6 text-jisra-green" />
+                  </div>
+                  <p className="text-lg font-semibold text-jisra-cream">{module}</p>
+                </>
+              )
+
               return (
                 <Card3D key={module} className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-jisra-green/10">
-                      <Icon className="h-6 w-6 text-jisra-green" />
-                    </div>
-                    <p className="text-lg font-semibold text-jisra-cream">{module}</p>
-                  </div>
+                  {href ? (
+                    <Link
+                      href={href}
+                      className="flex items-center gap-4 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-jisra-green/60"
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div className="flex items-center gap-4">{content}</div>
+                  )}
                 </Card3D>
               )
             })}
