@@ -1,16 +1,17 @@
 'use client'
 
 import Image from 'next/image'
-import { ArrowRight, Sparkles } from 'lucide-react'
+import { Calculator, Receipt, ShoppingCart, Sparkles, Truck } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { heroStats, logoMarquee } from '@/lib/marketing/site'
+import { heroHighlights, logoMarquee, logoMarqueeNotice } from '@/lib/marketing/site'
 import { Container } from '@/components/marketing/shared/container'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
 import { MarqueeLogos } from '@/components/marketing/shared/marquee-logos'
-import { MetricCounter } from '@/components/marketing/shared/metric-counter'
 import { MotionSection } from '@/components/marketing/shared/motion-section'
 import { Spotlight } from '@/components/marketing/shared/spotlight'
 import { fadeUp, heroVisualFloat } from '@/lib/marketing/motion'
+
+const highlightIcons = [ShoppingCart, Receipt, Truck, Calculator]
 
 export function HomeHero() {
   return (
@@ -33,7 +34,7 @@ export function HomeHero() {
                 Vos commandes, vos coûts et votre <span className="text-gradient-brand">profit</span> au même endroit.
               </h1>
               <p className="max-w-2xl text-base leading-8 text-jisra-cream/66 sm:text-lg">
-                Jisra rassemble ventes, publicité, livraison et stock pour vous aider à suivre ce que votre activité vous rapporte réellement.
+                Jisra rassemble ventes, publicité, livraison et stock pour vous aider à suivre ce que votre activité vous rapporte à partir de vos données.
               </p>
             </motion.div>
 
@@ -44,10 +45,22 @@ export function HomeHero() {
               </MarketingLink>
             </motion.div>
 
-            <motion.div variants={fadeUp} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {heroStats.map((stat) => (
-                <MetricCounter key={stat.label} value={stat.value} label={stat.label} />
-              ))}
+            <motion.div variants={fadeUp} className="grid gap-3 sm:grid-cols-2">
+              {heroHighlights.map((item, index) => {
+                const Icon = highlightIcons[index]
+                return (
+                  <div
+                    key={item.title}
+                    className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-xl"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon className="h-4 w-4 shrink-0 text-jisra-green-light" aria-hidden="true" />
+                      <p className="text-sm font-semibold text-jisra-cream">{item.title}</p>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-jisra-cream/58">{item.description}</p>
+                  </div>
+                )
+              })}
             </motion.div>
           </div>
 
@@ -77,7 +90,14 @@ export function HomeHero() {
           </motion.div>
         </MotionSection>
 
-        <motion.div variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-100px' }}>
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: '-100px' }}
+          className="space-y-3"
+        >
+          <p className="text-center text-sm leading-6 text-jisra-cream/62">{logoMarqueeNotice}</p>
           <MarqueeLogos items={logoMarquee} />
         </motion.div>
       </Container>

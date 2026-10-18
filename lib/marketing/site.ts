@@ -8,22 +8,29 @@ export const marketingNav = [
   { href: '/pricing', label: 'Tarifs' },
 ]
 
-export const heroStats = [
-  { value: '+12 h', label: 'gagnées par semaine' },
-  { value: '100 %', label: 'vision centralisée du business' },
-  { value: 'API', label: 'connexion sécurisée des stores' },
-  { value: '24/7', label: 'lecture de la rentabilité réelle' },
+export const heroHighlights = [
+  {
+    title: 'Commandes centralisées',
+    description: 'Boutiques YouCan et LightFunnels réunies dans un même flux de travail.',
+  },
+  {
+    title: 'Coûts rapprochés',
+    description: 'Produit, publicité et livraison reliés à chaque commande.',
+  },
+  {
+    title: 'Livraison suivie',
+    description: 'Statuts transporteurs rapprochés lorsqu’ils sont transmis par l’API.',
+  },
+  {
+    title: 'Marge calculée',
+    description: 'À partir des revenus et des coûts que vous enregistrez.',
+  },
 ]
 
-export const logoMarquee = [
-  'YouCan',
-  'LightFunnels',
-  'Meta',
-  'Rapid Delivery',
-  'Multi-stores',
-  'Profit Net',
-  'MAD Native',
-]
+export const logoMarquee = ['YouCan', 'LightFunnels', 'Meta Ads', 'Rapid Delivery']
+
+export const logoMarqueeNotice =
+  'Outils connectables selon les intégrations disponibles et la configuration de votre compte.'
 
 export const automations = [
   'Synchronisation des commandes depuis YouCan et LightFunnels',
@@ -138,27 +145,6 @@ export const faqItems = [
     question: 'Dois-je connecter mes intégrations dès le début ?',
     answer:
       'Non, vous pouvez démarrer progressivement puis brancher vos stores et vos sources de dépenses quand vous êtes prêt.',
-  },
-]
-
-export const testimonials = [
-  {
-    quote:
-      'On a enfin une lecture claire de ce que chaque commande nous laisse vraiment, pub et livraison incluses.',
-    author: 'Nadia A.',
-    role: 'Founder · DTC beauté',
-  },
-  {
-    quote:
-      'Le vrai gain, ce n’est pas seulement le dashboard. C’est l’exécution plus rapide entre store, équipe et livraison.',
-    author: 'Yassine B.',
-    role: 'COO · Multi-stores maison',
-  },
-  {
-    quote:
-      'Avant, notre rentabilité était une hypothèse. Avec jisra, c’est un chiffre pilotable chaque jour.',
-    author: 'Salma R.',
-    role: 'Head of Growth · Fashion commerce',
   },
 ]
 

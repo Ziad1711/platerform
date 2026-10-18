@@ -32,7 +32,6 @@ import {
   homeFeatureHighlights,
   integrations,
   modules,
-  testimonials,
 } from '@/lib/marketing/site'
 import { getPlans } from '@/services/plans'
 import { Container } from '@/components/marketing/shared/container'
@@ -40,9 +39,9 @@ import { SectionHeading } from '@/components/marketing/shared/section-heading'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
 import { MotionSection } from '@/components/marketing/shared/motion-section'
 import { Card3D } from '@/components/marketing/shared/card-3d'
-import { TestimonialsCarousel } from '@/components/marketing/shared/testimonials-carousel'
 import { fadeUp } from '@/lib/marketing/motion'
 import { WorkflowSection } from '@/components/marketing/workflow-section/WorkflowSection'
+import { OrderJourneySection } from './order-journey-section'
 import { AiFeatureSection } from './ai-feature-section'
 import { AdsIntegrationSection } from './ads-integration-section'
 import { NormalizationSection } from './normalization-section'
@@ -390,16 +389,7 @@ export function HomeSections() {
         </Container>
       </MotionSection>
 
-      <MotionSection className="py-20 sm:py-24" withStagger>
-        <Container className="space-y-12">
-          <SectionHeading
-            eyebrow="Témoignages"
-            title="Des équipes qui veulent enfin une lecture business exploitable"
-            description="Nous parlons à des marchands qui n’acceptent plus de piloter à l’approximation."
-          />
-          <TestimonialsCarousel items={testimonials} />
-        </Container>
-      </MotionSection>
+      <OrderJourneySection />
 
       <MotionSection className="py-20 sm:py-24" withStagger>
         <Container className="space-y-12">
