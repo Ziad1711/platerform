@@ -11,18 +11,19 @@ type StoreBadge = {
   logo: string
   color: string
   border: string
+  status: 'Disponible' | 'Bientôt'
   soon?: boolean
 }
 
 const stores: StoreBadge[] = [
-  { name: 'YouCan', logo: '/icons/youcan-shop-icon-filled-256.png', color: 'bg-[#000000]/10', border: 'border-white/10' },
-  { name: 'Shopify', logo: '/icons/shopify.png', color: 'bg-[#95BF47]/10', border: 'border-[#95BF47]/20', soon: true },
-  { name: 'LightFunnels', logo: '/icons/unnamed.png', color: 'bg-blue-500/10', border: 'border-blue-500/20' },
+  { name: 'YouCan', logo: '/icons/youcan-shop-icon-filled-256.png', color: 'bg-[#000000]/10', border: 'border-white/10', status: 'Disponible' },
+  { name: 'Shopify', logo: '/icons/shopify.png', color: 'bg-[#95BF47]/10', border: 'border-[#95BF47]/20', status: 'Bientôt', soon: true },
+  { name: 'LightFunnels', logo: '/icons/unnamed.png', color: 'bg-blue-500/10', border: 'border-blue-500/20', status: 'Disponible' },
 ]
 
 export function StoreIntegrationSection() {
   return (
-    <section id="integrations" className="relative overflow-hidden py-20 sm:py-28">
+    <section id="boutiques" className="relative overflow-hidden py-20 sm:py-28">
       {/* Background Decor */}
       <div className="absolute right-0 bottom-0 -z-10 h-[600px] w-[600px] bg-jisra-green/5 blur-[120px]" />
       
@@ -42,10 +43,10 @@ export function StoreIntegrationSection() {
                 Multi-Store Sync
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-                Vos boutiques, synchronisées dans un seul flux.
+                Plusieurs boutiques. Un seul endroit pour vos commandes.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                Que vous vendiez sur YouCan ou via des funnels LightFunnels, jisra centralise vos commandes dans un flux unique, sans ressaisie manuelle.
+                Connectez vos boutiques YouCan et LightFunnels pour retrouver leurs commandes dans Jisra et passer d’une boutique à une vue d’ensemble.
               </p>
             </motion.div>
 
@@ -85,11 +86,15 @@ export function StoreIntegrationSection() {
                     />
                   </div>
                   <span className="text-xs font-medium text-jisra-cream/80">{store.name}</span>
-                  {store.soon ? (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.15em] text-jisra-cream/50">
-                      Bientôt
-                    </span>
-                  ) : null}
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.15em] ${
+                      store.soon
+                        ? 'border-white/10 bg-white/5 text-jisra-cream/50'
+                        : 'border-jisra-green/30 bg-jisra-green/10 text-jisra-green-light'
+                    }`}
+                  >
+                    {store.status}
+                  </span>
                 </div>
               ))}
             </div>

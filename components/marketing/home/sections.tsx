@@ -228,8 +228,8 @@ export function HomeSections() {
         <Container className="space-y-12">
           <SectionHeading
             eyebrow="Automatisations"
-            title="Les tâches critiques s’exécutent sans friction"
-            description="Chaque automatisation réduit du temps perdu, fiabilise l’exécution et améliore la lecture du business."
+            title="Moins de ressaisie. Plus de temps pour piloter."
+            description="Les commandes connectées, les mouvements suivis et les données rapprochées réduisent les allers-retours entre vos outils."
           />
           <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
             {automations.map((item, i) => {
@@ -299,11 +299,11 @@ export function HomeSections() {
               <div>
                 <p className="text-sm font-semibold text-jisra-cream">Section — Intégrations</p>
                 <p className="mt-1 text-sm text-jisra-cream/58">
-                  Les connecteurs critiques sont présentés comme une couche produit à part entière, pas comme une simple liste.
+                  Intégrations disponibles, fonctionnalité native et connexion à venir sont distinguées explicitement.
                 </p>
               </div>
               <div className="rounded-full border border-jisra-green/20 bg-jisra-green/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-jisra-green-light">
-                6 connecteurs clés
+                {integrations.filter((integration) => integration.status === 'Disponible').length} intégrations disponibles
               </div>
             </div>
 
@@ -322,7 +322,7 @@ export function HomeSections() {
                       </div>
                       <div>
                         <p className="text-lg font-semibold text-jisra-cream">{integration.name}</p>
-                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-jisra-cream/42">connecteur business</p>
+                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-jisra-cream/42">{integration.kind}</p>
                       </div>
                     </div>
                     <span className="rounded-full bg-jisra-green/10 px-3 py-1 text-xs font-semibold text-jisra-green">

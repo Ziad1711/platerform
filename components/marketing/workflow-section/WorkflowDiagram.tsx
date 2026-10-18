@@ -33,8 +33,8 @@ export function WorkflowDiagram() {
     branches.find(n => n.id === 'ads'),
     nodes.find(n => n.id === 'notif-push'),
     nodes.find(n => n.id === 'confirm'),
-    branches.find(n => n.id === 'stock'),
     nodes.find(n => n.id === 'delivery'),
+    branches.find(n => n.id === 'stock'),
     nodes.find(n => n.id === 'delivered'),
     nodes.find(n => n.id === 'kpis'),
   ].filter(Boolean)
@@ -43,7 +43,7 @@ export function WorkflowDiagram() {
     <div
       className="relative mx-auto w-full max-w-7xl"
       role="img"
-      aria-label="Schéma du workflow d'automatisation jisra"
+      aria-label="Schéma du parcours de commande jisra"
     >
       {/* --- DESKTOP VIEW (>= 1024px) --- */}
       <div 

@@ -26,12 +26,12 @@ export const logoMarquee = [
 ]
 
 export const automations = [
-  'Synchronisation automatique des commandes depuis YouCan et LightFunnels',
-  'Création automatique des colis chez Rapid Delivery et autres transporteurs',
-  'Mise à jour automatique des statuts livraison: confirmé, ramassé, livré, retourné',
-  'Import automatique des dépenses Facebook Ads avec allocation par produit et commande',
-  'Normalisation intelligente des villes FR/AR avec apprentissage progressif',
-  'Calcul automatique du vrai profit net par commande',
+  'Synchronisation des commandes depuis YouCan et LightFunnels',
+  'Création de colis depuis Jisra pour les transporteurs configurés, avec numéro de suivi lorsque l’API le renvoie',
+  'Rapprochement des statuts transmis par les transporteurs (ramassé, livré, retourné) avec vos commandes',
+  'Import des dépenses Facebook Ads avec allocation par produit et commande',
+  'Rapprochement des villes saisies avec le référentiel des transporteurs, avec apprentissage progressif',
+  'Calcul du profit net par commande à partir des revenus et des coûts enregistrés',
 ]
 
 export const modules = [
@@ -50,36 +50,42 @@ export const integrations = [
   {
     name: 'YouCan',
     status: 'Disponible',
+    kind: 'Intégration',
     icon: '/icons/youcan-shop-icon-filled-256.png',
     description: 'Sync commandes, catalogue et opérations depuis votre store principal.',
   },
   {
     name: 'Rapid Delivery',
     status: 'Disponible',
+    kind: 'Intégration',
     icon: '/icons/logo.gif',
     description: 'Création colis, suivi et vouchers connectés au terrain marocain.',
   },
   {
     name: 'Facebook Ads',
     status: 'Disponible',
+    kind: 'Intégration',
     icon: '/icons/meta_PNG5.png',
     description: 'Dépenses pub reliées au profit net, pas seulement au volume.',
   },
   {
     name: 'Shopify',
     status: 'Bientôt',
+    kind: 'À venir',
     icon: '/icons/shopify.png',
     description: 'Connexion native pour les marques qui pilotent plusieurs stacks.',
   },
   {
     name: 'LightFunnels',
     status: 'Disponible',
+    kind: 'Intégration',
     icon: '/icons/unnamed.png',
     description: 'Flux funnel et ventes centralisés dans le même cockpit business.',
   },
   {
     name: 'Multi-devises',
     status: 'Natif',
+    kind: 'Fonctionnalité native',
     icon: '/icons/icon-192.svg',
     description: 'MAD en natif, conversions cohérentes et lecture consolidée.',
   },

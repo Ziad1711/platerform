@@ -34,17 +34,17 @@ const WorkflowPaths: React.FC = () => {
     },
     { 
       id: "path-4", 
-      d: "M 1100 150 L 1100 350", // Validation -> Stock
+      d: "M 1100 150 L 1320 350", // Validation -> Expédition
       delay: 1.0
     },
     { 
       id: "path-5", 
-      d: "M 1100 350 L 1320 350", // Stock -> Expédition
+      d: "M 1320 350 L 1100 350", // Expédition -> Stock consommé
       delay: 1.3
     },
     { 
       id: "path-6", 
-      d: "M 1320 350 C 1320 450 1200 450 900 450", // Expédition -> Livré
+      d: "M 1100 350 C 1100 450 1050 450 900 450", // Stock -> Livré
       delay: 1.6
     },
     { 

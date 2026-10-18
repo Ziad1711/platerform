@@ -8,9 +8,11 @@ import { fadeUp } from '@/lib/marketing/motion'
 
 const carriers = [
   { name: 'Rapid Delivery', logo: '/icons/logo.gif' },
-  { name: 'Zajil', logo: '/icons/icon-192.svg' }, 
-  { name: 'Aramex', logo: '/icons/icon-192.svg' }, 
-  { name: 'Cat', logo: '/icons/icon-192.svg' }, 
+  { name: 'Ozone', logo: null },
+  { name: 'ForceLog', logo: null },
+  { name: 'AMEEX', logo: null },
+  { name: 'Rushliv', logo: null },
+  { name: 'Sendit', logo: null },
 ]
 
 export function LogisticsSection() {
@@ -32,7 +34,7 @@ export function LogisticsSection() {
               <div className="flex items-center justify-between border-b border-white/10 bg-black/20 px-6 py-4">
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-jisra-green" />
-                  <span className="text-xs font-mono text-jisra-green-light tracking-widest uppercase">Expédition Automatisée</span>
+                  <span className="text-xs font-mono text-jisra-green-light tracking-widest uppercase">Expéditions & suivi</span>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="flex -space-x-2">
@@ -77,14 +79,14 @@ export function LogisticsSection() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] uppercase tracking-widest text-jisra-cream/30">Cycle de vie commande</p>
-                    <span className="text-[10px] font-mono text-jisra-green animate-pulse">● SYNC LIVE</span>
+                    <span className="text-[10px] font-mono text-jisra-green animate-pulse">● SUIVI TRANSPORTEUR</span>
                   </div>
                   <div className="relative space-y-3 pl-6 before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-white/10">
                     {/* Livré */}
                     <div className="relative flex items-center gap-3">
                       <div className="absolute -left-6 h-2.5 w-2.5 rounded-full bg-jisra-green shadow-[0_0_12px_#1fa971] border-2 border-[#111714]" />
                       <span className="text-xs text-jisra-green font-bold">Livré au client</span>
-                      <span className="text-[10px] text-jisra-cream/30 ml-auto">Aujourd'hui</span>
+                      <span className="text-[10px] text-jisra-cream/30 ml-auto">Aujourd’hui</span>
                     </div>
                     {/* Expédié */}
                     <div className="relative flex items-center gap-3 opacity-90">
@@ -107,7 +109,7 @@ export function LogisticsSection() {
                     {/* Confirmée */}
                     <div className="relative flex items-center gap-3 opacity-30">
                       <div className="absolute -left-6 h-2 w-2 rounded-full bg-white/10 border border-[#111714]" />
-                      <span className="text-xs text-jisra-cream/40">Confirmée par l'agent</span>
+                      <span className="text-xs text-jisra-cream/40">Confirmée par l’agent</span>
                       <span className="text-[10px] text-jisra-cream/30 ml-auto">Hier</span>
                     </div>
                     {/* Nouvelle */}
@@ -138,10 +140,10 @@ export function LogisticsSection() {
                 Logistique & Stock
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-                Expédiez en 1 clic, suivez en temps réel.
+                Vos colis avancent. Vous gardez la visibilité.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                jisra est nativement connecté aux principaux transporteurs marocains. Créez vos colis, générez vos étiquettes et suivez le statut de livraison sans jamais quitter votre dashboard. Votre stock est automatiquement décrémenté à chaque confirmation.
+                Préparez les expéditions et consultez leur progression depuis Jisra, selon les transporteurs et les opérations effectivement configurés.
               </p>
             </motion.div>
 
@@ -151,8 +153,8 @@ export function LogisticsSection() {
                   <ClipboardCheck className="h-5 w-5 text-jisra-green" />
                 </div>
                 <div>
-                  <h4 className="font-semibold text-jisra-cream">Automatisation des Vouchers</h4>
-                  <p className="text-sm text-jisra-cream/50">Génération automatique des étiquettes d'expédition dès la validation du bon de ramassage.</p>
+                  <h4 className="font-semibold text-jisra-cream">Bons de ramassage et étiquettes</h4>
+                  <p className="text-sm text-jisra-cream/50">Selon le transporteur configuré, regroupez les colis dans un bon de ramassage et accédez aux documents d’expédition disponibles.</p>
                 </div>
               </div>
               <div className="flex items-start gap-4">
@@ -160,27 +162,38 @@ export function LogisticsSection() {
                   <History className="h-5 w-5 text-jisra-green" />
                 </div>
                 <div>
-                  <h4 className="font-semibold text-jisra-cream">Tracking Statut Live</h4>
-                  <p className="text-sm text-jisra-cream/50">Mise à jour automatique des statuts (Livré, Retourné, Refusé) en synchronisation avec le transporteur.</p>
+                  <h4 className="font-semibold text-jisra-cream">Suivi des statuts</h4>
+                  <p className="text-sm text-jisra-cream/50">Les statuts transmis par les transporteurs pris en charge peuvent être rapprochés de vos commandes. Un statut non reconnu demande une vérification.</p>
                 </div>
               </div>
             </div>
 
             <div className="pt-4">
-              <p className="text-[10px] uppercase tracking-widest text-jisra-cream/30 mb-4">Transporteurs supportés</p>
+              <p className="text-[10px] uppercase tracking-widest text-jisra-cream/30 mb-4">Transporteurs pris en charge</p>
               <div className="flex flex-wrap gap-4">
                 {carriers.map((carrier) => (
                   <div key={carrier.name} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/5 bg-white/[0.03] grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all cursor-default">
-                    <div className="relative h-5 w-5 overflow-hidden rounded-md bg-white">
-                      <NextImage src={carrier.logo} alt={carrier.name} fill className="object-contain p-0.5" />
+                    <div className="relative flex h-5 w-5 items-center justify-center overflow-hidden rounded-md bg-white">
+                      {carrier.logo ? (
+                        <NextImage src={carrier.logo} alt={carrier.name} fill className="object-contain p-0.5" />
+                      ) : (
+                        <Truck className="h-3.5 w-3.5 text-black" />
+                      )}
                     </div>
                     <span className="text-xs font-bold text-jisra-cream/80">{carrier.name}</span>
                   </div>
                 ))}
               </div>
+              <p className="mt-3 text-[11px] leading-5 text-jisra-cream/50">
+                Disponibilité et fonctionnalités selon le transporteur et la configuration de votre compte.
+              </p>
             </div>
           </div>
         </div>
+
+        <p className="mt-6 text-[12px] leading-5 text-jisra-cream/65">
+          Exemple illustratif : colis, statuts et horaires simulés pour présenter l’interface.
+        </p>
       </Container>
     </section>
   )

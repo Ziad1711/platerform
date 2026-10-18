@@ -36,11 +36,11 @@ export function WorkflowSection() {
             Workflow Intelligent
           </div>
           <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-            Vos commandes, pilotées en automatique
+            De la commande à la livraison, gardez le fil.
           </h2>
           <p className="mt-4 text-base leading-8 text-jisra-cream/62 sm:text-lg">
-            De la réception à la livraison, jisra orchestre chaque étape sans que vous leviez le
-            petit doigt.
+            Retrouvez les étapes de confirmation, de stock, d’expédition et de suivi dans un même
+            parcours ; intervenez là où une décision reste nécessaire.
           </p>
         </motion.div>
 
