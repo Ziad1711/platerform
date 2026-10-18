@@ -155,9 +155,9 @@ export function HomeSections() {
       <MotionSection className="py-20 sm:py-28" withStagger>
         <Container className="space-y-12">
           <SectionHeading
-            eyebrow="Feature architecture"
-            title="Une landing orientée système, pas une simple liste de modules"
-            description="Chaque bloc clé du produit mérite sa propre présence visuelle, son rythme et sa preuve opérationnelle."
+            eyebrow="Fonctionnalités"
+            title="Tout ce qu’il vous faut pour piloter votre activité"
+            description="Suivez vos opérations, automatisez les tâches répétitives et retrouvez vos données dans une seule interface."
           />
           <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
             {homeFeatureHighlights.map((item) => (
@@ -291,7 +291,7 @@ export function HomeSections() {
           <SectionHeading
             eyebrow="Intégrations"
             title="Branché à votre stack marocaine"
-            description="Commencez avec les intégrations déjà disponibles et préparez la suite sans changer d’outil."
+            description="Connectez les outils que vous utilisez déjà et retrouvez leurs données dans Jisra."
           />
 
           <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-4 sm:p-5 lg:p-6">
@@ -432,14 +432,14 @@ export function HomeSections() {
                   Section — Passer à l’action
                 </div>
                 <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                  Arrêtez de piloter votre croissance à l’aveugle.
+                  Voyez plus clairement ce que vous rapporte votre activité.
                 </h2>
                 <p className="text-base leading-8 text-jisra-cream/65">
-                  Branchez vos stores, visualisez votre profit réel et gagnez du temps sur les opérations les plus coûteuses.
+                  Créez votre compte, ajoutez votre boutique et commencez à suivre vos commandes, vos coûts et votre rentabilité.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
-                <MarketingLink href="/login?signup=1">Créer un compte</MarketingLink>
+                <MarketingLink href="/signup">Créer mon compte</MarketingLink>
                 <MarketingLink href="/contact" variant="ghost">
                   Parler à l’équipe
                 </MarketingLink>

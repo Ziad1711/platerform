@@ -30,15 +30,15 @@ export function HomeHero() {
 
             <motion.div variants={fadeUp} className="space-y-5">
               <h1 className="max-w-4xl text-balance text-[clamp(1.75rem,4.5vw,3.5rem)] font-extrabold leading-[1.1] tracking-[-0.04em]">
-                Le cockpit qui transforme vos <span className="text-gradient-brand">opérations</span> en profit lisible.
+                Vos commandes, vos coûts et votre <span className="text-gradient-brand">profit</span> au même endroit.
               </h1>
               <p className="max-w-2xl text-base leading-8 text-jisra-cream/66 sm:text-lg">
-                jisra relie ventes, publicité, livraison, stock et équipe dans un même système d’exécution pour que chaque décision business repose enfin sur le net réel.
+                Jisra rassemble ventes, publicité, livraison et stock pour vous aider à suivre ce que votre activité vous rapporte réellement.
               </p>
             </motion.div>
 
             <motion.div variants={fadeUp} className="flex flex-col gap-3 sm:flex-row">
-              <MarketingLink href="/signup">Démarrer maintenant</MarketingLink>
+              <MarketingLink href="/signup">Créer mon compte</MarketingLink>
               <MarketingLink href="/pricing" variant="ghost">
                 Voir les tarifs
               </MarketingLink>

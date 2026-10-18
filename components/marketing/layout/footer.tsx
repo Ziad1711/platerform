@@ -10,7 +10,7 @@ const columns = [
       { href: '/features', label: 'Fonctionnalités' },
       { href: '/pricing', label: 'Tarifs' },
       { href: '/features#integrations', label: 'Intégrations' },
-      { href: '/login?signup=1', label: 'Démarrer' },
+      { href: '/signup', label: 'Démarrer' },
     ],
   },
   {
