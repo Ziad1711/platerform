@@ -51,10 +51,10 @@ export function NormalizationSection() {
                 Data Quality par IA
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-                Des villes propres, des livraisons réussies.
+                Des villes plus claires, des colis mieux préparés.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                Ne perdez plus de temps à corriger manuellement les adresses. Notre IA reconnaît instantanément les abréviations, fautes de frappe et noms de quartiers pour normaliser chaque commande vers la ville exacte attendue par les transporteurs.
+                Jisra aide à rapprocher les villes saisies de celles utilisées dans vos opérations de livraison, pour limiter les corrections manuelles. Les libellés reconnus sont alignés sur le référentiel de vos transporteurs avant la préparation des colis.
               </p>
             </motion.div>
 
@@ -62,16 +62,16 @@ export function NormalizationSection() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-jisra-green">
                   <CheckCircle2 className="h-5 w-5" />
-                  <span className="font-semibold text-jisra-cream">Zéro erreur d'import</span>
+                  <span className="font-semibold text-jisra-cream">Moins de corrections manuelles</span>
                 </div>
-                <p className="text-sm text-jisra-cream/50">Importation fluide chez Rapid Delivery et autres transporteurs sans rejet.</p>
+                <p className="text-sm text-jisra-cream/50">Les villes reconnues sont alignées sur le référentiel transporteur, ce qui réduit les saisies à reprendre.</p>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-jisra-green">
                   <Database className="h-5 w-5" />
-                  <span className="font-semibold text-jisra-cream">Analyses fiables</span>
+                  <span className="font-semibold text-jisra-cream">Villes consolidées</span>
                 </div>
-                <p className="text-sm text-jisra-cream/50">Vos KPIs par ville sont enfin précis car "Casa", "Casablanca" et "Dar Beida" sont consolidés.</p>
+                <p className="text-sm text-jisra-cream/50">« Casa », « Casablanca » et « Dar Beida » sont rapprochés d’un même libellé pour des KPIs par ville plus lisibles.</p>
               </div>
             </div>
           </div>
@@ -88,7 +88,7 @@ export function NormalizationSection() {
                   <Sparkles className="h-4 w-4 text-jisra-green animate-pulse" />
                   <span className="text-xs font-mono text-jisra-green-light tracking-widest uppercase italic">IA Normalisation active</span>
                 </div>
-                <div className="text-[10px] text-jisra-cream/30 uppercase font-bold tracking-tighter">Engine V3.2</div>
+                <div className="text-[10px] text-jisra-cream/30 uppercase font-bold tracking-tighter">Référentiel transporteur</div>
               </div>
 
               <div className="flex flex-1 items-center justify-center p-8">
@@ -166,11 +166,11 @@ export function NormalizationSection() {
                     </div>
                     <div>
                       <p className="text-xs font-bold text-jisra-cream">Prêt pour Expédition</p>
-                      <p className="text-[10px] text-jisra-cream/40 tracking-wider">Validation automatique par Rapid Delivery</p>
+                      <p className="text-[10px] text-jisra-cream/40 tracking-wider">Ville alignée sur le référentiel transporteur</p>
                     </div>
                   </div>
                   <div className="rounded-full bg-jisra-green/20 px-3 py-1 ring-1 ring-jisra-green/30">
-                    <span className="text-[10px] font-bold text-jisra-green">QUALITÉ 100%</span>
+                    <span className="text-[10px] font-bold text-jisra-green">VILLE NORMALISÉE</span>
                   </div>
                 </div>
               </div>

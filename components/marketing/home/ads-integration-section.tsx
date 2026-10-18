@@ -7,10 +7,20 @@ import { Container } from '@/components/marketing/shared/container'
 import { fadeUp } from '@/lib/marketing/motion'
 
 const adPlatforms = [
-  { name: 'Meta Ads', icon: '/icons/meta_PNG5.png', color: 'bg-[#0668E1]/10', border: 'border-[#0668E1]/20' },
-  { name: 'TikTok Ads', icon: '/icons/unnamed.png', color: 'bg-black/20', border: 'border-white/10' }, 
-  { name: 'Google Ads', icon: '/icons/icon-192.svg', color: 'bg-[#FBBC04]/10', border: 'border-[#FBBC04]/20' },
-  { name: 'Snapchat', icon: '/icons/unnamed.png', color: 'bg-[#FFFC00]/10', border: 'border-[#FFFC00]/20' },
+  {
+    name: 'Meta Ads',
+    detail: 'Intégration vérifiée',
+    icon: '/icons/meta_PNG5.png',
+    color: 'bg-[#0668E1]/10',
+    border: 'border-[#0668E1]/20',
+  },
+  {
+    name: 'Dépense manuelle',
+    detail: 'Saisie quotidienne',
+    icon: '/icons/icon-192.svg',
+    color: 'bg-jisra-green/10',
+    border: 'border-jisra-green/20',
+  },
 ]
 
 export function AdsIntegrationSection() {
@@ -33,10 +43,10 @@ export function AdsIntegrationSection() {
                 Données Ads finalisées
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-                Le ROAS réel, pas celui du Manager.
+                Ne pilotez pas vos pubs avec le ROAS seul.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                jisra importe chaque nuit vos dépenses publicitaires finalisées, puis revérifie les 7 derniers jours pour intégrer les corrections tardives de Meta. En croisant ces données avec vos ventes confirmées et livrées, nous calculons le ROAS net et le profit exact pour chaque campagne, chaque adset et chaque commande.
+                Consultez vos dépenses publicitaires à côté de vos commandes et de vos coûts pour juger vos campagnes avec davantage de contexte. Jisra connecte votre compte Meta Ads, importe les dépenses finalisées, puis remet ces chiffres en regard de vos ventes et de vos charges dans le dashboard.
               </p>
             </motion.div>
 
@@ -46,8 +56,8 @@ export function AdsIntegrationSection() {
                   <RefreshCw className="h-5 w-5 text-jisra-green" />
                 </div>
                 <div>
-                  <h4 className="font-semibold text-jisra-cream">Synchronisation Omnicanale</h4>
-                  <p className="text-sm text-jisra-cream/50">Centralisez Meta, TikTok, Google et Snapchat dans une vue unique.</p>
+                  <h4 className="font-semibold text-jisra-cream">Synchronisation Meta Ads</h4>
+                  <p className="text-sm text-jisra-cream/50">Connexion OAuth vérifiée, import quotidien des dépenses et resynchronisation pour intégrer les corrections tardives.</p>
                 </div>
               </div>
               <div className="flex items-start gap-4">
@@ -55,8 +65,8 @@ export function AdsIntegrationSection() {
                   <BarChart3 className="h-5 w-5 text-jisra-green" />
                 </div>
                 <div>
-                  <h4 className="font-semibold text-jisra-cream">Profit par Commande</h4>
-                  <p className="text-sm text-jisra-cream/50">Voyez exactement combien chaque commande vous rapporte après frais publicitaires.</p>
+                  <h4 className="font-semibold text-jisra-cream">Contexte par campagne</h4>
+                  <p className="text-sm text-jisra-cream/50">Dépense, ventes et coûts réunis au même endroit pour décider avec du recul.</p>
                 </div>
               </div>
             </div>
@@ -67,7 +77,10 @@ export function AdsIntegrationSection() {
                   <div className="relative h-5 w-5">
                     <NextImage src={platform.icon} alt={platform.name} fill className="object-contain" />
                   </div>
-                  <span className="text-xs font-medium text-jisra-cream/80">{platform.name}</span>
+                  <span className="flex flex-col">
+                    <span className="text-xs font-medium text-jisra-cream/80">{platform.name}</span>
+                    <span className="text-[9px] uppercase tracking-wider text-jisra-cream/40">{platform.detail}</span>
+                  </span>
                 </div>
               ))}
             </div>
@@ -83,7 +96,7 @@ export function AdsIntegrationSection() {
               <div className="flex items-center justify-between border-b border-white/10 bg-black/20 px-6 py-4">
                 <div className="flex items-center gap-2">
                   <div className="h-2 w-2 rounded-full bg-jisra-green animate-pulse" />
-                  <span className="text-xs font-mono text-jisra-green-light tracking-widest uppercase">Direct Sync active</span>
+                  <span className="text-xs font-mono text-jisra-green-light tracking-widest uppercase">Exemple illustratif</span>
                 </div>
                 <div className="flex gap-1.5">
                   <div className="h-2 w-2 rounded-full bg-white/10" />
@@ -93,19 +106,24 @@ export function AdsIntegrationSection() {
               </div>
 
               <div className="p-6 space-y-6">
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-wider text-jisra-cream/40">Dépense Pub</p>
-                    <p className="text-xl font-bold text-jisra-cream">4 280 MAD</p>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase tracking-wider text-jisra-cream/40">Dépense Pub</p>
+                      <p className="text-xl font-bold text-jisra-cream">4 280 MAD</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase tracking-wider text-jisra-cream/40">Valeur conv.</p>
+                      <p className="text-xl font-bold text-blue-400">20 550 MAD</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase tracking-wider text-jisra-green/60">ROAS</p>
+                      <p className="text-xl font-bold text-jisra-green">4.80x</p>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-wider text-jisra-cream/40">ROAS Manager</p>
-                    <p className="text-xl font-bold text-blue-400">8.4x</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-wider text-jisra-green/60">ROAS Réel (Net)</p>
-                    <p className="text-xl font-bold text-jisra-green">5.1x</p>
-                  </div>
+                  <p className="text-[11px] leading-4 text-jisra-cream/60">
+                    ROAS = valeur de conversion Meta ÷ dépense publicitaire.
+                  </p>
                 </div>
 
                 <div className="space-y-3">
@@ -116,35 +134,35 @@ export function AdsIntegrationSection() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-jisra-cream">Campagne Prospecting - MA</p>
-                        <p className="text-[10px] text-jisra-cream/40">Meta Ads · Live</p>
+                        <p className="text-[10px] text-jisra-cream/40">Meta Ads · Connecté</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-bold text-jisra-green">+ 12 400 MAD Profit</p>
-                      <p className="text-[10px] text-jisra-cream/40">Net après Ads & Livraison</p>
+                      <p className="text-sm font-bold text-jisra-green">12 400 MAD</p>
+                      <p className="text-[10px] text-jisra-cream/40">Valeur de conversion Meta</p>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between rounded-xl bg-white/5 border border-white/10 p-4 opacity-70">
                     <div className="flex items-center gap-3">
-                      <div className="relative h-8 w-8 overflow-hidden rounded-lg bg-black p-1.5">
-                        <NextImage src="/icons/tiktok.webp" alt="TikTok" fill className="object-contain" />
+                      <div className="relative h-8 w-8 overflow-hidden rounded-lg bg-white p-1.5">
+                        <NextImage src="/icons/meta_PNG5.png" alt="Meta" fill className="object-contain" />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-jisra-cream">Video Scaling - Trend</p>
-                        <p className="text-[10px] text-jisra-cream/40">TikTok Ads · Live</p>
+                        <p className="text-sm font-semibold text-jisra-cream">Retargeting - MA</p>
+                        <p className="text-[10px] text-jisra-cream/40">Meta Ads · Connecté</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-bold text-jisra-green">+ 8 150 MAD Profit</p>
-                      <p className="text-[10px] text-jisra-cream/40">Net après Ads & Livraison</p>
+                      <p className="text-sm font-bold text-jisra-green">8 150 MAD</p>
+                      <p className="text-[10px] text-jisra-cream/40">Valeur de conversion Meta</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] uppercase tracking-widest text-jisra-cream/30">
-                    <span>Importation des données</span>
+                    <span>Couverture des données</span>
                     <span>98%</span>
                   </div>
                   <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
@@ -158,6 +176,10 @@ export function AdsIntegrationSection() {
                 </div>
               </div>
             </div>
+
+            <p className="mt-4 text-[12px] leading-5 text-jisra-cream/65">
+              Exemple illustratif : données simulées pour présenter l’interface, et non des résultats clients.
+            </p>
 
             <div className="absolute -right-6 -top-6 -z-10 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" />
             <div className="absolute -left-6 -bottom-6 -z-10 h-64 w-64 rounded-full bg-jisra-green/10 blur-3xl" />

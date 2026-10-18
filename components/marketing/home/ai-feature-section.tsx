@@ -14,7 +14,7 @@ const chatScenarios = [
       color: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
       title: 'Performance Casablanca',
-      text: "Le profit net est en hausse de 14%. Cependant, 32% de vos frais de livraison sont dus à des tentatives échouées. Je suggère d'activer la confirmation automatique par SMS pour ces zones.",
+      text: "Pour Casablanca, Jisra réunit le chiffre d’affaires livré, les coûts de livraison et de confirmation, la dépense publicitaire et le taux de livraison. Comparez ces indicateurs avec les autres villes pour voir où agir.",
     }
   },
   {
@@ -23,8 +23,8 @@ const chatScenarios = [
       icon: AlertTriangle,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
-      title: 'Alerte Efficacité Pub',
-      text: "Votre coût par clic a bondi de 45% sur l'audience 'Lookalike'. Cause probable : saturation de l'audience. Testez un nouveau créatif ou élargissez le ciblage pour stabiliser la marge.",
+      title: 'Analyse Campagne Meta',
+      text: "L’assistant retrouve la dépense, les clics et le coût par clic de chaque campagne. Comparez-les aux ventes et au profit du dashboard pour voir si l’écart vient du coût média ou des commandes.",
     }
   },
   {
@@ -33,8 +33,8 @@ const chatScenarios = [
       icon: Lightbulb,
       color: 'text-cyan-400',
       bg: 'bg-cyan-500/10',
-      title: 'Gestion des Stocks',
-      text: "Le produit 'Sérum Éclat' sera en rupture sous 4 jours au rythme actuel. Vos revenus potentiels perdus s'élèvent à 12 500 MAD si vous ne réapprovisionnez pas demain.",
+      title: 'Niveau de stock',
+      text: "Jisra liste le stock disponible par produit et les références dont la quantité restante est la plus faible. Vous pouvez ouvrir le module Stock pour vérifier les quantités avant de réapprovisionner.",
     }
   }
 ]
@@ -83,7 +83,7 @@ export function AiFeatureSection() {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-jisra-cream">jisra AI Assistant</h4>
-                  <p className="text-[10px] uppercase tracking-widest text-jisra-green-light">Live Analysis</p>
+                  <p className="text-[10px] uppercase tracking-widest text-jisra-green-light">Exemple illustratif</p>
                 </div>
               </div>
 
@@ -138,7 +138,7 @@ export function AiFeatureSection() {
                       <div className="space-y-2 rounded-2xl rounded-tl-none bg-jisra-green/5 p-4 border border-jisra-green/10 shadow-[0_0_20px_rgba(31,169,113,0.05)]">
                         <p className="text-xs font-bold uppercase tracking-wider text-jisra-green-light">{current.ai.title}</p>
                         <p className="text-sm leading-relaxed text-jisra-cream/90 italic">
-                          "{current.ai.text}"
+                          « {current.ai.text} »
                         </p>
                       </div>
                     </motion.div>
@@ -162,6 +162,10 @@ export function AiFeatureSection() {
               </div>
             </div>
 
+            <p className="mt-4 text-[12px] leading-5 text-jisra-cream/65">
+              Les échanges affichés sont des exemples illustratifs, pas des données clients.
+            </p>
+
             <div className="absolute -inset-4 -z-10 rounded-[2.5rem] bg-jisra-green/10 blur-2xl" />
           </motion.div>
 
@@ -179,10 +183,10 @@ export function AiFeatureSection() {
                 jisra AI engine
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-jisra-cream sm:text-4xl lg:text-5xl">
-                Un cerveau au-dessus de vos données.
+                Posez la question. Explorez vos chiffres.
               </h2>
               <p className="text-lg leading-8 text-jisra-cream/65">
-                L'IA de jisra ne se contente pas d'afficher des chiffres. Elle les comprend. Connectée à vos ventes, vos pubs et vos stocks, elle détecte les opportunités et vous prévient avant que les problèmes n'impactent votre profit.
+                Interrogez votre activité en français et utilisez les données disponibles dans Jisra pour éclairer vos décisions sur les ventes, les dépenses et le stock.
               </p>
             </motion.div>
 
@@ -195,9 +199,9 @@ export function AiFeatureSection() {
             >
               {[
                 'Analyse multi-dimensionnelle',
-                'Alertes de marge en temps réel',
-                'Conseils d\'optimisation pub',
-                'Prévision de rupture de stock'
+                'Lecture des ventes et des marges',
+                'Analyse des dépenses publicitaires',
+                'Suivi du stock disponible'
               ].map((item) => (
                 <li key={item} className="flex items-center gap-3 text-sm text-jisra-cream/80">
                   <div className="h-1.5 w-1.5 rounded-full bg-jisra-green shadow-[0_0_8px_#1fa971]" />
