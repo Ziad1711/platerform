@@ -85,6 +85,8 @@ status                     -- Order filtering
 > 500k orders:  Pre-calculated metrics table
 ```
 
+> **Remplacé par ADR-DASH-001 (16/10/2026)** : le seuil de 500 000 commandes n'est plus la condition de bascule. JISRA évolue vers des **KPI quotidiens précalculés par boutique**, avec invalidation asynchrone après chaque modification pertinente. Référence unique : `memory-bank/dashboard-daily-kpis-architecture.md` (statut : orientation approuvée, exécution non autorisée).
+
 #### Advertising Cost Strategy
 ```
 Source primaire (opérations futures)   = ad_spend_daily

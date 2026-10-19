@@ -1170,3 +1170,12 @@ Avant toute tâche de performance :
 - Incident infrastructure et défaut applicatif.
 
 **Principe directeur : sécurité, stabilité, preuves, performance.**
+
+## 9. Chantier distinct — KPI quotidiens précalculés (renvoi)
+
+Le chantier **ADR-DASH-001** (KPI quotidiens précalculés par boutique, invalidation asynchrone, dashboard vivant) est **distinct** de ce document : il porte sur les calculs métier du dashboard, pas sur le bootstrap, l'Auth ni le cache frontend.
+
+- Référence unique : `memory-bank/dashboard-daily-kpis-architecture.md`
+- Statut : orientation approuvée par le propriétaire le 16/10/2026 ; **exécution non autorisée**.
+- Lot L0 (documentation) exécuté le 16/10/2026 — aucun fichier applicatif, aucune migration, aucune écriture Supabase.
+- Le suivi de ses lots (L0 → L9), de ses preuves et de ses décisions métier (B01 → B14) se fait **exclusivement** dans ce document de référence : ne pas le dupliquer ici.
