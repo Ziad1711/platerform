@@ -1,0 +1,176 @@
+{
+  "report": {
+    "checks": 33,
+    "passed": 33,
+    "failed": 0,
+    "failures": [],
+    "verdict": "PASS"
+  },
+  "checks": [
+    {
+      "id": "snapshot_function_count",
+      "status": "PASS",
+      "detail": "23/23"
+    },
+    {
+      "id": "snapshot_md5",
+      "status": "PASS",
+      "detail": "23/23"
+    },
+    {
+      "id": "install_function_count",
+      "status": "PASS",
+      "detail": "23/23"
+    },
+    {
+      "id": "install_function_md5",
+      "status": "PASS",
+      "detail": "23/23"
+    },
+    {
+      "id": "install_tables",
+      "status": "PASS",
+      "detail": "6"
+    },
+    {
+      "id": "install_view",
+      "status": "PASS",
+      "detail": "1"
+    },
+    {
+      "id": "install_no_trigger",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "install_no_cron",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "install_no_http_call",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "install_no_business_write",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "install_worker_disabled",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "install_wakeup_disabled",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "install_no_legacy_definitions",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "invalidation_triggers",
+      "status": "PASS",
+      "detail": "5"
+    },
+    {
+      "id": "invalidation_no_wakeup",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "wakeup_single_constraint_trigger",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "worker_two_jobs",
+      "status": "PASS",
+      "detail": "2"
+    },
+    {
+      "id": "worker_enables_flag",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "backfill_inclusive_documented",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "backfill_no_loop",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "rollback_keeps_journal",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "rollback_drops_six_triggers",
+      "status": "PASS",
+      "detail": "6"
+    },
+    {
+      "id": "rollback_no_business_table",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "rollback_cron_verifies_remaining_jobs",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "rollback_tolerates_missing_cron_job",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "rollback_does_not_swallow_all_errors",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "verify_temp_table_qualified",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "verify_columns_qualified",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "acl_separated_from_end_marker",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "acl_access_level_revoked",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "acl_revoke_count",
+      "status": "PASS",
+      "detail": "23"
+    },
+    {
+      "id": "acl_service_grant_count",
+      "status": "PASS",
+      "detail": "23"
+    },
+    {
+      "id": "manifest_install_before_extensions",
+      "status": "PASS",
+      "detail": ""
+    }
+  ]
+}

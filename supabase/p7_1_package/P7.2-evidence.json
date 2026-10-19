@@ -1,0 +1,77 @@
+{
+  "report": "P7.2-QUALIFICATION.md",
+  "date": "2026-10-19",
+  "verdict": "BLOCKED",
+  "static": {
+    "checks": 23,
+    "passed": 23,
+    "failed": 0,
+    "snapshot_functions": 23,
+    "snapshot_md5_ok": 23,
+    "aggregate_md5": "7c42c7ec3479d25f88d876be4f842bca",
+    "aggregate_matches_test": true
+  },
+  "dynamic_readonly": {
+    "test_functions": 23,
+    "test_tables": 6,
+    "test_columns": [33, 13, 17, 7, 10, 7],
+    "test_constraints_excl_trigger": 27,
+    "test_indexes": 9,
+    "test_view_columns": 12,
+    "test_rls": 6,
+    "test_policies": 0,
+    "test_triggers": 6,
+    "test_jobs": 2,
+    "test_pending": 0,
+    "test_reader_authenticated": true,
+    "test_reader_anon": false,
+    "test_service_role_exec": 23,
+    "test_client_exec_internal": 1,
+    "production_kpi_objects": 0,
+    "production_rbl4_objects": 0,
+    "production_pg_net_installed": false,
+    "production_pg_cron_installed": false,
+    "production_helpers_present": true,
+    "production_branches": 0
+  },
+  "dynamic_scratch": {
+    "schema": "p7_qual",
+    "persisted_after_test": false,
+    "metrics_columns": 33,
+    "metrics_constraints": 12,
+    "other_tables_columns": 54,
+    "other_tables_constraints": 15,
+    "other_tables_indexes": 8,
+    "view_columns": 12,
+    "functions_created": 23,
+    "triggers_created": 6,
+    "acl_anon_table": false,
+    "acl_authenticated_function": false,
+    "acl_service_role_function": true
+  },
+  "guards": {
+    "install_existing_objects": "P71_ALREADY_INSTALLED",
+    "rollback_without_authorization": "P71_ROLLBACK_NOT_AUTHORIZED",
+    "backfill_without_parameters": "P71_BACKFILL_PARAMETERS_MISSING"
+  },
+  "call_signatures_resolved_by_explain": [
+    "cron.schedule(text,text,text)",
+    "dashboard_kpi_worker_run(text,integer,bigint,numeric)",
+    "dashboard_kpi_backfill_enqueue(uuid,date,date)"
+  ],
+  "not_executed": [
+    "full 10_install_objects.sql on an isolated representative database",
+    "full 90_verify.sql as a file",
+    "full 91_rollback.sql",
+    "activation 30/31/40/41",
+    "idempotence after real install",
+    "any Production operation"
+  ],
+  "production_blockers": [
+    "tzdata older than 2026c",
+    "R-BL4 absent",
+    "frontend Production hard block",
+    "no isolated environment",
+    "B13 strict FAIL"
+  ]
+}

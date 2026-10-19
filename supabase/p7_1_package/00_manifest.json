@@ -1,0 +1,322 @@
+{
+  "package": "JISRA P7.1 KPI V5",
+  "status": "PASS",
+  "generated_at": "2026-10-19T16:13:55.419Z",
+  "source": {
+    "environment": "jisra-test",
+    "project_ref": "goqedvcdmgtejtyrawsp",
+    "postgres": "17.11",
+    "snapshot_raw_chars": 68812,
+    "functions": 23,
+    "functions_md5_verified": 23,
+    "aggregate_md5": "7c42c7ec3479d25f88d876be4f842bca"
+  },
+  "verification": {
+    "static_checks": "33/33 PASS",
+    "snapshot_md5": "23/23",
+    "aggregate_md5_matches_test": true
+  },
+  "target": {
+    "environment": "production",
+    "project_ref": "attvfeoqgbxsnnsllatt",
+    "postgres": "17.6",
+    "access": "read-only",
+    "kpi_objects_present": false,
+    "pg_net_installed": false,
+    "pg_cron_installed": false,
+    "rbl4_objects_present": false
+  },
+  "files": [
+    {
+      "file": "10_install_objects.sql",
+      "bytes": 91023,
+      "sha256": "489173d306ba68aee6a929eaa77a6b0d0782fe591a1de7a5deeedf5f7913cba7"
+    },
+    {
+      "file": "20_extensions_prerequisites.sql",
+      "bytes": 1625,
+      "sha256": "fcec195c3116154d58fc1e95dd6537e221b1194080e58b9e50fa334b903bc5e3"
+    },
+    {
+      "file": "30_activate_invalidations.sql",
+      "bytes": 3426,
+      "sha256": "8680b204bde3b909aa7ef7248b663f4dfdbbf089dd22d1a4749ccf9d4538c834"
+    },
+    {
+      "file": "31_activate_wakeup.sql",
+      "bytes": 2393,
+      "sha256": "01778e6b12d4cacf97b240bac6d1d1d460825e1dcbd820470388ad81fb408723"
+    },
+    {
+      "file": "40_activate_worker.sql",
+      "bytes": 2830,
+      "sha256": "2f18ff6446eadac6bfc0eed2675970ebe50013eb6d9741c318a7d1d10c6c9d18"
+    },
+    {
+      "file": "41_backfill.sql",
+      "bytes": 2890,
+      "sha256": "095244ea78a756b32a3e283697edaf39e8379042b85b377f60971d28e61a3fa0"
+    },
+    {
+      "file": "50_reader_activation.md",
+      "bytes": 2458,
+      "sha256": "549530d66b39e7e6d278dd80bf7433d22dd9d6494e9e5094dc2f258cbd9e136d"
+    },
+    {
+      "file": "README.md",
+      "bytes": 3572,
+      "sha256": "4e8293dc87797e3163b23a83a57fc82c86db2017bbd84a715e37798d35fb7bde"
+    },
+    {
+      "file": "90_verify.sql",
+      "bytes": 14610,
+      "sha256": "54df156eb2a8c3d0727e8d5ff6016c8ed26f6e8ed1089cf05000d841446e7705"
+    },
+    {
+      "file": "91_rollback.sql",
+      "bytes": 6808,
+      "sha256": "a0ed321ec81f8ce24ff9523acd6a1a7ea2e11db9cf88db081cf2b68d0a1cd590"
+    },
+    {
+      "file": "reference/20261018213537_dashboard_legacy_financial_permissions.sql",
+      "bytes": 14990,
+      "sha256": "b9e3c1a612b6cbeb7a460638252008885770550ce3f5cc5722c255319dd5f7b2"
+    },
+    {
+      "file": "reference/README.md",
+      "bytes": 755,
+      "sha256": "3161122302c21210df187fa2f30935f4ad68648786695604ab2d48426b7022ec"
+    },
+    {
+      "file": "verification-static.json",
+      "bytes": 3309,
+      "sha256": "136f20a2c37b2794d60c583dbe0551ae82f32160b53ad316c8bb21f7a0be0930"
+    },
+    {
+      "file": "MANIFEST.md",
+      "bytes": 7804,
+      "sha256": "ce0c8cfc1214fd572fb90333a8b66f6af1cbf74eebbe2bb6bd5a7354997c8e41"
+    },
+    {
+      "file": "P7.2-QUALIFICATION.md",
+      "bytes": 12052,
+      "sha256": "df40e20d2c6e25b0c7443062499d388829a814b91e22c0fe8fa773e813f64a84"
+    },
+    {
+      "file": "P7.2-evidence.json",
+      "bytes": 2353,
+      "sha256": "5fc883ec89bdd86724bcca98e225c88a812e3f60b6f11863f8f89c4e3ac34031"
+    },
+    {
+      "file": "P7.3-MCP.md",
+      "bytes": 7350,
+      "sha256": "5e8a868216542ac3b7013d07b0173595fc8b681603041739cf81a35a8e355a9a"
+    },
+    {
+      "file": "P7.3-evidence.json",
+      "bytes": 4072,
+      "sha256": "2555afa0ccd65d25be0c6643b33f9d70c3d70c06a61633347ef5248250342ebd"
+    },
+    {
+      "file": "tools/build-acl.mjs",
+      "bytes": 999,
+      "sha256": "9eab10e9b1d3383fa9b2a98cf6f1fba45265b2347f6a952bd2acdfa3e143e09a"
+    },
+    {
+      "file": "tools/build-install-snapshot.mjs",
+      "bytes": 645,
+      "sha256": "eaccc8ac52917ee178295661d88667b4c65d0222000574c319fd5f549746f7fd"
+    },
+    {
+      "file": "tools/build-rollback.mjs",
+      "bytes": 5028,
+      "sha256": "c617be68f8b1c4ab5fd17d1461df253b4eed387bb0130c782925fcac74e9b727"
+    },
+    {
+      "file": "tools/build-verify.mjs",
+      "bytes": 12809,
+      "sha256": "b38e7d4100577cbf58873aabd446ce53bbe39265892543a49c7ebbb6f5dfc477"
+    },
+    {
+      "file": "tools/build-manifest.mjs",
+      "bytes": 6413,
+      "sha256": "e1aa059e0d52c8fed5ce39b061bb06ac25b62eaab8d29edaf8b8b9d9919b6a17"
+    },
+    {
+      "file": "tools/verify-static.mjs",
+      "bytes": 5682,
+      "sha256": "9e87e41e551fcad8506f94940da8d66200c6959488d48587cb577a3a40c7d5b1"
+    },
+    {
+      "file": "tools/export-prod-structure.sh",
+      "bytes": 1727,
+      "sha256": "7079aef9b1968d02cccac12d94f0182ef25a60cb35ba995336f3b9d98f400650"
+    },
+    {
+      "file": "tools/preflight-export.sql",
+      "bytes": 2155,
+      "sha256": "7debed4db672374eeeadf10ec7e62efa6cb627b04552f29e8a280dd4840e5429"
+    }
+  ],
+  "external_dependencies": [
+    {
+      "file": "supabase/migrations/20261018213537_dashboard_legacy_financial_permissions.sql",
+      "bytes": 14990,
+      "sha256": "b9e3c1a612b6cbeb7a460638252008885770550ce3f5cc5722c255319dd5f7b2",
+      "package_copy": "reference/20261018213537_dashboard_legacy_financial_permissions.sql",
+      "reason": "R-BL4 requis avant shadow ou rollback legacy sécurisé ; absent en Production.",
+      "applied_by_install": false
+    }
+  ],
+  "functions": [
+    {
+      "signature": "dashboard_kpi_access_level(p_store_id uuid)",
+      "md5": "a13e12e991711542e511db56afcb4643"
+    },
+    {
+      "signature": "dashboard_kpi_aggregate_delivery(p_store_id uuid, p_date date, p_version integer, p_start timestamp with time zone, p_end timestamp with time zone, p_tz text, p_currency text, p_last_seq bigint)",
+      "md5": "f2a5aa1662ad21a1910d3336ad99fc4d"
+    },
+    {
+      "signature": "dashboard_kpi_aggregate_order(p_store_id uuid, p_date date, p_version integer, p_start timestamp with time zone, p_end timestamp with time zone, p_tz text, p_currency text, p_last_seq bigint)",
+      "md5": "3f841fc9915007f1f6e4091fbdde4c4a"
+    },
+    {
+      "signature": "dashboard_kpi_backfill_enqueue(p_store_id uuid, p_from date, p_to date)",
+      "md5": "7c7499c41206c269ecbdc8c634d5f0be"
+    },
+    {
+      "signature": "dashboard_kpi_business_date(p_ts timestamp with time zone, p_tz text)",
+      "md5": "86835f3507dad67879ede24208f13818"
+    },
+    {
+      "signature": "dashboard_kpi_claim(p_limit integer, p_worker text)",
+      "md5": "2d888ec8f84515f7b066c5fd043fc728"
+    },
+    {
+      "signature": "dashboard_kpi_coverage(p_store_id uuid, p_from date, p_to date)",
+      "md5": "1f488ea44c405eeb1bbd5bac9e5469b2"
+    },
+    {
+      "signature": "dashboard_kpi_direct_day(p_store_id uuid, p_date date, p_tz text)",
+      "md5": "2c391f4c6ded13d4caf96fa31427c2a5"
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_insert_stmt()",
+      "md5": "3aae1ffbfbbba014d6de0c321559be21"
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_trg()",
+      "md5": "b5211b6ea09373280e81a3f38c0aa01a"
+    },
+    {
+      "signature": "dashboard_kpi_mark_order_insert()",
+      "md5": "51396e7b26984fc83a72852f79f9490e"
+    },
+    {
+      "signature": "dashboard_kpi_note(p_store_id uuid, p_date date, p_reason text)",
+      "md5": "81d9589acf86211d2f780540ebf7837f"
+    },
+    {
+      "signature": "dashboard_kpi_purge_orphans(p_limit integer)",
+      "md5": "3008527119454e669ed7120c882cc8c3"
+    },
+    {
+      "signature": "dashboard_kpi_purge_processed(p_before timestamp with time zone, p_limit integer)",
+      "md5": "853e33c7cc31d7b55713f086e675a3e0"
+    },
+    {
+      "signature": "dashboard_kpi_rebuild_day(p_store_id uuid, p_date date, p_token uuid, p_seqs bigint[])",
+      "md5": "8aec8d63bf32704a59ae2911448df0b5"
+    },
+    {
+      "signature": "dashboard_kpi_resume(p_max_partitions integer, p_worker text)",
+      "md5": "05bca036ec529dd9aa7e9e0252a46630"
+    },
+    {
+      "signature": "dashboard_kpi_resume(p_max_partitions integer, p_worker text, p_force boolean)",
+      "md5": "4d34370a91eb2a8e98e74fdeb9821f3e"
+    },
+    {
+      "signature": "dashboard_kpi_store_tz(p_store_id uuid)",
+      "md5": "cbbd7d2d0749d39f09d7c5277ff20676"
+    },
+    {
+      "signature": "dashboard_kpi_store_tz_cached(p_store_id uuid)",
+      "md5": "312a695945c03e26f38bd8534ff8e03d"
+    },
+    {
+      "signature": "dashboard_kpi_wakeup_trg()",
+      "md5": "76ab1f2492efe081dac1d39c620866ab"
+    },
+    {
+      "signature": "dashboard_kpi_worker_purge_runs(p_before timestamp with time zone, p_limit integer)",
+      "md5": "938ec03cbb7fa48c25f4b0678b9e0f7c"
+    },
+    {
+      "signature": "dashboard_kpi_worker_run(p_worker text, p_max_partitions integer, p_max_events bigint, p_max_seconds numeric)",
+      "md5": "f41abff2c59cbba39ef740740307eb07"
+    },
+    {
+      "signature": "rpc_dashboard_kpi_reader(p_store_ids uuid[], p_from date, p_to date, p_include_direct boolean)",
+      "md5": "ea603cf2f66e47f7f57c79a985352e2d"
+    }
+  ],
+  "deviations": [
+    {
+      "id": "D01",
+      "severity": "BLOCKING",
+      "subject": "tzdata Production",
+      "detail": "Production est antérieure à 2026c ; V5 et tout backfill de journées métier restent bloqués jusqu’à correction officielle et vérification."
+    },
+    {
+      "id": "D02",
+      "severity": "BLOCKING",
+      "subject": "Migrations P1–P6 absentes du dépôt",
+      "detail": "Les sources locales ne contiennent pas les migrations worker/lecteur appliquées sur Test. Le snapshot Test (23 fonctions) est la référence de définition ; l’historique local reste non réconcilié."
+    },
+    {
+      "id": "D03",
+      "severity": "MAJEURE",
+      "subject": "Versions B13 locales ≠ historique Test",
+      "detail": "Ex. b13_invalidation_hot_path : 20261018230000 local vs 20261018230705 Test. Ne pas rejouer les fichiers historiques ; utiliser le snapshot."
+    },
+    {
+      "id": "D04",
+      "severity": "MAJEURE",
+      "subject": "ACL Test non durcie",
+      "detail": "dashboard_kpi_invalidate_insert_stmt porte EXECUTE PUBLIC/anon/authenticated sur Test. Le paquet révoque ces droits ; écart volontaire, à vérifier après installation."
+    },
+    {
+      "id": "D05",
+      "severity": "MINEURE",
+      "subject": "Rôle jisra_kpi_worker absent en Production",
+      "detail": "Test accorde EXECUTE à ce rôle sur worker_run et worker_purge_runs. Le paquet accorde service_role uniquement ; le cron s’exécute en postgres."
+    },
+    {
+      "id": "D06",
+      "severity": "MAJEURE",
+      "subject": "R-BL4 absent en Production",
+      "detail": "0 objet _rbl4 / dashboard_legacy_access en Production. R-BL4 doit être appliqué avant un rollback legacy sécurisé ou un shadow."
+    },
+    {
+      "id": "D07",
+      "severity": "MINEURE",
+      "subject": "Versions extensions",
+      "detail": "Production disponible : pg_net 0.20.0, pg_cron 1.6.4. Test : pg_net 0.20.4. Vérifier la signature net.http_post après installation."
+    },
+    {
+      "id": "D08",
+      "severity": "MAJEURE",
+      "subject": "PostgreSQL différent",
+      "detail": "Production 17.6 ARM64 / Test 17.11 x86_64. Les mesures B13 Test ne sont pas transposables telles quelles."
+    },
+    {
+      "id": "D09",
+      "severity": "BLOCKING",
+      "subject": "Lecteur V5 bloqué par le code",
+      "detail": "lib/dashboard/kpi-reader-flag.ts interdit explicitement la Production. Aucune activation possible sans modification P7.2 et autorisation."
+    }
+  ],
+  "verdict_reason": "P7.3 : PASS — installation propre atomique sur qxtqtzmxkwiohfbmwcdt, 29/29 vérifications, ACL corrigées, empreinte agrégée identique, extensions sans job, rollback 91 deux fois, idempotence. Installation Production non autorisée : tzdata et R-BL4 restent des prérequis distincts."
+}

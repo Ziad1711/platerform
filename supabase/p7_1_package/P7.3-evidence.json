@@ -1,0 +1,134 @@
+{
+  "report": "P7.3-MCP.md",
+  "date": "2026-10-19",
+  "project": {
+    "name": "jisra test 2",
+    "ref": "qxtqtzmxkwiohfbmwcdt",
+    "url": "https://qxtqtzmxkwiohfbmwcdt.supabase.co",
+    "identity_confirmed_by_mcp": true,
+    "postgres": "17.11",
+    "initially_empty": true
+  },
+  "mcp": {
+    "server": "supabase-p7",
+    "type": "streamableHttp",
+    "url": "https://mcp.supabase.com/mcp?project_ref=qxtqtzmxkwiohfbmwcdt&features=account%2Cdatabase",
+    "oauth": true,
+    "token_stored": false,
+    "publishable_key_used_as_admin": false,
+    "existing_servers_unchanged": true,
+    "tools_visible_in_session": false,
+    "mcp_connection": "authenticated",
+    "direct_mcp_client_used": true
+  },
+  "static": {
+    "checks": 33,
+    "passed": 33,
+    "failed": 0,
+    "verdict": "PASS"
+  },
+  "corrections": [
+    "order 10 before 20",
+    "verifier n ambiguity",
+    "temp table pg_temp",
+    "stage all without wakeup, stage wakeup with",
+    "tx index and note_tx checks",
+    "rollback cron errors not swallowed",
+    "rollback remaining jobs check",
+    "generator aligned",
+    "preflight and structural export scripts"
+  ],
+  "preflight_production": {
+    "schemas": ["auth", "extensions", "graphql", "graphql_public", "public", "realtime", "storage", "supabase_migrations", "vault"],
+    "security_definer_functions": 89,
+    "event_triggers": 7,
+    "publications": 1,
+    "subscriptions": 0,
+    "foreign_servers": 0,
+    "large_objects": 0,
+    "external_effect_functions": 0,
+    "suspicious_comments": 8,
+    "public_tables_rls_off": 0
+  },
+  "defects_found": [
+    {
+      "id": "P73-D01",
+      "severity": "BLOCKING_FOR_ACL",
+      "detail": "Premier revoke ACL collé à -- @@END, donc commenté : dashboard_kpi_access_level conservait EXECUTE PUBLIC/anon/authenticated.",
+      "fixed": true
+    },
+    {
+      "id": "P73-D02",
+      "severity": "MAJEURE",
+      "detail": "cron.unschedule lève XX000 'could not find valid entry for job' : le rollback doit tolérer ce cas précis.",
+      "fixed": true
+    }
+  ],
+  "qualification": {
+    "fixture_tables": 5,
+    "fixture_functions": 2,
+    "fixture_rows": 0,
+    "install_10": "PASS",
+    "initial_verify": "1 FAIL (ACL access_level)",
+    "verify_after_correction": "29/29 PASS",
+    "extensions": {
+      "pg_cron": "1.6.4",
+      "pg_net": "0.20.4"
+    },
+    "kpi_jobs_after_extensions": 0,
+    "rollback_91": "PASS (deux exécutions)",
+    "post_rollback": {
+      "kpi_tables": 6,
+      "kpi_functions": 23,
+      "kpi_triggers": 0,
+      "kpi_jobs": 0,
+      "worker_enabled": false,
+      "wakeup_enabled": false,
+      "acl_leaks": 0
+    },
+    "idempotence_10_rerun": "PASS (P71_ALREADY_INSTALLED)",
+    "data_imported": false,
+    "production_unchanged": true,
+    "test_unchanged": true
+  },
+  "clean_reinstall": {
+    "status": "PASS",
+    "method": "drop atomique des 6 tables, 23 fonctions et de la vue, sans CASCADE, puis 10 corrigé dans la même transaction",
+    "external_dependents": 0,
+    "verify_after_reinstall": "29/29 PASS",
+    "acl_access_level": {
+      "anon": false,
+      "authenticated": false,
+      "service_role": true
+    },
+    "aggregate_md5": "7c42c7ec3479d25f88d876be4f842bca",
+    "aggregate_matches_package": true,
+    "fixture_preserved": true,
+    "fixture_rows": 0,
+    "fixture_stores_pk_added": true,
+    "extensions_preserved": true,
+    "rollback_91_runs": 2,
+    "idempotence": "P71_ALREADY_INSTALLED",
+    "final_state": {
+      "kpi_tables": 6,
+      "kpi_functions": 23,
+      "kpi_view": 1,
+      "kpi_triggers": 0,
+      "kpi_jobs": 0,
+      "worker_enabled": false,
+      "wakeup_enabled": false,
+      "metrics_rows": 0,
+      "journal_rows": 0,
+      "run_rows": 0,
+      "extensions": 2,
+      "fixture_rows": 0
+    }
+  },
+  "phase3": {
+    "status": "PASS",
+    "functional_qualification": "PASS",
+    "reproducibility": "PASS",
+    "production_unchanged": true,
+    "test_unchanged": true
+  }
+}
