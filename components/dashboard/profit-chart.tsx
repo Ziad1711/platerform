@@ -4,12 +4,13 @@ import { TrendingUp, TrendingDown } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, getPeriodRange } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
+import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 
 export default function ProfitChart() {
   const { currentStoreId, selectedPeriod, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod)
+  const periodRange = businessRangeToInstants(legacyBusinessRange(selectedPeriod))
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-profit-chart', currentStoreId, selectedPeriod, accessibleStoreIds],

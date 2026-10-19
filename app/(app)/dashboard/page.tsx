@@ -10,9 +10,14 @@ import ConfirmationPerformance from '@/components/dashboard/confirmation-perform
 import PeriodFilter from '@/components/dashboard/period-filter'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
+import { kpiReaderV5Enabled } from '@/lib/dashboard/kpi-reader-flag'
+import { KpiRolloutProbe, KpiRolloutProvider } from '@/lib/dashboard/use-kpi-rollout'
 
 export default async function DashboardPage() {
   const { user, authUnavailable } = await getServerUserResult()
+  // Autorisation serveur : le mode effectif reste décidé par la configuration
+  // opérationnelle et vaut legacy par défaut.
+  const rolloutEnabled = kpiReaderV5Enabled()
 
   // Le layout protégé affiche normalement déjà l'état d'indisponibilité ; ce
   // repli couvre le cas où seul ce contrôle échoue (panne intermittente) :
@@ -45,6 +50,8 @@ export default async function DashboardPage() {
 
 
   return (
+    <KpiRolloutProvider enabled={rolloutEnabled}>
+    <KpiRolloutProbe />
     <div className="space-y-6 pt-2 sm:pt-0 animate-fade-in">
 
       {/* Header */}
@@ -102,5 +109,6 @@ export default async function DashboardPage() {
         <RecentOrders />
       </div>
     </div>
+    </KpiRolloutProvider>
   )
 }

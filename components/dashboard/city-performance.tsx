@@ -4,13 +4,16 @@ import { useMemo, useState } from 'react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, getPeriodRange } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
+import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 
 type SortBy = 'revenue' | 'confirmationRate' | 'returnRate'
 
 export default function CityPerformance() {
   const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
+  const periodRange = businessRangeToInstants(
+    legacyBusinessRange(selectedPeriod, customStartDate, customEndDate),
+  )
   const supabase = createClient()
   const [sortBy, setSortBy] = useState<SortBy>('revenue')
   const [minOrders, setMinOrders] = useState(10)

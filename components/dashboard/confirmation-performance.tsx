@@ -3,7 +3,8 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, formatNumber, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber } from '@/lib/utils'
+import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 
 type AgentRow = {
   id: string
@@ -21,7 +22,9 @@ type AgentRow = {
 export default function ConfirmationPerformance() {
   const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
+  const periodRange = businessRangeToInstants(
+    legacyBusinessRange(selectedPeriod, customStartDate, customEndDate),
+  )
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-confirmation-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],

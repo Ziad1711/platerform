@@ -5,7 +5,11 @@ import { useQuery } from '@tanstack/react-query'
 import { CalendarDays, Clock, Flame, RotateCcw } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
-import { getPeriodRange } from '@/lib/utils'
+import {
+  addBusinessDays,
+  businessRangeToInstants,
+  legacyBusinessRange,
+} from '@/lib/dashboard/business-time'
 
 type StatusFilter = 'all' | 'confirmed' | 'delivered'
 type ViewMode = 'day' | 'hour'
@@ -39,18 +43,6 @@ function formatPercent(value: number, total: number) {
   return `${((value / total) * 100).toFixed(1).replace('.', ',')} %`
 }
 
-function startOfDay(date: Date) {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-function addDays(date: Date, days: number) {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
-}
-
 export default function OrderTimePerformance() {
   const {
     currentStoreId,
@@ -63,23 +55,14 @@ export default function OrderTimePerformance() {
     authReady,
   } = useStore()
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
-
-  let periodStart = periodRange.start ? startOfDay(periodRange.start) : null
-  let periodEnd = periodRange.end ? startOfDay(periodRange.end) : null
-
-  if (selectedPeriod === 'today') {
-    const ref = startOfDay(new Date())
-    periodStart = addDays(ref, -6)
-    periodEnd = addDays(ref, 1)
-  } else if (selectedPeriod === 'yesterday') {
-    const ref = addDays(startOfDay(new Date()), -1)
-    periodStart = addDays(ref, -6)
-    periodEnd = addDays(ref, 1)
-  }
-
-  const startIso = periodStart ? periodStart.toISOString() : null
-  const endIso = periodEnd ? periodEnd.toISOString() : null
+  const legacyRange = legacyBusinessRange(selectedPeriod, customStartDate, customEndDate)
+  const queryRange =
+    selectedPeriod === 'today' || selectedPeriod === 'yesterday'
+      ? { from: addBusinessDays(legacyRange.from, -6), to: legacyRange.to }
+      : legacyRange
+  const periodRange = businessRangeToInstants(queryRange)
+  const startIso = periodRange.start.toISOString()
+  const endIso = periodRange.end.toISOString()
 
   const [viewMode, setViewMode] = useState<ViewMode>('day')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -144,21 +127,15 @@ export default function OrderTimePerformance() {
   // Nombre d'occurrences de chaque jour sur la période (pour comparer des moyennes)
   const weekdayOccurrences = useMemo(() => {
     const counts = Array<number>(7).fill(0)
-    if (!startIso) return counts
-    const start = new Date(startIso)
-    start.setHours(0, 0, 0, 0)
-    const rawEnd = endIso ? new Date(endIso) : new Date()
-    const todayEnd = new Date()
-    todayEnd.setHours(0, 0, 0, 0)
-    todayEnd.setDate(todayEnd.getDate() + 1)
-    const end = rawEnd > todayEnd ? todayEnd : rawEnd
-    const cursor = new Date(start)
-    while (cursor < end) {
-      counts[(cursor.getDay() + 6) % 7] += 1
-      cursor.setDate(cursor.getDate() + 1)
+    let cursor = queryRange.from
+    while (cursor < queryRange.to) {
+      const [year, month, day] = cursor.split('-').map(Number)
+      const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+      counts[(weekday + 6) % 7] += 1
+      cursor = addBusinessDays(cursor, 1)
     }
     return counts
-  }, [startIso, endIso])
+  }, [queryRange.from, queryRange.to])
 
   const bestDayIndex = useMemo(() => {
     let best = -1

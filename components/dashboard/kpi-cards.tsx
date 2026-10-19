@@ -1,13 +1,27 @@
 'use client'
 
+import { useMemo } from 'react'
 import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, Target, Package, Truck, Info } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, formatNumber, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber } from '@/lib/utils'
 import AdsCostChart from '@/components/dashboard/ads-cost-chart'
+import { businessRange, previousBusinessRange, useKpiReader, KPI_REVISION_POLL_MS } from '@/lib/dashboard/use-kpi-reader'
+import {
+  businessRangeToInstants,
+  legacyBusinessRange,
+  previousBusinessPeriodRange,
+  sameBusinessRange,
+  type BusinessRange,
+} from '@/lib/dashboard/business-time'
+import { buildReaderScope } from '@/lib/dashboard/kpi-reader-mappers'
+import type { KpiReaderMode } from '@/lib/dashboard/kpi-reader-flag'
+import { useKpiReaderErrorTelemetry, useKpiRollout } from '@/lib/dashboard/use-kpi-rollout'
+
 
 interface KpiData {
+  financialAccess: boolean
   orders: number
   deliveredOrders: number
   revenue: number
@@ -45,88 +59,6 @@ interface KpiResult extends KpiData {
   changes: KpiChanges
 }
 
-interface DateRange {
-  start: Date | null
-  end: Date | null
-}
-
-function addDays(date: Date, days: number) {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
-}
-
-function diffDays(start: Date, end: Date) {
-  return Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
-}
-
-function getPreviousRange(selectedPeriod: string, currentRange: DateRange): DateRange {
-  const now = new Date()
-
-  // « Toujours » n'a pas de période précédente comparable : on compare à la même donnée.
-  if (selectedPeriod === 'all') {
-    return { start: null, end: null }
-  }
-
-  if (selectedPeriod === 'today') {
-    const todayStart = new Date(now)
-    todayStart.setHours(0, 0, 0, 0)
-    const yesterdayStart = addDays(todayStart, -1)
-    return { start: yesterdayStart, end: todayStart }
-  }
-
-  if (selectedPeriod === 'yesterday') {
-    const todayStart = new Date(now)
-    todayStart.setHours(0, 0, 0, 0)
-    const yesterdayStart = addDays(todayStart, -1)
-    const dayBeforeStart = addDays(todayStart, -2)
-    return { start: dayBeforeStart, end: yesterdayStart }
-  }
-
-  if (selectedPeriod === 'week') {
-    const end = currentRange.start
-    const start = end ? addDays(end, -7) : null
-    return { start, end }
-  }
-
-  if (selectedPeriod === 'month' || selectedPeriod === 'last_month') {
-    const currentMonthStart = currentRange.start
-    if (!currentMonthStart) return { start: null, end: null }
-    const previousMonthStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - 1, 1)
-    return { start: previousMonthStart, end: currentMonthStart }
-  }
-
-  if (selectedPeriod === 'quarter') {
-    const currentQuarterStart = currentRange.start
-    if (!currentQuarterStart) return { start: null, end: null }
-    const previousQuarterStart = new Date(currentQuarterStart.getFullYear(), currentQuarterStart.getMonth() - 3, 1)
-    return { start: previousQuarterStart, end: currentQuarterStart }
-  }
-
-  if (selectedPeriod === 'year' || selectedPeriod === 'last_year') {
-    const currentYearStart = currentRange.start
-    if (!currentYearStart) return { start: null, end: null }
-    const previousYearStart = new Date(currentYearStart.getFullYear() - 1, 0, 1)
-    return { start: previousYearStart, end: currentYearStart }
-  }
-
-  if (selectedPeriod === 'custom' && currentRange.start && currentRange.end) {
-    const days = diffDays(currentRange.start, currentRange.end)
-    const previousEnd = currentRange.start
-    const previousStart = addDays(previousEnd, -days)
-    return { start: previousStart, end: previousEnd }
-  }
-
-  if (currentRange.start && currentRange.end) {
-    const days = diffDays(currentRange.start, currentRange.end)
-    const previousEnd = currentRange.start
-    const previousStart = addDays(previousEnd, -days)
-    return { start: previousStart, end: previousEnd }
-  }
-
-  return { start: null, end: null }
-}
-
 function calcPctChange(current: number, previous: number) {
   if (previous === 0) return current === 0 ? 0 : 100
   return ((current - previous) / Math.abs(previous)) * 100
@@ -144,24 +76,147 @@ function shouldShowChange(value: number) {
 
 interface KpiCardsProps {
   variant?: 'primary' | 'marketing'
+  /** Override de test uniquement ; le mode normal vient du rollout serveur. */
+  source?: KpiReaderMode
 }
 
-export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
+export default function KpiCards({ variant = 'primary', source }: KpiCardsProps) {
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading, userId } = useStore()
+  const rollout = useKpiRollout()
+  const mode = source ?? rollout.mode
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
+  const legacyRange = legacyBusinessRange(selectedPeriod, customStartDate, customEndDate)
+  const legacyPreviousRange = previousBusinessPeriodRange(selectedPeriod, legacyRange)
 
-  const { data: kpiData, isLoading } = useQuery<KpiResult>({
-    queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
-    enabled: !isStoresLoading,
+  const v5Enabled = mode === 'v5'
+  const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
+  const v5PreviousRange = previousBusinessRange(v5Range)
+  const v5StoreIds = currentStoreId ? [currentStoreId] : null
+  const boundary = `${userId ?? 'anonymous'}:${rollout.accessFingerprint}`
+
+  const v5Current = useKpiReader({
+    enabled: v5Enabled && !isStoresLoading,
+    supabase,
+    boundary,
+    storeIds: v5StoreIds,
+    from: v5Range.from,
+    to: v5Range.to,
+    // Un seul poller par dashboard : l'invalidation couvre toutes les clés V5.
+    pollMs: variant === 'primary' ? KPI_REVISION_POLL_MS : 0,
+  })
+  const v5Previous = useKpiReader({
+    enabled: v5Enabled && !isStoresLoading,
+    supabase,
+    boundary,
+    storeIds: v5StoreIds,
+    from: v5PreviousRange.from,
+    to: v5PreviousRange.to,
+    pollMs: 0,
+  })
+  useKpiReaderErrorTelemetry(
+    'kpi-cards',
+    v5Enabled,
+    v5Current.isError || v5Previous.isError,
+  )
+
+  const v5Result = useMemo<KpiResult | undefined>(() => {
+    if (!v5Enabled || !v5Current.data || !v5Previous.data) return undefined
+    const current = buildReaderScope(v5Current.data)
+    const previous = buildReaderScope(v5Previous.data)
+    if (!current.totals) return undefined
+
+    const totals = current.totals as unknown as Record<string, unknown>
+    const previousTotals = (previous.totals ?? {}) as unknown as Record<string, unknown>
+    const num = (value: unknown) => (value === undefined || value === null ? 0 : Number(value))
+    const metric = (record: Record<string, unknown>, key: string) => num(record[key])
+
+    const data: KpiData = {
+      financialAccess: current.access === 'full',
+      orders: metric(totals, 'orders_count'),
+      deliveredOrders: metric(totals, 'delivered_count'),
+      revenue: metric(totals, 'revenue'),
+      purchaseCost: metric(totals, 'purchase_cost'),
+      adSpend: metric(totals, 'ads_tracked') + metric(totals, 'ads_fallback'),
+      adCost: metric(totals, 'ads_tracked') + metric(totals, 'ads_fallback'),
+      deliveryCost: metric(totals, 'delivery_fee_cost'),
+      confirmationCost: metric(totals, 'confirmation_cost'),
+      profit: metric(totals, 'contribution_margin'),
+      averageOrderValue: metric(totals, 'aov'),
+      deliveredRate: metric(totals, 'delivery_rate'),
+      cpl: metric(totals, 'cpl'),
+      cpa: metric(totals, 'cpa'),
+      roas: metric(totals, 'roas'),
+      marginRate: metric(totals, 'margin_rate'),
+    }
+
+    const charges = data.purchaseCost + data.deliveryCost + data.confirmationCost
+    const previousCharges =
+      metric(previousTotals, 'purchase_cost') +
+      metric(previousTotals, 'delivery_fee_cost') +
+      metric(previousTotals, 'confirmation_cost')
+
+    return {
+      ...data,
+      changes: {
+        orders: calcPctChange(data.orders, metric(previousTotals, 'orders_count')),
+        deliveredOrders: calcPctChange(data.deliveredOrders, metric(previousTotals, 'delivered_count')),
+        revenue: calcPctChange(data.revenue, metric(previousTotals, 'revenue')),
+        charges: calcPctChange(charges, previousCharges),
+        adSpend: calcPctChange(
+          data.adSpend,
+          metric(previousTotals, 'ads_tracked') + metric(previousTotals, 'ads_fallback'),
+        ),
+        adCost: calcPctChange(
+          data.adCost,
+          metric(previousTotals, 'ads_tracked') + metric(previousTotals, 'ads_fallback'),
+        ),
+        profit: calcPctChange(data.profit, metric(previousTotals, 'contribution_margin')),
+        deliveryCost: calcPctChange(data.deliveryCost, metric(previousTotals, 'delivery_fee_cost')),
+        cpl: calcPctChange(data.cpl, metric(previousTotals, 'cpl')),
+        cpa: calcPctChange(data.cpa, metric(previousTotals, 'cpa')),
+        confirmationCost: calcPctChange(
+          data.confirmationCost,
+          metric(previousTotals, 'confirmation_cost'),
+        ),
+        roas: calcPctChange(data.roas, metric(previousTotals, 'roas')),
+        marginRate: calcPctChange(data.marginRate, metric(previousTotals, 'margin_rate')),
+      },
+    }
+  }, [v5Enabled, v5Current.data, v5Previous.data])
+
+  const v5Access = useMemo(
+    () => (v5Current.data ? buildReaderScope(v5Current.data).access : null),
+    [v5Current.data],
+  )
+  const v5Coverage = useMemo(
+    () => (v5Current.data ? buildReaderScope(v5Current.data).coverage : null),
+    [v5Current.data],
+  )
+  const v5Mixed = useMemo(
+    () => (v5Current.data ? buildReaderScope(v5Current.data).mixed : false),
+    [v5Current.data],
+  )
+  const v5Notice = useMemo(() => {
+    if (!v5Enabled || !v5Coverage) return null
+    const unavailable =
+      v5Coverage.days_missing + v5Coverage.days_dirty + v5Coverage.days_incompatible
+    if (unavailable === 0) return null
+    return `Données partielles : ${v5Coverage.days_missing} jour(s) indisponible(s), ${v5Coverage.days_dirty} en cours d’actualisation, ${v5Coverage.days_incompatible} incompatible(s). Ces journées sont exclues des totaux.`
+  }, [v5Enabled, v5Coverage])
+
+
+
+  const { data: legacyData, isLoading: legacyLoading } = useQuery<KpiResult>({
+    queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
+    enabled: !isStoresLoading && mode !== 'v5' && rollout.resolved,
     queryFn: async () => {
-      const previousRange = getPreviousRange(selectedPeriod, periodRange)
-
-      const fetchMetrics = async (range: DateRange): Promise<KpiData> => {
+      const fetchMetrics = async (range: BusinessRange): Promise<KpiData> => {
         const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
+        const { start, end } = businessRangeToInstants(range)
 
         if (storeIds.length === 0) {
           return {
+            financialAccess: false,
             orders: 0,
             deliveredOrders: 0,
             revenue: 0,
@@ -180,44 +235,32 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
           }
         }
 
-        const [results, topProductsResults] = await Promise.all([
-          Promise.all(
-            storeIds.map(async (storeId) => {
-              const { data, error } = await supabase.rpc('rpc_dashboard_kpi_metrics', {
-                p_store_id: storeId,
-                p_start_date: range.start ? range.start.toISOString() : null,
-                p_end_date: range.end ? range.end.toISOString() : null,
-              })
-
-              if (error) throw error
-
-              return (data?.[0] || {}) as {
-                orders_count?: number
-                delivered_count?: number
-                revenue?: number
-                purchase_cost?: number
-                ad_spend?: number
-                ad_cost_allocated?: number
-                delivery_cost?: number
-                confirmation_cost?: number
-              }
+        // Lot 1 (O1) : le CA des cartes provient de `rpc_dashboard_kpi_metrics`.
+        // L'appel `rpc_dashboard_top_products` ne servait qu'à le recalculer
+        // (résultat identique : 7 boutiques x 3 périodes vérifiées en base), et il
+        // reste utilisé par le bloc Produits.
+        const results = await Promise.all(
+          storeIds.map(async (storeId) => {
+            const { data, error } = await supabase.rpc('rpc_dashboard_kpi_metrics', {
+              p_store_id: storeId,
+              p_start_date: start.toISOString(),
+              p_end_date: end.toISOString(),
             })
-          ),
 
-          Promise.all(
-            storeIds.map(async (storeId) => {
-              const { data, error } = await supabase.rpc('rpc_dashboard_top_products', {
-                p_store_id: storeId,
-                p_start_date: range.start ? range.start.toISOString() : null,
-                p_end_date: range.end ? range.end.toISOString() : null,
-              })
+            if (error) throw error
 
-              if (error) throw error
-
-              return (data || []) as Array<{ revenue?: number }>
-            })
-          ),
-        ])
+            return (data?.[0] || {}) as {
+              orders_count?: number
+              delivered_count?: number
+              revenue?: number
+              purchase_cost?: number | null
+              ad_spend?: number
+              ad_cost_allocated?: number
+              delivery_cost?: number | null
+              confirmation_cost?: number | null
+            }
+          })
+        )
 
         type AggregatedRow = {
           orders_count: number
@@ -230,8 +273,12 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
           confirmation_cost: number
         }
 
-        const aggregated = results.reduce<AggregatedRow>(
-          (acc, row) => {
+        const financialAccess = results.every((row) =>
+          row.purchase_cost !== null &&
+          row.delivery_cost !== null &&
+          row.confirmation_cost !== null,
+        )
+        const aggregated = results.reduce<AggregatedRow>((acc, row) => {
             acc.orders_count += Number(row.orders_count || 0)
             acc.delivered_count += Number(row.delivered_count || 0)
             acc.revenue += Number(row.revenue || 0)
@@ -256,9 +303,9 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
         const ordersCount = aggregated.orders_count
         const deliveredOrdersCount = aggregated.delivered_count
-        const revenue = topProductsResults
-          .flat()
-          .reduce((sum, row) => sum + Number(row.revenue || 0), 0)
+        // Lot 1 (O1) : CA = valeur de `rpc_dashboard_kpi_metrics`. Identique à la
+        // somme des revenus produits (mêmes lignes livrées), sans second calcul.
+        const revenue = aggregated.revenue
         
         const purchaseCost = aggregated.purchase_cost
         const adSpendTotal = aggregated.ad_spend
@@ -280,6 +327,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
         const marginRate = revenue > 0 ? (profit / revenue) * 100 : 0
 
         return {
+          financialAccess,
           orders: ordersCount,
           deliveredOrders: deliveredOrdersCount,
           revenue,
@@ -299,8 +347,13 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
       }
 
-      const current = await fetchMetrics(periodRange)
-      const previous = await fetchMetrics(previousRange)
+      // Lot 1 (O2) : une période précédente strictement identique à la période
+      // courante ne justifie pas un second appel réseau ; les variations restent
+      // calculées sur les mêmes valeurs.
+      const current = await fetchMetrics(legacyRange)
+      const previous = sameBusinessRange(legacyPreviousRange, legacyRange)
+        ? current
+        : await fetchMetrics(legacyPreviousRange)
       const currentCharges = current.purchaseCost + current.deliveryCost + current.confirmationCost
       const previousCharges = previous.purchaseCost + previous.deliveryCost + previous.confirmationCost
 
@@ -326,6 +379,12 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
   })
 
 
+  const kpiData = v5Enabled ? v5Result : legacyData
+  const isLoading = v5Enabled
+    ? v5Current.isLoading || v5Previous.isLoading
+    : legacyLoading || !rollout.resolved
+  // Accès commercial : aucun coût, marge ni profit ne doit être affiché.
+  const showCosts = v5Enabled ? v5Access === 'full' : kpiData?.financialAccess === true
   const primaryKpis = [
     {
       title: 'Commandes',
@@ -356,7 +415,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
     },
     {
       title: 'Charges',
-      value: kpiData ? formatCurrency((kpiData.purchaseCost || 0) + (kpiData.deliveryCost || 0) + (kpiData.confirmationCost || 0)) : '0 MAD',
+      value: showCosts && kpiData ? formatCurrency((kpiData.purchaseCost || 0) + (kpiData.deliveryCost || 0) + (kpiData.confirmationCost || 0)) : 'Non autorisé',
       rawChange: kpiData?.changes?.charges || 0,
       change: formatChange(kpiData?.changes?.charges || 0),
       trend: (kpiData?.changes?.charges || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -375,7 +434,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
     },
     {
       title: 'Profit (partiel)',
-      value: kpiData ? formatCurrency(kpiData.profit) : '0 MAD',
+      value: showCosts && kpiData ? formatCurrency(kpiData.profit) : 'Non autorisé',
       rawChange: kpiData?.changes?.profit || 0,
       change: formatChange(kpiData?.changes?.profit || 0),
       trend: (kpiData?.changes?.profit || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -425,6 +484,16 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
       color: 'bg-fuchsia-500',
     },
   ]
+
+  // Multi-devises ou niveaux d'accès mixtes : aucun montant ne doit être additionné.
+  if (v5Enabled && v5Mixed) {
+    return (
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+        Plusieurs devises ou niveaux d&apos;accès sont concernés : les montants ne sont pas
+        additionnés. Sélectionnez une boutique pour consulter ses KPI.
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (
@@ -477,7 +546,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
           })}
         </div>
             <div className="mt-4">
-              <AdsCostChart />
+              <AdsCostChart source={mode} />
             </div>
           </div>
         )}
@@ -488,6 +557,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
   if (variant === 'marketing') {
     return (
       <div className="bg-card rounded-xl shadow p-4">
+        <span hidden data-kpi-financial-access={String(showCosts)} />
         <div className="mb-3">
           <h3 className="text-lg font-semibold text-foreground dark:text-gray-100">Performance marketing</h3>
         </div>
@@ -518,7 +588,7 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
           })}
         </div>
         <div className="mt-4">
-          <AdsCostChart />
+          <AdsCostChart source={mode} />
         </div>
       </div>
     )
@@ -526,6 +596,12 @@ export default function KpiCards({ variant = 'primary' }: KpiCardsProps) {
 
   return (
     <div className="space-y-6">
+      <span hidden data-kpi-financial-access={String(showCosts)} />
+      {v5Enabled && v5Notice && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          {v5Notice}
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {primaryKpis.map((kpi) => {
           const Icon = kpi.icon

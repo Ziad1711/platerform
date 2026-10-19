@@ -5,17 +5,21 @@ import { TrendingUp } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, formatNumber, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber } from '@/lib/utils'
+import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 
 type SortBy = 'revenue' | 'profit'
+type ProductMetric = { id: string; name: string; sales: number; revenue: number; profit: number | null }
 
 export default function TopProducts() {
   const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
+  const periodRange = businessRangeToInstants(
+    legacyBusinessRange(selectedPeriod, customStartDate, customEndDate),
+  )
   const [sortBy, setSortBy] = useState<SortBy>('revenue')
 
-  const { data: topProductsRaw, isLoading } = useQuery({
+  const { data: topProductsRaw, isLoading } = useQuery<ProductMetric[]>({
     queryKey: ['dashboard-top-products', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
     enabled: !isStoresLoading,
     queryFn: async () => {
@@ -33,19 +37,21 @@ export default function TopProducts() {
             p_end_date: periodRange.end ? periodRange.end.toISOString() : null,
           })
           if (error) throw error
-          return (rows || []) as Array<{ id: string; name: string; sales: number; revenue: number; profit: number }>
+          return (rows || []) as Array<ProductMetric>
         })
       )
 
       // Aggregate products by id
-      const productMap = new Map<string, { id: string; name: string; sales: number; revenue: number; profit: number }>()
+      const productMap = new Map<string, ProductMetric>()
       for (const rows of results) {
         for (const row of rows) {
           const id = String(row.id || 'inconnu')
-          const existing = productMap.get(id) || { id, name: String(row.name || 'Produit'), sales: 0, revenue: 0, profit: 0 }
+          const existing = productMap.get(id) || { id, name: String(row.name || 'Produit'), sales: 0, revenue: 0, profit: row.profit === null ? null : 0 }
           existing.sales += Number(row.sales || 0)
           existing.revenue += Number(row.revenue || 0)
-          existing.profit += Number(row.profit || 0)
+          existing.profit = existing.profit === null || row.profit === null
+            ? null
+            : existing.profit + Number(row.profit || 0)
           productMap.set(id, existing)
         }
       }
@@ -56,17 +62,19 @@ export default function TopProducts() {
 
 
   const colors = ['#2563eb', '#16a34a', '#f59e0b', '#a855f7', '#ef4444']
+  const financialAccess = (topProductsRaw || []).every((product) => product.profit !== null)
+  const effectiveSort: SortBy = sortBy === 'profit' && !financialAccess ? 'revenue' : sortBy
 
   const topProducts = useMemo(() => {
     const rows = [...(topProductsRaw || [])]
-      .sort((a, b) => (sortBy === 'revenue' ? b.revenue - a.revenue : b.profit - a.profit))
+      .sort((a, b) => (effectiveSort === 'revenue' ? b.revenue - a.revenue : Number(b.profit) - Number(a.profit)))
       .slice(0, 5)
     return rows
-  }, [topProductsRaw, sortBy])
+  }, [topProductsRaw, effectiveSort])
 
   const totalMetric = useMemo(() => {
-    return topProducts.reduce((sum, p) => sum + Math.max(0, sortBy === 'revenue' ? p.revenue : p.profit), 0)
-  }, [topProducts, sortBy])
+    return topProducts.reduce((sum, p) => sum + Math.max(0, effectiveSort === 'revenue' ? p.revenue : Number(p.profit)), 0)
+  }, [topProducts, effectiveSort])
 
   const conicGradient = useMemo(() => {
     if (!topProducts.length || totalMetric <= 0) {
@@ -74,7 +82,7 @@ export default function TopProducts() {
     }
     let start = 0
     const stops = topProducts.map((p, index) => {
-      const value = Math.max(0, sortBy === 'revenue' ? p.revenue : p.profit)
+      const value = Math.max(0, effectiveSort === 'revenue' ? p.revenue : Number(p.profit))
       const pct = (value / totalMetric) * 100
       const end = start + pct
       const color = colors[index % colors.length]
@@ -86,7 +94,7 @@ export default function TopProducts() {
       stops.push(`#e5e7eb ${start.toFixed(2)}% 100%`)
     }
     return `conic-gradient(${stops.join(', ')})`
-  }, [topProducts, sortBy, totalMetric])
+  }, [topProducts, effectiveSort, totalMetric])
 
   return (
     <div className="bg-card rounded-xl shadow">
@@ -102,9 +110,10 @@ export default function TopProducts() {
               onChange={(e) => setSortBy(e.target.value as SortBy)}
             >
               <option value="revenue">Chiffre d'affaires</option>
-              <option value="profit">Profit</option>
+              {financialAccess && <option value="profit">Profit</option>}
             </select>
             <span className="text-sm text-muted-foreground">Top 5</span>
+            {!financialAccess && <span className="text-xs text-muted-foreground">Profit : Non autorisé</span>}
           </div>
         </div>
       </div>
@@ -122,7 +131,7 @@ export default function TopProducts() {
                 <div className="absolute inset-6 bg-card rounded-full flex items-center justify-center text-center px-2">
                   <div>
                     <div className="text-xs text-muted-foreground">
-                      {sortBy === 'revenue' ? 'CA total' : 'Profit total'}
+                      {effectiveSort === 'revenue' ? 'CA total' : 'Profit total'}
                     </div>
                     <div className="text-sm font-semibold text-foreground mt-1">
                       {formatCurrency(totalMetric)}
@@ -134,7 +143,7 @@ export default function TopProducts() {
 
             <div className="space-y-2 min-w-0">
               {topProducts.map((product, index) => {
-                const metricValue = sortBy === 'revenue' ? product.revenue : product.profit
+                const metricValue = effectiveSort === 'revenue' ? product.revenue : Number(product.profit)
                 return (
                   <div key={product.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border px-4 py-3 overflow-hidden">
                     <div className="flex items-center gap-3 min-w-0 overflow-hidden">
@@ -148,7 +157,7 @@ export default function TopProducts() {
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className={`font-semibold ${sortBy === 'profit' && metricValue < 0 ? 'text-red-600' : 'text-foreground'}`}>
+                      <div className={`font-semibold ${effectiveSort === 'profit' && metricValue < 0 ? 'text-red-600' : 'text-foreground'}`}>
                         {formatCurrency(metricValue)}
                       </div>
                       <div className="text-xs text-muted-foreground flex items-center justify-end">

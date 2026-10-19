@@ -3,7 +3,8 @@
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
-import { formatCurrency, formatDateTime, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 import Link from 'next/link'
 
 const statusLabels: Record<string, string> = {
@@ -108,7 +109,9 @@ function getStatusColor(status: string) {
 export default function RecentOrders() {
   const { currentStoreId, accessibleStoreIds, selectedPeriod, customStartDate, customEndDate, isStoresLoading } = useStore()
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
+  const periodRange = businessRangeToInstants(
+    legacyBusinessRange(selectedPeriod, customStartDate, customEndDate),
+  )
 
   const { data: orders, isLoading } = useQuery({
     queryKey: ['dashboard-recent-orders', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],

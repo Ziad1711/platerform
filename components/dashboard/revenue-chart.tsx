@@ -5,21 +5,20 @@ import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
 import { Info } from 'lucide-react'
-import { formatCurrency, formatNumber, buildRoundedPath, getPeriodRange } from '@/lib/utils'
+import { formatCurrency, formatNumber, buildRoundedPath } from '@/lib/utils'
+import { businessRange, useKpiReader } from '@/lib/dashboard/use-kpi-reader'
+import {
+  addBusinessDays,
+  businessRangeToInstants,
+  formatBusinessDayLabel,
+  legacyBusinessRange,
+} from '@/lib/dashboard/business-time'
+import { buildReaderScope } from '@/lib/dashboard/kpi-reader-mappers'
+import type { KpiReaderMode } from '@/lib/dashboard/kpi-reader-flag'
+import { useKpiReaderErrorTelemetry, useKpiRollout } from '@/lib/dashboard/use-kpi-rollout'
+
 
 type SeriesKey = 'revenue' | 'profit' | 'ads' | 'purchase'
-
-function startOfDay(date: Date) {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-function addDays(date: Date, days: number) {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
-}
 
 function formatAxisValue(value: number) {
   const abs = Math.abs(value)
@@ -66,12 +65,33 @@ function getTooltipLeft(
   return `${left}px`
 }
 
-export default function RevenueChart() {
-  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading } = useStore()
+export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}) {
+  const { currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, isStoresLoading, userId } = useStore()
+  const rollout = useKpiRollout()
+  const mode = source ?? rollout.mode
   const supabase = createClient()
-  const periodRange = getPeriodRange(selectedPeriod, { customStartDate, customEndDate })
-  const strictPeriodStart = periodRange.start ? startOfDay(periodRange.start) : null
-  const strictPeriodEnd = periodRange.end ? startOfDay(periodRange.end) : null
+  const legacyRange = legacyBusinessRange(selectedPeriod, customStartDate, customEndDate)
+  const legacyQueryRange =
+    selectedPeriod === 'today' || selectedPeriod === 'yesterday'
+      ? { from: addBusinessDays(legacyRange.from, -6), to: legacyRange.to }
+      : legacyRange
+  const legacyPeriod = businessRangeToInstants(legacyQueryRange)
+
+  const v5Enabled = mode === 'v5'
+  const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
+  const v5 = useKpiReader({
+    enabled: v5Enabled && !isStoresLoading,
+    supabase,
+    boundary: `${userId ?? 'anonymous'}:${rollout.accessFingerprint}`,
+    storeIds: currentStoreId ? [currentStoreId] : null,
+    from: v5Range.from,
+    to: v5Range.to,
+    pollMs: 0,
+  })
+  const v5Scope = useMemo(() => (v5.data ? buildReaderScope(v5.data) : null), [v5.data])
+  useKpiReaderErrorTelemetry('revenue-chart', v5Enabled, v5.isError)
+  const strictPeriodStart = legacyPeriod.start
+  const strictPeriodEnd = legacyPeriod.end
   const [visibleSeries, setVisibleSeries] = useState<Record<SeriesKey, boolean>>({
     revenue: true,
     profit: true,
@@ -85,54 +105,27 @@ export default function RevenueChart() {
   const [tooltipWidth, setTooltipWidth] = useState(170)
   const [containerWidth, setContainerWidth] = useState(800)
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
-    enabled: !isStoresLoading,
+  const { data: legacyData, isLoading: legacyLoading } = useQuery({
+    queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
+    enabled: !isStoresLoading && mode !== 'v5' && rollout.resolved,
     queryFn: async () => {
-      const now = new Date()
-      const todayStart = startOfDay(now)
-
-      let periodStart = periodRange.start ? startOfDay(periodRange.start) : startOfDay(addDays(now, -29))
-      let periodEndExclusive = periodRange.end ? startOfDay(periodRange.end) : addDays(todayStart, 1)
-
-      if (selectedPeriod === 'today') {
-        const ref = todayStart
-        periodStart = addDays(ref, -6)
-        periodEndExclusive = addDays(ref, 1)
-      } else if (selectedPeriod === 'yesterday') {
-        const ref = addDays(todayStart, -1)
-        periodStart = addDays(ref, -6)
-        periodEndExclusive = addDays(ref, 1)
-      } else if (selectedPeriod === 'week') {
-        const weekStart = startOfDay(new Date(now))
-        const day = weekStart.getDay()
-        const diff = day === 0 ? 6 : day - 1
-        weekStart.setDate(weekStart.getDate() - diff)
-        periodStart = weekStart
-        periodEndExclusive = addDays(weekStart, 7)
-      } else if (selectedPeriod === 'month') {
-        periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        periodEndExclusive = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-      }
-
-      const todayEndExclusive = addDays(todayStart, 1)
-      if (periodEndExclusive > todayEndExclusive) {
-        periodEndExclusive = todayEndExclusive
-      }
-
+      const periodStart = legacyPeriod.start
+      const periodEndExclusive = legacyPeriod.end
       const dayCount = Math.max(1, Math.round((periodEndExclusive.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24)))
       const useMonthly = selectedPeriod !== 'month' && selectedPeriod !== 'today' && selectedPeriod !== 'yesterday' && selectedPeriod !== 'week' && dayCount > 31
       const granularity: 'day' | 'month' = useMonthly ? 'month' : 'day'
 
       const bucketLabel = (d: Date) =>
-        granularity === 'day'
-          ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-          : d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
+        formatBusinessDayLabel(
+          `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`,
+          granularity,
+        )
 
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 
       if (storeIds.length === 0) {
         return {
+          financialAccess: false,
           points: [],
           granularity,
           totalRevenue: 0,
@@ -261,6 +254,9 @@ export default function RevenueChart() {
 
       return {
         points,
+        financialAccess: results.every((payload) =>
+          payload?.totalProfit !== null && payload?.totalPurchase !== null,
+        ),
         granularity,
         totalRevenue,
         totalProfit,
@@ -281,7 +277,69 @@ export default function RevenueChart() {
   })
 
 
+  // ---- V5 : source commune (lecteur agrégé), conservée derrière le flag ----
+  const v5WaitingPickup = useQuery<number>({
+    queryKey: ['dashboard-v5-waiting-pickup', currentStoreId, accessibleStoreIds, v5Range.from, v5Range.to, userId, rollout.accessFingerprint],
+    enabled: v5Enabled && !isStoresLoading,
+    queryFn: async () => {
+      const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
+      if (storeIds.length === 0) return 0
+      const { start, end } = businessRangeToInstants(v5Range)
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'dl_pickup_pending')
+        .gte('order_date', start.toISOString())
+        .lt('order_date', end.toISOString())
+      query = currentStoreId ? query.eq('store_id', currentStoreId) : query.in('store_id', storeIds)
+      const { count, error } = await query
+      if (error) throw error
+      return Number(count || 0)
+    },
+  })
+
+  const v5Data = useMemo(() => {
+    if (!v5Enabled || !v5Scope) return undefined
+    const totals = (v5Scope.totals ?? {}) as Record<string, unknown>
+    const n = (key: string) => Number(totals[key] ?? 0)
+    return {
+      financialAccess: v5Scope.access === 'full',
+      points: v5Scope.points.map((point) => ({
+        date: point.date,
+        label: formatBusinessDayLabel(point.date, 'day'),
+        revenue: Number(point.revenue),
+        profit: point.contribution_margin !== undefined ? Number(point.contribution_margin) : 0,
+        ads: Number(point.ads),
+        purchase: point.purchase_cost !== undefined ? Number(point.purchase_cost) : 0,
+        delivery: 0,
+      })),
+      granularity: 'day' as const,
+      totalRevenue: n('revenue'),
+      totalProfit: n('contribution_margin'),
+      totalAds: n('ads_tracked') + n('ads_fallback'),
+      totalPurchase: n('purchase_cost'),
+      conversion: {
+        totalOrders: n('orders_count'),
+        confirmedOrders: 0,
+        cancelledOrders: n('cancelled_count'),
+        pendingOrders: n('pending_count'),
+        sentOrders: 0,
+        deliveredOrders: n('delivered_count'),
+        returnedOrders: n('returned_count'),
+        waitingPickupOrders: v5WaitingPickup.data ?? 0,
+      },
+    }
+  }, [v5Enabled, v5Scope, v5WaitingPickup.data])
+
+  const data = v5Enabled ? v5Data : legacyData
+  const isLoading = v5Enabled
+    ? v5.isLoading || v5WaitingPickup.isLoading
+    : legacyLoading || !rollout.resolved
   const points = data?.points || []
+  // Accès commercial : aucune série de coût/marge, en legacy comme en V5.
+  const allowedSeries: SeriesKey[] = data?.financialAccess
+    ? ['revenue', 'profit', 'ads', 'purchase']
+    : ['revenue', 'ads']
 
   // Mesure de la largeur réelle du plot pour adapter le nombre de labels X.
   useEffect(() => {
@@ -305,7 +363,9 @@ export default function RevenueChart() {
 
   const tooltipLeft = getTooltipLeft(hoveredIndex, points.length, plotRef.current, tooltipWidth)
 
-  const activeKeys = (Object.keys(visibleSeries) as SeriesKey[]).filter((k) => visibleSeries[k])
+  const activeKeys = (Object.keys(visibleSeries) as SeriesKey[]).filter(
+    (k) => visibleSeries[k] && allowedSeries.includes(k),
+  )
   const labelStep = useMemo(() => {
     if (points.length === 0) return 1
     const base = containerWidth >= 1024 ? 14 : containerWidth >= 768 ? 10 : 8
@@ -489,7 +549,7 @@ export default function RevenueChart() {
           <p className="text-sm text-muted-foreground mt-1">Selon la période sélectionnée</p>
         </div>
         <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
-          {(Object.keys(seriesConfig) as SeriesKey[]).map((key) => (
+          {(Object.keys(seriesConfig) as SeriesKey[]).filter((key) => allowedSeries.includes(key)).map((key) => (
             <button
               key={key}
               onClick={() => toggleSeries(key)}
@@ -527,7 +587,7 @@ export default function RevenueChart() {
                       {formatShortCurrency(maxRevenuePoint.value)}
                     </span>
                   )}
-                  {visibleSeries.profit && maxProfitPoint && (
+                  {allowedSeries.includes('profit') && visibleSeries.profit && maxProfitPoint && (
                     <span
                       className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
                       style={{ top: `${valueToY(maxProfitPoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.profit.color }}
@@ -556,7 +616,7 @@ export default function RevenueChart() {
                 )}
 
                 {(Object.keys(seriesConfig) as SeriesKey[]).map((key) =>
-                  visibleSeries[key] ? (
+                  allowedSeries.includes(key) && visibleSeries[key] ? (
                     <path
                       key={key}
                       d={buildPath(key)}
@@ -587,7 +647,7 @@ export default function RevenueChart() {
                     vectorEffect="non-scaling-stroke"
                   />
                 )}
-                {visibleSeries.profit && maxProfitPoint && (
+                {allowedSeries.includes('profit') && visibleSeries.profit && maxProfitPoint && (
                   <line
                     x1="0"
                     y1={valueToY(maxProfitPoint.value)}
@@ -666,13 +726,13 @@ export default function RevenueChart() {
                         </div>
                         <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].revenue)}</span>
                       </div>
-                      <div className="flex items-center justify-between gap-4">
+                      {allowedSeries.includes('profit') && <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.profit.color }} />
                           <span className="text-[11px] text-muted-foreground">Profit</span>
                         </div>
                         <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].profit)}</span>
-                      </div>
+                      </div>}
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.ads.color }} />
@@ -680,20 +740,20 @@ export default function RevenueChart() {
                         </div>
                         <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].ads)}</span>
                       </div>
-                      <div className="flex items-center justify-between gap-4">
+                      {allowedSeries.includes('profit') && <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
                           <span className="text-[11px] text-muted-foreground">Livraison</span>
                         </div>
                         <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].delivery || 0)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-4">
+                      </div>}
+                      {allowedSeries.includes('purchase') && <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: seriesConfig.purchase.color }} />
                           <span className="text-[11px] text-muted-foreground">Achat</span>
                         </div>
                         <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].purchase)}</span>
-                      </div>
+                      </div>}
                     </div>
                   </div>
                 </div>
@@ -760,7 +820,9 @@ export default function RevenueChart() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-          {conversionStages.map((stage) => (
+          {conversionStages
+            .filter((stage) => !v5Enabled || (stage.key !== 'confirmed' && stage.key !== 'sent'))
+            .map((stage) => (
             <div key={stage.key} className="rounded-lg border border-border p-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-foreground">{stage.label}</span>
@@ -787,16 +849,23 @@ export default function RevenueChart() {
             <div className="text-muted-foreground">Pub total</div>
             <div className="font-semibold text-foreground">{formatCurrency(data?.totalAds || 0)}</div>
           </div>
-          <div className="flex items-center justify-between">
-            <div className="text-muted-foreground">Achat total</div>
-            <div className="font-semibold text-foreground">{formatCurrency(data?.totalPurchase || 0)}</div>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="text-muted-foreground">Profit total</div>
-            <div className={`font-semibold ${(data?.totalProfit || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-              {formatCurrency(data?.totalProfit || 0)}
-            </div>
-          </div>
+          {allowedSeries.includes('purchase') && (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="text-muted-foreground">Achat total</div>
+                <div className="font-semibold text-foreground">{formatCurrency(data?.totalPurchase || 0)}</div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="text-muted-foreground">Profit total</div>
+                <div className={`font-semibold ${(data?.totalProfit || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {formatCurrency(data?.totalProfit || 0)}
+                </div>
+              </div>
+            </>
+          )}
+          {!data?.financialAccess && (
+            <div className="col-span-2 text-xs text-muted-foreground">Coûts et profit : Non autorisé</div>
+          )}
         </div>
       </div>
     </div>
