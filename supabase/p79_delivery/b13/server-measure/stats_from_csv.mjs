@@ -14,20 +14,32 @@ const values = []
 const details = []
 for (const f of files) {
   if (!fs.existsSync(f)) { console.error('P79_STATS_MISSING_FILE ' + f); process.exit(3) }
-  const raw = fs.readFileSync(f, 'utf8').trim()
-  if (raw === '') { console.error('P79_STATS_EMPTY ' + f); process.exit(4) }
+  // BOM UTF-8 eventuel (redirection PowerShell) retire avant parsing.
+  const raw = fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')
   const lines = raw.split(/\r?\n/)
+    .filter((l) => l.trim() !== '')
+    // Le CSV de mesure contient aussi le bloc de preuve P79_SRV_PROOF : ignore.
+    .filter((l) => !l.startsWith('marker,') && !l.startsWith('P79_SRV_PROOF,'))
+  if (lines.length === 0) { console.error('P79_STATS_EMPTY ' + f); process.exit(4) }
   const header = lines[0].split(',').map((s) => s.trim().toLowerCase())
-  const iIdx = header.indexOf('i')
-  const msIdx = header.indexOf('ms')
-  if (msIdx === -1) { console.error('P79_STATS_BAD_HEADER ' + f + ' -> ' + lines[0]); process.exit(5) }
+  if (header.length !== 2 || header[0] !== 'i' || header[1] !== 'ms') {
+    console.error('P79_STATS_BAD_HEADER ' + f + ' -> ' + JSON.stringify(lines[0])); process.exit(5)
+  }
+  const seen = new Set()
   let n = 0
   for (const line of lines.slice(1)) {
     const cols = line.split(',')
-    const v = Number(cols[msIdx])
+    if (cols.length !== 2) { console.error('P79_STATS_BAD_COLUMNS ' + f + ' -> ' + line); process.exit(9) }
+    const idx = Number(cols[0].trim())
+    const v = Number(cols[1].trim())
+    if (!Number.isInteger(idx) || idx < 1) { console.error('P79_STATS_BAD_INDEX ' + f + ' -> ' + line); process.exit(7) }
+    if (seen.has(idx)) { console.error('P79_STATS_DUPLICATE_INDEX ' + f + ' -> ' + idx); process.exit(10) }
     if (!Number.isFinite(v) || v < 0) { console.error('P79_STATS_BAD_VALUE ' + f + ' -> ' + line); process.exit(6) }
-    if (iIdx !== -1 && cols[iIdx] === undefined) { console.error('P79_STATS_BAD_INDEX ' + f); process.exit(7) }
-    values.push(v); n++
+    seen.add(idx); values.push(v); n++
+  }
+  // Indices strictement consecutifs 1..n, sans trou.
+  for (let k = 1; k <= n; k++) {
+    if (!seen.has(k)) { console.error('P79_STATS_INDEX_GAP ' + f + ' -> manque ' + k); process.exit(11) }
   }
   details.push({ file: f, samples: n })
 }

@@ -13,7 +13,8 @@
 \set ON_ERROR_STOP on
 \pset pager off
 \pset tuples_only on
-\set QUIET on
+-- Pas de \set QUIET : cela masquerait les NOTICE (P79_SRV_OK) sur stderr.
+-- Les tags de commande sont deja supprimes par psql -q.
 
 DO $guard$
 BEGIN
@@ -113,6 +114,18 @@ SELECT p79_srv_check_volumes(
   :items_after - :items_before,
   :batches, :size, :n
 );
+
+-- Preuve STRUCTUREE des volumes : seconde sortie CSV marquee, dans la MEME
+-- transaction. Aucune table creee. Le pilote separe par le marqueur.
+COPY (
+  SELECT 'P79_SRV_PROOF' AS marker,
+         :'kind' AS kind,
+         coalesce(current_setting('p79.bench_variant', true), 'C') AS variant,
+         :orders_after - :orders_before AS orders,
+         :items_after - :items_before AS items,
+         CASE WHEN :'kind' IN ('import_bulk','import_loop')
+              THEN :batches ELSE :n END AS samples
+) TO STDOUT WITH (FORMAT csv, HEADER true);
 
 SELECT p79_bench_teardown();
 SELECT p79_bench_set_triggers(true);
