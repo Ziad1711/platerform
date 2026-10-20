@@ -1,0 +1,46 @@
+{
+  "campaign": "B13-P7.9-paired",
+  "status": "thresholds proposed, not contractual until measured",
+  "environment": {
+    "required": "isolated PostgreSQL matching the target package",
+    "forbidden": ["jisra-test shared", "production", "P7 isolated project without authorization"],
+    "guard": "session setting p79.bench_env='isolated' and stores count <= 20"
+  },
+  "variants": {
+    "A": "KPI producers disabled (business cost only)",
+    "C": "KPI producers enabled (P7.9 state)"
+  },
+  "scenarios": {
+    "create": "1 order + 2 items, one statement per iteration (own transaction)",
+    "update_rounding": "rounding_adjustment only (P7.9 quality trigger)",
+    "update_subtotal": "subtotal_amount only (P7.9 quality trigger)",
+    "update_unrelated": "customer_name only (control: no KPI work)",
+    "import": "200 orders + 400 items in a single transaction"
+  },
+  "sample": {
+    "iterations_per_variant": 100,
+    "import_rounds_per_variant": 10,
+    "rounds": 3,
+    "order": "AB/BA alternating",
+    "warmup": "one discarded round recommended"
+  },
+  "budgets": {
+    "median_overcost_pct_max": 15,
+    "p95_overcost_pct_max": 25,
+    "business_lock_wait_ms_max": 50,
+    "backlog_drain_seconds_max": 30,
+    "deadlock_increase_allowed": 0,
+    "lock_timeout_increase_allowed": 0
+  },
+  "verdict_rules": {
+    "PASS": "median and p95 within budget, no deadlock, no lock timeout, backlog drained",
+    "FAIL": "any budget exceeded, any deadlock, or unexplained financial divergence",
+    "NOT_COVERED": "insufficient samples, missing lock instrumentation, or scenario not executed"
+  },
+  "known_limits": [
+    "psql timing includes client/session overhead shared by both variants (differential measurement)",
+    "no per-trigger attribution without EXPLAIN instrumentation",
+    "worker is single-flight by design: parallel publication cannot be demonstrated",
+    "production runs PostgreSQL 17.6 ARM64 vs test 17.11 x86_64: results are not transferable as-is"
+  ]
+}
