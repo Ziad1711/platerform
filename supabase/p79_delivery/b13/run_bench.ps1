@@ -7,6 +7,7 @@ param(
   [int]$ImportBatch  = 200,
   [int]$ImportRounds = 10,
   [int]$Rounds       = 3,
+  [int]$StartRound   = 1,
   [string]$OutDir    = "$PSScriptRoot\out"
 )
 $ErrorActionPreference = 'Stop'
@@ -26,7 +27,8 @@ $sectionsExpected = @{
 
 function Invoke-Variant([string]$variant) {
   $log = Join-Path $OutDir ("log-" + $variant + "-" + [guid]::NewGuid().ToString('N').Substring(0,6) + ".txt")
-  & $psql -X -w $svc -v ON_ERROR_STOP=1 `
+  $ErrorActionPreference = "Continue"
+    & $psql -X -w $svc -v ON_ERROR_STOP=1 ` $psql -X -w $svc -v ON_ERROR_STOP=1 `
     -c "set p79.bench_env='isolated'" `
     -c "set p79.bench_confirm='SCHEDULED-ISOLATED-RUN'" `
     -c "set p79.bench_project='$Project'" `
@@ -85,7 +87,7 @@ $deadlocksBase = [long]((& $psql -X -w $svc -A -t -c "select p79_bench_deadlocks
 $envValidated = $false
 $results = @()
 try {
-  for ($r = 1; $r -le $Rounds; $r++) {
+  for ($r = $StartRound; $r -lt ($StartRound + $Rounds); $r++) {
     $order = if ($r % 2 -eq 1) { @('A','C') } else { @('C','A') }
     foreach ($v in $order) {
       Write-Output "round=$r variant=$v"
