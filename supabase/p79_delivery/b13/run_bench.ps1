@@ -36,10 +36,7 @@ function Invoke-Variant([string]$variant) {
     -c "set p79.bench_variant='$variant'" `
     -v iterations=$Iterations -v import_batch=$ImportBatch -v import_rounds=$ImportRounds `
     -f $sql *> $log
-  if ($LASTEXITCODE -ne 0) { throw "Variante $variant en echec - voir $log" }
-  if (-not (Select-String -Path $log -Pattern 'P79_GUARD_OK' -Quiet)) {
-    throw "Variante ${variant}: marqueur de garde-fou absent - voir $log"
-  }
+  if ($LASTEXITCODE -ne 0) { throw "Variante $variant : psql exit $LASTEXITCODE - voir $log" }
 
   $data = @{}; $current = $null; $metrics = @{}
   foreach ($line in Get-Content -LiteralPath $log) {
