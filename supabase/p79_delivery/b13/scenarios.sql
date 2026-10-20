@@ -29,12 +29,15 @@ BEGIN
     RAISE EXCEPTION 'P79_BENCH_NOT_CONFIRMED (p79.bench_confirm)';
   END IF;
 
-  -- 2) Strict project allowlist : the operator must name the target twice.
-  IF v_project = '' OR v_project <> v_allow THEN
-    RAISE EXCEPTION 'P79_BENCH_PROJECT_NOT_ALLOWED (p79.bench_project / p79.bench_allow)';
+  -- 2) Allowlist stricte : une seule cible autorisee pour B13.
+  IF v_project <> 'biqrgdopcvkrbgfxkzxm' THEN
+    RAISE EXCEPTION 'P79_BENCH_PROJECT_NOT_ALLOWED (%)', coalesce(nullif(v_project, ''), '<vide>');
+  END IF;
+  IF v_allow <> v_project THEN
+    RAISE EXCEPTION 'P79_BENCH_DOUBLE_ENTRY_MISMATCH (p79.bench_allow)';
   END IF;
 
-  -- 3) Explicit refusal list. Production and jisra-test are never legitimate.
+  -- 3) Refus explicite : Production, jisra-test, projet P7 historique.
   IF v_project IN ('attvfeoqgbxsnnsllatt', 'goqedvcdmgtejtyrawsp') THEN
     RAISE EXCEPTION 'P79_BENCH_FORBIDDEN_TARGET (%)', v_project;
   END IF;

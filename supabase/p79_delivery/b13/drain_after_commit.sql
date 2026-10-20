@@ -13,11 +13,17 @@
 \pset pager off
 
 DO $guard$
-DECLARE v_ok boolean;
+DECLARE v_ok boolean; v_project text := coalesce(current_setting('p79.bench_project', true), '');
 BEGIN
   IF current_setting('p79.bench_env', true) IS DISTINCT FROM 'isolated'
      OR current_setting('p79.bench_confirm', true) IS DISTINCT FROM 'SCHEDULED-ISOLATED-RUN' THEN
     RAISE EXCEPTION 'P79_DRAIN_NOT_AUTHORIZED';
+  END IF;
+  IF v_project <> 'biqrgdopcvkrbgfxkzxm' THEN
+    RAISE EXCEPTION 'P79_DRAIN_PROJECT_NOT_ALLOWED (%)', coalesce(nullif(v_project, ''), '<vide>');
+  END IF;
+  IF coalesce(current_setting('p79.bench_allow', true), '') <> v_project THEN
+    RAISE EXCEPTION 'P79_DRAIN_DOUBLE_ENTRY_MISMATCH';
   END IF;
   SELECT enabled INTO v_ok FROM public.dashboard_kpi_worker_config WHERE id = 1;
   IF v_ok IS NOT TRUE THEN
