@@ -29,8 +29,11 @@ autorisé distinctement. Aucun `db push`.
 | 3 | Configuration rollout | 6 fichiers `2026101918*.sql`, ordre strict | `kill_switch = true`, `requested_mode = legacy`, 0 cohorte |
 | 4 | Corrections P7.7 | 6 fichiers `20261020100000` → `20261020105000` | qualité v2, CA par ville, graphique aligné |
 | 5 | Corrections P7.8 | `20261020110000`, `20261020111000` | finalisation des métadonnées |
-| 6 | Corrections P7.9 | 4 fichiers `20261020120000` → `20261020120300` | invalidation qualité, permissions, transitions, surcharge fermée |
-| 7 | Vérification P7.9 | `p79_delivery/90_verify_p79.sql` | PASS attendu |
+| 6 | Corrections P7.9 — **mode inactif** | `p79_delivery/10_install_p79_functions.sql` : 4 fonctions + ACL, **aucun producteur** | 0 trigger qualité ; fonctions inertes |
+| 6b | Référence historique | les 4 migrations `2026102012*` (inchangées) : équivalent du mode actif en une passe | ce que Test a réellement reçu |
+| 7 | Vérification mode inactif | `p79_delivery/90_verify_p79.sql` stage `inactive` | 13 contrôles PASS |
+| 8 | **Activation du producteur** | `p79_delivery/20_activate_p79_quality_trigger.sql` (gated) | 1 trigger qualité |
+| 9 | Vérification mode actif | `90_verify_p79.sql` stage `active` | 13 contrôles PASS |
 
 ## 3. Activation — lots séparés, jamais implicites
 
@@ -48,13 +51,25 @@ autorisé distinctement. Aucun `db push`.
 l'étape 6 (la fonction est alors inerte). Son activation est une décision
 d'exploitation, pas une conséquence de l'installation.
 
+### Deux modes explicites
+
+| Mode | Script | Trigger qualité | Vérification |
+|---|---|---|---|
+| Inactif | `10_install_p79_functions.sql` | absent | `stage = inactive` |
+| Actif | `20_activate_p79_quality_trigger.sql` | présent | `stage = active` |
+
+`10_install_p79_functions.sql` est **généré** depuis les quatre migrations
+approuvées : chaque corps est copié à l'identique (vérifié par inclusion
+stricte dans les sources), et aucune instruction `create trigger` n'y figure.
+Les quatre migrations restent inchangées et deviennent la référence du mode
+actif ; elles ne sont pas rejouées sur Test.
+
 L'activation du lecteur (G) n'est **pas** incluse dans ce paquet : voir
 `p7_1_package/50_reader_activation.md` et `P7.5-PRODUCTION-CONFIG.md`.
 
 ## 4. Signatures SHA-256 des fichiers du paquet
 
-Empreintes calculées sur les fichiers de cette branche, répertoires
-`p7_1_package/`, `supabase/migrations/` et `supabase/p79_delivery/`.
+Empreintes tronquees a 16 caracteres ; les valeurs completes sont recalculees par le controle statique local.
 
 | Étape | Fichier | Rôle | SHA-256 |
 |---|---|---|---|
@@ -67,7 +82,7 @@ Empreintes calculées sur les fichiers de cette branche, répertoires
 | 3 | `migrations/20261019183349_kpi_rollout_event.sql` | rollout event | `b6f614fc4734a992…` |
 | 3 | `migrations/20261019183712_kpi_rollout_trigger_names.sql` | trigger names | `b7140d579bd648ad…` |
 | 3 | `migrations/20261019183800_kpi_rollout_function_names.sql` | function names | `9f18074bceb89ea6…` |
-| 4 | `migrations/20261020100000_p77_c2_city_performance.sql` | P7.7 vill | `17f8e8064c21f788…` |
+| 4 | `migrations/20261020100000_p77_c2_city_performance.sql` | P7.7 villes | `17f8e8064c21f788…` |
 | 4 | `migrations/20261020101000_p77_c3_quality_version.sql` | P7.7 qualite | `2f618da08549e8d4…` |
 | 4 | `migrations/20261020102000_p77_c3_aggregate_order.sql` | P7.7 agg order | `80ce1ce732a060ba…` |
 | 4 | `migrations/20261020103000_p77_c3_aggregate_delivery.sql` | P7.7 agg delivery | `164ce605cb6ef05f…` |
@@ -75,21 +90,20 @@ Empreintes calculées sur les fichiers de cette branche, répertoires
 | 4 | `migrations/20261020105000_p77_c1_revenue_chart_ads.sql` | P7.7 graphique | `9fd23594715b5602…` |
 | 5 | `migrations/20261020110000_p78_finalize_store_state.sql` | P7.8 finalisation | `f0b0a699f0b158bf…` |
 | 5 | `migrations/20261020111000_p78_rebuild_day_finalizes.sql` | P7.8 rebuild | `eba77d8607724615…` |
-| 6 | `migrations/20261020120000_p79_quality_invalidation.sql` | P7.9 invalidation | `34b38666858af41c…` |
-| 6 | `migrations/20261020120100_p79_quality_status_permissions.sql` | P7.9 permissions | `b72ba50c71646b05…` |
-| 6 | `migrations/20261020120200_p79_finalize_state_transitions.sql` | P7.9 transitions | `71e34126a20b62f9…` |
-| 6 | `migrations/20261020120300_p79_multistore_chart_restriction.sql` | P7.9 surcharge | `befdf37a6b60fcb8…` |
-| 7 | `p79_delivery/90_verify_p79.sql` | verification P7.9 | `e16348aa96a6cf2b…` |
+| 6 | `p79_delivery/10_install_p79_functions.sql` | P7.9 INACTIF (0 producteur) | `3f4b9361f722f680…` |
+| 6b | `migrations/20261020120000_p79_quality_invalidation.sql` | P7.9 source historique 1 | `34b38666858af41c…` |
+| 6b | `migrations/20261020120100_p79_quality_status_permissions.sql` | P7.9 source historique 2 | `b72ba50c71646b05…` |
+| 6b | `migrations/20261020120200_p79_finalize_state_transitions.sql` | P7.9 source historique 3 | `71e34126a20b62f9…` |
+| 6b | `migrations/20261020120300_p79_multistore_chart_restriction.sql` | P7.9 source historique 4 | `befdf37a6b60fcb8…` |
+| 7 | `p79_delivery/90_verify_p79.sql` | verification P7.9 (2 modes) | `64f97b3b3b851d21…` |
 | A | `p7_1_package/20_extensions_prerequisites.sql` | extensions | `fcec195c3116154d…` |
 | B | `p7_1_package/30_activate_invalidations.sql` | 5 producteurs | `8680b204bde3b909…` |
 | C | `p7_1_package/31_activate_wakeup.sql` | reveil | `01778e6b12d4cacf…` |
 | D | `p7_1_package/40_activate_worker.sql` | worker | `2f18ff6446eadac6…` |
 | E | `p7_1_package/41_backfill.sql` | backfill | `095244ea78a756b3…` |
-| F | `p79_delivery/20_activate_p79_quality_trigger.sql` | trigger qualite | `3a7e431bb386498c…` |
+| F | `p79_delivery/20_activate_p79_quality_trigger.sql` | trigger qualite (gated) | `3a7e431bb386498c…` |
 | R | `p7_1_package/91_rollback.sql` | rollback P7.1 | `be8c87532d86e9da…` |
 | R | `p79_delivery/91_rollback_p79.sql` | rollback P7.9 | `482383fcc5251065…` |
-
-Empreintes tronquees a 16 caracteres pour la lisibilite ; le manifeste machine (tools) porte les valeurs completes.
 
 ## 5. Correspondance avec l'état Test
 
@@ -99,9 +113,22 @@ quatre fichiers de l'étape 6. Les migrations P7.7/P7.8 n'apparaissent pas dans
 l'historique Supabase de Test mais leurs objets sont installés et leurs
 empreintes vérifiées.
 
+### Traçabilité bundle ↔ sources
+
+| Élément | Valeur |
+|---|---|
+| Bundle appliqué sur Test | `20261020005512` — `20261020120000_p79_p0_closure_bundle` |
+| Sources correspondantes | les **quatre** fichiers `2026102012*.sql` de cette branche |
+| Ordre dans le bundle | `120000` → `120100` → `120200` → `120300` |
+| Mode du bundle | **actif** (installation + trigger qualité dans la même transaction) |
+| Historique P7.7/P7.8 sur Test | absent de `supabase_migrations`, objets présents et empreintes conformes |
+
+Le bundle est l'exécution des quatre sources concaténées : il ne remplace aucune
+d'entre elles et ne doit jamais être rejoué.
+
 Conclusion : **l'historique de Test n'est pas une preuve de reproductibilité**.
 Seule une installation propre sur cible vide, suivie des vérifications des
-étapes 1b et 7, peut qualifier la reproductibilité.
+étapes 1b, 7 et 9, peut qualifier la reproductibilité.
 
 ## 6. Contrôles attendus après installation
 
