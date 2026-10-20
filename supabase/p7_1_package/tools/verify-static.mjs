@@ -2,7 +2,17 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 
 const root = new URL('../', import.meta.url)
-const read = (file) => fs.readFileSync(new URL(file, root), 'utf8')
+
+// Les empreintes de `00_manifest.json` et des marqueurs `-- @@FUNCTION` sont
+// calculées sur le texte canonique en LF. Un checkout Windows convertit LF en
+// CRLF : sans normalisation, toutes les empreintes échouent alors qu'aucun
+// contenu SQL n'a changé (écart constaté le 20/10/2026 : 0/23 au lieu de 23/23).
+//
+// On normalise donc UNIQUEMENT les fins de ligne. Toute autre modification
+// (un caractère, un espace, un ordre d'instruction) modifie toujours le MD5 :
+// la vérification reste sensible aux vraies modifications SQL.
+const normalize = (text) => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+const read = (file) => normalize(fs.readFileSync(new URL(file, root), 'utf8'))
 
 const snapshot = read('.work/snapshot.sql')
 const install = read('10_install_objects.sql')
