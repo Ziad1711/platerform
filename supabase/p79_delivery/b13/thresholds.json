@@ -1,21 +1,34 @@
 {
   "campaign": "B13-P7.9-paired",
-  "status": "thresholds proposed, not contractual until measured",
+  "harness_version": 2,
+  "status": "thresholds proposed — no measurement yet, B13 remains FAIL until run on isolated environment",
   "environment": {
-    "required": "isolated PostgreSQL matching the target package",
-    "forbidden": ["jisra-test shared", "production", "P7 isolated project without authorization"],
-    "guard": "session setting p79.bench_env='isolated' and stores count <= 20"
+    "required": "isolated PostgreSQL with the representative business schema",
+    "forbidden": ["jisra-test shared", "production", "any environment containing jisra-test sentinel stores"],
+    "guards": [
+      "session setting p79.bench_env = 'isolated'",
+      "session setting p79.bench_confirm = 'SCHEDULED-ISOLATED-RUN'",
+      "no jisra-test sentinel store present",
+      "stores count <= 20"
+    ],
+    "operator_check": "verify the connection target before running; the harness cannot read the project ref"
+  },
+  "initial_state": {
+    "method": "p79_bench_begin() per variant (setup + reset) and p79_bench_teardown() at the end",
+    "guarantee": "A and C start from an identical empty benchmark store; no accumulation across rounds"
   },
   "variants": {
-    "A": "KPI producers disabled (business cost only)",
-    "C": "KPI producers enabled (P7.9 state)"
+    "A": "all six KPI producers disabled (including trg_kpi_mark_order_insert)",
+    "C": "all six KPI producers enabled (P7.9 state)",
+    "verified_by": "p79_bench_producer_state() printed at variant start"
   },
-  "scenarios": {
-    "create": "1 order + 2 items, one statement per iteration (own transaction)",
-    "update_rounding": "rounding_adjustment only (P7.9 quality trigger)",
-    "update_subtotal": "subtotal_amount only (P7.9 quality trigger)",
-    "update_unrelated": "customer_name only (control: no KPI work)",
-    "import": "200 orders + 400 items in a single transaction"
+  "sections": {
+    "create_unit": "1 order + 2 items, one statement per iteration",
+    "update_rounding": "rounding_adjustment only",
+    "update_subtotal": "subtotal_amount only",
+    "update_unrelated": "customer_name only (control)",
+    "import_bulk": "set-based import: 2 INSERT ... SELECT for N orders / 2N items",
+    "import_loop": "loop-based creation, comparison only"
   },
   "sample": {
     "iterations_per_variant": 100,
@@ -32,15 +45,22 @@
     "deadlock_increase_allowed": 0,
     "lock_timeout_increase_allowed": 0
   },
+  "measurement_coverage": {
+    "median_p95_per_section": "instrumented",
+    "deadlocks": "instrumented (pg_stat_database delta)",
+    "drain_seconds": "instrumented if worker enabled, otherwise NOT_COVERED",
+    "individual_lock_waits": "NOT COVERED — requires parallel pg_locks sampling"
+  },
   "verdict_rules": {
-    "PASS": "median and p95 within budget, no deadlock, no lock timeout, backlog drained",
-    "FAIL": "any budget exceeded, any deadlock, or unexplained financial divergence",
-    "NOT_COVERED": "insufficient samples, missing lock instrumentation, or scenario not executed"
+    "PASS_UNDER_BUDGETS": "median and p95 within budget on all sections, no deadlock increase",
+    "FAIL": "any budget exceeded, deadlock increase, or unexplained financial divergence",
+    "NOT_COVERED": "missing lock instrumentation, worker disabled for drain, or scenario not executed"
   },
   "known_limits": [
     "psql timing includes client/session overhead shared by both variants (differential measurement)",
     "no per-trigger attribution without EXPLAIN instrumentation",
     "worker is single-flight by design: parallel publication cannot be demonstrated",
-    "production runs PostgreSQL 17.6 ARM64 vs test 17.11 x86_64: results are not transferable as-is"
+    "production runs PostgreSQL 17.6 ARM64 vs test 17.11 x86_64: results are not transferable as-is",
+    "a simulated benchmark is never a B13 qualification"
   ]
 }
