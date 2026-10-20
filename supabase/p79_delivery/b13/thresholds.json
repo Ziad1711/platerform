@@ -1,7 +1,7 @@
 {
   "campaign": "B13-P7.9-paired",
   "harness_version": 2,
-  "status": "thresholds proposed — no measurement yet, B13 remains FAIL until run on isolated environment",
+  "status": "thresholds unchanged — campaign executed on isolated environment (60 invocations); C1 abandoned; B13 remains FAIL (imports median over budget)",
   "environment": {
     "required": "isolated PostgreSQL with the representative business schema",
     "forbidden": ["jisra-test shared", "production", "any environment containing jisra-test sentinel stores"],

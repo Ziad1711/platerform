@@ -15,8 +15,22 @@
 | Référence | Empreinte | Statut |
 |---|---|---|
 | C0 historique | `c685fdd2e81ee1f9034be3f4ceaf53fd` | **historique uniquement** |
-| **C0 adoptée** | **`2536fe3c58c8af6b18acb844ac585049`** | référence de travail |
-| C1 (optimisation 1) | `9b3c13d478b66860d00a5c1acd7a8cbf` | **abandonnée**, non adoptée |
+| **C0 adoptée** | **`2536fe3c58c8af6b18acb844ac585049`** | **référence officielle active** |
+| C1 évaluée | `578763df7d0c7431f626ba87429e0f2f` | **non adoptée** — générée puis mesurée pendant la campagne comparative |
+| C1 tentative antérieure | `9b3c13d478b66860d00a5c1acd7a8cbf` | **non adoptée**, sans campagne rattachée |
+
+### 2.1 Trois empreintes à ne pas confondre
+
+| Empreinte | Ce qu'elle désigne | Usage |
+|---|---|---|
+| `2536fe3c…` | C0 officielle, seule référence opposable | pré-vol `precheck_c0.ps1`, restauration, garde `-C0` de `compare_c0_c1.ps1` |
+| `578763df…` | C1 réellement générée (`opt1/c1-optimized.sql`) puis évaluée | garde `-C1` de `compare_c0_c1.ps1` et contrôle après application |
+| `9b3c13d4…` | ancienne tentative de C1, non adoptée | **aucun usage opérationnel** — traçabilité uniquement |
+
+`9b3c13d4…` n'est **pas** une empreinte de campagne : aucune mesure n'y est rattachée
+et elle ne doit jamais servir de garde. Toute empreinte C1 différente de `578763df…`
+invalide la comparaison C0/C1. Décision associée : `../CLOTURE-OPT1.md`
+(C1 abandonnée, B13 revenue à C0).
 
 **Pourquoi l'ancienne référence textuelle est abandonnée** : `md5(pg_get_functiondef)` dépend de la **forme exacte du texte source** (casse des mots-clés, mise en forme de l'en-tête `LANGUAGE / SECURITY DEFINER / SET search_path`). Trois sources ont été appliquées sans jamais reproduire `c685fdd2` :
 
