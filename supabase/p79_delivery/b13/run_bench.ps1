@@ -28,7 +28,7 @@ $sectionsExpected = @{
 function Invoke-Variant([string]$variant) {
   $log = Join-Path $OutDir ("log-" + $variant + "-" + [guid]::NewGuid().ToString('N').Substring(0,6) + ".txt")
   $ErrorActionPreference = "Continue"
-    & $psql -X -w $svc -v ON_ERROR_STOP=1 ` $psql -X -w $svc -v ON_ERROR_STOP=1 `
+  & $psql -X -w $svc -v ON_ERROR_STOP=1 `
     -c "set p79.bench_env='isolated'" `
     -c "set p79.bench_confirm='SCHEDULED-ISOLATED-RUN'" `
     -c "set p79.bench_project='$Project'" `
