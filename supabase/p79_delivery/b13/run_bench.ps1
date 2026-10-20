@@ -1,21 +1,38 @@
-# P7.9 - Pilote B13 apparie (v2). ENVIRONNEMENT ISOLE UNIQUEMENT.
-# Aucun secret : utilise un service PostgreSQL local deja configure.
+# P7.9 - Pilote B13 apparie (v3). ENVIRONNEMENT ISOLE UNIQUEMENT.
+# Aucun secret : service PostgreSQL local deja configure.
+# psql est invoque via Start-Process avec des arguments explicitement quotes,
+# compatible Windows PowerShell 5.1 et chemins contenant des espaces.
 param(
-  [string]$Service   = 'jisra-bench',
-  [string]$Project   = '',
+  [string]$Service   = 'b13-isolated',
+  [string]$Project   = 'biqrgdopcvkrbgfxkzxm',
+  [string]$Owner     = '',
   [int]$Iterations   = 100,
   [int]$ImportBatch  = 200,
   [int]$ImportRounds = 10,
   [int]$Rounds       = 3,
   [int]$StartRound   = 1,
-  [string]$OutDir    = "$PSScriptRoot\out"
+  [string]$OutDir    = "$PSScriptRoot\out",
+  [string]$WrapperToken = '',
+  [string]$ProtectedBy  = '',
+  [switch]$InjectFailureAfterVariant
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'b13-common.ps1')
+
 $psql = Join-Path $HOME 'Tools\pg17\pgsql\bin\psql.exe'
-if (-not (Test-Path $psql)) { throw "psql introuvable : $psql" }
+if (-not (Test-Path -LiteralPath $psql)) { throw "psql introuvable : $psql" }
+if ($Service -ne 'b13-isolated') { throw 'B13_SERVICE_REQUIRED' }
+if ($Project -ne 'biqrgdopcvkrbgfxkzxm') { throw 'B13_PROJECT_REQUIRED' }
+if ([string]::IsNullOrWhiteSpace($Owner)) { throw 'B13_OWNER_REQUIRED' }
+if ([string]::IsNullOrWhiteSpace($WrapperToken) -or $env:B13_WRAPPER_TOKEN -ne $WrapperToken) {
+  throw 'B13_WRAPPER_REQUIRED : utiliser run_campaign.ps1 ou run_warmup_safe.ps1'
+}
+if (@('run_campaign','run_warmup_safe') -notcontains $ProtectedBy) {
+  throw 'B13_WRAPPER_REQUIRED : appel direct non protege refuse'
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $sql = Join-Path $PSScriptRoot 'scenarios.sql'
-$svc = "service=$Service"
 $sectionsExpected = @{
   create_unit       = $Iterations
   update_rounding   = $Iterations
@@ -27,32 +44,18 @@ $sectionsExpected = @{
 
 function Invoke-Variant([string]$variant) {
   $log = Join-Path $OutDir ("log-" + $variant + "-" + [guid]::NewGuid().ToString('N').Substring(0,6) + ".txt")
-  $ErrorActionPreference = "Continue"
-  & $psql -X -w $svc -v ON_ERROR_STOP=1 `
-    -c "set p79.bench_env='isolated'" `
-    -c "set p79.bench_confirm='SCHEDULED-ISOLATED-RUN'" `
-    -c "set p79.bench_project='$Project'" `
-    -c "set p79.bench_allow='$Project'" `
-    -c "set p79.bench_variant='$variant'" `
-    -v iterations=$Iterations -v import_batch=$ImportBatch -v import_rounds=$ImportRounds `
-    -f $sql *> $log
-  if ($LASTEXITCODE -ne 0) { throw "Variante $variant : psql exit $LASTEXITCODE - voir $log" }
-
-  $data = @{}; $current = $null; $metrics = @{}
-  foreach ($line in Get-Content -LiteralPath $log) {
-    if ($line -match '^SECTION:([a-z_]+)') {
-      $current = $Matches[1]
-      if (-not $data.ContainsKey($current)) { $data[$current] = New-Object System.Collections.ArrayList }
-      continue
-    }
-    if ($current -and $line -match '^Time:\s+([0-9.]+)\s+ms') {
-      [void]$data[$current].Add([double]$Matches[1]); continue
-    }
-    if ($line -match '^(pending_events|orders|items|deadlocks_after|drain_seconds)\s*\|\s*(\S+)') {
-      $metrics[$Matches[1]] = $Matches[2]
-    }
+  $err = $log + '.err'
+  $argString = New-B13PsqlArgumentString -Service $Service -Project $Project -Owner $Owner `
+    -Variant $variant -Iterations $Iterations -ImportBatch $ImportBatch `
+    -ImportRounds $ImportRounds -SqlFile $sql
+  $process = Start-B13Process -FilePath $psql -ArgumentString $argString -StdOut $log -StdErr $err
+  if ($process.ExitCode -ne 0) {
+    throw "Variante $variant : psql exit $($process.ExitCode) - voir $log et $err"
   }
 
+  $parsed = Read-B13Log -LogPath $log
+  $data = $parsed.Data
+  $metrics = $parsed.Metrics
   foreach ($key in $sectionsExpected.Keys) {
     $expected = $sectionsExpected[$key]
     $count = if ($data.ContainsKey($key)) { $data[$key].Count } else { 0 }
@@ -60,7 +63,7 @@ function Invoke-Variant([string]$variant) {
       throw "Variante ${variant} / section ${key} : $count mesures au lieu de $expected (voir $log)"
     }
   }
-  [pscustomobject]@{ Variant = $variant; Data = $data; Metrics = $metrics; Log = $log }
+  [pscustomobject]@{ Variant = $variant; Data = $data; Metrics = $metrics; Log = $log; Err = $err }
 }
 
 function Get-Percentile([double[]]$values, [double]$p) {
@@ -74,14 +77,15 @@ function Get-Percentile([double[]]$values, [double]$p) {
 $budgets = Get-Content (Join-Path $PSScriptRoot 'thresholds.json') -Raw | ConvertFrom-Json
 
 # Etat initial des six producteurs : capture AVANT toute modification.
-$trigState = (& $psql -X -w $svc -A -t -c "select p79_bench_capture_triggers()" 2>$null | Out-String).Trim()
+$trigState = Invoke-B13Scalar -Psql $psql -Service $Service `
+  -Sql 'select public.p79_bench_capture_triggers()' -OutDir $OutDir -Name 'capture-before'
 if ([string]::IsNullOrWhiteSpace($trigState) -or $trigState -notlike '{*}') {
   throw 'capture de l etat des triggers impossible : campagne annulee'
 }
 Write-Output "etat initial captures : $trigState"
 
-$deadlocksBase = [long]((& $psql -X -w $svc -A -t -c "select p79_bench_deadlocks()" 2>$null | Out-String).Trim())
-$envValidated = $false
+$deadlocksBase = [long](Invoke-B13Scalar -Psql $psql -Service $Service `
+  -Sql 'select public.p79_bench_deadlocks()' -OutDir $OutDir -Name 'deadlocks-before')
 $results = @()
 try {
   for ($r = $StartRound; $r -lt ($StartRound + $Rounds); $r++) {
@@ -89,27 +93,51 @@ try {
     foreach ($v in $order) {
       Write-Output "round=$r variant=$v"
       $results += Invoke-Variant $v
-      # Le marqueur P79_GUARD_OK a ete vu : la cible est validee pour cette campagne.
-      $envValidated = $true
+      if ($InjectFailureAfterVariant) {
+        throw 'B13_INJECTED_FAILURE_AFTER_MUTATION'
+      }
     }
   }
 }
 finally {
-  if ($envValidated) {
-    # Restauration EXACTE des valeurs tgenabled capturees, puis nettoyage.
-    $sqlRestore = 'select p79_bench_restore_triggers(' + [char]39 + $trigState + [char]39 + ')'
-    & $psql -X -w $svc -v ON_ERROR_STOP=1 -c $sqlRestore *> $null
-    & $psql -X -w $svc -c "select p79_bench_teardown()" *> $null
-    $after = (& $psql -X -w $svc -A -t -c "select p79_bench_capture_triggers()" 2>$null | Out-String).Trim()
-    if ($after -ne $trigState) {
-      Write-Warning "restauration des triggers NON conforme : attendu $trigState, obtenu $after"
-    } else {
-      Write-Output 'restauration: etats tgenabled identiques a la capture initiale'
+  $restoreFailure = $null
+  if ($trigState -like '{*}') {
+    # Restauration inconditionnelle, meme si la premiere variante a echoue.
+    try {
+      $restoreFile = Join-Path $OutDir 'restore-triggers.sql'
+      $literal = $trigState.Replace("'", "''")
+      Write-B13Text $restoreFile ("select public.p79_bench_restore_triggers('" + $literal + "');")
+      Invoke-B13File -Psql $psql -Service $Service -SqlFile $restoreFile `
+        -OutDir $OutDir -Name 'restore-triggers' | Out-Null
+    } catch {
+      $restoreFailure = $_.Exception.Message
+    }
+
+    try {
+      $teardownFile = Join-Path $OutDir 'teardown.sql'
+      Write-B13Text $teardownFile 'select public.p79_bench_teardown();'
+      Invoke-B13File -Psql $psql -Service $Service -SqlFile $teardownFile `
+        -OutDir $OutDir -Name 'teardown' | Out-Null
+    } catch {
+      if (-not $restoreFailure) { $restoreFailure = $_.Exception.Message }
+    }
+
+    try {
+      $after = Invoke-B13Scalar -Psql $psql -Service $Service `
+        -Sql 'select public.p79_bench_capture_triggers()' -OutDir $OutDir -Name 'capture-after'
+      if ($after -ne $trigState) {
+        $restoreFailure = "triggers non restaures : attendu $trigState, obtenu $after"
+      }
+    } catch {
+      if (-not $restoreFailure) { $restoreFailure = $_.Exception.Message }
     }
   }
-  else {
-    Write-Output 'restauration NON tentee : controle d environnement non valide (aucune modification appliquee)'
+
+  if ($restoreFailure) {
+    Write-Warning "restauration en echec : $restoreFailure"
+    throw "B13_RESTORE_FAILED : $restoreFailure"
   }
+  Write-Output 'restauration: etats tgenabled identiques a la capture initiale'
 }
 
 $summary = [ordered]@{}

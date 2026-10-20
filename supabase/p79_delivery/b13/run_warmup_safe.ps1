@@ -3,6 +3,7 @@
 param(
   [string]$Service = 'b13-isolated',
   [string]$Project = 'biqrgdopcvkrbgfxkzxm',
+  [string]$Owner = '',
   [string]$OutDir  = 'C:\Users\HP-EXE\Documents\JISRA-QA\P79-B13-export\warmup-safe',
   [int]$Iterations = 20,
   [int]$ImportBatch = 20,
@@ -10,11 +11,18 @@ param(
   [switch]$InjectFailureAfterMutation
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'b13-common.ps1')
+
+if ($Service -ne 'b13-isolated') { throw 'B13_SERVICE_REQUIRED' }
+if ($Project -ne 'biqrgdopcvkrbgfxkzxm') { throw 'B13_PROJECT_REQUIRED' }
+if ([string]::IsNullOrWhiteSpace($Owner)) { throw 'B13_OWNER_REQUIRED' }
+
 $env:PGSERVICEFILE = "$env:APPDATA\postgresql\pg_service.conf"
 $env:PGPASSFILE     = "$env:APPDATA\postgresql\pgpass.conf"
 $psql  = 'C:\Users\HP-EXE\Tools\pg17\pgsql\bin\psql.exe'
-$bench = 'C:\Users\HP-EXE\Documents\erp ecom\jisra-kpi-v5-consolidated\supabase\p79_delivery\b13\run_bench.ps1'
-$svc   = "service=$Service"
+$bench = Join-Path $PSScriptRoot 'run_bench.ps1'
+if (-not (Test-Path -LiteralPath $psql))  { throw "psql introuvable : $psql" }
+if (-not (Test-Path -LiteralPath $bench)) { throw "pilote introuvable : $bench" }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stateFile = Join-Path $OutDir 'run-state.json'
 
@@ -24,7 +32,9 @@ function Set-State([hashtable]$h) {
   Move-Item -Force -Path $tmp -Destination $stateFile
 }
 
-function Sql([string]$q) { (& $psql -X -w $svc -A -t -c $q 2>$null | Out-String).Trim() }
+function Sql([string]$q, [string]$name = 'query') {
+  return Invoke-B13Scalar -Psql $psql -Service $Service -Sql $q -OutDir $OutDir -Name $name
+}
 
 # 1) Identite de la cible : seule preuve acceptee, avant toute mutation.
 $identity = Sql "select current_database() || '|' || (select count(*) from public.stores)"
@@ -45,14 +55,37 @@ try {
   Set-State @{ target = $Project; phase = 'mutating'; mutated = $mutated; result = 'pending'
                triggers_initial = $initial; started_at = (Get-Date).ToString('o') }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bench -Service $Service -Project $Project `
-      -Iterations $Iterations -ImportBatch $ImportBatch -ImportRounds $ImportRounds `
-      -Rounds 1 -StartRound 1 -OutDir (Join-Path $OutDir 'bench') *> (Join-Path $OutDir 'bench.log')
-  $benchExit = $LASTEXITCODE
+  $runToken = [guid]::NewGuid().ToString('N')
+  $env:B13_WRAPPER_TOKEN = $runToken
+  $benchLog = Join-Path $OutDir 'bench.log'
+  $benchErr = Join-Path $OutDir 'bench.err.log'
+  $benchArgs = @(
+    '-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-NativeArg $bench),
+    '-Service',(Quote-NativeArg $Service),'-Project',(Quote-NativeArg $Project),
+    '-Owner',(Quote-NativeArg $Owner),'-Iterations',"$Iterations",
+    '-ImportBatch',"$ImportBatch",'-ImportRounds',"$ImportRounds",
+    '-Rounds','1','-StartRound','1','-OutDir',(Quote-NativeArg (Join-Path $OutDir 'bench')),
+    '-WrapperToken',(Quote-NativeArg $runToken),'-ProtectedBy','run_warmup_safe'
+  )
+  if ($InjectFailureAfterMutation) { $benchArgs += '-InjectFailureAfterVariant' }
+  $benchProc = Start-B13Process -FilePath 'powershell.exe' -ArgumentString ($benchArgs -join ' ') `
+    -StdOut $benchLog -StdErr $benchErr
+  $benchExit = $benchProc.ExitCode
 
-  if ($InjectFailureAfterMutation) { throw "ECHEC INJECTE APRES MUTATION (test de restauration)" }
-  if ($benchExit -ne 0) { throw "pilote en echec (exit=$benchExit) - voir bench.log" }
-  $result = 'ok'
+  $reportFile = Get-ChildItem -LiteralPath (Join-Path $OutDir 'bench') -Filter 'b13-*.json' `
+    -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if ($InjectFailureAfterMutation) {
+    if ($benchExit -eq 0) { throw 'injection demandee mais le pilote a reussi' }
+    throw "echec injecte attendu (exit=$benchExit) - voir $benchLog et $benchErr"
+  }
+  if ($benchExit -ne 0 -and $benchExit -ne 2) {
+    throw "pilote en echec (exit=$benchExit) - voir $benchLog et $benchErr"
+  }
+  if (-not $reportFile) {
+    throw "pilote sans rapport JSON (exit=$benchExit) - voir $benchLog et $benchErr"
+  }
+  $report = Get-Content -LiteralPath $reportFile.FullName -Raw | ConvertFrom-Json
+  $result = 'completed:' + $report.verdict
 }
 catch {
   $result = 'error: ' + $_.Exception.Message
@@ -69,22 +102,41 @@ finally {
     # Transport sur par fichier SQL (aucun echappement de ligne de commande).
     $restoreSql = Join-Path $OutDir 'restore-triggers.sql'
     $literal = $initial.Replace("'", "''")
-    Set-Content -Path $restoreSql -Encoding utf8 `
-      -Value ("select public.p79_bench_restore_triggers('" + $literal + "');")
-    & $psql -X -w $svc -v ON_ERROR_STOP=1 -f $restoreSql *> (Join-Path $OutDir 'restore.log')
-    if ($LASTEXITCODE -eq 0) { $restored = $true }
-    else { Write-Output 'RESTAURATION EN ECHEC - voir restore.log' }
+    Write-B13Text $restoreSql ("select public.p79_bench_restore_triggers('" + $literal + "');")
+    try {
+      Invoke-B13File -Psql $psql -Service $Service -SqlFile $restoreSql `
+        -OutDir $OutDir -Name 'restore-triggers' | Out-Null
+      $restored = $true
+    } catch {
+      Write-Output "RESTAURATION EN ECHEC : $($_.Exception.Message)"
+    }
   }
-  & $psql -X -w $svc -c "select p79_bench_teardown()" *> (Join-Path $OutDir 'teardown.log')
 
-  $after = Sql "select p79_bench_capture_triggers()"
-  $counts = Sql "select (select count(*) from public.orders) || '|' || (select count(*) from public.order_items) || '|' || (select count(*) from public.dashboard_kpi_invalidation) || '|' || (select count(*) from public.stores)"
+  $teardownSql = Join-Path $OutDir 'teardown.sql'
+  Write-B13Text $teardownSql 'select public.p79_bench_teardown();'
+  try {
+    Invoke-B13File -Psql $psql -Service $Service -SqlFile $teardownSql `
+      -OutDir $OutDir -Name 'teardown' | Out-Null
+  } catch {
+    $result = 'error: teardown - ' + $_.Exception.Message
+  }
+
+  $after = Sql "select p79_bench_capture_triggers()" 'capture-after'
+  $counts = Sql "select (select count(*) from public.orders where store_id = '7f000000-0000-4000-8000-0000000000b1') || '|' || (select count(*) from public.order_items where store_id = '7f000000-0000-4000-8000-0000000000b1') || '|' || (select count(*) from public.dashboard_kpi_invalidation where store_id = '7f000000-0000-4000-8000-0000000000b1') || '|' || (select count(*) from public.stores where id = '7f000000-0000-4000-8000-0000000000b1')" 'counts-after'
+  $triggersIdentical = ($after -eq $initial)
+  $residual = ($counts -ne '0|0|0|0')
+  if (-not $triggersIdentical -or $residual) {
+    $result = 'error: restauration non conforme'
+  }
   Set-State @{ target = $Project; phase = 'restored'; mutated = $mutated; result = $result
                triggers_initial = $initial; triggers_after = $after
-               restored = $restored; counts = $counts; finished_at = (Get-Date).ToString('o') }
+               restored = $restored; triggers_identical = $triggersIdentical
+               counts = $counts; residual = $residual; finished_at = (Get-Date).ToString('o') }
 
   Write-Output "restauration=$restored"
-  Write-Output "triggers_identiques=$($after -eq $initial)"
+  Write-Output "triggers_identiques=$triggersIdentical"
   Write-Output "counts(orders|items|events|stores)=$counts"
   Write-Output "resultat=$result"
 }
+
+if ($result -like 'error:*' -or -not $restored -or $residual) { exit 2 }

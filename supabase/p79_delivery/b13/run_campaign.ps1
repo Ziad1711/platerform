@@ -4,6 +4,7 @@
 param(
   [string]$Service = 'b13-isolated',
   [string]$Project = 'biqrgdopcvkrbgfxkzxm',
+  [string]$Owner   = '',
   [string]$OutDir  = 'C:\Users\HP-EXE\Documents\JISRA-QA\P79-B13-export\campaign',
   [int]$Iterations = 100,
   [int]$ImportBatch = 200,
@@ -11,13 +12,20 @@ param(
   [int]$MaxAttempts = 3
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'b13-common.ps1')
+
+if ($Service -ne 'b13-isolated') { throw 'B13_SERVICE_REQUIRED' }
+if ($Project -ne 'biqrgdopcvkrbgfxkzxm') { throw 'B13_PROJECT_REQUIRED' }
+if ([string]::IsNullOrWhiteSpace($Owner)) { throw 'B13_OWNER_REQUIRED' }
+
 $env:PGSERVICEFILE = "$env:APPDATA\postgresql\pg_service.conf"
 $env:PGPASSFILE     = "$env:APPDATA\postgresql\pgpass.conf"
 $psql  = 'C:\Users\HP-EXE\Tools\pg17\pgsql\bin\psql.exe'
-$bench = 'C:\Users\HP-EXE\Documents\erp ecom\jisra-kpi-v5-consolidated\supabase\p79_delivery\b13\run_bench.ps1'
-$obs   = 'C:\Users\HP-EXE\Documents\erp ecom\jisra-kpi-v5-consolidated\supabase\p79_delivery\b13\lock_observer.ps1'
-if (-not (Test-Path $psql))  { throw "psql introuvable : $psql" }
-if (-not (Test-Path $bench)) { throw "pilote introuvable : $bench" }
+$bench = Join-Path $PSScriptRoot 'run_bench.ps1'
+$obs   = Join-Path $PSScriptRoot 'lock_observer.ps1'
+if (-not (Test-Path -LiteralPath $psql))  { throw "psql introuvable : $psql" }
+if (-not (Test-Path -LiteralPath $bench)) { throw "pilote introuvable : $bench" }
+if (-not (Test-Path -LiteralPath $obs))   { throw "observateur introuvable : $obs" }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 # Verrou : une seule campagne a la fois.
@@ -31,25 +39,26 @@ function Write-Log([string]$msg) {
   Write-Output $line
 }
 
-function Invoke-Sql([string]$sql) {
-  return (& $psql -X -w "service=$Service" -A -t -c $sql 2>$null | Out-String).Trim()
-}
-
 function Get-State {
-  $r = Invoke-Sql "select count(*) filter (where t.tgenabled='O') || '|' || (select count(*) from public.orders) || '|' || (select count(*) from public.order_items) || '|' || (select count(*) from public.dashboard_kpi_invalidation) from pg_trigger t join pg_class c on c.oid=t.tgrelid where not t.tgisinternal and t.tgname like 'trg_kpi_%'"
+  $r = Invoke-B13Scalar -Psql $psql -Service $Service -OutDir $OutDir -Name 'state' `
+    -Sql "select count(*) filter (where t.tgenabled='O') || '|' || (select count(*) from public.orders) || '|' || (select count(*) from public.order_items) || '|' || (select count(*) from public.dashboard_kpi_invalidation) from pg_trigger t join pg_class c on c.oid=t.tgrelid where not t.tgisinternal and t.tgname like 'trg_kpi_%'"
   $p = $r -split '\|'
   [pscustomobject]@{ TriggersOn = [int]$p[0]; Orders = [int]$p[1]; Items = [int]$p[2]; Events = [int]$p[3] }
 }
 
 function Assert-Preflight([string]$phase) {
-  $db = Invoke-Sql "select current_database() || '|' || (select count(*) from public.stores)"
-  if ($db -notlike 'postgres|*') { throw "[$phase] cible inattendue : $db" }
+  $db = Invoke-B13Scalar -Psql $psql -Service $Service -OutDir $OutDir -Name 'identity' `
+    -Sql "select current_database() || '|' || current_user || '|' || (select count(*) from public.stores)"
+  if ($db -notlike 'postgres|postgres|*') { throw "[$phase] cible inattendue : $db" }
+  $benchStore = Invoke-B13Scalar -Psql $psql -Service $Service -OutDir $OutDir -Name 'bench-store' `
+    -Sql "select count(*) from public.stores where id = '7f000000-0000-4000-8000-0000000000b1'"
+  if ([int]$benchStore -ne 0) { throw "[$phase] store de bench residuel : $benchStore - STOP" }
   $s = Get-State
   if ($s.TriggersOn -ne 6) { throw "[$phase] triggers non conformes : $($s.TriggersOn)/6" }
   if ($s.Orders -ne 0 -or $s.Items -ne 0 -or $s.Events -ne 0) {
     throw "[$phase] residus presents (orders=$($s.Orders) items=$($s.Items) events=$($s.Events)) - STOP"
   }
-  Write-Log "[$phase] preflight OK (stores=$($db.Split('|')[1]), triggers=6, residus=0)"
+  Write-Log "[$phase] preflight OK (stores=$($db.Split('|')[2]), triggers=6, residus=0)"
 }
 
 
@@ -59,12 +68,19 @@ function Invoke-Round([int]$round) {
   for ($a = 1; $a -le $MaxAttempts; $a++) {
     Assert-Preflight "r$round/avant-tentative$a"
     $log = Join-Path $dir ("attempt$a.log")
-    $proc = Start-Process -FilePath 'powershell.exe' -PassThru -NoNewWindow `
-      -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$bench,'-Service',$Service,
-                      '-Project',$Project,'-Iterations',$Iterations,'-ImportBatch',$ImportBatch,
-                      '-ImportRounds',$ImportRounds,'-Rounds','1','-StartRound',"$round",'-OutDir',$dir) `
-      -RedirectStandardOutput $log -RedirectStandardError ($log + '.err')
-    $proc.WaitForExit()
+    $err = Join-Path $dir ("attempt$a.err.log")
+    $runToken = [guid]::NewGuid().ToString('N')
+    $env:B13_WRAPPER_TOKEN = $runToken
+    $argParts = @(
+      '-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-NativeArg $bench),
+      '-Service',(Quote-NativeArg $Service),'-Project',(Quote-NativeArg $Project),
+      '-Owner',(Quote-NativeArg $Owner),'-Iterations',"$Iterations",
+      '-ImportBatch',"$ImportBatch",'-ImportRounds',"$ImportRounds",
+      '-Rounds','1','-StartRound',"$round",'-OutDir',(Quote-NativeArg $dir),
+      '-WrapperToken',(Quote-NativeArg $runToken),'-ProtectedBy','run_campaign'
+    )
+    $proc = Start-B13Process -FilePath 'powershell.exe' -ArgumentString ($argParts -join ' ') `
+      -StdOut $log -StdErr $err
     $code = $proc.ExitCode
     $json = Get-ChildItem -Path $dir -Filter 'b13-*.json' -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -89,17 +105,35 @@ try {
 
   $warm = Join-Path $OutDir 'warmup'
   New-Item -ItemType Directory -Force -Path $warm | Out-Null
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bench -Service $Service -Project $Project `
-      -Iterations 20 -ImportBatch 20 -ImportRounds 2 -Rounds 1 -StartRound 1 -OutDir $warm `
-      *> (Join-Path $warm 'warmup.log')
-  Write-Log "echauffement termine (code=$LASTEXITCODE, non comptabilise)"
+  $runToken = [guid]::NewGuid().ToString('N')
+  $env:B13_WRAPPER_TOKEN = $runToken
+  $warmLog = Join-Path $warm 'warmup.log'
+  $warmErr = Join-Path $warm 'warmup.err.log'
+  $warmArgs = @(
+    '-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-NativeArg $bench),
+    '-Service',(Quote-NativeArg $Service),'-Project',(Quote-NativeArg $Project),
+    '-Owner',(Quote-NativeArg $Owner),'-Iterations','20','-ImportBatch','20',
+    '-ImportRounds','2','-Rounds','1','-StartRound','1','-OutDir',(Quote-NativeArg $warm),
+    '-WrapperToken',(Quote-NativeArg $runToken),'-ProtectedBy','run_campaign'
+  )
+  $warmProc = Start-B13Process -FilePath 'powershell.exe' -ArgumentString ($warmArgs -join ' ') `
+    -StdOut $warmLog -StdErr $warmErr
+  $warmCode = $warmProc.ExitCode
+  Write-Log "echauffement termine (code=$warmCode, non comptabilise)"
+  if ($warmCode -ne 0) {
+    throw "echauffement en echec (code=$warmCode) - voir $warmLog et $warmErr"
+  }
   Assert-Preflight 'apres-echauffement'
 
   $results = @()
   foreach ($r in 1..3) {
+    $observerArgs = @(
+      '-NoProfile','-ExecutionPolicy','Bypass','-File',(Quote-NativeArg $obs),
+      '-Service',(Quote-NativeArg $Service),'-DurationSeconds','900',
+      '-OutDir',(Quote-NativeArg (Join-Path $OutDir "r$r"))
+    )
     $job = Start-Process -FilePath 'powershell.exe' -PassThru -NoNewWindow `
-      -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$obs,'-Service',$Service,
-                      '-DurationSeconds','900','-OutDir',(Join-Path $OutDir "r$r")) `
+      -ArgumentList ($observerArgs -join ' ') `
       -RedirectStandardOutput (Join-Path $OutDir "r$r\observer.log") `
       -RedirectStandardError  (Join-Path $OutDir "r$r\observer.err")
     $results += Invoke-Round $r

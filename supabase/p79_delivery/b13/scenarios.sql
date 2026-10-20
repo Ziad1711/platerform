@@ -46,7 +46,17 @@ BEGIN
     RAISE EXCEPTION 'P79_BENCH_FORBIDDEN_TARGET (projet P7 historique)';
   END IF;
 
-  -- 4) Sentinel stores of jisra-test.
+  -- 4) Proprietaire obligatoire : utilisateur synthetique B13, sans fallback.
+  IF current_setting('p79.bench_owner', true) IS NULL
+     OR current_setting('p79.bench_owner', true) = '' THEN
+    RAISE EXCEPTION 'P79_BENCH_OWNER_REQUIRED';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles p
+                  WHERE p.id = current_setting('p79.bench_owner')::uuid) THEN
+    RAISE EXCEPTION 'P79_BENCH_OWNER_UNKNOWN (%)', current_setting('p79.bench_owner', true);
+  END IF;
+
+  -- 5) Sentinel stores of jisra-test.
   SELECT count(*) INTO v_sentinels
     FROM public.stores
    WHERE id IN ('d6bfa510-3411-e642-3bd4-1fdff95cbc25',
@@ -96,7 +106,7 @@ RETURNS void LANGUAGE plpgsql AS $fn$
 BEGIN
   INSERT INTO public.stores (id, owner_user_id, name, currency, country)
   VALUES ('7f000000-0000-4000-8000-0000000000b1',
-          '33333333-3333-4333-8333-333333333333', 'P7.9 B13 bench', 'MAD', 'MA')
+          current_setting('p79.bench_owner')::uuid, 'P7.9 B13 bench', 'MAD', 'MA')
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.products (id, store_id, name)
