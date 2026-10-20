@@ -59,11 +59,22 @@ catch {
   Write-Output "ERREUR CAPTUREE : $result"
 }
 finally {
-  # 3) Restauration inconditionnelle : identite confirmee + mutation possible.
+  # 3) Identite re-verifiee AVANT toute restauration.
   $restored = $false
-  $sqlRestore = 'select p79_bench_restore_triggers(' + [char]39 + $initial + [char]39 + ')'
-  & $psql -X -w $svc -v ON_ERROR_STOP=1 -c $sqlRestore *> (Join-Path $OutDir 'restore.log')
-  if ($LASTEXITCODE -eq 0) { $restored = $true }
+  $id2 = Sql "select current_database() || '|' || (select count(*) from public.stores)"
+  if ($id2 -notlike 'postgres|*') {
+    Write-Output "RESTAURATION ANNULEE : identite non confirmee ($id2)"
+  }
+  else {
+    # Transport sur par fichier SQL (aucun echappement de ligne de commande).
+    $restoreSql = Join-Path $OutDir 'restore-triggers.sql'
+    $literal = $initial.Replace("'", "''")
+    Set-Content -Path $restoreSql -Encoding utf8 `
+      -Value ("select public.p79_bench_restore_triggers('" + $literal + "');")
+    & $psql -X -w $svc -v ON_ERROR_STOP=1 -f $restoreSql *> (Join-Path $OutDir 'restore.log')
+    if ($LASTEXITCODE -eq 0) { $restored = $true }
+    else { Write-Output 'RESTAURATION EN ECHEC - voir restore.log' }
+  }
   & $psql -X -w $svc -c "select p79_bench_teardown()" *> (Join-Path $OutDir 'teardown.log')
 
   $after = Sql "select p79_bench_capture_triggers()"
