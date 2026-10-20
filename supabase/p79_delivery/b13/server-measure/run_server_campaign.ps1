@@ -5,6 +5,7 @@ param(
   [int]$N            = 100,
   [int]$ImportN      = 10,
   [int]$Reps         = 5,
+  [string[]]$Kinds   = @('create_unit','update_rounding','update_subtotal','update_unrelated','import_bulk','import_loop'),
   [string]$OutDir    = 'C:\Users\HP-EXE\Documents\JISRA-QA\P79-B13-export\server-campaign'
 )
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,7 @@ if ($id -notlike 'postgres|*') { throw "identite non confirmee : $id" }
 $dl0 = [long](Q "select coalesce(sum(deadlocks),0) from pg_stat_database where datname=current_database()")
 Log "campagne demarree identite=$id deadlocks0=$dl0"
 
-foreach ($kind in 'create_unit','update_rounding','update_subtotal','update_unrelated','import_bulk','import_loop') {
+foreach ($kind in $Kinds) {
   $n = if ($kind -like 'import_*') { $ImportN } else { $N }
   for ($rep = 1; $rep -le $Reps; $rep++) {
     $order = if ($rep % 2 -eq 1) { @('A','C') } else { @('C','A') }

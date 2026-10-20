@@ -71,6 +71,14 @@ $fn$;
 
 -- Execution : une instruction par iteration si p_kind est unitaire.
 SELECT p79_bench_begin();
+
+-- Commande de reference pour les scenarios update_* : creee HORS fenetre
+-- chronometree, puis invalidations purgees afin que A et C partent d'un etat
+-- strictement identique (aucune invalidation de setup heritee).
+SELECT (public.p79_bench_create(1) IS NOT NULL) AS reference_order_created;
+DELETE FROM public.dashboard_kpi_invalidation
+ WHERE store_id = '7f000000-0000-4000-8000-0000000000b1';
+
 SELECT p79_bench_set_triggers(coalesce(current_setting('p79.bench_variant', true), 'C') <> 'A');
 
 SELECT :'kind' AS kind,
