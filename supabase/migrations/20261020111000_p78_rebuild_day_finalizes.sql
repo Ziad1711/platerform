@@ -42,6 +42,15 @@ begin
     raise exception 'KPI_PARTITION_NOT_LOCKED';
   end if;
 
+  -- P7.8 : verrou de boutique pris AVANT toute écriture de
+  -- dashboard_kpi_store_state. Ordre global garanti :
+  --   verrou de partition -> verrou de boutique -> ligne d'état.
+  -- Sans cela, un appel direct à la finalisation (boutique puis ligne)
+  -- pourrait s'interbloquer avec une publication (ligne puis boutique).
+  -- La fonction de finalisation reprend le même verrou : réentrant.
+  perform pg_advisory_xact_lock(hashtextextended(p_store_id::text || '|finalize', 0));
+
+
   v_tz := public.dashboard_kpi_store_tz(p_store_id);
   v_start := (p_date::timestamp at time zone v_tz);
   v_end := ((p_date + 1)::timestamp at time zone v_tz);
