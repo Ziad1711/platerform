@@ -1,0 +1,51 @@
+{
+  "campaign": "B13-P7.9-isolated-provisoning",
+  "generated_at": "2026-10-20",
+  "source": {
+    "project": "jisra-test",
+    "project_ref": "goqedvcdmgtejtyrawsp",
+    "postgres": "17.11 x86_64",
+    "access": "lecture seule (psql service=jisra-test-p79, TLS verify-full)",
+    "writes": "aucune"
+  },
+  "artifact": {
+    "path": "C:/Users/HP-EXE/Documents/JISRA-QA/P79-B13-export/public-schema.sql",
+    "location": "hors depot Git",
+    "bytes": 842514,
+    "sha256": "27eb1b699ba1d9bbd9423f9bb4ce41b045c4e1177852d204ec2e1d86602136fa",
+    "contains_data": false,
+    "copy_blocks": 0,
+    "top_level_inserts": 0,
+    "create_table": 105,
+    "create_function": 184,
+    "create_policy": 219
+  },
+  "regeneration_command": "pg_dump \"service=jisra-test-p79\" --schema-only --no-owner --schema=public -f public-schema.sql",
+  "scope_decision": {
+    "chosen": "A - schema public complet, structure seule",
+    "rejected": "B - fermeture manuelle restreinte (dependances manquantes probables)",
+    "bias_documented": "objets d integration presents mais inactifs ; aucun effet attendu sur le chemin mesure"
+  },
+  "measured_closure": {
+    "public_tables": 104,
+    "public_functions": 184,
+    "public_triggers": 70,
+    "public_policies": 219,
+    "fk_closure_from_6_seeds": 12,
+    "auth_users_managed": true,
+    "triggers_on_fk_closure_tables": 38,
+    "trigger_functions": 30,
+    "extra_objects_from_function_bodies": 18
+  },
+  "application_preconditions": [
+    "creer les extensions pgcrypto, uuid-ossp, pg_cron, pg_net, pg_stat_statements",
+    "creer un utilisateur auth synthetique avant les FK vers auth.users",
+    "appliquer le schema puis le paquet KPI en mode inactif",
+    "ne pas activer worker, reveil ni lecteur V5",
+    "aucune donnee reelle, aucun secret"
+  ],
+  "not_proven": [
+    "equivalence de comportement avec la production (parametres serveur, volumes, versions d extensions)",
+    "qualification B13 (aucune campagne executee)"
+  ]
+}

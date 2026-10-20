@@ -74,6 +74,15 @@ parcours nominal.
 Un tour d'échauffement jeté est recommandé. Le pilote écrit un JSON horodaté et
 sort en code 2 si un budget est dépassé.
 
+## Mesure du drainage réel
+
+`p79_bench_drain()` (appel direct) ne mesure qu'un drainage synchrone.
+Le drainage **après COMMIT** se mesure séparément avec `drain_after_commit.sql` :
+injection committée, puis attente **passive** du cron (aucun appel à
+`dashboard_kpi_worker_run`), avec `pending` et `elapsed_s` en sortie.
+Si le worker de la cible est désactivé, la mesure est refusée — pas de
+`NOT_COVERED` silencieux.
+
 ## Ce que ce harnais ne prouve pas
 
 1. **Aucun benchmark exécuté ici** : aucune donnée de cette version ne qualifie

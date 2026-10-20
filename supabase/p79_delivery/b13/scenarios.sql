@@ -15,8 +15,13 @@
 \pset pager off
 
 DO $guard$
-DECLARE v_stores int; v_sentinels int;
+DECLARE
+  v_stores int;
+  v_sentinels int;
+  v_project text := coalesce(current_setting('p79.bench_project', true), '');
+  v_allow   text := coalesce(current_setting('p79.bench_allow', true), '');
 BEGIN
+  -- 1) Environment and double-entry confirmation.
   IF current_setting('p79.bench_env', true) IS DISTINCT FROM 'isolated' THEN
     RAISE EXCEPTION 'P79_BENCH_NOT_AUTHORIZED (p79.bench_env)';
   END IF;
@@ -24,6 +29,21 @@ BEGIN
     RAISE EXCEPTION 'P79_BENCH_NOT_CONFIRMED (p79.bench_confirm)';
   END IF;
 
+  -- 2) Strict project allowlist : the operator must name the target twice.
+  IF v_project = '' OR v_project <> v_allow THEN
+    RAISE EXCEPTION 'P79_BENCH_PROJECT_NOT_ALLOWED (p79.bench_project / p79.bench_allow)';
+  END IF;
+
+  -- 3) Explicit refusal list. Production and jisra-test are never legitimate.
+  IF v_project IN ('attvfeoqgbxsnnsllatt', 'goqedvcdmgtejtyrawsp') THEN
+    RAISE EXCEPTION 'P79_BENCH_FORBIDDEN_TARGET (%)', v_project;
+  END IF;
+  IF current_setting('p79.bench_p7_ref', true) IS NOT NULL
+     AND v_project = current_setting('p79.bench_p7_ref', true) THEN
+    RAISE EXCEPTION 'P79_BENCH_FORBIDDEN_TARGET (projet P7 historique)';
+  END IF;
+
+  -- 4) Sentinel stores of jisra-test.
   SELECT count(*) INTO v_sentinels
     FROM public.stores
    WHERE id IN ('d6bfa510-3411-e642-3bd4-1fdff95cbc25',
@@ -46,8 +66,12 @@ BEGIN
   IF to_regprocedure('public.dashboard_kpi_invalidate_orders_quality_trg()') IS NULL THEN
     RAISE EXCEPTION 'P79_BENCH_PACKAGE_MISSING';
   END IF;
+
+  -- Marqueur lu par le pilote : sans lui, aucune restauration n'est tentee.
+  RAISE NOTICE 'P79_GUARD_OK project=% stores=%', v_project, v_stores;
 END
 $guard$;
+
 
 -- Réinitialisation : état initial identique pour chaque variante et chaque tour.
 CREATE OR REPLACE FUNCTION p79_bench_reset()
@@ -220,6 +244,48 @@ BEGIN
 END
 $fn$;
 
+-- Capture de l'état exact (tgenabled) des six producteurs KPI.
+CREATE OR REPLACE FUNCTION p79_bench_capture_triggers()
+RETURNS text LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(jsonb_object_agg(t.tgname, t.tgenabled::text)::text, '{}')
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+   WHERE NOT t.tgisinternal
+     AND c.relname IN ('orders', 'order_items', 'ad_spend_daily')
+     AND t.tgname IN ('trg_kpi_mark_order_insert',
+                      'trg_kpi_invalidate_orders',
+                      'trg_kpi_invalidate_orders_insert',
+                      'trg_kpi_invalidate_orders_quality',
+                      'trg_kpi_invalidate_order_items',
+                      'trg_kpi_invalidate_ad_spend');
+$fn$;
+
+-- Restauration EXACTE : seules les valeurs capturées sont réappliquées.
+CREATE OR REPLACE FUNCTION p79_bench_restore_triggers(p_state text)
+RETURNS int LANGUAGE plpgsql AS $fn$
+DECLARE v jsonb := p_state::jsonb; r record; n int := 0;
+BEGIN
+  FOR r IN
+    SELECT t.tgname, c.relname AS rel, v ->> t.tgname AS flag
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+     WHERE NOT t.tgisinternal
+       AND c.relname IN ('orders', 'order_items', 'ad_spend_daily')
+       AND v ? t.tgname
+  LOOP
+    IF r.flag = 'O' THEN
+      EXECUTE format('ALTER TABLE public.%I ENABLE TRIGGER %I', r.rel, r.tgname);
+    ELSIF r.flag = 'D' THEN
+      EXECUTE format('ALTER TABLE public.%I DISABLE TRIGGER %I', r.rel, r.tgname);
+    ELSE
+      RAISE EXCEPTION 'P79_BENCH_BAD_FLAG %=%', r.tgname, r.flag;
+    END IF;
+    n := n + 1;
+  END LOOP;
+  RETURN n;
+END
+$fn$;
+
 -- Contrôle de la variante : renvoie l'état effectif des producteurs.
 CREATE OR REPLACE FUNCTION p79_bench_producer_state()
 RETURNS TABLE(trigger_name text, enabled boolean) LANGUAGE sql AS $fn$
@@ -329,6 +395,6 @@ SELECT 'drain_seconds' AS metric, coalesce(p79_bench_drain(90)::text, 'NOT_COVER
 
 -- Remise à l'état initial et restauration des producteurs : la variante
 -- suivante repart d'un état strictement identique.
-SELECT p79_bench_teardown();
-SELECT p79_bench_set_triggers(true);
+-- Nettoyage et restauration pris en charge par le pilote (etat capture).
+-- (aucune restauration implicite ici)
 

@@ -2,6 +2,7 @@
 # Aucun secret : utilise un service PostgreSQL local deja configure.
 param(
   [string]$Service   = 'jisra-bench',
+  [string]$Project   = '',
   [int]$Iterations   = 100,
   [int]$ImportBatch  = 200,
   [int]$ImportRounds = 10,
@@ -28,10 +29,15 @@ function Invoke-Variant([string]$variant) {
   & $psql -X -w $svc -v ON_ERROR_STOP=1 `
     -c "set p79.bench_env='isolated'" `
     -c "set p79.bench_confirm='SCHEDULED-ISOLATED-RUN'" `
+    -c "set p79.bench_project='$Project'" `
+    -c "set p79.bench_allow='$Project'" `
     -c "set p79.bench_variant='$variant'" `
     -v iterations=$Iterations -v import_batch=$ImportBatch -v import_rounds=$ImportRounds `
     -f $sql *> $log
   if ($LASTEXITCODE -ne 0) { throw "Variante $variant en echec - voir $log" }
+  if (-not (Select-String -Path $log -Pattern 'P79_GUARD_OK' -Quiet)) {
+    throw "Variante ${variant}: marqueur de garde-fou absent - voir $log"
+  }
 
   $data = @{}; $current = $null; $metrics = @{}
   foreach ($line in Get-Content -LiteralPath $log) {
@@ -67,6 +73,16 @@ function Get-Percentile([double[]]$values, [double]$p) {
 }
 
 $budgets = Get-Content (Join-Path $PSScriptRoot 'thresholds.json') -Raw | ConvertFrom-Json
+
+# Etat initial des six producteurs : capture AVANT toute modification.
+$trigState = (& $psql -X -w $svc -A -t -c "select p79_bench_capture_triggers()" 2>$null | Out-String).Trim()
+if ([string]::IsNullOrWhiteSpace($trigState) -or $trigState -notlike '{*}') {
+  throw 'capture de l etat des triggers impossible : campagne annulee'
+}
+Write-Output "etat initial captures : $trigState"
+
+$deadlocksBase = [long]((& $psql -X -w $svc -A -t -c "select p79_bench_deadlocks()" 2>$null | Out-String).Trim())
+$envValidated = $false
 $results = @()
 try {
   for ($r = 1; $r -le $Rounds; $r++) {
@@ -74,35 +90,27 @@ try {
     foreach ($v in $order) {
       Write-Output "round=$r variant=$v"
       $results += Invoke-Variant $v
+      # Le marqueur P79_GUARD_OK a ete vu : la cible est validee pour cette campagne.
+      $envValidated = $true
     }
   }
 }
 finally {
-  # Restauration garantie, meme en cas d'erreur.
-  # 1) tous les triggers trg_kpi_* metier sont reactives sans dependre du paquet ;
-  # 2) les fixtures de benchmark sont supprimees si les fonctions existent.
-  $restore = @'
-do $$
-declare t record;
-begin
-  for t in
-    select c.relname as rel, tg.tgname
-      from pg_trigger tg
-      join pg_class c on c.oid = tg.tgrelid
-     where not tg.tgisinternal
-       and tg.tgname like 'trg_kpi_%'
-       and c.relname in ('orders', 'order_items', 'ad_spend_daily')
-  loop
-    execute format('alter table public.%I enable trigger %I', t.rel, t.tgname);
-  end loop;
-  if to_regprocedure('public.p79_bench_teardown()') is not null then
-    perform public.p79_bench_teardown();
-  end if;
-end
-$$;
-'@
-  $restore | & $psql -X -w $svc -v ON_ERROR_STOP=1 -f - *> $null
-  Write-Output 'restauration: triggers KPI actifs, fixtures de benchmark supprimees'
+  if ($envValidated) {
+    # Restauration EXACTE des valeurs tgenabled capturees, puis nettoyage.
+    $sqlRestore = 'select p79_bench_restore_triggers(' + [char]39 + $trigState + [char]39 + ')'
+    & $psql -X -w $svc -v ON_ERROR_STOP=1 -c $sqlRestore *> $null
+    & $psql -X -w $svc -c "select p79_bench_teardown()" *> $null
+    $after = (& $psql -X -w $svc -A -t -c "select p79_bench_capture_triggers()" 2>$null | Out-String).Trim()
+    if ($after -ne $trigState) {
+      Write-Warning "restauration des triggers NON conforme : attendu $trigState, obtenu $after"
+    } else {
+      Write-Output 'restauration: etats tgenabled identiques a la capture initiale'
+    }
+  }
+  else {
+    Write-Output 'restauration NON tentee : controle d environnement non valide (aucune modification appliquee)'
+  }
 }
 
 $summary = [ordered]@{}
@@ -125,7 +133,9 @@ foreach ($section in $sectionsExpected.Keys) {
 
 $drain = @($results | Where-Object Variant -eq 'C' | ForEach-Object { $_.Metrics['drain_seconds'] })
 $deadlocks = @($results | ForEach-Object { [long]$_.Metrics['deadlocks_after'] })
-$deadlockDelta = if ($deadlocks.Count -gt 0) { ($deadlocks | Measure-Object -Maximum).Maximum } else { 0 }
+$deadlockMax = if ($deadlocks.Count -gt 0) { ($deadlocks | Measure-Object -Maximum).Maximum } else { $deadlocksBase }
+$deadlockDelta = $deadlockMax - $deadlocksBase
+if ($deadlockDelta -gt 0) { $verdictFail = $true }
 
 $report = [ordered]@{
   generated_at = (Get-Date).ToString('o')
