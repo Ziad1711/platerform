@@ -5,7 +5,7 @@ param(
   [int]$N            = 100,
   [int]$ImportN      = 10,
   [int]$Reps         = 5,
-  [string[]]$Kinds   = @('create_unit','update_rounding','update_subtotal','update_unrelated','import_bulk','import_loop'),
+  [string]$Kinds     = 'create_unit,update_rounding,update_subtotal,update_unrelated,import_bulk,import_loop',
   [string]$OutDir    = 'C:\Users\HP-EXE\Documents\JISRA-QA\P79-B13-export\server-campaign'
 )
 $ErrorActionPreference = 'Stop'
@@ -26,7 +26,16 @@ if ($id -notlike 'postgres|*') { throw "identite non confirmee : $id" }
 $dl0 = [long](Q "select coalesce(sum(deadlocks),0) from pg_stat_database where datname=current_database()")
 Log "campagne demarree identite=$id deadlocks0=$dl0"
 
-foreach ($kind in $Kinds) {
+$allowedKinds = @('create_unit','update_rounding','update_subtotal','update_unrelated','import_bulk','import_loop')
+$kindList = @($Kinds.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+if ($kindList.Count -eq 0) { throw 'P79_BAD_KINDS_EMPTY' }
+foreach ($k in $kindList) {
+  if ($allowedKinds -notcontains $k) { throw "P79_BAD_KIND_PARAM: $k" }
+}
+if (($kindList | Sort-Object -Unique).Count -ne $kindList.Count) { throw 'P79_BAD_KINDS_DUPLICATE' }
+Log ("scenarios demandes = " + ($kindList -join ','))
+
+foreach ($kind in $kindList) {
   $n = if ($kind -like 'import_*') { $ImportN } else { $N }
   for ($rep = 1; $rep -le $Reps; $rep++) {
     $order = if ($rep % 2 -eq 1) { @('A','C') } else { @('C','A') }
