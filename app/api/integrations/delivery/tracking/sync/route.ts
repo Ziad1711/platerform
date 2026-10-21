@@ -21,7 +21,9 @@ import {
   getAccessibleStoreIds,
   getErrorStatus,
   requireAuthenticatedUser,
+  verifyStoreAccess,
 } from '@/lib/assistant/security'
+import { hasPermission, type Role } from '@/lib/auth/permissions'
 import { runDeliveryTrackingSweep } from '@/lib/integrations/delivery/tracking-runner'
 import {
   DELIVERY_TRACKING_FRESHNESS_MS,
@@ -103,6 +105,19 @@ export async function POST(request: Request) {
     }
     if (requestedTargets.some((storeId) => !accessible.includes(storeId))) {
       return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+    }
+
+    // P8.2 : le rattrapage ecrit l'etat de suivi des colis (client admin).
+    // L'appartenance au magasin ne suffit pas : il faut une permission d'action,
+    // verifiee AVANT toute lecture couteuse ou ecriture.
+    for (const storeId of requestedTargets) {
+      const member = await verifyStoreAccess(supabase, user.id, storeId)
+      const allowed =
+        hasPermission(member.role as Role, 'delivery.manage') ||
+        hasPermission(member.role as Role, 'integrations.manage')
+      if (!allowed) {
+        return NextResponse.json({ error: 'FORBIDDEN', storeId }, { status: 403 })
+      }
     }
 
     const admin = createAdminClient()

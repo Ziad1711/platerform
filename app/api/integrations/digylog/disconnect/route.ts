@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { hasPermission, type Role } from '@/lib/auth/permissions'
 
 export async function POST(request: Request) {
   try {
+    assertTrustedOrigin(request)
     const { supabase, user } = await requireAuthenticatedUser()
     const body = (await request.json()) as { storeId: string }
     const { storeId } = body
@@ -12,7 +14,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'MISSING_STORE_ID' }, { status: 400 })
     }
 
-    await verifyStoreAccess(supabase, user.id, storeId)
+    // P8.2 : la deconnexion supprime la configuration et le webhook. Elle exige
+    // integrations.manage, pas seulement l'appartenance au magasin.
+    const member = await verifyStoreAccess(supabase, user.id, storeId)
+    if (!hasPermission(member.role as Role, 'integrations.manage')) {
+      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
 
     const admin = createAdminClient()
 

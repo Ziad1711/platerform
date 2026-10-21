@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { assertTrustedOrigin, requireAuthenticatedUser, verifyStoreAccess } from '@/lib/assistant/security'
+import { hasPermission, type Role } from '@/lib/auth/permissions'
 import { listRapidDeliveryCities, listRapidDeliveryShops, listRapidDeliveryStates } from '@/lib/integrations/rapid-delivery'
 import {
   getDecryptedIntegrationToken,
@@ -19,7 +20,12 @@ export async function POST(request: Request) {
     const storeId = String(body.storeId || '').trim()
 
     if (!storeId) return NextResponse.json({ error: 'MISSING_STORE_ID' }, { status: 400 })
-    await verifyStoreAccess(supabase, user.id, storeId)
+    // P8.2 : synchronisation de configuration transporteur. L'appartenance au
+    // magasin ne suffit pas ; il faut integrations.manage (owner, admin, marketer).
+    const member = await verifyStoreAccess(supabase, user.id, storeId)
+    if (!hasPermission(member.role as Role, 'integrations.manage')) {
+      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 })
+    }
 
     const admin = createAdminClient()
     const { data: config, error: configError } = await admin

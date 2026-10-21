@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
+import { usePermissions } from '@/lib/auth/use-permissions'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
@@ -42,6 +43,10 @@ const CATEGORY_PRESETS: Array<{ key: CategoryPresetKey; name: string; type: stri
 export default function DepensesPage() {
   const PAGE_SIZE = 10
   const { currentStoreId, accessibleStoreIds, accessibleStores: stores } = useStore()
+  const { can } = usePermissions(currentStoreId)
+  // P8.2 : seul expenses.manage autorise a creer, modifier ou supprimer une
+  // charge / un modele recurrent. La lecture reste ouverte a expenses.view.
+  const canManageExpenses = can('expenses.manage')
   const supabase = createClient()
   const queryClient = useQueryClient()
 
@@ -349,18 +354,20 @@ export default function DepensesPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <button
-            type="button"
-            onClick={() => setIsAddExpenseModalOpen(true)}
-            className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white rounded-lg px-4 py-2 whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            Ajouter une charge
-          </button>
+          {canManageExpenses ? (
+            <button
+              type="button"
+              onClick={() => setIsAddExpenseModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-white rounded-lg px-4 py-2 whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" />
+              Ajouter une charge
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {isAddExpenseModalOpen ? (
+      {canManageExpenses && isAddExpenseModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-5xl rounded-xl bg-card shadow-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
@@ -656,13 +663,19 @@ export default function DepensesPage() {
                   {tpl.note ? `${tpl.note} • ` : ''}{tpl.recurrence_type} • Prochaine exécution: {formatDateTime(tpl.next_run_at)}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => toggleRecurringMutation.mutate({ id: tpl.id, is_active: !!tpl.is_active })}
-                className={`px-3 py-1.5 rounded-md text-sm ${tpl.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}
-              >
-                {tpl.is_active ? 'Désactiver auto' : 'Activer auto'}
-              </button>
+              {canManageExpenses ? (
+                <button
+                  type="button"
+                  onClick={() => toggleRecurringMutation.mutate({ id: tpl.id, is_active: !!tpl.is_active })}
+                  className={`px-3 py-1.5 rounded-md text-sm ${tpl.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}
+                >
+                  {tpl.is_active ? 'Désactiver auto' : 'Activer auto'}
+                </button>
+              ) : (
+                <span className={`px-3 py-1.5 rounded-md text-sm ${tpl.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                  {tpl.is_active ? 'Active' : 'Inactive'}
+                </span>
+              )}
             </div>
           ))}
         </div>
