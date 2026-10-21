@@ -61,3 +61,23 @@ Résidus après campagne : `orders 0 · movements 0 · stores 0 · members 0 · 
 ## 6. Verdict
 
 **GO** pour D4 et S2 : anomalies corrigées et vérifiées, opérations légitimes conservées, rollback validé.
+
+## 7. Correctif Confirmation (RPC) — `20261023120000`
+
+Deux contournements reproduits lors du test C3 :
+
+1. `v_actor_role` **NULL** (aucune appartenance dans la boutique visée) ne déclenchait pas `NOT IN (...)` : un agent Confirmation du store S confirmait une commande du store F ;
+2. une commande **non assignée** était auto-attribuée à l'appelant.
+
+Correctif par patch d'expression sur les définitions installées, avec échec explicite si un fragment manque :
+
+- `if v_actor_role is null or v_actor_role not in ('owner','admin','confirmation')` ;
+- `if v_order.confirmation_agent_id is null or <> v_agent_id then raise` ;
+- bloc d'auto-assignation neutralisé (`if false then`) ;
+- ACL : `PUBLIC`/`anon` révoqués sur les deux RPC.
+
+Appliqué à `rpc_order_confirmation_action` **et** `rpc_update_confirmation_order_details`. Rollback verbatim : `20_rollback_confirmation_rpc.sql`.
+
+**Tests JWT — 12/12 PASS** : non assignée refusée (statut et agent inchangés) · autre agent refusé · agent assigné autorisé · **inter-boutiques refusé** · sans appartenance refusé · `revoked` refusé · viewer refusé · owner/admin autorisés · édition inter-boutiques refusée · édition légitime autorisée. Résidus 0.
+
+Contrôle transversal : 7 fonctions `SECURITY DEFINER` contiennent un `NOT IN` ; 6 ont déjà une garde `is null`. Seule `rls_auto_enable` (event trigger système Supabase, sans portée métier) reste sans garde — non modifiée.
