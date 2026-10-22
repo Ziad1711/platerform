@@ -427,8 +427,10 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
   }, [v5Enabled, v5Scope, v5Counters.data, v5Granularity, v5FillWindow, selectedPeriod])
 
   const data = v5Enabled ? v5Data : legacyData
+  // Les courbes financières ne dépendent plus des compteurs du tunnel : elles
+  // s'affichent dès que la série est disponible, les compteurs suivent.
   const isLoading = v5Enabled
-    ? isStoresLoading || v5.isLoading || v5Counters.isLoading
+    ? isStoresLoading || v5.isLoading
     : isStoresLoading || legacyLoading || !rollout.resolved
   const v5Failed = v5Enabled && !v5.isLoading && v5.isError
   const v5NoTotals = v5Enabled && !isLoading && !v5Failed && !v5Scope?.totals

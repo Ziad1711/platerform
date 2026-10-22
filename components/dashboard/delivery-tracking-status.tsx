@@ -228,7 +228,12 @@ function DeliveryTrackingStatusBySelection({
       const url = requestedStore
         ? `/api/integrations/delivery/tracking/sync?storeId=${encodeURIComponent(requestedStore)}`
         : '/api/integrations/delivery/tracking/sync'
-      const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+      const response = await fetch(url, {
+        cache: 'no-store',
+        // Budget navigateur : un statut qui ne revient pas ne bloque jamais le
+        // Dashboard ni le reste de l'interface.
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]),
+      })
       const payload = (await response.json().catch(() => null)) as StatusResponse | null
       // Reponse d'un store qui n'est plus celui affiche : ignoree (aucun
       // melange de donnees entre deux stores). Les reponses d'une generation

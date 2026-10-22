@@ -277,17 +277,19 @@ export function chartFillWindow(
 }
 
 /**
- * Fenêtre du graphique : les filtres « Aujourd'hui » et « Hier » affichent les
- * sept dernières journées (comportement d'origine), sans changer la période des
- * cartes ni des compteurs.
+ * Fenêtre du graphique : « Aujourd'hui » et « Hier » affichent la même fenêtre
+ * de sept journées incluant aujourd'hui. La période métier des cartes et des
+ * compteurs n'est pas modifiée (Hier reste hier pour les KPI).
  */
 export function chartBusinessRange(
   period: DashboardPeriod,
   range: BusinessRange,
 ): BusinessRange {
-  return period === 'today' || period === 'yesterday'
-    ? { from: addBusinessDays(range.from, -6), to: range.to }
-    : range
+  if (period !== 'today' && period !== 'yesterday') return range
+  // Pour « Hier », la borne exclusive du lecteur vaut aujourd'hui : la fenêtre
+  // du graphique doit malgré tout se terminer demain pour inclure aujourd'hui.
+  const end = period === 'yesterday' ? addBusinessDays(range.to, 1) : range.to
+  return { from: addBusinessDays(end, -7), to: end }
 }
 
 /** Période du lecteur V5 : « toujours » est borné à 365 jours. */

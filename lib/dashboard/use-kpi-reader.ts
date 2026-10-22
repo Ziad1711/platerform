@@ -79,7 +79,8 @@ export function useKpiReader({
     queryKey: dashboardKpiReaderKey(boundary, input),
     enabled: enabled && Boolean(from) && Boolean(to),
     // Pas de données de la boutique/mode précédent pendant un changement de clé.
-    queryFn: () => fetchDashboardKpiReader(supabase, input),
+    // Le signal annule réellement la requête réseau quand le filtre change.
+    queryFn: ({ signal }) => fetchDashboardKpiReader(supabase, { ...input, signal }),
   })
 
   // Révision : journée métier courante (Africa/Casablanca), jamais locale.
@@ -115,7 +116,8 @@ export function useKpiReader({
     refetchInterval: pollMs || false,
     refetchOnWindowFocus: false,
     staleTime: 0,
-    queryFn: () => fetchDashboardKpiReader(supabase, revisionInput),
+    queryFn: ({ signal }) =>
+      fetchDashboardKpiReader(supabase, { ...revisionInput, signal }),
   })
 
   const revisionKey = useMemo(

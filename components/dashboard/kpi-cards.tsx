@@ -418,7 +418,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
 
   const kpiData = v5Enabled ? v5Result : legacyData
   const isLoading = v5Enabled
-    ? isStoresLoading || v5Current.isLoading || v5Previous.isLoading
+    ? isStoresLoading || v5Current.isLoading
     : isStoresLoading || legacyLoading || !rollout.resolved
   // Accès commercial : aucun coût, marge ni profit ne doit être affiché.
   const showCosts = v5Enabled ? v5Access === 'full' : kpiData?.financialAccess === true

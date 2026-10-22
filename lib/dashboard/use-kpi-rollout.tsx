@@ -120,6 +120,15 @@ export function KpiRolloutProvider({
     return () => window.clearInterval(timer)
   }, [enabled])
 
+  // Dernier mode explicitement confirmé par le serveur (kill switch et mode
+  // demandé inclus). Une réponse périmée ou une erreur réseau ne doit plus
+  // faire rebasculer l'interface vers l'ancien dashboard : le mode confirmé est
+  // conservé, l'état `stale`/`degraded` signale seulement la fraîcheur.
+  const [accepted, setAccepted] = useState<{ mode: KpiReaderMode; version: string }>({
+    mode: 'legacy',
+    version: '0',
+  })
+
   const fresh = isKpiRolloutFresh(rollout.dataUpdatedAt, now)
   const rawEntry = fresh ? rollout.data : undefined
   const rawPayload = rawEntry?.payload
@@ -150,11 +159,28 @@ export function KpiRolloutProvider({
     )
       ? rawEntry.payload
       : undefined
-  const mode: KpiReaderMode = canPoll
-    ? resolveKpiRolloutMode(data, fresh && Boolean(data))
-    : 'legacy'
 
-  const configVersion = data?.config_version ?? 'stale'
+  // Configuration reçue : elle seule peut changer de mode (y compris le kill
+  // switch et un retour legacy explicitement demandé). Aucune écriture d'état
+  // si le mode et la version sont identiques (pas de rendu inutile au polling).
+  useEffect(() => {
+    if (!data) return
+    const nextMode: KpiReaderMode = data.kill_switch ? 'legacy' : data.selection_mode
+    setAccepted((previous) =>
+      previous.mode === nextMode && previous.version === data.config_version
+        ? previous
+        : { mode: nextMode, version: data.config_version },
+    )
+  }, [data])
+
+  // Nouvelle frontière (identité, session, boutiques) : aucune autorisation V5
+  // acquise pour une autre sélection n'est réutilisée.
+  useEffect(() => {
+    setAccepted({ mode: 'legacy', version: '0' })
+  }, [boundary, storeIds])
+
+  const mode: KpiReaderMode = canPoll ? accepted.mode : 'legacy'
+  const configVersion = data?.config_version ?? accepted.version
   const shadowDate = useMemo(
     () => businessRange('today', null, null, new Date(), BUSINESS_TIME_ZONE, 365).from,
     [],

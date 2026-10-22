@@ -19,6 +19,8 @@ export const KPI_READER_RPC = 'rpc_dashboard_kpi_reader'
 export const KPI_READER_DIRECT_LIMIT = 7
 /** Plage maximale acceptée par `rpc_dashboard_kpi_reader`. */
 export const KPI_READER_MAX_RPC_DAYS = 400
+/** Budget d'une lecture RPC : au-delà, la requête est annulée et remontée en erreur. */
+export const KPI_READER_REQUEST_TIMEOUT_MS = 20_000
 
 export type KpiReaderAccess = 'full' | 'commercial'
 
@@ -35,6 +37,8 @@ export type KpiReaderErrorCode =
   | 'KPI_BAD_RANGE'
   | 'KPI_RANGE_TOO_LARGE'
   | 'KPI_NO_ACCESS'
+  | 'KPI_READER_TIMEOUT'
+  | 'KPI_READER_FAILED'
   | 'KPI_UNKNOWN'
 
 export interface KpiReaderQualityCommercial {
@@ -162,6 +166,8 @@ export interface KpiReaderInput {
   /** Journée métier exclue, `YYYY-MM-DD`. */
   to: string
   includeDirect?: boolean
+  /** Annulation transmise par React Query (changement de filtre, démontage). */
+  signal?: AbortSignal
 }
 
 export class KpiReaderError extends Error {
@@ -246,18 +252,41 @@ async function fetchDashboardKpiReaderWindow(
   supabase: SupabaseClient,
   input: KpiReaderInput,
 ): Promise<KpiReaderPayload> {
-  const { data, error } = await supabase.rpc(KPI_READER_RPC, {
-    p_store_ids: input.storeIds,
-    p_from: input.from,
-    p_to: input.to,
-    p_include_direct: input.includeDirect ?? true,
-  })
-
-  if (error) {
-    throw new KpiReaderError(toErrorCode(error.message), error.message)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), KPI_READER_REQUEST_TIMEOUT_MS)
+  const forwardAbort = () => controller.abort()
+  if (input.signal) {
+    if (input.signal.aborted) controller.abort()
+    else input.signal.addEventListener('abort', forwardAbort)
   }
 
-  return data as KpiReaderPayload
+  try {
+    const { data, error } = await supabase
+      .rpc(KPI_READER_RPC, {
+        p_store_ids: input.storeIds,
+        p_from: input.from,
+        p_to: input.to,
+        p_include_direct: input.includeDirect ?? true,
+      })
+      .abortSignal(controller.signal)
+
+    if (error) {
+      throw new KpiReaderError(toErrorCode(error.message), error.message)
+    }
+
+    return data as KpiReaderPayload
+  } catch (error) {
+    if (error instanceof KpiReaderError) throw error
+    // Annulation (délai dépassé ou changement de filtre) : erreur bornée,
+    // jamais un chargement sans fin.
+    throw new KpiReaderError(
+      controller.signal.aborted ? 'KPI_READER_TIMEOUT' : 'KPI_READER_FAILED',
+      error instanceof Error ? error.message : 'KPI_READER_FAILED',
+    )
+  } finally {
+    clearTimeout(timer)
+    input.signal?.removeEventListener('abort', forwardAbort)
+  }
 }
 
 /** Un accès `full` est seul à exposer les coûts, la marge et le profit. */
