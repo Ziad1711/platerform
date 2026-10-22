@@ -49,7 +49,7 @@ with expected(signature, expected_md5) as (
   ('rpc_dashboard_kpi_reader(p_store_ids uuid[], p_from date, p_to date, p_include_direct boolean)', 'ea603cf2f66e47f7f57c79a985352e2d')
 ),
 actual as (
-  select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as signature,
+  select p.proname || '(' || regexp_replace(pg_get_function_arguments(p.oid), ' DEFAULT [^,)]+', '', 'g') || ')' as signature,
          md5(pg_get_functiondef(p.oid)) as actual_md5,
          p.oid
     from pg_proc p
