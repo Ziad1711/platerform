@@ -384,7 +384,9 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
         profit: bucket.margin,
         ads: bucket.ads,
         purchase: bucket.purchase,
-        delivery: 0,
+        // Le lecteur V5 n'expose pas le coût de livraison par journée :
+        // `null` signifie « indisponible », jamais un faux zéro.
+        delivery: null,
       })),
       granularity: v5Granularity,
       totalRevenue: n('revenue'),
@@ -791,6 +793,37 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
                 )}
               </svg>
 
+              {/* Série à un seul bucket : la courbe SVG ne contient qu'un point
+                  de départ (`M`), donc rien de visible. Les marqueurs sont
+                  rendus en HTML pour rester ronds malgré
+                  preserveAspectRatio="none". */}
+              {points.length === 1 && (
+                <div className="pointer-events-none absolute inset-y-0 left-10 right-0">
+                  {activeKeys.map((key) => {
+                    const raw =
+                      key === 'revenue'
+                        ? points[0].revenue
+                        : key === 'profit'
+                        ? points[0].profit
+                        : key === 'ads'
+                        ? points[0].ads
+                        : points[0].purchase
+                    return (
+                      <span
+                        key={`point-${key}`}
+                        className="absolute h-2 w-2 rounded-full ring-2 ring-background"
+                        style={{
+                          left: 0,
+                          top: `${valueToY(raw)}%`,
+                          transform: 'translateY(-50%)',
+                          backgroundColor: seriesConfig[key].color,
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+
               <div
                 className="absolute inset-0 z-10"
                 onPointerMove={(e) => {
@@ -847,7 +880,11 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
                           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
                           <span className="text-[11px] text-muted-foreground">Livraison</span>
                         </div>
-                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">{formatCurrency(points[hoveredIndex].delivery || 0)}</span>
+                        <span className="text-[11px] font-medium text-foreground/90 tabular-nums">
+                          {points[hoveredIndex].delivery === null
+                            ? 'Indisponible'
+                            : formatCurrency(points[hoveredIndex].delivery ?? 0)}
+                        </span>
                       </div>}
                       {allowedSeries.includes('purchase') && <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-1.5">

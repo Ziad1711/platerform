@@ -429,6 +429,37 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
                 )}
               </svg>
 
+              {/* Série à un seul bucket : la courbe SVG ne contient qu'un point
+                  de départ (`M`), donc rien de visible. Les marqueurs sont
+                  rendus en HTML pour rester ronds malgré
+                  preserveAspectRatio="none". */}
+              {points.length === 1 && (
+                <div className="pointer-events-none absolute inset-y-0 left-10 right-0">
+                  {showCpl && (
+                    <span
+                      className="absolute h-2 w-2 rounded-full ring-2 ring-background"
+                      style={{
+                        left: 0,
+                        top: `${valueToY(points[0].cpl)}%`,
+                        transform: 'translateY(-50%)',
+                        backgroundColor: seriesConfig.cpl.color,
+                      }}
+                    />
+                  )}
+                  {showCpa && (
+                    <span
+                      className="absolute h-2 w-2 rounded-full ring-2 ring-background"
+                      style={{
+                        left: 0,
+                        top: `${valueToY(points[0].cpa)}%`,
+                        transform: 'translateY(-50%)',
+                        backgroundColor: seriesConfig.cpa.color,
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
               <div
                 className="absolute inset-0 z-10"
                 onPointerMove={(e) => {

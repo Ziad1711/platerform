@@ -72,22 +72,34 @@ export function bucketPoints(
 }
 
 /**
- * Le graphique de revenus legacy ne crée un point que pour une journée portant
- * au moins une commande (toutes statuts confondus), même si tous ses montants
- * sont nuls (commandes en attente ou annulées). Une journée sans commande
- * n'apparaît jamais. Cette règle est reproduite ici : la journée reste donc
- * visible avec ses zéros réels, elle n'est pas supprimée.
+ * Visibilité d'un bucket sur le graphique de revenus.
+ *
+ * Règle historique conservée, sans invention :
+ * - un bucket portant au moins une commande reste visible, même si tous ses
+ *   montants sont nuls (commandes en attente, annulées ou non livrées) : un
+ *   chiffre d'affaires à zéro n'est jamais un motif d'exclusion ;
+ * - un bucket sans commande mais avec une activité financière affichable
+ *   (dépense publicitaire seule, achat, marge) reste visible, comme dans le
+ *   graphique legacy corrigé par P7.7 ;
+ * - seuls les buckets entièrement vides sont écartés.
  */
-export function hasOrders(bucket: SeriesBucket): boolean {
-  return bucket.orders_count > 0
+export function hasRevenueActivity(bucket: SeriesBucket): boolean {
+  return (
+    bucket.orders_count > 0 ||
+    bucket.delivered_count > 0 ||
+    bucket.revenue !== 0 ||
+    bucket.ads !== 0 ||
+    bucket.purchase !== 0 ||
+    bucket.margin !== 0
+  )
 }
 
-/** Graphique de revenus : seules les journées avec commande sont tracées. */
+/** Graphique de revenus : buckets avec commande ou activité financière. */
 export function revenueSeries(
   points: KpiReaderPoint[],
   granularity: SeriesGranularity,
 ): SeriesBucket[] {
-  return bucketPoints(points, granularity).filter(hasOrders)
+  return bucketPoints(points, granularity).filter(hasRevenueActivity)
 }
 
 /**
