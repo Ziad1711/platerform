@@ -1,0 +1,707 @@
+{
+  "package": "jisra-kpi-v5",
+  "phase": "release-preparation-inactive",
+  "branch": "p79/kpi-v5-consolidated",
+  "source_commit": "34aa955",
+  "created": "2026-10-21",
+  "default_mode": "inactive",
+  "hash_rule": "sha256 sur contenu normalise LF (CRLF -> LF), comme verify-static.mjs",
+  "principles": [
+    "Une etape = une transaction psql (--single-transaction, ON_ERROR_STOP=1).",
+    "Aucune etape avant verification de la precedente.",
+    "Installation par defaut INACTIVE : ni producteur, ni worker, ni lecteur.",
+    "Chaque activation est un lot separe, garde par un parametre de session.",
+    "Aucun db push, aucun rejeu des migrations B13 historiques.",
+    "Aucune regle financiere modifiee.",
+    "Le rollback ne rouvre jamais une permission retiree (P7.9, P8)."
+  ],
+  "preconditions": [
+    {
+      "id": "PREREQ",
+      "label": "Socle metier et environnement autorise",
+      "requires": [
+        "cible explicitement autorisee par operation ; Production interdite en ecriture dans la preparation ; B13 uniquement sous autorisation de qualification",
+        "tables stores, store_members, profiles, orders, order_items, ad_spend_daily",
+        "fonctions can_view_store_finances(uuid) et order_purchase_cost(text,numeric,numeric)",
+        "schema vault",
+        "PostgreSQL 17.x ; pg_net et pg_cron disponibles avant les lots A et D",
+        "historique migrations et objets cible compares avant execution ; collision de version => ARRET, aucun renommage implicite"
+      ],
+      "capture": "p79_delivery/93_preflight_capture.sql"
+    },
+    {
+      "id": "P8.3_BASELINE",
+      "label": "Socle de politiques pour P8.3",
+      "requires": [
+        "les 41 politiques d'ecriture et 21 de lecture capturees sur TEST doivent exister dans le socle",
+        "sinon P8.3 M2/M3 cree des politiques non versionnees : etat non reproductible"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "order": 5,
+      "id": "CAPTURE_SOCLE",
+      "label": "Capture de socle (lecture seule) avant toute ecriture",
+      "mode": "verify",
+      "requires": [
+        "PREREQ"
+      ],
+      "files": [
+        {
+          "path": "p79_delivery/93_preflight_capture.sql",
+          "sha256": "8478641836d5148b0bd6624ac649368d6e426f17f33144ddf520bb3b2d48a9a3"
+        }
+      ],
+      "invariants": [
+        "objets KPI absents",
+        "0 trigger/job KPI",
+        "compteurs metier de reference"
+      ]
+    },
+    {
+      "order": 10,
+      "id": "P7.1_SOCLE",
+      "label": "Socle KPI inactif : 6 tables, 23 fonctions, 1 vue, ACL service_role",
+      "mode": "install",
+      "guard": "p7.install_authorized=yes",
+      "requires": [
+        "PREREQ"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/10_install_objects.sql",
+          "sha256": "489173d306ba68aee6a929eaa77a6b0d0782fe591a1de7a5deeedf5f7913cba7"
+        }
+      ],
+      "produces": {
+        "tables": 6,
+        "functions": 23,
+        "views": 1,
+        "triggers": 0,
+        "jobs": 0,
+        "worker_enabled": false,
+        "wakeup_enabled": false
+      }
+    },
+    {
+      "order": 20,
+      "id": "P7.1_VERIFY_INSTALL",
+      "label": "Verification du socle (lecture seule, stage=install)",
+      "mode": "verify",
+      "requires": [
+        "P7.1_SOCLE"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/90_verify.sql",
+          "sha256": "54df156eb2a8c3d0727e8d5ff6016c8ed26f6e8ed1089cf05000d841446e7705"
+        }
+      ],
+      "invariants": [
+        "23 fonctions",
+        "6 tables",
+        "0 trigger KPI",
+        "0 job KPI"
+      ]
+    },
+    {
+      "order": 30,
+      "id": "RBL4",
+      "label": "R-BL4 : permissions financieres legacy securisees (wrappers full/commercial)",
+      "mode": "security",
+      "requires": [
+        "P7.1_SOCLE"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/reference/20261018213537_dashboard_legacy_financial_permissions.sql",
+          "sha256": "ed895623a9ca6450e8561eb36619a7e4a7be60eda2e4bae6dfc1048446e9b8f9"
+        }
+      ],
+      "note": "Identique octet pour octet a migrations/20261018213537_dashboard_legacy_financial_permissions.sql"
+    },
+    {
+      "order": 40,
+      "id": "P7.4_ROLLOUT_CONFIG",
+      "label": "Configuration rollout : kill_switch=true, requested_mode=legacy, 0 cohorte",
+      "mode": "install",
+      "requires": [
+        "RBL4"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261019183241_kpi_rollout_config.sql",
+          "sha256": "06797b8554a12189d582bf2ea3d0c4b1dc5db7c0614e717e1b4d8240193b9d0e"
+        },
+        {
+          "path": "migrations/20261019183328_kpi_rollout_reader.sql",
+          "sha256": "262cd91379df83a05780dd28a77a1aba780a0728a1655561e1605f4c058bcea1"
+        },
+        {
+          "path": "migrations/20261019183342_kpi_rollout_shadow.sql",
+          "sha256": "d685ed85fbf1ec42fc6ab31557dbfec7f3954204f89933e96ff788d4c8e741ab"
+        },
+        {
+          "path": "migrations/20261019183349_kpi_rollout_event.sql",
+          "sha256": "a25e5075f2e65987b625c595c86d04851eb842b3b1ad9b3c33643fff26ddc6fd"
+        },
+        {
+          "path": "migrations/20261019183712_kpi_rollout_trigger_names.sql",
+          "sha256": "2d1d0744b5613346bf4621187a0623e2b089a9cfa73a1488bb540a096faff73b"
+        },
+        {
+          "path": "migrations/20261019183800_kpi_rollout_function_names.sql",
+          "sha256": "bfff049797b34640bcbfa46241ced9b33d32506c7fb7242fed9063e6ba0fe5b0"
+        }
+      ]
+    },
+    {
+      "order": 50,
+      "id": "P7.7_CORRECTIONS",
+      "label": "P7.7 : qualite v2, CA par ville, graphique aligne",
+      "mode": "install",
+      "requires": [
+        "P7.4_ROLLOUT_CONFIG"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261020100000_p77_c2_city_performance.sql",
+          "sha256": "f6d74b6d3c229d27208e721c564b0f72fae90eb3f85774069c2488e0bb96e79d"
+        },
+        {
+          "path": "migrations/20261020101000_p77_c3_quality_version.sql",
+          "sha256": "e3b744bd5e0531c9de341ad19cd77b6d374f4a4e70966ba852062bb7ea59ea8a"
+        },
+        {
+          "path": "migrations/20261020102000_p77_c3_aggregate_order.sql",
+          "sha256": "f90fb1a0ea973a1c6a52846e837b755c35bd58b81c30f154617d14bb34ba2f91"
+        },
+        {
+          "path": "migrations/20261020103000_p77_c3_aggregate_delivery.sql",
+          "sha256": "af068196ad36740c9265217f61599807c43149ad03eadd908162e811ac59cf37"
+        },
+        {
+          "path": "migrations/20261020104000_p77_c3_direct_day.sql",
+          "sha256": "3ad8f90bf03115e598b9ba79454c91a7eceb8b4f60e1c05a68181198cb2f5b80"
+        },
+        {
+          "path": "migrations/20261020105000_p77_c1_revenue_chart_ads.sql",
+          "sha256": "1d0dc55c777d9fff0d3e2e8d440c3fcb3a86aa87ab7a5897bbc83ccb0605f09f"
+        }
+      ]
+    },
+    {
+      "order": 60,
+      "id": "P7.8_CORRECTIONS",
+      "label": "P7.8 : finalisation des metadonnees de boutique et de journee",
+      "mode": "install",
+      "requires": [
+        "P7.7_CORRECTIONS"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261020110000_p78_finalize_store_state.sql",
+          "sha256": "08e191984efaabc78e223f56bfda1222b63e0d89ccef9339ed74b43c1d52ae12"
+        },
+        {
+          "path": "migrations/20261020111000_p78_rebuild_day_finalizes.sql",
+          "sha256": "07bf3e1e8a7d357827152d7031ff924804dec6fde0eba9056ee6daa133483cc6"
+        }
+      ]
+    },
+    {
+      "order": 70,
+      "id": "P7.9_INACTIVE",
+      "label": "P7.9 mode INACTIF : 4 fonctions + 2 surcharges, aucun producteur",
+      "mode": "install",
+      "requires": [
+        "P7.8_CORRECTIONS",
+        "RBL4"
+      ],
+      "files": [
+        {
+          "path": "p79_delivery/10_install_p79_functions.sql",
+          "sha256": "ecece1e37edb2b098eb435e47ad972c545910c2f752e02d10bbaf84ff5986a31"
+        }
+      ],
+      "produces": {
+        "quality_triggers": 0,
+        "note": "depend de dashboard_legacy_access et _rbl4_impl_dashboard_revenue_chart (R-BL4)"
+      },
+      "residual_risk": "aucune garde d'autorisation dans ce fichier : il n'active rien, mais peut etre applique sans parametre de session"
+    },
+    {
+      "order": 75,
+      "id": "P7.9_SOURCES_REFERENCE",
+      "label": "Sources historiques P7.9 (reference du mode actif, jamais rejouees ici)",
+      "mode": "reference",
+      "apply": false,
+      "requires": [
+        "P7.9_INACTIVE"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261020120000_p79_quality_invalidation.sql",
+          "sha256": "ca35c40303fa67a6482bf56e64a6a1166f47f231e2dbe2179fba18b0d0a1758a"
+        },
+        {
+          "path": "migrations/20261020120100_p79_quality_status_permissions.sql",
+          "sha256": "49af7220ec0a2d9f929f73424947c5d884e6024bd3ae747faa58e61d6a944fe4"
+        },
+        {
+          "path": "migrations/20261020120200_p79_finalize_state_transitions.sql",
+          "sha256": "3332dbf570af3bc75b84562123439ae437537a459dfb6660679c8480364e636a"
+        },
+        {
+          "path": "migrations/20261020120300_p79_multistore_chart_restriction.sql",
+          "sha256": "03e8501ff9c0b7d43783cdb9faaba33426f06078981f82c6c25bec1888cf7d2d"
+        }
+      ]
+    },
+    {
+      "order": 80,
+      "id": "P7.9_VERIFY_INACTIVE",
+      "label": "Verification du mode inactif P7.9 (lecture seule, stage=inactive)",
+      "mode": "verify",
+      "requires": [
+        "P7.9_INACTIVE"
+      ],
+      "files": [
+        {
+          "path": "p79_delivery/90_verify_p79.sql",
+          "sha256": "831ea26c18feed938792bf1cb54d38aa5346a0485bf4159a917bf1b3dccc4f94"
+        }
+      ],
+      "invariants": [
+        "0 trigger qualite",
+        "4 fonctions P7.9",
+        "ACL internes fermees",
+        "surcharge uuid[] fermee aux clients"
+      ]
+    },
+    {
+      "order": 90,
+      "id": "P8.1",
+      "label": "P8.1 : autorisation de l'inviteur (helper + politiques + RPC atomique)",
+      "mode": "security",
+      "requires": [
+        "P7.9_VERIFY_INACTIVE"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261021120000_p81_invitation_inviter_authorization.sql",
+          "sha256": "3ca0b69337d6e798459e42d499afbf15f69e7c6fa7ec90346000514682dbcff7"
+        }
+      ],
+      "effects": [
+        "can_invite_to_store(uuid,uuid)",
+        "politiques d'affectation gardees",
+        "accept_team_invitation refuse INVITER_NOT_AUTHORIZED"
+      ]
+    },
+    {
+      "order": 91,
+      "id": "P8.2",
+      "label": "P8.2 : ecritures du module Depenses gouvernees par permission",
+      "mode": "security",
+      "requires": [
+        "P8.1"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261022093000_p82_expense_write_permissions.sql",
+          "sha256": "610876098e4b2efd2bbde8190dc92b35240c8cd862f895d3a13c4fb73e106dc2"
+        }
+      ],
+      "effects": [
+        "can_manage_store_expenses(uuid)",
+        "6 politiques d'ecriture",
+        "SELECT inchange"
+      ]
+    },
+    {
+      "order": 92,
+      "id": "P8.3_M1",
+      "label": "P8.3 M1 : fonctions produits filtrent l'appartenance active",
+      "mode": "security",
+      "requires": [
+        "P8.2"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261023100000_p83_revoked_member_product_functions.sql",
+          "sha256": "8b8451641628de2186886d7597fba8c6b476c5b6ebbe084648d32fae75886975"
+        }
+      ]
+    },
+    {
+      "order": 93,
+      "id": "P8.3_M2",
+      "label": "P8.3 M2 : 41 politiques d'ecriture avec statut actif",
+      "mode": "security",
+      "requires": [
+        "P8.3_M1",
+        "P8.3_BASELINE"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261023100100_p83_revoked_member_write_policies.sql",
+          "sha256": "bb76752716adf599f3bc086bfae7cd0becf6ad6ded7914163fc2c674d5dd823e"
+        }
+      ]
+    },
+    {
+      "order": 94,
+      "id": "P8.3_M3",
+      "label": "P8.3 M3 : 21 politiques de lecture avec statut actif",
+      "mode": "security",
+      "requires": [
+        "P8.3_M2",
+        "P8.3_BASELINE"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261023100200_p83_revoked_member_read_policies.sql",
+          "sha256": "1e15efa93f8efa8d70837971c6fd6e6614319b3c37e241be60e672d07956497d"
+        }
+      ]
+    },
+    {
+      "order": 95,
+      "id": "P8.4_D4",
+      "label": "P8.4 D4 : garde de colonnes Livraison (trigger a_p84)",
+      "mode": "security",
+      "requires": [
+        "P8.3_M3"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261023110000_p84_delivery_order_column_guard.sql",
+          "sha256": "c4e8c84cc95236dec84ecd55b05665f9ec10411345ce7338f909fae131bb26ba"
+        }
+      ]
+    },
+    {
+      "order": 96,
+      "id": "P8.4_S2",
+      "label": "P8.4 S2 : mouvements de stock ouverts au stock_manager actif",
+      "mode": "security",
+      "requires": [
+        "P8.4_D4"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261023110100_p84_stock_movement_write_policies.sql",
+          "sha256": "7b53a2a6e7d09af9285b79722d991a6f686459526743576f0c719e88ae9cdf76"
+        }
+      ],
+      "ordering_note": "doit rester APRES P8.3_M2, sinon la politique inventaire perd le filtre de statut"
+    },
+    {
+      "order": 97,
+      "id": "P8.4_RPC",
+      "label": "P8.4 : isolation multi-tenant des RPC Confirmation",
+      "mode": "security",
+      "requires": [
+        "P8.4_S2"
+      ],
+      "files": [
+        {
+          "path": "migrations/20261023120000_p84_confirmation_rpc_isolation.sql",
+          "sha256": "38f465b80700a7e9ab8e885f113d1e85d60cc7932b50a726648fdef89df297e1"
+        }
+      ],
+      "effects": [
+        "v_actor_role is null refuse",
+        "commande non assignee refusee",
+        "auto-assignation neutralisee"
+      ]
+    },
+    {
+      "order": 100,
+      "id": "FINAL_VERIFY",
+      "label": "Verification finale : socle inactif + mode inactif P7.9 + P8 present",
+      "mode": "verify",
+      "requires": [
+        "P8.4_RPC"
+      ],
+      "files": [],
+      "commands": [
+        "psql -v ON_ERROR_STOP=1 -c \"set p7.stage='install'\" -f p7_1_package/90_verify.sql",
+        "psql -v ON_ERROR_STOP=1 -c \"set p79.stage='inactive'\" -f p79_delivery/90_verify_p79.sql",
+        "psql -v ON_ERROR_STOP=1 -f p79_delivery/93_preflight_capture.sql"
+      ],
+      "invariants": [
+        "0 trigger KPI",
+        "0 job KPI",
+        "worker et reveil desactives",
+        "kill_switch=true",
+        "requested_mode=legacy",
+        "0 cohorte",
+        "compteurs metier inchanges"
+      ]
+    }
+  ],
+  "activations": [
+    {
+      "order": "A",
+      "id": "EXTENSIONS",
+      "label": "Extensions et prerequis reseau",
+      "guard": "p7.extensions_authorized=yes",
+      "requires": [
+        "P7.1_VERIFY_INSTALL"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/20_extensions_prerequisites.sql",
+          "sha256": "f0c5f2d92b0fb1b7e9912341602d857c1bd4a84da7af907f97b70cca94abde4d"
+        }
+      ]
+    },
+    {
+      "order": "B",
+      "id": "INVALIDATIONS",
+      "label": "Cinq producteurs d'invalidation",
+      "guard": "p7.activate_invalidations=yes",
+      "requires": [
+        "EXTENSIONS",
+        "RBL4"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/30_activate_invalidations.sql",
+          "sha256": "818fb364a1dc13484bd21d144042c11fe8b68005564bd625faec51220473577e"
+        }
+      ],
+      "expected_triggers": [
+        "trg_kpi_mark_order_insert",
+        "trg_kpi_invalidate_orders",
+        "trg_kpi_invalidate_orders_insert",
+        "trg_kpi_invalidate_order_items",
+        "trg_kpi_invalidate_ad_spend"
+      ]
+    },
+    {
+      "order": "C",
+      "id": "WAKEUP",
+      "label": "Reveil HTTP (optionnel, desactive par defaut)",
+      "guard": "p7.activate_wakeup=yes",
+      "requires": [
+        "INVALIDATIONS"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/31_activate_wakeup.sql",
+          "sha256": "f35763904906102a2f0e7e89821a1b345567cadef1bfef42f780d0fe3b5598f0"
+        }
+      ]
+    },
+    {
+      "order": "D",
+      "id": "WORKER",
+      "label": "Deux jobs cron et interrupteur worker",
+      "guard": "p7.activate_worker=yes",
+      "requires": [
+        "INVALIDATIONS"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/40_activate_worker.sql",
+          "sha256": "94cd5cf23de912517dcdd3a966d04e2513bf4218d398b38cb865bb400a50d86f"
+        }
+      ]
+    },
+    {
+      "order": "E",
+      "id": "BACKFILL",
+      "label": "Backfill manuel borne a 31 jours",
+      "guard": "p7.backfill=yes + p7.backfill_store_id/from/to",
+      "requires": [
+        "WORKER"
+      ],
+      "files": [
+        {
+          "path": "p7_1_package/41_backfill.sql",
+          "sha256": "20fe6b62b84aaa508b0da52257e765f05e02808400524c2001cd02225a4defdb"
+        }
+      ]
+    },
+    {
+      "order": "F",
+      "id": "P7.9_QUALITY_TRIGGER",
+      "label": "Producteur qualite P7.9 (septieme et dernier trigger KPI)",
+      "guard": "p79.activate_quality=yes",
+      "requires": [
+        "P7.9_INACTIVE",
+        "INVALIDATIONS"
+      ],
+      "files": [
+        {
+          "path": "p79_delivery/20_activate_p79_quality_trigger.sql",
+          "sha256": "792dbf0f3774c2417f9233264bbd402471322efce3cab364db122a6ea8fc7015"
+        }
+      ],
+      "expected_triggers_total": 7
+    },
+    {
+      "order": "G",
+      "id": "READER_V5",
+      "label": "Lecteur V5 (configuration + flag serveur, jamais implicite)",
+      "requires": [
+        "WORKER",
+        "P7.9_QUALITY_TRIGGER"
+      ],
+      "files": [],
+      "steps": [
+        "KPI_READER_V5=1 cote deploiement (et KPI_READER_V5_PRODUCTION_ACK=ref pour la Production)",
+        "configuration : kill_switch=false puis requested_mode selon cohorte",
+        "cohortes explicites uniquement ; aucune cohorte par defaut",
+        "verrou de code : kpi-reader-flag.ts n'autorise que TEST ou Production avec ACK ; toute autre cible reste legacy"
+      ]
+    }
+  ],
+  "rollback": [
+    {
+      "order": 0,
+      "id": "READER_APP",
+      "label": "Retour applicatif : KPI_READER_V5 different de 1 / retrait de l'ACK, redeploiement",
+      "kind": "deployment",
+      "files": []
+    },
+    {
+      "order": 1,
+      "id": "COMBINED",
+      "label": "Rollback combine P7.1 + P7.9 + lecteur, P8 conserve et verifie",
+      "kind": "runtime",
+      "guard": "p79.combined_rollback_authorized=yes",
+      "files": [
+        {
+          "path": "p79_delivery/92_rollback_combined.sql",
+          "sha256": "60f15ca719532400ee57a0fd9ff9e32daf3a99232f021cf7e5cfe40887da52c6"
+        }
+      ],
+      "keeps": [
+        "tables KPI",
+        "journal d'invalidation",
+        "agregats",
+        "runs",
+        "corrections P8",
+        "protections P7.9"
+      ],
+      "rejects": [
+        "rollback P8",
+        "suppression d'evenements",
+        "reouverture de permissions"
+      ]
+    },
+    {
+      "order": 2,
+      "id": "P7.1_ONLY",
+      "label": "Diagnostic : rollback P7.1 seul",
+      "kind": "diagnostic",
+      "guard": "p7.rollback_authorized=yes",
+      "files": [
+        {
+          "path": "p7_1_package/91_rollback.sql",
+          "sha256": "a0ed321ec81f8ce24ff9523acd6a1a7ea2e11db9cf88db081cf2b68d0a1cd590"
+        }
+      ]
+    },
+    {
+      "order": 3,
+      "id": "P7.9_ONLY",
+      "label": "Diagnostic : rollback du producteur qualite P7.9",
+      "kind": "diagnostic",
+      "guard": "p79.rollback_authorized=yes",
+      "files": [
+        {
+          "path": "p79_delivery/91_rollback_p79.sql",
+          "sha256": "270b675d4bbb98114beac5c684cdbb7ed45db97de1012ca7107242d1155a4824"
+        }
+      ],
+      "note": "Son controle invalidation_journal_preserved attend > 0 : sur cible sans donnee il rend FAIL a tort. Utiliser 92, qui compare avant/apres."
+    },
+    {
+      "order": 4,
+      "id": "P8_DIAGNOSTIC_ONLY",
+      "label": "Rollbacks P8 verbatim : diagnostic uniquement, jamais urgence Production",
+      "kind": "diagnostic",
+      "files": [
+        {
+          "path": "p8_1_package/20_rollback.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_2_package/20_rollback.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_3_package/20_rollback_m1.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_3_package/20_rollback_m2.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_3_package/20_rollback_m3.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_4_package/20_rollback_d4.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_4_package/20_rollback_s2.sql",
+          "sha256": null
+        },
+        {
+          "path": "p8_4_package/20_rollback_confirmation_rpc.sql",
+          "sha256": null
+        }
+      ],
+      "warning": "restaure un etat anterieur vulnerable : correction en avant, restriction du parcours, ou rollback applicatif compatible"
+    },
+    {
+      "order": 5,
+      "id": "RESUME",
+      "label": "Reprise apres rollback niveau 1 (objets et tables conserves)",
+      "kind": "runtime",
+      "steps": [
+        "lecteur legacy et worker arrete ; capture des fonctions et triggers de la cible avant modification",
+        "recreer la fonction qualite depuis release/REINSTALL-QUALITY-RELEASE.sql (source du paquet, jamais C0 B13)",
+        "P7.1 : verifier la compatibilite des gardes de 30_activate_invalidations.sql avec le socle final avant execution ; count=23 peut etre incompatible",
+        "rejouer F seulement apres presence de la fonction qualite",
+        "rejouer D seulement sous autorisation worker/extensions/jobs ; reconstruire avant lecteur",
+        "verifications stagees : empreintes P7.1 initiales avant les correctifs, pas sur socle final"
+      ],
+      "files": [
+        {
+          "path": "p79_delivery/release/REINSTALL-QUALITY-RELEASE.sql",
+          "sha256": "3ad13c6e4d2cf528677e3a074fa75152c207b468bf57db2a14d4adda46d32d3f"
+        }
+      ]
+    }
+  ],
+  "inactive_invariants": [
+    "10_install_objects.sql ne cree aucun trigger et aucun job",
+    "10_install_objects.sql insere worker et reveil a enabled=false",
+    "10_install_p79_functions.sql ne cree aucun trigger",
+    "rollout_config : kill_switch=true, requested_mode=legacy, 0 cohorte",
+    "aucun trigger dont le nom commence par trg_kpi_",
+    "aucun job cron nomme jisra_kpi%"
+  ],
+  "forbidden": [
+    "supabase db push (global ou cible)",
+    "rejeu des migrations B13 historiques",
+    "installation ou activation Production sans autorisation distincte ; aucune operation dans la preparation Release",
+    "ecriture TEST/P7 ; ecriture B13 sans autorisation specifique",
+    "activation implicite du worker, du reveil ou du lecteur",
+    "rollback P8 comme bouton d'urgence",
+    "modification d'une definition financiere"
+  ],
+  "release_status": "NO_GO_ACTIVATION",
+  "release_selection": "release/release-manifest.json",
+  "qualification_status": "release/STATUS.md"
+}

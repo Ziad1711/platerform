@@ -1,0 +1,114 @@
+{
+  "original_file_sha256": "acf5777d9906bf455749c27cb9e71f012049963713ab5c696e174febce7cc805",
+  "evidence": {
+    "cron": "PASS",
+    "samples": [
+      {
+        "observation": 1,
+        "commitAcknowledgedAt": "2026-10-22T00:10:00.027Z",
+        "visibleObservedAt": "2026-10-22T00:10:02.055Z",
+        "commitToCorrectAndDrainedMs": 2028,
+        "values": {
+          "orders": 1,
+          "revenue": 100,
+          "purchase": 40,
+          "pending": 0
+        },
+        "correct": true
+      },
+      {
+        "observation": 2,
+        "commitAcknowledgedAt": "2026-10-22T00:10:03.287Z",
+        "visibleObservedAt": "2026-10-22T00:10:04.050Z",
+        "commitToCorrectAndDrainedMs": 763,
+        "values": {
+          "orders": 2,
+          "revenue": 300,
+          "purchase": 80,
+          "pending": 0
+        },
+        "correct": true
+      },
+      {
+        "observation": 3,
+        "commitAcknowledgedAt": "2026-10-22T00:10:05.202Z",
+        "visibleObservedAt": "2026-10-22T00:10:05.971Z",
+        "commitToCorrectAndDrainedMs": 768,
+        "values": {
+          "orders": 3,
+          "revenue": 600,
+          "purchase": 120,
+          "pending": 0
+        },
+        "correct": true
+      }
+    ],
+    "cleanup": "PASS",
+    "jobsBefore": [],
+    "runs": [
+      {
+        "run_id": 7,
+        "worker": "b13_qa_94d14e98f6",
+        "ended_at": "2026-10-22T00:10:00.847344+00:00",
+        "last_error": null,
+        "started_at": "2026-10-22T00:10:00.792126+00:00",
+        "duration_ms": 55.218,
+        "stop_reason": "drained",
+        "events_processed": 2,
+        "partitions_failed": 0,
+        "partitions_rebuilt": 2
+      },
+      {
+        "run_id": 8,
+        "worker": "b13_qa_94d14e98f6",
+        "ended_at": "2026-10-22T00:10:02.881527+00:00",
+        "last_error": null,
+        "started_at": "2026-10-22T00:10:02.808055+00:00",
+        "duration_ms": 73.472,
+        "stop_reason": "drained",
+        "events_processed": 2,
+        "partitions_failed": 0,
+        "partitions_rebuilt": 2
+      },
+      {
+        "run_id": 9,
+        "worker": "b13_qa_94d14e98f6",
+        "ended_at": "2026-10-22T00:10:04.897676+00:00",
+        "last_error": null,
+        "started_at": "2026-10-22T00:10:04.822596+00:00",
+        "duration_ms": 75.08,
+        "stop_reason": "drained",
+        "events_processed": 2,
+        "partitions_failed": 0,
+        "partitions_rebuilt": 2
+      }
+    ],
+    "cronDetails": [
+      {
+        "end": "2026-10-22T00:10:00.849924+00:00",
+        "start": "2026-10-22T00:10:00.790925+00:00",
+        "return": "1 row",
+        "status": "succeeded"
+      },
+      {
+        "end": "2026-10-22T00:10:02.883531+00:00",
+        "start": "2026-10-22T00:10:02.806902+00:00",
+        "return": "1 row",
+        "status": "succeeded"
+      },
+      {
+        "end": "2026-10-22T00:10:04.899615+00:00",
+        "start": "2026-10-22T00:10:04.821468+00:00",
+        "return": "1 row",
+        "status": "succeeded"
+      },
+      {
+        "end": "2026-10-22T00:10:06.841492+00:00",
+        "start": "2026-10-22T00:10:06.836427+00:00",
+        "return": "1 row",
+        "status": "succeeded"
+      }
+    ],
+    "p95": "NOT_COVERED (n=3)"
+  }
+}

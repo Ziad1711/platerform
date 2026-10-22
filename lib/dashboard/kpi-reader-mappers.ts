@@ -121,6 +121,54 @@ export function sumDecimal(values: string[]): string {
 }
 
 
+/**
+ * Division entière de deux chaînes de chiffres (algorithme scolaire).
+ * `divisor` doit être non nul et strictement positif.
+ */
+function divideDigits(dividend: string, divisor: string): string {
+  let remainder = '0'
+  let quotient = ''
+  for (const digit of dividend) {
+    remainder = remainder === '0' ? digit : `${remainder}${digit}`
+    let step = 0
+    while (compareDigits(remainder, divisor) >= 0) {
+      remainder = subtractDigits(remainder, divisor)
+      step += 1
+    }
+    quotient += String(step)
+  }
+  return quotient.replace(/^0+(?=\d)/, '')
+}
+
+/**
+ * Ratio `numérateur / dénominateur`, tronqué à `scale` décimales.
+ *
+ * `shift` multiplie le numérateur par 10^shift : les pourcentages de la RPC
+ * (`100 * a / b`) passent `shift = 2`. Dénominateur nul => `'0'`, exactement
+ * comme les `case when … else 0 end` de `rpc_dashboard_kpi_reader`.
+ * Aucun flottant n'intervient : les composantes agrégées gardent leur exactitude.
+ */
+export function divideDecimal(
+  numerator: string,
+  denominator: string,
+  scale = 6,
+  shift = 0,
+): string {
+  const num = parseDecimal(numerator)
+  const den = parseDecimal(denominator)
+  if (/^0+$/.test(den.digits)) return '0'
+
+  // (numInt / 10^numScale) / (denInt / 10^denScale) = numInt·10^(denScale) / denInt·10^(numScale)
+  const numeratorScaled = `${num.digits}${'0'.repeat(den.scale + scale + shift)}`
+  const denominatorScaled = `${den.digits}${'0'.repeat(num.scale)}`
+  const quotient = divideDigits(numeratorScaled, denominatorScaled)
+  const padded = quotient.padStart(scale + 1, '0')
+  const integer = padded.slice(0, padded.length - scale)
+  const fraction = scale > 0 ? `.${padded.slice(padded.length - scale)}` : ''
+  const zero = /^0+$/.test(padded)
+  return `${num.negative !== den.negative && !zero ? '-' : ''}${integer}${fraction}`
+}
+
 const EMPTY_COVERAGE: KpiReaderCoverage = {
   days_total: 0,
   days_aggregate: 0,
@@ -193,12 +241,27 @@ function sumTotals(stores: KpiReaderStore[], access: KpiReaderAccess): KpiReader
     )
   }
   base.quality = quality
-  base.aov = '0'
-  base.delivery_rate = '0'
-  base.cpl = '0'
-  base.cpa = '0'
-  base.roas = '0'
-  if (access === 'full') base.margin_rate = '0'
+  if (access === 'commercial') {
+    // Le RPC omet ces champs pour un accès commercial : ne pas les remplacer
+    // par des zéros fabriqués dans l'agrégat (même s'ils ne sont pas affichés).
+    for (const key of ['purchase_cost', 'delivery_fee_cost', 'confirmation_cost', 'contribution_margin']) {
+      delete base[key]
+    }
+  }
+  // Ratios recalculés sur les composantes agrégées, avec les formules de
+  // `rpc_dashboard_kpi_reader`. Jamais de moyenne de ratios par boutique.
+  const revenue = String(base.revenue ?? '0')
+  const delivered = String(base.delivered_count ?? 0)
+  const orders = String(base.orders_count ?? 0)
+  const adSpend = String(base.ad_spend_contract ?? '0')
+  base.aov = divideDecimal(revenue, delivered)
+  base.delivery_rate = divideDecimal(delivered, orders, 6, 2)
+  base.cpl = divideDecimal(adSpend, orders)
+  base.cpa = divideDecimal(adSpend, delivered)
+  base.roas = divideDecimal(revenue, adSpend)
+  if (access === 'full') {
+    base.margin_rate = divideDecimal(String(base.contribution_margin ?? '0'), revenue, 6, 2)
+  }
   return base as unknown as KpiReaderTotals
 }
 

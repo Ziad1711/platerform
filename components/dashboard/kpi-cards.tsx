@@ -56,7 +56,8 @@ interface KpiChanges {
 }
 
 interface KpiResult extends KpiData {
-  changes: KpiChanges
+  /** `null` : période précédente absente, incomplète ou non comparable. */
+  changes: KpiChanges | null
 }
 
 function calcPctChange(current: number, previous: number) {
@@ -119,14 +120,25 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     v5Current.isError || v5Previous.isError,
   )
 
-  const v5Result = useMemo<KpiResult | undefined>(() => {
-    if (!v5Enabled || !v5Current.data || !v5Previous.data) return undefined
+  // Comparabilité des périodes : mêmes totaux exploitables, aucune journée
+  // sale/absente/incompatible de part et d'autre, et « Toujours » exclu
+  // (borné à 365 jours, donc non comparable à une période précédente).
+  const v5Comparable = useMemo(() => {
+    if (!v5Enabled || !v5Current.data || !v5Previous.data) return false
+    if (selectedPeriod === 'all') return false
     const current = buildReaderScope(v5Current.data)
     const previous = buildReaderScope(v5Previous.data)
+    return Boolean(current.totals) && Boolean(previous.totals) && !current.incomplete && !previous.incomplete
+  }, [v5Enabled, v5Current.data, v5Previous.data, selectedPeriod])
+
+  const v5Result = useMemo<KpiResult | undefined>(() => {
+    if (!v5Enabled || !v5Current.data) return undefined
+    const current = buildReaderScope(v5Current.data)
     if (!current.totals) return undefined
+    const previous = v5Previous.data ? buildReaderScope(v5Previous.data) : null
 
     const totals = current.totals as unknown as Record<string, unknown>
-    const previousTotals = (previous.totals ?? {}) as unknown as Record<string, unknown>
+    const previousTotals = (previous?.totals ?? {}) as unknown as Record<string, unknown>
     const num = (value: unknown) => (value === undefined || value === null ? 0 : Number(value))
     const metric = (record: Record<string, unknown>, key: string) => num(record[key])
 
@@ -155,54 +167,75 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
       metric(previousTotals, 'delivery_fee_cost') +
       metric(previousTotals, 'confirmation_cost')
 
+    // Aucune variation si une des deux périodes n'est pas couverte ou si la
+    // comparaison n'a pas de sens : « Toujours » est borné à 365 jours.
+    const comparable = v5Comparable
+
     return {
       ...data,
-      changes: {
-        orders: calcPctChange(data.orders, metric(previousTotals, 'orders_count')),
-        deliveredOrders: calcPctChange(data.deliveredOrders, metric(previousTotals, 'delivered_count')),
-        revenue: calcPctChange(data.revenue, metric(previousTotals, 'revenue')),
-        charges: calcPctChange(charges, previousCharges),
-        adSpend: calcPctChange(
-          data.adSpend,
-          metric(previousTotals, 'ads_tracked') + metric(previousTotals, 'ads_fallback'),
-        ),
-        adCost: calcPctChange(
-          data.adCost,
-          metric(previousTotals, 'ads_tracked') + metric(previousTotals, 'ads_fallback'),
-        ),
-        profit: calcPctChange(data.profit, metric(previousTotals, 'contribution_margin')),
-        deliveryCost: calcPctChange(data.deliveryCost, metric(previousTotals, 'delivery_fee_cost')),
-        cpl: calcPctChange(data.cpl, metric(previousTotals, 'cpl')),
-        cpa: calcPctChange(data.cpa, metric(previousTotals, 'cpa')),
-        confirmationCost: calcPctChange(
-          data.confirmationCost,
-          metric(previousTotals, 'confirmation_cost'),
-        ),
-        roas: calcPctChange(data.roas, metric(previousTotals, 'roas')),
-        marginRate: calcPctChange(data.marginRate, metric(previousTotals, 'margin_rate')),
-      },
+      changes: comparable
+        ? {
+            orders: calcPctChange(data.orders, metric(previousTotals, 'orders_count')),
+            deliveredOrders: calcPctChange(data.deliveredOrders, metric(previousTotals, 'delivered_count')),
+            revenue: calcPctChange(data.revenue, metric(previousTotals, 'revenue')),
+            charges: calcPctChange(charges, previousCharges),
+            adSpend: calcPctChange(
+              data.adSpend,
+              metric(previousTotals, 'ads_tracked') + metric(previousTotals, 'ads_fallback'),
+            ),
+            adCost: calcPctChange(
+              data.adCost,
+              metric(previousTotals, 'ads_tracked') + metric(previousTotals, 'ads_fallback'),
+            ),
+            profit: calcPctChange(data.profit, metric(previousTotals, 'contribution_margin')),
+            deliveryCost: calcPctChange(data.deliveryCost, metric(previousTotals, 'delivery_fee_cost')),
+            cpl: calcPctChange(data.cpl, metric(previousTotals, 'cpl')),
+            cpa: calcPctChange(data.cpa, metric(previousTotals, 'cpa')),
+            confirmationCost: calcPctChange(
+              data.confirmationCost,
+              metric(previousTotals, 'confirmation_cost'),
+            ),
+            roas: calcPctChange(data.roas, metric(previousTotals, 'roas')),
+            marginRate: calcPctChange(data.marginRate, metric(previousTotals, 'margin_rate')),
+          }
+        : null,
     }
-  }, [v5Enabled, v5Current.data, v5Previous.data])
+  }, [v5Enabled, v5Current.data, v5Previous.data, v5Comparable])
 
-  const v5Access = useMemo(
-    () => (v5Current.data ? buildReaderScope(v5Current.data).access : null),
+  const v5Scope = useMemo(
+    () => (v5Current.data ? buildReaderScope(v5Current.data) : null),
     [v5Current.data],
   )
-  const v5Coverage = useMemo(
-    () => (v5Current.data ? buildReaderScope(v5Current.data).coverage : null),
-    [v5Current.data],
-  )
-  const v5Mixed = useMemo(
-    () => (v5Current.data ? buildReaderScope(v5Current.data).mixed : false),
-    [v5Current.data],
-  )
+  const v5Access = v5Scope?.access ?? null
+  const v5Coverage = v5Scope?.coverage ?? null
+  const v5Mixed = v5Scope?.mixed ?? false
   const v5Notice = useMemo(() => {
-    if (!v5Enabled || !v5Coverage) return null
-    const unavailable =
-      v5Coverage.days_missing + v5Coverage.days_dirty + v5Coverage.days_incompatible
-    if (unavailable === 0) return null
-    return `Données partielles : ${v5Coverage.days_missing} jour(s) indisponible(s), ${v5Coverage.days_dirty} en cours d’actualisation, ${v5Coverage.days_incompatible} incompatible(s). Ces journées sont exclues des totaux.`
-  }, [v5Enabled, v5Coverage])
+    if (!v5Enabled) return null
+    const notes: string[] = []
+    if (selectedPeriod === 'all') {
+      notes.push('Période « Toujours » bornée à 365 jours : aucune variation n’est calculée.')
+    } else if (!v5Comparable) {
+      if (v5Previous.isError) {
+        notes.push(
+          'Comparaison indisponible : la période précédente n’a pas pu être lue, aucune variation n’est affichée.',
+        )
+      } else if (v5Previous.data) {
+        notes.push(
+          'Comparaison non calculable : une des deux périodes n’est pas entièrement couverte, aucune variation n’est affichée.',
+        )
+      }
+    }
+    if (v5Coverage) {
+      const unavailable =
+        v5Coverage.days_missing + v5Coverage.days_dirty + v5Coverage.days_incompatible
+      if (unavailable > 0) {
+        notes.push(
+          `Données partielles : ${v5Coverage.days_missing} jour(s) indisponible(s), ${v5Coverage.days_dirty} en cours d’actualisation, ${v5Coverage.days_incompatible} incompatible(s). Ces journées sont exclues des totaux.`,
+        )
+      }
+    }
+    return notes.length > 0 ? notes.join(' ') : null
+  }, [v5Enabled, v5Coverage, v5Comparable, v5Previous.isError, v5Previous.data, selectedPeriod])
 
 
 
@@ -381,14 +414,14 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
 
   const kpiData = v5Enabled ? v5Result : legacyData
   const isLoading = v5Enabled
-    ? v5Current.isLoading || v5Previous.isLoading
-    : legacyLoading || !rollout.resolved
+    ? isStoresLoading || v5Current.isLoading || v5Previous.isLoading
+    : isStoresLoading || legacyLoading || !rollout.resolved
   // Accès commercial : aucun coût, marge ni profit ne doit être affiché.
   const showCosts = v5Enabled ? v5Access === 'full' : kpiData?.financialAccess === true
   const primaryKpis = [
     {
       title: 'Commandes',
-      value: kpiData ? formatNumber(kpiData.orders) : '0',
+      value: kpiData ? formatNumber(kpiData.orders) : '—',
       rawChange: kpiData?.changes?.orders || 0,
       change: formatChange(kpiData?.changes?.orders || 0),
       trend: (kpiData?.changes?.orders || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -397,7 +430,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     },
     {
       title: 'Commandes livrées',
-      value: kpiData ? formatNumber(kpiData.deliveredOrders) : '0',
+      value: kpiData ? formatNumber(kpiData.deliveredOrders) : '—',
       rawChange: kpiData?.changes?.deliveredOrders || 0,
       change: formatChange(kpiData?.changes?.deliveredOrders || 0),
       trend: (kpiData?.changes?.deliveredOrders || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -406,7 +439,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     },
     {
       title: 'Chiffre d\'affaires',
-      value: kpiData ? formatCurrency(kpiData.revenue) : '0 MAD',
+      value: kpiData ? formatCurrency(kpiData.revenue) : '—',
       rawChange: kpiData?.changes?.revenue || 0,
       change: formatChange(kpiData?.changes?.revenue || 0),
       trend: (kpiData?.changes?.revenue || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -425,7 +458,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     },
     {
       title: 'Coût publicité',
-      value: kpiData ? formatCurrency(kpiData.adCost) : '0 MAD',
+      value: kpiData ? formatCurrency(kpiData.adCost) : '—',
       rawChange: kpiData?.changes?.adCost || 0,
       change: formatChange(kpiData?.changes?.adCost || 0),
       trend: (kpiData?.changes?.adCost || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -447,7 +480,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
   const marketingKpis = [
     {
       title: 'Dépense publicitaire',
-      value: kpiData ? formatCurrency(kpiData.adSpend) : '0 MAD',
+      value: kpiData ? formatCurrency(kpiData.adSpend) : '—',
       rawChange: kpiData?.changes?.adSpend || 0,
       change: formatChange(kpiData?.changes?.adSpend || 0),
       trend: (kpiData?.changes?.adSpend || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -456,7 +489,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     },
     {
       title: 'CPL moyen (Coût par lead)',
-      value: kpiData ? formatCurrency(kpiData.cpl) : '0 MAD',
+      value: kpiData ? formatCurrency(kpiData.cpl) : '—',
       rawChange: kpiData?.changes?.cpl || 0,
       change: formatChange(kpiData?.changes?.cpl || 0),
       trend: (kpiData?.changes?.cpl || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -466,7 +499,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     },
     {
       title: 'CPA moyen (Coût par achat)',
-      value: kpiData ? formatCurrency(kpiData.cpa) : '0 MAD',
+      value: kpiData ? formatCurrency(kpiData.cpa) : '—',
       rawChange: kpiData?.changes?.cpa || 0,
       change: formatChange(kpiData?.changes?.cpa || 0),
       trend: (kpiData?.changes?.cpa || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -476,7 +509,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     },
     {
       title: 'ROAS',
-      value: kpiData ? `${kpiData.roas.toFixed(2)}x` : '0x',
+      value: kpiData ? `${kpiData.roas.toFixed(2)}x` : '—',
       rawChange: kpiData?.changes?.roas || 0,
       change: formatChange(kpiData?.changes?.roas || 0),
       trend: (kpiData?.changes?.roas || 0) >= 0 ? 'up' as const : 'down' as const,
@@ -491,6 +524,17 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
       <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
         Plusieurs devises ou niveaux d&apos;accès sont concernés : les montants ne sont pas
         additionnés. Sélectionnez une boutique pour consulter ses KPI.
+      </div>
+    )
+  }
+
+  // Erreur de lecture V5 ou aucun total exploitable : jamais de zéro financier.
+  if (v5Enabled && !isLoading && !v5Result) {
+    return (
+      <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+        {v5Current.isError
+          ? 'KPI indisponibles : la lecture V5 a échoué. Aucun montant n’est affiché.'
+          : 'KPI indisponibles : aucun total exploitable pour cette période. Aucun montant n’est affiché.'}
       </div>
     )
   }

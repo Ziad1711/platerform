@@ -20,6 +20,25 @@ import { useKpiReaderErrorTelemetry, useKpiRollout } from '@/lib/dashboard/use-k
 
 type SeriesKey = 'revenue' | 'profit' | 'ads' | 'purchase'
 
+/**
+ * Statuts du tunnel de conversion, identiques à `rpc_dashboard_revenue_chart`
+ * (migration 20261020105000) : « Confirmées » est cumulatif.
+ */
+const CONFIRMED_ORDER_STATUSES: string[] = [
+  'confirmed',
+  'picked_up',
+  'sent',
+  'delivered',
+  'returned_not_stocked',
+  'returned_stocked',
+]
+const SENT_ORDER_STATUSES: string[] = [
+  'sent',
+  'delivered',
+  'returned_not_stocked',
+  'returned_stocked',
+]
+
 function formatAxisValue(value: number) {
   const abs = Math.abs(value)
   if (abs >= 1000000) return `${(value / 1000000).toFixed(1)}M`
@@ -278,29 +297,70 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
 
 
   // ---- V5 : source commune (lecteur agrégé), conservée derrière le flag ----
-  const v5WaitingPickup = useQuery<number>({
-    queryKey: ['dashboard-v5-waiting-pickup', currentStoreId, accessibleStoreIds, v5Range.from, v5Range.to, userId, rollout.accessFingerprint],
+  // Compteurs du tunnel : lecture bornée et non financière, regroupée avec
+  // « non ramassé ». Aucun appel à la RPC financière complète.
+  const v5Counters = useQuery<{
+    confirmed: number | null
+    sent: number | null
+    waitingPickup: number | null
+  }>({
+    queryKey: ['dashboard-v5-order-counters', currentStoreId, accessibleStoreIds, v5Range.from, v5Range.to, userId, rollout.accessFingerprint],
     enabled: v5Enabled && !isStoresLoading,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
-      if (storeIds.length === 0) return 0
+      if (storeIds.length === 0) return { confirmed: 0, sent: 0, waitingPickup: 0 }
       const { start, end } = businessRangeToInstants(v5Range)
-      let query = supabase
+      const startIso = start.toISOString()
+      const endIso = end.toISOString()
+
+      let waitingQuery = supabase
         .from('orders')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'dl_pickup_pending')
-        .gte('order_date', start.toISOString())
-        .lt('order_date', end.toISOString())
-      query = currentStoreId ? query.eq('store_id', currentStoreId) : query.in('store_id', storeIds)
-      const { count, error } = await query
-      if (error) throw error
-      return Number(count || 0)
+        .gte('order_date', startIso)
+        .lt('order_date', endIso)
+      let confirmedQuery = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .in('status', CONFIRMED_ORDER_STATUSES)
+        .gte('order_date', startIso)
+        .lt('order_date', endIso)
+      let sentQuery = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .in('status', SENT_ORDER_STATUSES)
+        .gte('order_date', startIso)
+        .lt('order_date', endIso)
+
+      if (currentStoreId) {
+        waitingQuery = waitingQuery.eq('store_id', currentStoreId)
+        confirmedQuery = confirmedQuery.eq('store_id', currentStoreId)
+        sentQuery = sentQuery.eq('store_id', currentStoreId)
+      } else {
+        waitingQuery = waitingQuery.in('store_id', storeIds)
+        confirmedQuery = confirmedQuery.in('store_id', storeIds)
+        sentQuery = sentQuery.in('store_id', storeIds)
+      }
+
+      const [waiting, confirmed, sent] = await Promise.all([
+        waitingQuery,
+        confirmedQuery,
+        sentQuery,
+      ])
+
+      // Une erreur laisse `null` (indisponible) : jamais un faux zéro.
+      return {
+        confirmed: confirmed.error ? null : Number(confirmed.count ?? 0),
+        sent: sent.error ? null : Number(sent.count ?? 0),
+        waitingPickup: waiting.error ? null : Number(waiting.count ?? 0),
+      }
     },
   })
 
   const v5Data = useMemo(() => {
-    if (!v5Enabled || !v5Scope) return undefined
-    const totals = (v5Scope.totals ?? {}) as Record<string, unknown>
+    // Sans totaux (devises/accès mixtes, aucune boutique) rien n'est additionnable.
+    if (!v5Enabled || !v5Scope || !v5Scope.totals) return undefined
+    const totals = v5Scope.totals as unknown as Record<string, unknown>
     const n = (key: string) => Number(totals[key] ?? 0)
     return {
       financialAccess: v5Scope.access === 'full',
@@ -320,21 +380,23 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
       totalPurchase: n('purchase_cost'),
       conversion: {
         totalOrders: n('orders_count'),
-        confirmedOrders: 0,
+        confirmedOrders: v5Counters.data ? v5Counters.data.confirmed : null,
         cancelledOrders: n('cancelled_count'),
         pendingOrders: n('pending_count'),
-        sentOrders: 0,
+        sentOrders: v5Counters.data ? v5Counters.data.sent : null,
         deliveredOrders: n('delivered_count'),
         returnedOrders: n('returned_count'),
-        waitingPickupOrders: v5WaitingPickup.data ?? 0,
+        waitingPickupOrders: v5Counters.data ? v5Counters.data.waitingPickup : null,
       },
     }
-  }, [v5Enabled, v5Scope, v5WaitingPickup.data])
+  }, [v5Enabled, v5Scope, v5Counters.data])
 
   const data = v5Enabled ? v5Data : legacyData
   const isLoading = v5Enabled
-    ? v5.isLoading || v5WaitingPickup.isLoading
-    : legacyLoading || !rollout.resolved
+    ? isStoresLoading || v5.isLoading || v5Counters.isLoading
+    : isStoresLoading || legacyLoading || !rollout.resolved
+  const v5Failed = v5Enabled && !v5.isLoading && v5.isError
+  const v5NoTotals = v5Enabled && !isLoading && !v5Failed && !v5Scope?.totals
   const points = data?.points || []
   // Accès commercial : aucune série de coût/marge, en legacy comme en V5.
   const allowedSeries: SeriesKey[] = data?.financialAccess
@@ -375,8 +437,9 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     .map((p, index) => ({ ...p, index }))
     .filter((p) => p.index % labelStep === 0 || p.index === points.length - 1)
   const conversion = data?.conversion
-  const baseOrders = conversion?.totalOrders || 0
-  const waitingPickupOrders = conversion?.waitingPickupOrders || 0
+  // `null` = compteur indisponible (erreur de lecture) : jamais affiché en zéro.
+  const baseOrders = conversion?.totalOrders ?? null
+  const waitingPickupOrders = conversion?.waitingPickupOrders ?? null
   const conversionStages = [
     {
       key: 'total',
@@ -388,21 +451,21 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     {
       key: 'confirmed',
       label: 'Confirmées',
-      count: conversion?.confirmedOrders || 0,
+      count: conversion?.confirmedOrders ?? null,
       color: 'bg-blue-500',
       soft: 'bg-blue-50 text-blue-700',
     },
     {
       key: 'cancelled',
       label: 'Annulées',
-      count: conversion?.cancelledOrders || 0,
+      count: conversion?.cancelledOrders ?? null,
       color: 'bg-gray-500',
       soft: 'bg-gray-100 text-gray-700',
     },
     {
       key: 'pending',
       label: 'En traitement',
-      count: conversion?.pendingOrders || 0,
+      count: conversion?.pendingOrders ?? null,
       color: 'bg-amber-500',
       soft: 'bg-amber-50 text-amber-700',
     },
@@ -416,28 +479,41 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     {
       key: 'sent',
       label: 'Expédiées',
-      count: conversion?.sentOrders || 0,
+      count: conversion?.sentOrders ?? null,
       color: 'bg-indigo-500',
       soft: 'bg-indigo-50 text-indigo-700',
     },
     {
       key: 'delivered',
       label: 'Livrées',
-      count: conversion?.deliveredOrders || 0,
+      count: conversion?.deliveredOrders ?? null,
       color: 'bg-emerald-500',
       soft: 'bg-emerald-50 text-emerald-700',
     },
     {
       key: 'returned',
       label: 'Retour',
-      count: conversion?.returnedOrders || 0,
+      count: conversion?.returnedOrders ?? null,
       color: 'bg-rose-500',
       soft: 'bg-rose-50 text-rose-700',
     },
-  ].map((stage) => ({
-    ...stage,
-    rate: stage.key === 'total' ? (baseOrders > 0 ? 100 : 0) : (baseOrders > 0 ? (stage.count / baseOrders) * 100 : 0),
-  }))
+  ].map((stage) => {
+    const unavailable = stage.count === null
+    const count = stage.count ?? 0
+    const base = baseOrders ?? 0
+    return {
+      ...stage,
+      unavailable,
+      rate:
+        stage.key === 'total'
+          ? base > 0
+            ? 100
+            : 0
+          : base > 0
+            ? (count / base) * 100
+            : 0,
+    }
+  })
 
   const { yMin, yMax, yTicks } = useMemo(() => {
     if (points.length === 0) {
@@ -547,6 +623,11 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
             Performance du business
           </h3>
           <p className="text-sm text-muted-foreground mt-1">Selon la période sélectionnée</p>
+          {v5Enabled && v5Scope?.incomplete && (
+            <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+              Données partielles : les journées non couvertes sont exclues du graphique.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
           {(Object.keys(seriesConfig) as SeriesKey[]).filter((key) => allowedSeries.includes(key)).map((key) => (
@@ -566,6 +647,14 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
 
       {isLoading ? (
         <div className="h-80 flex items-center justify-center text-muted-foreground">Chargement...</div>
+      ) : v5Failed || v5NoTotals ? (
+        <div className="h-80 flex items-center justify-center px-6 text-center text-muted-foreground">
+          {v5Scope?.mixed
+            ? 'Plusieurs devises ou niveaux d’accès : les montants ne sont pas additionnés. Sélectionnez une boutique.'
+            : v5Failed
+              ? 'KPI indisponibles : la lecture V5 a échoué.'
+              : 'KPI indisponibles : aucun total exploitable pour cette période.'}
+        </div>
       ) : points.length === 0 ? (
         <div className="h-80 flex items-center justify-center text-muted-foreground">Pas de données pour cette période</div>
       ) : (
@@ -816,23 +905,25 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
               </div>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-1">Base: {formatNumber(baseOrders)} commandes</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Base: {baseOrders === null ? '—' : formatNumber(baseOrders)} commandes
+          </p>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-          {conversionStages
-            .filter((stage) => !v5Enabled || (stage.key !== 'confirmed' && stage.key !== 'sent'))
-            .map((stage) => (
+          {conversionStages.map((stage) => (
             <div key={stage.key} className="rounded-lg border border-border p-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-foreground">{stage.label}</span>
-                <span className="text-xs font-semibold text-foreground">{stage.rate.toFixed(1)}%</span>
+                <span className="text-xs font-semibold text-foreground">
+                  {stage.unavailable ? '—' : `${stage.rate.toFixed(1)}%`}
+                </span>
               </div>
               <div className="h-2 rounded-full bg-muted overflow-hidden">
                 <div className={`${stage.color} h-2 rounded-full`} style={{ width: `${Math.min(stage.rate, 100)}%` }} />
               </div>
               <div className={`mt-3 inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${stage.soft}`}>
-                {formatNumber(stage.count)} commandes
+                {stage.unavailable ? 'Indisponible' : `${formatNumber(stage.count ?? 0)} commandes`}
               </div>
             </div>
           ))}
@@ -843,27 +934,27 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div className="flex items-center justify-between">
             <div className="text-muted-foreground">CA total</div>
-            <div className="font-semibold text-foreground">{formatCurrency(data?.totalRevenue || 0)}</div>
+            <div className="font-semibold text-foreground">{data ? formatCurrency(data.totalRevenue) : '—'}</div>
           </div>
           <div className="flex items-center justify-between">
             <div className="text-muted-foreground">Pub total</div>
-            <div className="font-semibold text-foreground">{formatCurrency(data?.totalAds || 0)}</div>
+            <div className="font-semibold text-foreground">{data ? formatCurrency(data.totalAds) : '—'}</div>
           </div>
           {allowedSeries.includes('purchase') && (
             <>
               <div className="flex items-center justify-between">
                 <div className="text-muted-foreground">Achat total</div>
-                <div className="font-semibold text-foreground">{formatCurrency(data?.totalPurchase || 0)}</div>
+                <div className="font-semibold text-foreground">{data ? formatCurrency(data.totalPurchase) : '—'}</div>
               </div>
               <div className="flex items-center justify-between">
                 <div className="text-muted-foreground">Profit total</div>
-                <div className={`font-semibold ${(data?.totalProfit || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {formatCurrency(data?.totalProfit || 0)}
+                <div className={`font-semibold ${data && data.totalProfit < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                  {data ? formatCurrency(data.totalProfit) : '—'}
                 </div>
               </div>
             </>
           )}
-          {!data?.financialAccess && (
+          {data && !data.financialAccess && (
             <div className="col-span-2 text-xs text-muted-foreground">Coûts et profit : Non autorisé</div>
           )}
         </div>

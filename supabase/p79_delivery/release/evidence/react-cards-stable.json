@@ -1,0 +1,234 @@
+{
+  "original_file_sha256": "3ab63e455406f83d85cac568e20b78a7c63df526ddb898015e9f3c41971e252a",
+  "evidence": {
+    "readiness": "PASS",
+    "reactV5": "PASS",
+    "killSwitch": "PASS",
+    "cleanup": "PASS",
+    "modeDelayMs": 1859,
+    "legacyFunctionalDelayMs": 3004,
+    "cards": {
+      "Commandes": {
+        "found": true,
+        "value": "1",
+        "loading": false,
+        "visible": true
+      },
+      "Commandes livrées": {
+        "found": true,
+        "value": "1",
+        "loading": false,
+        "visible": true
+      },
+      "Chiffre d'affaires": {
+        "found": true,
+        "value": "200 MAD",
+        "loading": false,
+        "visible": true
+      },
+      "Charges": {
+        "found": true,
+        "value": "80 MAD",
+        "loading": false,
+        "visible": true
+      },
+      "Coût publicité": {
+        "found": true,
+        "value": "0 MAD",
+        "loading": false,
+        "visible": true
+      },
+      "Profit (partiel)": {
+        "found": true,
+        "value": "120 MAD",
+        "loading": false,
+        "visible": true
+      }
+    },
+    "pageErrors": [],
+    "networkErrors": [
+      {
+        "path": "/api/integrations/delivery/tracking/sync",
+        "status": 403
+      },
+      {
+        "path": "/api/team/invitations/pending",
+        "status": 500
+      }
+    ],
+    "requests": [
+      {
+        "name": "rpc_dashboard_city_performance",
+        "status": 200,
+        "at": 30835.1955
+      },
+      {
+        "name": "rpc_dashboard_city_performance",
+        "status": 200,
+        "at": 30892.1245
+      },
+      {
+        "name": "rpc_dashboard_confirmation_performance",
+        "status": 200,
+        "at": 30892.1793
+      },
+      {
+        "name": "rpc_dashboard_kpi_rollout",
+        "status": 200,
+        "mode": "v5",
+        "at": 30913.1418
+      },
+      {
+        "name": "rpc_billing_status",
+        "status": 200,
+        "at": 30938.4411
+      },
+      {
+        "name": "rpc_dashboard_top_products",
+        "status": 200,
+        "at": 30940.6328
+      },
+      {
+        "name": "rpc_billing_status",
+        "status": 200,
+        "at": 30972.0399
+      },
+      {
+        "name": "rpc_dashboard_confirmation_performance",
+        "status": 200,
+        "at": 30981.3728
+      },
+      {
+        "name": "rpc_dashboard_top_products",
+        "status": 200,
+        "at": 30982.2227
+      },
+      {
+        "name": "rpc_dashboard_order_time_performance",
+        "status": 200,
+        "at": 31531.0824
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31559.166
+      },
+      {
+        "name": "rpc_dashboard_kpi_rollout_event",
+        "status": 204,
+        "at": 31609.8327
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31560.1692
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31610.18
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31773.419
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31840.2198
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31869.6232
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31872.6976
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31876.7073
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31885.0106
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31885.6075
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31907.3726
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 31907.9608
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 32074.3502
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 34410.9407
+      },
+      {
+        "name": "rpc_dashboard_kpi_rollout",
+        "status": 200,
+        "mode": "legacy",
+        "at": 36044.1437
+      },
+      {
+        "name": "rpc_dashboard_revenue_chart",
+        "status": 200,
+        "at": 36253.5338
+      },
+      {
+        "name": "rpc_dashboard_kpi_metrics",
+        "status": 200,
+        "at": 36255.9803
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 36257.0742
+      },
+      {
+        "name": "rpc_dashboard_kpi_reader",
+        "status": 200,
+        "at": 36272.8469
+      },
+      {
+        "name": "rpc_dashboard_kpi_rollout_event",
+        "status": 204,
+        "at": 36280.8856
+      },
+      {
+        "name": "rpc_dashboard_ads_cost_chart",
+        "status": 200,
+        "at": 36281.2911
+      },
+      {
+        "name": "rpc_dashboard_kpi_metrics",
+        "status": 200,
+        "at": 36379.0118
+      },
+      {
+        "name": "rpc_dashboard_ads_cost_chart",
+        "status": 200,
+        "at": 36527.088
+      }
+    ]
+  }
+}

@@ -1,0 +1,550 @@
+{
+  "package": "jisra-kpi-v5-release-candidate",
+  "status": "PREPARED_STATIC_ONLY_NO_GO_ACTIVATION",
+  "source_commit": "34aa95523485e4c73f74c222c9db8b83554fac70",
+  "branch": "p79/kpi-v5-consolidated",
+  "hash_rule": "sha256 UTF-8 normalized LF",
+  "application": [
+    {
+      "path": "components/dashboard/ads-cost-chart.tsx",
+      "source": "worktree",
+      "sha256": "9aa1827c6d9551c7379190cf57fe6284e693af67672b8b7255e96954df262eb7"
+    },
+    {
+      "path": "components/dashboard/kpi-cards.tsx",
+      "source": "worktree",
+      "sha256": "8a3dc7a9c8816a8d9f796970217fd8c857f309689adffc7f7412eb0fd7490dc2"
+    },
+    {
+      "path": "components/dashboard/revenue-chart.tsx",
+      "source": "worktree",
+      "sha256": "836dd43fb1759dbdee8e71f62676785a2573090360d9a10e216b716fd99ea07b"
+    },
+    {
+      "path": "lib/dashboard/kpi-reader-mappers.ts",
+      "source": "worktree",
+      "sha256": "d3c8d8aec106c4cf08deeeffaba9a2648e03f6ff0efefdae6bfca460e96dffdb"
+    },
+    {
+      "path": "lib/dashboard/use-kpi-rollout.tsx",
+      "source": "worktree",
+      "sha256": "d20f3947d6f73c2e2742c0c89982090ff1ef617dff9bfcddf102db6a0eb2f00f"
+    },
+    {
+      "path": "lib/dashboard/kpi-reader-flag.ts",
+      "source": "git-head",
+      "sha256": "36c56d676d8933a24fdc6bf378414862fe9397867d1c599048c96086c752df4e"
+    },
+    {
+      "path": "lib/supabase/client.ts",
+      "source": "git-head",
+      "sha256": "5256c936f4d8bdb1af881dde04062290dd7ef6297689fe39fda70efda22ae00c"
+    },
+    {
+      "path": "lib/supabase/server.ts",
+      "source": "git-head",
+      "sha256": "d34bbaeaf2b26754e1ab97bb0ed1e308cbf6b592f0584cf9ef994eced73d3a0b"
+    },
+    {
+      "path": "middleware.ts",
+      "source": "git-head",
+      "sha256": "6593ac76401872a8cb78e3ca03cea557116c87c8a33a6a6c621d5690be4a9291"
+    },
+    {
+      "path": "next.config.js",
+      "source": "git-head",
+      "sha256": "647c8f5ba7a143308d6f30f873ef1d2060359d7df9b41da173a60c93307b5216"
+    },
+    {
+      "path": ".gitignore",
+      "source": "git-head",
+      "sha256": "78ec0059cb4211647cd46652e2772a94298a3138dbfedb57138de0c50a7bba71"
+    }
+  ],
+  "inactive_sql": [
+    {
+      "id": "CAPTURE_SOCLE",
+      "order": 5,
+      "mode": "verify",
+      "requires": [
+        "PREREQ"
+      ],
+      "files": [
+        {
+          "path": "supabase/p79_delivery/93_preflight_capture.sql",
+          "source": "worktree",
+          "sha256": "8478641836d5148b0bd6624ac649368d6e426f17f33144ddf520bb3b2d48a9a3"
+        }
+      ]
+    },
+    {
+      "id": "P7.1_SOCLE",
+      "order": 10,
+      "mode": "install",
+      "requires": [
+        "PREREQ"
+      ],
+      "files": [
+        {
+          "path": "supabase/p7_1_package/10_install_objects.sql",
+          "source": "worktree",
+          "sha256": "489173d306ba68aee6a929eaa77a6b0d0782fe591a1de7a5deeedf5f7913cba7"
+        }
+      ]
+    },
+    {
+      "id": "P7.1_VERIFY_INSTALL",
+      "order": 20,
+      "mode": "verify",
+      "requires": [
+        "P7.1_SOCLE"
+      ],
+      "files": [
+        {
+          "path": "supabase/p7_1_package/90_verify.sql",
+          "source": "worktree",
+          "sha256": "54df156eb2a8c3d0727e8d5ff6016c8ed26f6e8ed1089cf05000d841446e7705"
+        }
+      ]
+    },
+    {
+      "id": "RBL4",
+      "order": 30,
+      "mode": "security",
+      "requires": [
+        "P7.1_SOCLE"
+      ],
+      "files": [
+        {
+          "path": "supabase/p7_1_package/reference/20261018213537_dashboard_legacy_financial_permissions.sql",
+          "source": "worktree",
+          "sha256": "ed895623a9ca6450e8561eb36619a7e4a7be60eda2e4bae6dfc1048446e9b8f9"
+        }
+      ]
+    },
+    {
+      "id": "P7.4_ROLLOUT_CONFIG",
+      "order": 40,
+      "mode": "install",
+      "requires": [
+        "RBL4"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261019183241_kpi_rollout_config.sql",
+          "source": "worktree",
+          "sha256": "06797b8554a12189d582bf2ea3d0c4b1dc5db7c0614e717e1b4d8240193b9d0e"
+        },
+        {
+          "path": "supabase/migrations/20261019183328_kpi_rollout_reader.sql",
+          "source": "worktree",
+          "sha256": "262cd91379df83a05780dd28a77a1aba780a0728a1655561e1605f4c058bcea1"
+        },
+        {
+          "path": "supabase/migrations/20261019183342_kpi_rollout_shadow.sql",
+          "source": "worktree",
+          "sha256": "d685ed85fbf1ec42fc6ab31557dbfec7f3954204f89933e96ff788d4c8e741ab"
+        },
+        {
+          "path": "supabase/migrations/20261019183349_kpi_rollout_event.sql",
+          "source": "worktree",
+          "sha256": "a25e5075f2e65987b625c595c86d04851eb842b3b1ad9b3c33643fff26ddc6fd"
+        },
+        {
+          "path": "supabase/migrations/20261019183712_kpi_rollout_trigger_names.sql",
+          "source": "worktree",
+          "sha256": "2d1d0744b5613346bf4621187a0623e2b089a9cfa73a1488bb540a096faff73b"
+        },
+        {
+          "path": "supabase/migrations/20261019183800_kpi_rollout_function_names.sql",
+          "source": "worktree",
+          "sha256": "bfff049797b34640bcbfa46241ced9b33d32506c7fb7242fed9063e6ba0fe5b0"
+        }
+      ]
+    },
+    {
+      "id": "P7.7_CORRECTIONS",
+      "order": 50,
+      "mode": "install",
+      "requires": [
+        "P7.4_ROLLOUT_CONFIG"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261020100000_p77_c2_city_performance.sql",
+          "source": "worktree",
+          "sha256": "f6d74b6d3c229d27208e721c564b0f72fae90eb3f85774069c2488e0bb96e79d"
+        },
+        {
+          "path": "supabase/migrations/20261020101000_p77_c3_quality_version.sql",
+          "source": "worktree",
+          "sha256": "e3b744bd5e0531c9de341ad19cd77b6d374f4a4e70966ba852062bb7ea59ea8a"
+        },
+        {
+          "path": "supabase/migrations/20261020102000_p77_c3_aggregate_order.sql",
+          "source": "worktree",
+          "sha256": "f90fb1a0ea973a1c6a52846e837b755c35bd58b81c30f154617d14bb34ba2f91"
+        },
+        {
+          "path": "supabase/migrations/20261020103000_p77_c3_aggregate_delivery.sql",
+          "source": "worktree",
+          "sha256": "af068196ad36740c9265217f61599807c43149ad03eadd908162e811ac59cf37"
+        },
+        {
+          "path": "supabase/migrations/20261020104000_p77_c3_direct_day.sql",
+          "source": "worktree",
+          "sha256": "3ad8f90bf03115e598b9ba79454c91a7eceb8b4f60e1c05a68181198cb2f5b80"
+        },
+        {
+          "path": "supabase/migrations/20261020105000_p77_c1_revenue_chart_ads.sql",
+          "source": "worktree",
+          "sha256": "1d0dc55c777d9fff0d3e2e8d440c3fcb3a86aa87ab7a5897bbc83ccb0605f09f"
+        }
+      ]
+    },
+    {
+      "id": "P7.8_CORRECTIONS",
+      "order": 60,
+      "mode": "install",
+      "requires": [
+        "P7.7_CORRECTIONS"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261020110000_p78_finalize_store_state.sql",
+          "source": "worktree",
+          "sha256": "08e191984efaabc78e223f56bfda1222b63e0d89ccef9339ed74b43c1d52ae12"
+        },
+        {
+          "path": "supabase/migrations/20261020111000_p78_rebuild_day_finalizes.sql",
+          "source": "worktree",
+          "sha256": "07bf3e1e8a7d357827152d7031ff924804dec6fde0eba9056ee6daa133483cc6"
+        }
+      ]
+    },
+    {
+      "id": "P7.9_INACTIVE",
+      "order": 70,
+      "mode": "install",
+      "requires": [
+        "P7.8_CORRECTIONS",
+        "RBL4"
+      ],
+      "files": [
+        {
+          "path": "supabase/p79_delivery/10_install_p79_functions.sql",
+          "source": "worktree",
+          "sha256": "ecece1e37edb2b098eb435e47ad972c545910c2f752e02d10bbaf84ff5986a31"
+        }
+      ]
+    },
+    {
+      "id": "P7.9_VERIFY_INACTIVE",
+      "order": 80,
+      "mode": "verify",
+      "requires": [
+        "P7.9_INACTIVE"
+      ],
+      "files": [
+        {
+          "path": "supabase/p79_delivery/90_verify_p79.sql",
+          "source": "worktree",
+          "sha256": "831ea26c18feed938792bf1cb54d38aa5346a0485bf4159a917bf1b3dccc4f94"
+        }
+      ]
+    },
+    {
+      "id": "P8.1",
+      "order": 90,
+      "mode": "security",
+      "requires": [
+        "P7.9_VERIFY_INACTIVE"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261021120000_p81_invitation_inviter_authorization.sql",
+          "source": "worktree",
+          "sha256": "3ca0b69337d6e798459e42d499afbf15f69e7c6fa7ec90346000514682dbcff7"
+        }
+      ]
+    },
+    {
+      "id": "P8.2",
+      "order": 91,
+      "mode": "security",
+      "requires": [
+        "P8.1"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261022093000_p82_expense_write_permissions.sql",
+          "source": "worktree",
+          "sha256": "610876098e4b2efd2bbde8190dc92b35240c8cd862f895d3a13c4fb73e106dc2"
+        }
+      ]
+    },
+    {
+      "id": "P8.3_M1",
+      "order": 92,
+      "mode": "security",
+      "requires": [
+        "P8.2"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261023100000_p83_revoked_member_product_functions.sql",
+          "source": "worktree",
+          "sha256": "8b8451641628de2186886d7597fba8c6b476c5b6ebbe084648d32fae75886975"
+        }
+      ]
+    },
+    {
+      "id": "P8.3_M2",
+      "order": 93,
+      "mode": "security",
+      "requires": [
+        "P8.3_M1",
+        "P8.3_BASELINE"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261023100100_p83_revoked_member_write_policies.sql",
+          "source": "worktree",
+          "sha256": "bb76752716adf599f3bc086bfae7cd0becf6ad6ded7914163fc2c674d5dd823e"
+        }
+      ]
+    },
+    {
+      "id": "P8.3_M3",
+      "order": 94,
+      "mode": "security",
+      "requires": [
+        "P8.3_M2",
+        "P8.3_BASELINE"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261023100200_p83_revoked_member_read_policies.sql",
+          "source": "worktree",
+          "sha256": "1e15efa93f8efa8d70837971c6fd6e6614319b3c37e241be60e672d07956497d"
+        }
+      ]
+    },
+    {
+      "id": "P8.4_D4",
+      "order": 95,
+      "mode": "security",
+      "requires": [
+        "P8.3_M3"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261023110000_p84_delivery_order_column_guard.sql",
+          "source": "worktree",
+          "sha256": "c4e8c84cc95236dec84ecd55b05665f9ec10411345ce7338f909fae131bb26ba"
+        }
+      ]
+    },
+    {
+      "id": "P8.4_S2",
+      "order": 96,
+      "mode": "security",
+      "requires": [
+        "P8.4_D4"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261023110100_p84_stock_movement_write_policies.sql",
+          "source": "worktree",
+          "sha256": "7b53a2a6e7d09af9285b79722d991a6f686459526743576f0c719e88ae9cdf76"
+        }
+      ]
+    },
+    {
+      "id": "P8.4_RPC",
+      "order": 97,
+      "mode": "security",
+      "requires": [
+        "P8.4_S2"
+      ],
+      "files": [
+        {
+          "path": "supabase/migrations/20261023120000_p84_confirmation_rpc_isolation.sql",
+          "source": "worktree",
+          "sha256": "38f465b80700a7e9ab8e885f113d1e85d60cc7932b50a726648fdef89df297e1"
+        }
+      ]
+    },
+    {
+      "id": "FINAL_VERIFY",
+      "order": 100,
+      "mode": "verify",
+      "requires": [
+        "P8.4_RPC"
+      ],
+      "files": []
+    }
+  ],
+  "activation_sql": [
+    {
+      "id": "EXTENSIONS",
+      "guard": "p7.extensions_authorized=yes",
+      "files": [
+        {
+          "path": "supabase/p7_1_package/20_extensions_prerequisites.sql",
+          "source": "worktree",
+          "sha256": "f0c5f2d92b0fb1b7e9912341602d857c1bd4a84da7af907f97b70cca94abde4d"
+        }
+      ]
+    },
+    {
+      "id": "INVALIDATIONS",
+      "guard": "p7.activate_invalidations=yes",
+      "files": [
+        {
+          "path": "supabase/p7_1_package/30_activate_invalidations.sql",
+          "source": "worktree",
+          "sha256": "818fb364a1dc13484bd21d144042c11fe8b68005564bd625faec51220473577e"
+        }
+      ]
+    },
+    {
+      "id": "WAKEUP",
+      "guard": "p7.activate_wakeup=yes",
+      "files": [
+        {
+          "path": "supabase/p7_1_package/31_activate_wakeup.sql",
+          "source": "worktree",
+          "sha256": "f35763904906102a2f0e7e89821a1b345567cadef1bfef42f780d0fe3b5598f0"
+        }
+      ]
+    },
+    {
+      "id": "WORKER",
+      "guard": "p7.activate_worker=yes",
+      "files": [
+        {
+          "path": "supabase/p7_1_package/40_activate_worker.sql",
+          "source": "worktree",
+          "sha256": "94cd5cf23de912517dcdd3a966d04e2513bf4218d398b38cb865bb400a50d86f"
+        }
+      ]
+    },
+    {
+      "id": "BACKFILL",
+      "guard": "p7.backfill=yes + p7.backfill_store_id/from/to",
+      "files": [
+        {
+          "path": "supabase/p7_1_package/41_backfill.sql",
+          "source": "worktree",
+          "sha256": "20fe6b62b84aaa508b0da52257e765f05e02808400524c2001cd02225a4defdb"
+        }
+      ]
+    },
+    {
+      "id": "P7.9_QUALITY_TRIGGER",
+      "guard": "p79.activate_quality=yes",
+      "files": [
+        {
+          "path": "supabase/p79_delivery/20_activate_p79_quality_trigger.sql",
+          "source": "worktree",
+          "sha256": "792dbf0f3774c2417f9233264bbd402471322efce3cab364db122a6ea8fc7015"
+        }
+      ]
+    }
+  ],
+  "rollback_sql": [
+    {
+      "path": "supabase/p79_delivery/92_rollback_combined.sql",
+      "source": "worktree",
+      "sha256": "60f15ca719532400ee57a0fd9ff9e32daf3a99232f021cf7e5cfe40887da52c6"
+    },
+    {
+      "path": "supabase/p79_delivery/release/REINSTALL-QUALITY-RELEASE.sql",
+      "source": "worktree",
+      "sha256": "3ad13c6e4d2cf528677e3a074fa75152c207b468bf57db2a14d4adda46d32d3f"
+    }
+  ],
+  "excluded": [
+    "lib/qualification/**",
+    "scripts/qualify-b13.cjs",
+    "supabase/p79_delivery/b13/**",
+    "supabase/p79_delivery/final/b13_v3/**",
+    "supabase/p79_delivery/final/legacy-b13/**",
+    "supabase/p79_delivery/final/REINSTALL-*.sql",
+    "supabase/p79_delivery/reference/production_*.sql",
+    ".next-b13/**",
+    "aucune execution automatique de verification_tooling ; outils de controle seulement, jamais dans un lot de migration"
+  ],
+  "qualification_only_modified_files": [
+    "lib/dashboard/kpi-reader-flag.ts",
+    "lib/supabase/client.ts",
+    "lib/supabase/server.ts",
+    "middleware.ts",
+    "next.config.js",
+    ".gitignore"
+  ],
+  "archive": [
+    {
+      "path": "supabase/p79_delivery/release/evidence/react-cards-stable.json",
+      "source": "worktree",
+      "sha256": "236b048e18a091e3955379ef3b8f35859e0e9efa03c0fac85f6ec85a70dc856f"
+    },
+    {
+      "path": "supabase/p79_delivery/release/evidence/cron-automatic.json",
+      "source": "worktree",
+      "sha256": "971d1734271c68f7b5bb1b106f0bdb205aa8b88d3aa9227bb0f54df8479b6217"
+    },
+    {
+      "path": "supabase/p79_delivery/release/evidence/jwt-permissions.json",
+      "source": "worktree",
+      "sha256": "882db31ffa04adc0f37019ea6eab7766bf3654cff958d392f281ce4dc81fc315"
+    },
+    {
+      "path": "supabase/p79_delivery/release/evidence/rollback-resume.json",
+      "source": "worktree",
+      "sha256": "b1c8baf7d32cd351eb1157eecf72dcf3181356f70e4ea6c283d97f9eacf15494"
+    }
+  ],
+  "reservations": [
+    "import_orders_600 exception unsigned",
+    "update_item_price p95 risk not accepted",
+    "fresh install full package not covered",
+    "B13 exposed admin key revocation not confirmed",
+    "Production initial state/migration applicability not freshly verified",
+    "30_activate_invalidations exact function-count guard potentially incompatible after final corrections"
+  ],
+  "deployment": {
+    "inactive": {
+      "reader": "legacy",
+      "KPI_READER_V5": "0 or absent",
+      "KPI_READER_V5_PRODUCTION_ACK": "absent",
+      "kill_switch": true,
+      "requested_mode": "legacy",
+      "cohorts": 0,
+      "worker": false,
+      "wakeup": false,
+      "producers": 0,
+      "jobs": 0
+    },
+    "activation": "distinct explicit authorization required",
+    "no_global_db_push": true
+  },
+  "verification_tooling": [
+    {
+      "path": "supabase/p79_delivery/final/oracle/financial_exactness_oracle.sql",
+      "sha256": "e6ed1940cc724f8b103e23cb5dcf56879ced49effbf370f4ea14d945a5d1db86",
+      "purpose": "controle exactitude financiere post-installation (lecture seule)"
+    },
+    {
+      "path": "supabase/p79_delivery/final/ops/runtime_controls.sql",
+      "sha256": "22a6f9be815bf9ae6da2e0533c7fb075d3f6958af914ee95ecee8d04b9473ab3",
+      "purpose": "controles exploitation et retour legacy (lecture seule)"
+    },
+    {
+      "path": "supabase/p79_delivery/tools/verify-package.mjs",
+      "sha256": "07490ef1c7b2793079a06483042a4bdd480f9b2913126b99663d0d30216382df",
+      "purpose": "verificateur statique du paquet (220+ controles)"
+    }
+  ]
+}

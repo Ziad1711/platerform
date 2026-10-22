@@ -65,7 +65,7 @@ const CACHE_PREFIXES = [
   'dashboard-kpis',
   'dashboard-business-trends',
   'dashboard-ads-cost-chart',
-  'dashboard-v5-waiting-pickup',
+  'dashboard-v5-order-counters',
   'dashboard-kpi-shadow-check',
 ]
 
@@ -183,7 +183,11 @@ export function KpiRolloutProvider({
   useEffect(() => {
     const current = `${mode}:${configVersion}`
     if (previousRef.current && previousRef.current !== current) {
-      queryClient.removeQueries({
+      // Les enfants peuvent déjà observer la nouvelle clé legacy au moment
+      // de cet effet. La supprimer détache leur QueryObserver et peut laisser
+      // isLoading bloqué malgré une réponse RPC correcte dans une nouvelle
+      // entrée du cache. Invalider conserve les abonnements et relit les données.
+      void queryClient.invalidateQueries({
         predicate: (query) =>
           Array.isArray(query.queryKey) &&
           typeof query.queryKey[0] === 'string' &&

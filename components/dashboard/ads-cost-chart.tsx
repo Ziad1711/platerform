@@ -183,8 +183,10 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
 
   const data = v5Enabled ? v5Data : legacyData
   const isLoading = v5Enabled
-    ? v5.isLoading
-    : legacyLoading || !rollout.resolved
+    ? isStoresLoading || v5.isLoading
+    : isStoresLoading || legacyLoading || !rollout.resolved
+  const v5Failed = v5Enabled && !v5.isLoading && v5.isError
+  const v5NoData = v5Enabled && !isLoading && !v5Failed && (!v5Scope || v5Scope.mixed)
   const points = data?.points || []
 
   // Mesure de la largeur réelle du plot pour adapter le nombre de labels X.
@@ -279,7 +281,14 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
     <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-        <h3 className="text-base font-semibold text-foreground">Coûts Ads moyens (CPL / CPA)</h3>
+        <div>
+          <h3 className="text-base font-semibold text-foreground">Coûts Ads moyens (CPL / CPA)</h3>
+          {v5Enabled && v5Scope?.incomplete && (
+            <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+              Données partielles : les journées non couvertes sont exclues du graphique.
+            </p>
+          )}
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowCpl((v) => !v)}
@@ -304,6 +313,14 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
 
       {isLoading ? (
         <div className="h-56 flex items-center justify-center text-muted-foreground">Chargement...</div>
+      ) : v5Failed || v5NoData ? (
+        <div className="h-56 flex items-center justify-center px-6 text-center text-muted-foreground">
+          {v5Scope?.mixed
+            ? 'Plusieurs devises ou niveaux d’accès : les coûts ne sont pas additionnés. Sélectionnez une boutique.'
+            : v5Failed
+              ? 'KPI indisponibles : la lecture V5 a échoué.'
+              : 'KPI indisponibles : aucune donnée exploitable pour cette période.'}
+        </div>
       ) : points.length === 0 ? (
         <div className="h-56 flex items-center justify-center text-muted-foreground">Pas de données pour cette période</div>
       ) : (

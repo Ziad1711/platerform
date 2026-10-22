@@ -39,7 +39,10 @@ from (
   select 'quality_trigger_enabled', 'O',
          (select tgenabled::text from pg_trigger where tgname = 'trg_kpi_invalidate_orders_quality')
   union all
-  select 'kpi_triggers_total', '7',
+  -- Six producteurs ; le septieme trigger (reveil HTTP) est optionnel sur B13.
+  select 'kpi_triggers_total',
+         (6 + (select count(*) from pg_trigger
+                where not tgisinternal and tgname = 'trg_kpi_wakeup'))::text,
          (select count(*)::text from pg_trigger t
             join pg_class c on c.oid = t.tgrelid
             join pg_namespace n on n.oid = c.relnamespace

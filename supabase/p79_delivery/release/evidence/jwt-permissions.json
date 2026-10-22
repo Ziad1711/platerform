@@ -1,0 +1,118 @@
+{
+  "original_file_sha256": "9d6efb225b9d693b0e95b55cf1eb8f757b792d595dfd2a4d245f40c675064daf",
+  "evidence": {
+    "auth": "PASS",
+    "permissions": "PASS",
+    "killSwitchClient": "NOT_COVERED",
+    "killSwitchUI": "NOT_COVERED",
+    "checks": [
+      {
+        "name": "C0",
+        "status": "PASS"
+      },
+      {
+        "name": "six producers",
+        "status": "PASS"
+      },
+      {
+        "name": "no business residues",
+        "status": "PASS"
+      },
+      {
+        "name": "real JWT owner",
+        "status": "PASS"
+      },
+      {
+        "name": "Auth verified owner",
+        "status": "PASS"
+      },
+      {
+        "name": "real JWT commercial",
+        "status": "PASS"
+      },
+      {
+        "name": "Auth verified commercial",
+        "status": "PASS"
+      },
+      {
+        "name": "real JWT other",
+        "status": "PASS"
+      },
+      {
+        "name": "Auth verified other",
+        "status": "PASS"
+      },
+      {
+        "name": "owner full KPI access",
+        "status": "PASS"
+      },
+      {
+        "name": "commercial KPI access",
+        "status": "PASS"
+      },
+      {
+        "name": "commercial financial masking entire response",
+        "status": "PASS"
+      },
+      {
+        "name": "other owns B",
+        "status": "PASS"
+      },
+      {
+        "name": "owner isolation",
+        "status": "PASS"
+      },
+      {
+        "name": "owner isolation orders RLS",
+        "status": "PASS"
+      },
+      {
+        "name": "commercial isolation",
+        "status": "PASS"
+      },
+      {
+        "name": "commercial isolation orders RLS",
+        "status": "PASS"
+      },
+      {
+        "name": "other isolation",
+        "status": "PASS"
+      },
+      {
+        "name": "other isolation orders RLS",
+        "status": "PASS"
+      },
+      {
+        "name": "mixed selection no foreign KPI",
+        "status": "PASS"
+      },
+      {
+        "name": "same pre-revocation JWT",
+        "status": "PASS"
+      },
+      {
+        "name": "revoked JWT KPI denied",
+        "status": "PASS"
+      },
+      {
+        "name": "revoked JWT orders denied",
+        "status": "PASS"
+      },
+      {
+        "name": "synthetic Auth profiles sessions tokens removed",
+        "status": "PASS"
+      },
+      {
+        "name": "all public data functions ACL policies configs triggers restored",
+        "status": "PASS"
+      },
+      {
+        "name": "original Auth user set unchanged",
+        "status": "PASS"
+      }
+    ],
+    "cleanup": "PASS",
+    "killSwitchReason": "No authenticated React frontend running on B13; readiness flags not forged; no V5 cohort enabled.",
+    "created": 3
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "original_file_sha256": "ed606e8872c15ba4ea0e5a382cd5423922e23dc9031d8907d5419ebec243a0de",
+  "evidence": {
+    "rollbackExecuted": true,
+    "reactivation": true,
+    "reconstruction": true,
+    "business": true,
+    "permissions": true,
+    "restoration": true,
+    "sequencesBefore": [
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": 1997959,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "dashboard_kpi_invalidation_seq_seq",
+        "sequenceowner": "postgres"
+      },
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": null,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "dashboard_kpi_rollout_events_id_seq",
+        "sequenceowner": "postgres"
+      },
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": 4,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "dashboard_kpi_worker_run_run_id_seq",
+        "sequenceowner": "postgres"
+      },
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": null,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "delivery_provider_logs_id_seq",
+        "sequenceowner": "postgres"
+      }
+    ],
+    "sequencesAfter": [
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": 1997968,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "dashboard_kpi_invalidation_seq_seq",
+        "sequenceowner": "postgres"
+      },
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": null,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "dashboard_kpi_rollout_events_id_seq",
+        "sequenceowner": "postgres"
+      },
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": 6,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "dashboard_kpi_worker_run_run_id_seq",
+        "sequenceowner": "postgres"
+      },
+      {
+        "cycle": false,
+        "data_type": "bigint",
+        "max_value": 9223372036854776000,
+        "min_value": 1,
+        "cache_size": 1,
+        "last_value": null,
+        "schemaname": "public",
+        "start_value": 1,
+        "increment_by": 1,
+        "sequencename": "delivery_provider_logs_id_seq",
+        "sequenceowner": "postgres"
+      }
+    ],
+    "harnessStrictComparisonFailure": "business exact after resume",
+    "authorizedDifferences": [
+      {
+        "table": "orders",
+        "index": 0,
+        "column": "updated_at",
+        "before": "2026-10-21T22:09:27.301043+00:00",
+        "after": "2026-10-21T22:09:40.410761+00:00"
+      }
+    ],
+    "businessAfterResume": "identical except updated_at from two intentional writes"
+  }
+}
