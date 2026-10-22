@@ -8,11 +8,16 @@
  *
  * - les composantes additives sont regroupées **avant** tout ratio : CPL et CPA
  *   ne sont jamais la moyenne de ratios journaliers ;
- * - aucun montant n'est fabriqué : une journée absente du lecteur reste absente ;
- * - les seules journées exclues sont celles sans aucune composante affichable,
- *   comme dans le dashboard legacy.
+ * - aucune journée n'est inventée hors de la fenêtre couverte : les journées
+ *   antérieures à l'historique de la boutique restent absentes ;
+ * - à l'intérieur de la fenêtre, toutes les journées existent, y compris celles
+ *   sans donnée (zéros réels), comme sur le graphique CPL / CPA ;
+ * - « Toujours » garde le filtre historique et n'affiche que les buckets avec
+ *   activité réelle.
  */
 import type { KpiReaderPoint } from './kpi-reader'
+import { addBusinessDays } from './business-time'
+import type { BusinessRange } from './business-time'
 import type { DashboardPeriod } from '@/lib/utils'
 
 export type SeriesGranularity = 'day' | 'month'
@@ -30,6 +35,24 @@ export interface SeriesBucket {
 
 function bucketKey(date: string, granularity: SeriesGranularity): string {
   return granularity === 'month' ? `${date.slice(0, 7)}-01` : date
+}
+
+function nextMonthKey(key: string): string {
+  const [year, month] = key.split('-').map(Number)
+  const next = new Date(Date.UTC(year, month, 1))
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
+}
+
+function emptyBucket(date: string): SeriesBucket {
+  return {
+    date,
+    orders_count: 0,
+    delivered_count: 0,
+    revenue: 0,
+    ads: 0,
+    purchase: 0,
+    margin: 0,
+  }
 }
 
 function toNumber(value: string | undefined): number {
@@ -94,29 +117,79 @@ export function hasRevenueActivity(bucket: SeriesBucket): boolean {
   )
 }
 
-/** Graphique de revenus : buckets avec commande ou activité financière. */
-export function revenueSeries(
+/**
+ * Complète la série sur toute la fenêtre calendaire : chaque journée (ou mois)
+ * de `window` existe, y compris sans donnée, avec des zéros réels.
+ *
+ * Aucune journée antérieure à la fenêtre couverte n'est fabriquée : la borne
+ * basse provient de `chartFillWindow` (historique de la boutique respecté).
+ * Une période entièrement vide renvoie une série vide : l'état « Pas de
+ * données » reste affiché, aucun mois nul n'est inventé.
+ */
+export function completeBuckets(
   points: KpiReaderPoint[],
   granularity: SeriesGranularity,
+  window: BusinessRange | null,
 ): SeriesBucket[] {
-  return bucketPoints(points, granularity).filter(hasRevenueActivity)
+  if (points.length === 0) return []
+  const buckets = bucketPoints(points, granularity)
+  if (!window) return buckets
+
+  const byKey = new Map(buckets.map((bucket) => [bucket.date, bucket]))
+  const completed: SeriesBucket[] = []
+
+  if (granularity === 'month') {
+    const startKey = bucketKey(window.from, 'month')
+    const endKey = bucketKey(window.to, 'month')
+    let key = startKey
+    while (key <= endKey) {
+      completed.push(byKey.get(key) ?? emptyBucket(key))
+      key = nextMonthKey(key)
+    }
+    return completed
+  }
+
+  let day = window.from
+  while (day <= window.to) {
+    completed.push(byKey.get(day) ?? emptyBucket(day))
+    day = addBusinessDays(day, 1)
+  }
+  return completed
 }
 
 /**
- * Graphique publicitaire : buckets vides conservés, sauf pour « Toujours » où
- * l'ancien dashboard ne gardait que les périodes avec activité réelle
- * (dépense, commande ou livraison).
+ * Graphique de revenus : toutes les journées de la période sont tracées, même
+ * sans commande ni montant. « Toujours » conserve le filtre historique et ne
+ * garde que les buckets avec commande ou activité financière (pas de série de
+ * plusieurs centaines de journées vides).
+ */
+export function revenueSeries(
+  points: KpiReaderPoint[],
+  granularity: SeriesGranularity,
+  period: DashboardPeriod,
+  window: BusinessRange | null = null,
+): SeriesBucket[] {
+  if (period === 'all') return bucketPoints(points, granularity).filter(hasRevenueActivity)
+  return completeBuckets(points, granularity, window)
+}
+
+/**
+ * Graphique publicitaire : mêmes journées que le graphique de revenus, y
+ * compris les journées sans dépense. « Toujours » conserve le filtre historique
+ * (dépense, commande ou livraison réelle).
  */
 export function adsSeries(
   points: KpiReaderPoint[],
   granularity: SeriesGranularity,
   period: DashboardPeriod,
+  window: BusinessRange | null = null,
 ): SeriesBucket[] {
-  const buckets = bucketPoints(points, granularity)
-  if (period !== 'all') return buckets
-  return buckets.filter(
-    (bucket) => bucket.ads !== 0 || bucket.orders_count !== 0 || bucket.delivered_count !== 0,
-  )
+  if (period === 'all') {
+    return bucketPoints(points, granularity).filter(
+      (bucket) => bucket.ads !== 0 || bucket.orders_count !== 0 || bucket.delivered_count !== 0,
+    )
+  }
+  return completeBuckets(points, granularity, window)
 }
 
 /** CPL / CPA recalculés sur les composantes déjà regroupées. */

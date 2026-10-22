@@ -224,23 +224,56 @@ export function businessDayCount(range: BusinessRange): number {
 }
 
 /**
- * Granularité historique des graphiques du Dashboard (legacy et V5).
+ * Granularité historique des graphiques du Dashboard.
  *
- * Règle reprise telle quelle du dashboard d'origine, sans invention :
- * mensuel si la durée dépasse 31 jours, **sauf** pour « Ce mois »,
- * « Aujourd'hui », « Hier » et « Cette semaine » qui restent journaliers.
+ * Règle appliquée :
+ * - « Cette année », « L'année dernière » et « Toujours » sont mensuels ;
+ * - une période personnalisée devient mensuelle au-delà de 31 jours ;
+ * - tous les autres filtres (« Aujourd'hui », « Hier », « Cette semaine »,
+ *   « Ce mois », « Mois dernier », « Ce trimestre ») restent journaliers.
  */
 export function chartGranularity(
   period: DashboardPeriod,
   dayCount: number,
 ): 'day' | 'month' {
-  const monthly =
-    period !== 'month' &&
-    period !== 'today' &&
-    period !== 'yesterday' &&
-    period !== 'week' &&
-    dayCount > 31
-  return monthly ? 'month' : 'day'
+  if (period === 'year' || period === 'last_year' || period === 'all') return 'month'
+  if (period === 'custom' && dayCount > 31) return 'month'
+  return 'day'
+}
+
+/**
+ * Fenêtre calendaire complète des graphiques : toutes les journées de la
+ * période, y compris celles sans donnée.
+ *
+ * - la borne haute s'arrête à aujourd'hui : aucune journée future inventée ;
+ * - la borne basse ne remonte jamais avant l'historique réel de la boutique :
+ *   `coverageDays` est le nombre de journées renvoyées par le lecteur après
+ *   application de `history_from`, ce qui permet de retrouver le début couvert ;
+ * - en multi-boutiques (historiques différents), la borne basse est ramenée au
+ *   premier point réellement renvoyé plutôt que de fabriquer des journées.
+ */
+export function chartFillWindow(
+  range: BusinessRange,
+  coverageDays: number,
+  storeCount: number,
+  firstDay: string | null = null,
+  now: Date = new Date(),
+): BusinessRange {
+  const today = businessTodayIso(now)
+  const requestedEnd = addBusinessDays(range.to, -1)
+  const to = requestedEnd < today ? requestedEnd : today
+
+  const totalDays = businessDayCount(range)
+  let from = range.from
+
+  if (storeCount === 1 && coverageDays > 0 && coverageDays < totalDays) {
+    from = addBusinessDays(range.to, -coverageDays)
+  } else if (storeCount > 1 && firstDay) {
+    from = firstDay
+  }
+
+  if (from < range.from) from = range.from
+  return { from, to }
 }
 
 /**

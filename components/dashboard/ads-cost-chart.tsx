@@ -12,6 +12,7 @@ import {
   businessDayCount,
   businessRangeToInstants,
   chartBusinessRange,
+  chartFillWindow,
   chartGranularity,
   formatBusinessDayLabel,
   legacyBusinessRange,
@@ -79,9 +80,15 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
   const legacyPeriod = businessRangeToInstants(legacyQueryRange)
 
   const v5Enabled = mode === 'v5'
-  const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
+  const v5Range = useMemo(
+    () => businessRange(selectedPeriod, customStartDate, customEndDate),
+    [selectedPeriod, customStartDate, customEndDate],
+  )
   // Même fenêtre que le legacy : sept journées pour « Aujourd'hui » / « Hier ».
-  const v5ChartRange = chartBusinessRange(selectedPeriod, v5Range)
+  const v5ChartRange = useMemo(
+    () => chartBusinessRange(selectedPeriod, v5Range),
+    [selectedPeriod, v5Range],
+  )
   const v5Granularity = chartGranularity(selectedPeriod, businessDayCount(v5ChartRange))
   const v5 = useKpiReader({
     enabled: v5Enabled && !isStoresLoading,
@@ -93,19 +100,32 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
     pollMs: 0,
   })
   const v5Scope = useMemo(() => (v5.data ? buildReaderScope(v5.data) : null), [v5.data])
+  // Même fenêtre calendaire que le graphique de revenus : jours vides inclus.
+  const v5FillWindow = useMemo(
+    () =>
+      v5Scope
+        ? chartFillWindow(
+            v5ChartRange,
+            v5Scope.coverage.days_total,
+            v5Scope.stores,
+            v5Scope.points[0]?.date ?? null,
+          )
+        : null,
+    [v5Scope, v5ChartRange],
+  )
   useKpiReaderErrorTelemetry('ads-cost-chart', v5Enabled, v5.isError)
   const v5Data = useMemo(() => {
     if (!v5Enabled || !v5Scope) return undefined
     // CPL/CPA sont recalculés APRÈS addition des dépenses et des compteurs du
     // bucket (jamais la moyenne des ratios journaliers).
     return {
-      points: adsSeries(v5Scope.points, v5Granularity, selectedPeriod).map((bucket) => ({
+      points: adsSeries(v5Scope.points, v5Granularity, selectedPeriod, v5FillWindow).map((bucket) => ({
         date: bucket.date,
         label: formatBusinessDayLabel(bucket.date, v5Granularity),
         ...bucketRatios(bucket),
       })),
     }
-  }, [v5Enabled, v5Scope, v5Granularity, selectedPeriod])
+  }, [v5Enabled, v5Scope, v5Granularity, selectedPeriod, v5FillWindow])
 
   const [showCpl, setShowCpl] = useState(true)
   const [showCpa, setShowCpa] = useState(true)

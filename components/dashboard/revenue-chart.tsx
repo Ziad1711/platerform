@@ -13,6 +13,7 @@ import {
   businessDayCount,
   businessRangeToInstants,
   chartBusinessRange,
+  chartFillWindow,
   chartGranularity,
   formatBusinessDayLabel,
   legacyBusinessRange,
@@ -104,8 +105,14 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
   const v5Enabled = mode === 'v5'
   // Période réelle (cartes, compteurs) et fenêtre du graphique (7 journées pour
   // « Aujourd'hui » / « Hier »), exactement comme le dashboard legacy.
-  const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
-  const v5ChartRange = chartBusinessRange(selectedPeriod, v5Range)
+  const v5Range = useMemo(
+    () => businessRange(selectedPeriod, customStartDate, customEndDate),
+    [selectedPeriod, customStartDate, customEndDate],
+  )
+  const v5ChartRange = useMemo(
+    () => chartBusinessRange(selectedPeriod, v5Range),
+    [selectedPeriod, v5Range],
+  )
   const v5Granularity = chartGranularity(selectedPeriod, businessDayCount(v5ChartRange))
   const v5 = useKpiReader({
     enabled: v5Enabled && !isStoresLoading,
@@ -117,6 +124,20 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     pollMs: 0,
   })
   const v5Scope = useMemo(() => (v5.data ? buildReaderScope(v5.data) : null), [v5.data])
+  // Fenêtre calendaire complète : toutes les journées de la période, y compris
+  // sans donnée, sans jamais remonter avant l'historique réel de la boutique.
+  const v5FillWindow = useMemo(
+    () =>
+      v5Scope
+        ? chartFillWindow(
+            v5ChartRange,
+            v5Scope.coverage.days_total,
+            v5Scope.stores,
+            v5Scope.points[0]?.date ?? null,
+          )
+        : null,
+    [v5Scope, v5ChartRange],
+  )
   useKpiReaderErrorTelemetry('revenue-chart', v5Enabled, v5.isError)
   const strictPeriodStart = legacyPeriod.start
   const strictPeriodEnd = legacyPeriod.end
@@ -374,10 +395,9 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     const n = (key: string) => Number(totals[key] ?? 0)
     return {
       financialAccess: v5Scope.access === 'full',
-      // Regroupement mensuel/journalier identique au legacy : les composantes
-      // sont additionnées avant tout ratio, et les buckets sans activité sont
-      // retirés comme dans l'ancien graphique.
-      points: revenueSeries(v5Scope.points, v5Granularity).map((bucket) => ({
+      // Toutes les journées de la fenêtre sont tracées (jours vides inclus),
+      // avec regroupement mensuel pour l'année et « Toujours ».
+      points: revenueSeries(v5Scope.points, v5Granularity, selectedPeriod, v5FillWindow).map((bucket) => ({
         date: bucket.date,
         label: formatBusinessDayLabel(bucket.date, v5Granularity),
         revenue: bucket.revenue,
@@ -404,7 +424,7 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
         waitingPickupOrders: v5Counters.data ? v5Counters.data.waitingPickup : null,
       },
     }
-  }, [v5Enabled, v5Scope, v5Counters.data, v5Granularity])
+  }, [v5Enabled, v5Scope, v5Counters.data, v5Granularity, v5FillWindow, selectedPeriod])
 
   const data = v5Enabled ? v5Data : legacyData
   const isLoading = v5Enabled
