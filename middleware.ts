@@ -4,6 +4,16 @@ import type { NextRequest } from 'next/server'
 import { getFirstAllowedRoute, hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
 import { isProtectedAppRoute } from '@/lib/auth/redirects'
 
+/** Budget du garde de navigation : au-delà, le rendu serveur reste seul juge. */
+const MIDDLEWARE_AUTH_DEADLINE_MS = 4_000
+
+function withDeadline<T>(promise: Promise<T>): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), MIDDLEWARE_AUTH_DEADLINE_MS)),
+  ])
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
@@ -48,9 +58,12 @@ export async function middleware(request: NextRequest) {
   )
 
   // getUser vérifie le JWT via l'API Auth et renouvelle la session si nécessaire
-  // (les cookies éventuels sont écrits via setAll ci-dessus).
-  const { data: { user } } = await supabase.auth.getUser()
-  const sessionUser = user ?? (await supabase.auth.getSession()).data.session?.user ?? null
+  // (les cookies éventuels sont écrits via setAll ci-dessus). Une Auth lente ne
+  // doit jamais bloquer la navigation jusqu'au délai de la plateforme : au-delà
+  // du budget, on laisse le rendu serveur appliquer la garde d'identité.
+  const authResult = await withDeadline(supabase.auth.getUser())
+  if (!authResult) return response
+  const sessionUser = authResult.data.user ?? null
 
   // Permission guards uniquement si l'utilisateur est connecté
   // (le blocage des routes sans session est géré par app/(app)/layout.tsx côté serveur)
@@ -58,13 +71,20 @@ export async function middleware(request: NextRequest) {
     const storeId = request.cookies.get('current-store-id')?.value
 
     if (storeId) {
-      const { data: member, error } = await supabase
-        .from('store_members')
-        .select('role')
-        .eq('store_id', storeId)
-        .eq('user_id', sessionUser.id)
-        .eq('status', 'active')
-        .maybeSingle()
+      const membership = await withDeadline(
+        Promise.resolve(
+          supabase
+            .from('store_members')
+            .select('role')
+            .eq('store_id', storeId)
+            .eq('user_id', sessionUser.id)
+            .eq('status', 'active')
+            .maybeSingle()
+        )
+      )
+      // Lecture non aboutie dans le budget : aucune décision de redirection.
+      if (!membership) return response
+      const { data: member, error } = membership
 
       const defaultRoute = getFirstAllowedRoute(member?.role as any)
 

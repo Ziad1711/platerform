@@ -80,17 +80,38 @@ function isDefinitiveUnauthenticated(
  * d'accès (et non l'objet `user`) puis le resoumet à l'API : un cookie
  * forgé ne peut donc pas authentifier.
  */
+/**
+ * Budget d'une vérification d'identité réseau : au-delà, l'API Auth est
+ * considérée momentanément indisponible (jamais « déconnecté »).
+ */
+const AUTH_VERIFY_TIMEOUT_MS = 8_000
+
+async function withDeadline<T>(promise: Promise<T>): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), AUTH_VERIFY_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 async function resolveServerUserResult(): Promise<ServerUserResult> {
   const supabase = await getRequestClient().catch(() => null)
   if (!supabase) return { user: null, authUnavailable: true }
 
-  // 1. Vérification serveur du JWT (source de vérité).
+  // 1. Vérification serveur du JWT (source de vérité), bornée dans le temps.
   let user: User | null = null
   let firstError: { name?: string; code?: string; status?: number } | null = null
   try {
-    const { data, error } = await supabase.auth.getUser()
-    user = data.user ?? null
-    firstError = error ?? null
+    const first = await withDeadline(supabase.auth.getUser())
+    if (!first) return { user: null, authUnavailable: true }
+    user = first.data.user ?? null
+    firstError = first.error ?? null
   } catch {
     // Erreur inattendue : ne pas conclure à une déconnexion.
     return { user: null, authUnavailable: true }
@@ -102,9 +123,10 @@ async function resolveServerUserResult(): Promise<ServerUserResult> {
   let session: { access_token?: string } | null = null
   let sessionError: { name?: string; code?: string; status?: number } | null = null
   try {
-    const { data, error } = await supabase.auth.getSession()
-    session = data.session ?? null
-    sessionError = error ?? null
+    const result = await withDeadline(supabase.auth.getSession())
+    if (!result) return { user: null, authUnavailable: true }
+    session = result.data.session ?? null
+    sessionError = result.error ?? null
   } catch {
     return { user: null, authUnavailable: true }
   }
@@ -113,9 +135,10 @@ async function resolveServerUserResult(): Promise<ServerUserResult> {
     let verifiedUser: User | null = null
     let verifyError: { name?: string; code?: string; status?: number } | null = null
     try {
-      const { data, error } = await supabase.auth.getUser(session.access_token)
-      verifiedUser = data.user ?? null
-      verifyError = error ?? null
+      const verified = await withDeadline(supabase.auth.getUser(session.access_token))
+      if (!verified) return { user: null, authUnavailable: true }
+      verifiedUser = verified.data.user ?? null
+      verifyError = verified.error ?? null
     } catch {
       return { user: null, authUnavailable: true }
     }
