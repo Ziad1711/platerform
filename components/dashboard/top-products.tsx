@@ -5,6 +5,7 @@ import { TrendingUp } from 'lucide-react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import { DASHBOARD_ANALYTICS_STALE_MS } from '@/lib/dashboard/analytics-cache'
 import { formatCurrency, formatNumber } from '@/lib/utils'
 import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 
@@ -22,6 +23,7 @@ export default function TopProducts() {
   const { data: topProductsRaw, isLoading } = useQuery<ProductMetric[]>({
     queryKey: ['dashboard-top-products', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
     enabled: !isStoresLoading,
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 

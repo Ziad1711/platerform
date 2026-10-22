@@ -6,6 +6,7 @@ import type { DashboardPeriod } from '@/lib/utils'
 import type { Role } from '@/lib/auth/permissions'
 import { createClient } from '@/lib/supabase/client'
 import { loadStoreAccess, STORE_ACCESS_TIMEOUT_MS } from '@/lib/auth/store-access'
+import { DASHBOARD_STORES_STALE_ALERT_MS } from '@/lib/dashboard/analytics-cache'
 import { toAccessMap } from '@/lib/auth/store-bootstrap'
 import type { AccessibleStore, AppBootstrap, StoreSelection } from '@/lib/auth/store-bootstrap'
 import {
@@ -213,6 +214,7 @@ export function StoreProvider({
     dataUpdatedAt,
     isLoading,
     isError,
+    error: storesQueryError,
     refetch: retryStores,
   } = useQuery({
     queryKey: ['accessible-stores', initialUserId],
@@ -274,6 +276,17 @@ export function StoreProvider({
   // elle est signalée séparément et ne doit ni effacer la sélection ni déclencher
   // un faux onboarding.
   const isStoresError = Boolean(initialUserId) && isError
+  // Une revalidation peut échouer pour une cause PASSAGÈRE (timeout de la borne
+  // de 12 s, coupure réseau, 5xx du pooler) alors que l'instantané confirmé reste
+  // parfaitement valide : afficher « données obsolètes » dans ce cas est un faux
+  // positif permanent, puisque la seule action proposée rejoue la même lecture.
+  const storesErrorIsTransient = isTransientStoreAccessError(storesQueryError)
+  // Un incident passager ne justifie pas d'alerte ; une absence de revalidation
+  // réussie qui se prolonge, si. On s'appuie sur l'âge réel de l'instantané
+  // confirmé : au-delà de la borne, les chiffres affichés peuvent avoir bougé.
+  const storesSnapshotAgeMs = dataUpdatedAt ? Date.now() - dataUpdatedAt : Number.POSITIVE_INFINITY
+  const storesErrorIsDurable =
+    !storesErrorIsTransient || storesSnapshotAgeMs > DASHBOARD_STORES_STALE_ALERT_MS
 
   // Sélection EFFECTIVE du rendu courant : la liste confirmée fait autorité, une
   // préférence devenue invalide n'est donc jamais exposée ni persistée pendant le
@@ -544,7 +557,7 @@ export function StoreProvider({
       {/* key=accessVersion remonte les consommateurs privés à chaque révocation
           confirmée, vidant leurs états locaux. */}
       <Fragment key={accessVersion}>
-        {isStoresError && accessibleStores.length > 0 && (
+        {isStoresError && storesErrorIsDurable && accessibleStores.length > 0 && (
           <div className="fixed left-1/2 top-3 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-600 shadow-sm">
             <span>
               Impossible de recharger vos magasins — les données affichées peuvent
@@ -563,6 +576,31 @@ export function StoreProvider({
       </Fragment>
     </StoreContext.Provider>
   )
+}
+
+/**
+ * Vrai pour une erreur de revalidation PASSAGÈRE : borne d'attente atteinte,
+ * requête annulée, coupure réseau ou 5xx du pooler. Ces incidents ne disent rien
+ * de la validité de l'instantané déjà confirmé : le prochain focus revalidera.
+ *
+ * Les erreurs définitives (RLS, JWT, réponse mal formée) restent signalées :
+ * masquer un refus d'accès serait une perte d'information de sécurité.
+ */
+function isTransientStoreAccessError(error: unknown): boolean {
+  if (!error) return false
+  const name = typeof (error as { name?: unknown }).name === 'string' ? String((error as { name: string }).name) : ''
+  const message =
+    typeof (error as { message?: unknown }).message === 'string'
+      ? String((error as { message: string }).message)
+      : ''
+  const normalized = message.toLowerCase()
+
+  if (name === 'AbortError' || name === 'TimeoutError') return true
+  if (normalized.includes('store_access_aborted') || normalized.includes('store_access_timeout')) return true
+  if (normalized.includes('failed to fetch') || normalized.includes('networkerror')) return true
+  if (normalized.includes('timeout') || normalized.includes('timed out')) return true
+  if (/\b(502|503|504)\b/.test(normalized)) return true
+  return false
 }
 
 export function useStore() {

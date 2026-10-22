@@ -5,6 +5,7 @@ import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, Target, Package, Tr
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import { DASHBOARD_ANALYTICS_STALE_MS } from '@/lib/dashboard/analytics-cache'
 import { formatCurrency, formatNumber } from '@/lib/utils'
 import AdsCostChart from '@/components/dashboard/ads-cost-chart'
 import { businessRange, previousBusinessRange, useKpiReader, KPI_REVISION_POLL_MS } from '@/lib/dashboard/use-kpi-reader'
@@ -242,6 +243,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
   const { data: legacyData, isLoading: legacyLoading } = useQuery<KpiResult>({
     queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
     enabled: !isStoresLoading && mode !== 'v5' && rollout.resolved,
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
     queryFn: async () => {
       const fetchMetrics = async (range: BusinessRange): Promise<KpiData> => {
         const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds

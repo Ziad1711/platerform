@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import { DASHBOARD_ANALYTICS_STALE_MS } from '@/lib/dashboard/analytics-cache'
 import { formatCurrency } from '@/lib/utils'
 import { businessRangeToInstants, legacyBusinessRange } from '@/lib/dashboard/business-time'
 
@@ -22,6 +23,7 @@ export default function CityPerformance() {
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard-city-performance', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds],
     enabled: !isStoresLoading,
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
 

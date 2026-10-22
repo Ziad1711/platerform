@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
+import { DASHBOARD_ANALYTICS_STALE_MS } from '@/lib/dashboard/analytics-cache'
 import { Info } from 'lucide-react'
 import { formatCurrency, formatNumber, buildRoundedPath } from '@/lib/utils'
 import { businessRange, useKpiReader } from '@/lib/dashboard/use-kpi-reader'
@@ -127,6 +128,7 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
   const { data: legacyData, isLoading: legacyLoading } = useQuery({
     queryKey: ['dashboard-business-trends', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
     enabled: !isStoresLoading && mode !== 'v5' && rollout.resolved,
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
     queryFn: async () => {
       const periodStart = legacyPeriod.start
       const periodEndExclusive = legacyPeriod.end

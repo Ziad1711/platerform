@@ -1,6 +1,7 @@
 'use client'
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { invalidateDashboardAnalytics } from '@/lib/dashboard/analytics-cache'
 import { useState, createContext, useContext, useEffect, useMemo, useRef } from 'react'
 import { StoreProvider, useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
@@ -130,7 +131,20 @@ function isDefinitiveUnauthenticated(error: AuthErrorLike): boolean {
  * aucune lecture initiale des appartenances n'est nécessaire au premier rendu.
  */
 function PrivateApp({ bootstrap, children }: { bootstrap: AppBootstrap; children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient())
+  // Toute écriture réussie périme les agrégats du dashboard : sans cette
+  // invalidation centralisée, le `staleTime` analytique de 60 s laisserait des
+  // chiffres périmés après une commande, une dépense, une livraison ou une
+  // modification de produit.
+  const [queryClient] = useState(() => {
+    const client = new QueryClient({
+      mutationCache: new MutationCache({
+        onSuccess: () => {
+          invalidateDashboardAnalytics(client)
+        },
+      }),
+    })
+    return client
+  })
 
   // Au démontage (changement d'identité), annuler les requêtes en vol et vider
   // le cache privé : aucune réponse ni effet de bord tardif de A ne survit.
