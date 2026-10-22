@@ -218,6 +218,45 @@ function rangeForPeriod(
   }
 }
 
+/** Nombre de journées métier couvertes par `[from, to[`. */
+export function businessDayCount(range: BusinessRange): number {
+  return Math.max(1, dayNumber(range.to) - dayNumber(range.from))
+}
+
+/**
+ * Granularité historique des graphiques du Dashboard (legacy et V5).
+ *
+ * Règle reprise telle quelle du dashboard d'origine, sans invention :
+ * mensuel si la durée dépasse 31 jours, **sauf** pour « Ce mois »,
+ * « Aujourd'hui », « Hier » et « Cette semaine » qui restent journaliers.
+ */
+export function chartGranularity(
+  period: DashboardPeriod,
+  dayCount: number,
+): 'day' | 'month' {
+  const monthly =
+    period !== 'month' &&
+    period !== 'today' &&
+    period !== 'yesterday' &&
+    period !== 'week' &&
+    dayCount > 31
+  return monthly ? 'month' : 'day'
+}
+
+/**
+ * Fenêtre du graphique : les filtres « Aujourd'hui » et « Hier » affichent les
+ * sept dernières journées (comportement d'origine), sans changer la période des
+ * cartes ni des compteurs.
+ */
+export function chartBusinessRange(
+  period: DashboardPeriod,
+  range: BusinessRange,
+): BusinessRange {
+  return period === 'today' || period === 'yesterday'
+    ? { from: addBusinessDays(range.from, -6), to: range.to }
+    : range
+}
+
 /** Période du lecteur V5 : « toujours » est borné à 365 jours. */
 export function businessRange(
   period: DashboardPeriod,

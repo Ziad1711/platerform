@@ -9,10 +9,14 @@ import { buildRoundedPath } from '@/lib/utils'
 import { businessRange, useKpiReader } from '@/lib/dashboard/use-kpi-reader'
 import {
   addBusinessDays,
+  businessDayCount,
   businessRangeToInstants,
+  chartBusinessRange,
+  chartGranularity,
   formatBusinessDayLabel,
   legacyBusinessRange,
 } from '@/lib/dashboard/business-time'
+import { adsSeries, bucketRatios } from '@/lib/dashboard/kpi-series'
 import { buildReaderScope } from '@/lib/dashboard/kpi-reader-mappers'
 import type { KpiReaderMode } from '@/lib/dashboard/kpi-reader-flag'
 import { useKpiReaderErrorTelemetry, useKpiRollout } from '@/lib/dashboard/use-kpi-rollout'
@@ -76,28 +80,32 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
 
   const v5Enabled = mode === 'v5'
   const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
+  // Même fenêtre que le legacy : sept journées pour « Aujourd'hui » / « Hier ».
+  const v5ChartRange = chartBusinessRange(selectedPeriod, v5Range)
+  const v5Granularity = chartGranularity(selectedPeriod, businessDayCount(v5ChartRange))
   const v5 = useKpiReader({
     enabled: v5Enabled && !isStoresLoading,
     supabase,
     boundary: `${userId ?? 'anonymous'}:${rollout.accessFingerprint}`,
     storeIds: currentStoreId ? [currentStoreId] : null,
-    from: v5Range.from,
-    to: v5Range.to,
+    from: v5ChartRange.from,
+    to: v5ChartRange.to,
     pollMs: 0,
   })
   const v5Scope = useMemo(() => (v5.data ? buildReaderScope(v5.data) : null), [v5.data])
   useKpiReaderErrorTelemetry('ads-cost-chart', v5Enabled, v5.isError)
   const v5Data = useMemo(() => {
     if (!v5Enabled || !v5Scope) return undefined
+    // CPL/CPA sont recalculés APRÈS addition des dépenses et des compteurs du
+    // bucket (jamais la moyenne des ratios journaliers).
     return {
-      points: v5Scope.points.map((point) => ({
-        date: point.date,
-        label: formatBusinessDayLabel(point.date, 'day'),
-        cpl: point.orders_count > 0 ? Number(point.ads) / point.orders_count : 0,
-        cpa: point.delivered_count > 0 ? Number(point.ads) / point.delivered_count : 0,
+      points: adsSeries(v5Scope.points, v5Granularity, selectedPeriod).map((bucket) => ({
+        date: bucket.date,
+        label: formatBusinessDayLabel(bucket.date, v5Granularity),
+        ...bucketRatios(bucket),
       })),
     }
-  }, [v5Enabled, v5Scope])
+  }, [v5Enabled, v5Scope, v5Granularity, selectedPeriod])
 
   const [showCpl, setShowCpl] = useState(true)
   const [showCpa, setShowCpa] = useState(true)

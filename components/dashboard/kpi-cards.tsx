@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { DASHBOARD_ANALYTICS_STALE_MS } from '@/lib/dashboard/analytics-cache'
 import { formatCurrency, formatNumber } from '@/lib/utils'
 import AdsCostChart from '@/components/dashboard/ads-cost-chart'
-import { businessRange, previousBusinessRange, useKpiReader, KPI_REVISION_POLL_MS } from '@/lib/dashboard/use-kpi-reader'
+import { businessRange, useKpiReader, KPI_REVISION_POLL_MS } from '@/lib/dashboard/use-kpi-reader'
 import {
   businessRangeToInstants,
   legacyBusinessRange,
@@ -92,7 +92,10 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
 
   const v5Enabled = mode === 'v5'
   const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
-  const v5PreviousRange = previousBusinessRange(v5Range)
+  // Comparaison identique au dashboard legacy : mois/trimestre/année précédents
+  // complets, et aucune comparaison pour « Toujours ».
+  const v5PreviousRange = previousBusinessPeriodRange(selectedPeriod, v5Range)
+  const v5ComparablePeriod = selectedPeriod !== 'all'
   const v5StoreIds = currentStoreId ? [currentStoreId] : null
   const boundary = `${userId ?? 'anonymous'}:${rollout.accessFingerprint}`
 
@@ -107,7 +110,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     pollMs: variant === 'primary' ? KPI_REVISION_POLL_MS : 0,
   })
   const v5Previous = useKpiReader({
-    enabled: v5Enabled && !isStoresLoading,
+    enabled: v5Enabled && !isStoresLoading && v5ComparablePeriod,
     supabase,
     boundary,
     storeIds: v5StoreIds,
@@ -214,25 +217,24 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     if (!v5Enabled) return null
     const notes: string[] = []
     if (selectedPeriod === 'all') {
-      notes.push('Période « Toujours » bornée à 365 jours : aucune variation n’est calculée.')
+      notes.push('Variations non calculées sur « Toujours ».')
     } else if (!v5Comparable) {
-      if (v5Previous.isError) {
-        notes.push(
-          'Comparaison indisponible : la période précédente n’a pas pu être lue, aucune variation n’est affichée.',
-        )
-      } else if (v5Previous.data) {
-        notes.push(
-          'Comparaison non calculable : une des deux périodes n’est pas entièrement couverte, aucune variation n’est affichée.',
-        )
-      }
+      notes.push('Comparaison indisponible pour cette période.')
     }
     if (v5Coverage) {
-      const unavailable =
-        v5Coverage.days_missing + v5Coverage.days_dirty + v5Coverage.days_incompatible
-      if (unavailable > 0) {
+      const dirty = v5Coverage.days_dirty
+      const incomplete = v5Coverage.days_missing + v5Coverage.days_incompatible
+      // Un total partiel ne doit jamais être présenté comme complet, mais le
+      // détail des partitions reste dans les outils internes. La cause affichée
+      // reste exacte : actualisation en cours ≠ journée réellement absente.
+      if (dirty > 0 && incomplete > 0) {
         notes.push(
-          `Données partielles : ${v5Coverage.days_missing} jour(s) indisponible(s), ${v5Coverage.days_dirty} en cours d’actualisation, ${v5Coverage.days_incompatible} incompatible(s). Ces journées sont exclues des totaux.`,
+          'Données partielles : certains jours sont en cours d’actualisation et d’autres sont incomplets. Ces journées sont exclues des totaux.',
         )
+      } else if (dirty > 0) {
+        notes.push('Données en cours d’actualisation : ces journées sont exclues des totaux.')
+      } else if (incomplete > 0) {
+        notes.push('Données incomplètes : certains jours sont exclus des totaux.')
       }
     }
     return notes.length > 0 ? notes.join(' ') : null

@@ -10,10 +10,14 @@ import { formatCurrency, formatNumber, buildRoundedPath } from '@/lib/utils'
 import { businessRange, useKpiReader } from '@/lib/dashboard/use-kpi-reader'
 import {
   addBusinessDays,
+  businessDayCount,
   businessRangeToInstants,
+  chartBusinessRange,
+  chartGranularity,
   formatBusinessDayLabel,
   legacyBusinessRange,
 } from '@/lib/dashboard/business-time'
+import { revenueSeries } from '@/lib/dashboard/kpi-series'
 import { buildReaderScope } from '@/lib/dashboard/kpi-reader-mappers'
 import type { KpiReaderMode } from '@/lib/dashboard/kpi-reader-flag'
 import { useKpiReaderErrorTelemetry, useKpiRollout } from '@/lib/dashboard/use-kpi-rollout'
@@ -98,14 +102,18 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
   const legacyPeriod = businessRangeToInstants(legacyQueryRange)
 
   const v5Enabled = mode === 'v5'
+  // Période réelle (cartes, compteurs) et fenêtre du graphique (7 journées pour
+  // « Aujourd'hui » / « Hier »), exactement comme le dashboard legacy.
   const v5Range = businessRange(selectedPeriod, customStartDate, customEndDate)
+  const v5ChartRange = chartBusinessRange(selectedPeriod, v5Range)
+  const v5Granularity = chartGranularity(selectedPeriod, businessDayCount(v5ChartRange))
   const v5 = useKpiReader({
     enabled: v5Enabled && !isStoresLoading,
     supabase,
     boundary: `${userId ?? 'anonymous'}:${rollout.accessFingerprint}`,
     storeIds: currentStoreId ? [currentStoreId] : null,
-    from: v5Range.from,
-    to: v5Range.to,
+    from: v5ChartRange.from,
+    to: v5ChartRange.to,
     pollMs: 0,
   })
   const v5Scope = useMemo(() => (v5.data ? buildReaderScope(v5.data) : null), [v5.data])
@@ -366,16 +374,19 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     const n = (key: string) => Number(totals[key] ?? 0)
     return {
       financialAccess: v5Scope.access === 'full',
-      points: v5Scope.points.map((point) => ({
-        date: point.date,
-        label: formatBusinessDayLabel(point.date, 'day'),
-        revenue: Number(point.revenue),
-        profit: point.contribution_margin !== undefined ? Number(point.contribution_margin) : 0,
-        ads: Number(point.ads),
-        purchase: point.purchase_cost !== undefined ? Number(point.purchase_cost) : 0,
+      // Regroupement mensuel/journalier identique au legacy : les composantes
+      // sont additionnées avant tout ratio, et les buckets sans activité sont
+      // retirés comme dans l'ancien graphique.
+      points: revenueSeries(v5Scope.points, v5Granularity).map((bucket) => ({
+        date: bucket.date,
+        label: formatBusinessDayLabel(bucket.date, v5Granularity),
+        revenue: bucket.revenue,
+        profit: bucket.margin,
+        ads: bucket.ads,
+        purchase: bucket.purchase,
         delivery: 0,
       })),
-      granularity: 'day' as const,
+      granularity: v5Granularity,
       totalRevenue: n('revenue'),
       totalProfit: n('contribution_margin'),
       totalAds: n('ads_tracked') + n('ads_fallback'),
@@ -391,7 +402,7 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
         waitingPickupOrders: v5Counters.data ? v5Counters.data.waitingPickup : null,
       },
     }
-  }, [v5Enabled, v5Scope, v5Counters.data])
+  }, [v5Enabled, v5Scope, v5Counters.data, v5Granularity])
 
   const data = v5Enabled ? v5Data : legacyData
   const isLoading = v5Enabled

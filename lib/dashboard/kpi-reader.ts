@@ -13,9 +13,12 @@
  * - montants `numeric` transmis en texte décimal exact (aucun arrondi JS).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { mergeReaderPayloads } from './kpi-reader-merge'
 
 export const KPI_READER_RPC = 'rpc_dashboard_kpi_reader'
 export const KPI_READER_DIRECT_LIMIT = 7
+/** Plage maximale acceptée par `rpc_dashboard_kpi_reader`. */
+export const KPI_READER_MAX_RPC_DAYS = 400
 
 export type KpiReaderAccess = 'full' | 'commercial'
 
@@ -199,6 +202,47 @@ export function dashboardKpiReaderKey(boundary: string, input: KpiReaderInput) {
 }
 
 export async function fetchDashboardKpiReader(
+  supabase: SupabaseClient,
+  input: KpiReaderInput,
+): Promise<KpiReaderPayload> {
+  const totalDays = isoDayNumber(input.to) - isoDayNumber(input.from)
+
+  // Le RPC refuse les plages supérieures à 400 jours : une période plus longue
+  // est lue par fenêtres disjointes puis recomposée sans double comptage.
+  if (totalDays <= KPI_READER_MAX_RPC_DAYS) {
+    return fetchDashboardKpiReaderWindow(supabase, input)
+  }
+
+  const payloads: KpiReaderPayload[] = []
+  let cursor = input.from
+  while (isoDayNumber(cursor) < isoDayNumber(input.to)) {
+    const endDay = Math.min(
+      isoDayNumber(cursor) + KPI_READER_MAX_RPC_DAYS,
+      isoDayNumber(input.to),
+    )
+    const windowTo = isoFromDayNumber(endDay)
+    payloads.push(
+      await fetchDashboardKpiReaderWindow(supabase, { ...input, from: cursor, to: windowTo }),
+    )
+    cursor = windowTo
+  }
+
+  return mergeReaderPayloads(payloads)
+}
+
+function isoDayNumber(value: string): number {
+  const [year, month, day] = value.split('-').map(Number)
+  return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000)
+}
+
+function isoFromDayNumber(value: number): string {
+  const date = new Date(value * 86_400_000)
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+  return `${date.getUTCFullYear()}-${month}-${day}`
+}
+
+async function fetchDashboardKpiReaderWindow(
   supabase: SupabaseClient,
   input: KpiReaderInput,
 ): Promise<KpiReaderPayload> {
