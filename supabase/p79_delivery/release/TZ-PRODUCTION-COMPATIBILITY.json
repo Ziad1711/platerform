@@ -1,0 +1,119 @@
+{
+  "compatible": true,
+  "functions": [
+    {
+      "signature": "dashboard_kpi_business_date(timestamp with time zone,text)",
+      "sourceBodyMD5": "c4d0545440706e0f1331abd345614b12",
+      "sourceDefinitionMD5": "86835f3507dad67879ede24208f13818",
+      "replacementCount": 1,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    },
+    {
+      "signature": "dashboard_kpi_direct_day(uuid,date,text)",
+      "sourceBodyMD5": "8e16ee78adb0b75aa11d1f0ca2cf70dc",
+      "sourceDefinitionMD5": "20bbe141a11a94e72b9587c2d85eff54",
+      "replacementCount": 2,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_insert_stmt()",
+      "sourceBodyMD5": "a09af967f634b2d4f6b57cb72b84f3ea",
+      "sourceDefinitionMD5": "3aae1ffbfbbba014d6de0c321559be21",
+      "replacementCount": 5,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_orders_quality_trg()",
+      "sourceBodyMD5": "2812bd01768511f9a3ae1426e322d26b",
+      "sourceDefinitionMD5": "091c0890a3e245de0b05387c7f2f4dbf",
+      "replacementCount": 2,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_trg()",
+      "sourceBodyMD5": "7e71da7b36fc20070909a8d9321f05d8",
+      "sourceDefinitionMD5": "b5211b6ea09373280e81a3f38c0aa01a",
+      "replacementCount": 10,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    },
+    {
+      "signature": "dashboard_kpi_rebuild_day(uuid,date,uuid,bigint[])",
+      "sourceBodyMD5": "d75c744d0962dc24a0550427e0c19238",
+      "sourceDefinitionMD5": "08f35896a0b63dc67806926c5a5397af",
+      "replacementCount": 2,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    },
+    {
+      "signature": "rpc_dashboard_kpi_reader(uuid[],date,date,boolean)",
+      "sourceBodyMD5": "b51f1d69fc77d3cf972c7ecc1a5056e3",
+      "sourceDefinitionMD5": "ea603cf2f66e47f7f57c79a985352e2d",
+      "replacementCount": 1,
+      "onlyPlannedChanges": true,
+      "owner": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ]
+    }
+  ],
+  "inactive": {
+    "triggers": 0,
+    "worker": false,
+    "wakeup": false,
+    "kill": true,
+    "mode": "legacy",
+    "cohorts": 0
+  }
+}

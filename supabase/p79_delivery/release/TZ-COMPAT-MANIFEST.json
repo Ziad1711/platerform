@@ -1,0 +1,175 @@
+{
+  "status": "QUALIFIED_B13_PRODUCTION_NOT_APPLIED",
+  "baseCommit": "691b21f",
+  "patch": "TZ-COMPAT-PATCH.sql",
+  "sha256": "9d4da3027e1933679eafeb4758b8400d9f6b08decada771434f65a1a0840c730",
+  "sourceSitesReviewed": 27,
+  "liveSitesReplaced": 23,
+  "notes": [
+    "27 includes duplicate baseline/final direct_day and rebuild_day (4 duplicate sites)",
+    "timezone inverse ambiguity corrected: 01:00 local maps to later UTC standard occurrence",
+    "historical sources/manifests unchanged; additive upgrade only"
+  ],
+  "functions": [
+    {
+      "signature": "dashboard_kpi_business_date(timestamp with time zone,text)",
+      "oldDefinitionMD5": "86835f3507dad67879ede24208f13818",
+      "newDefinitionMD5": "d0550083e6cab3fcf69de8f98407e92f",
+      "newBodyMD5": "e9f9dc6e74d518127a938bd5a55171c6",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": false,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_direct_day(uuid,date,text)",
+      "oldDefinitionMD5": "17ad59b2bca48fff724deab8a8831087",
+      "newDefinitionMD5": "58fd299e575c3fd05c83f83ccaa0b1ba",
+      "newBodyMD5": "89da378339a950390ed3dab8c8111807",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": true,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_insert_stmt()",
+      "oldDefinitionMD5": "2536fe3c58c8af6b18acb844ac585049",
+      "newDefinitionMD5": "db18817564f6348743ee82b389ec56db",
+      "newBodyMD5": "63a98ce2c754c9e706f4c779488d6443",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": true,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_orders_quality_trg()",
+      "oldDefinitionMD5": "992c67b9a61c9919debcd1b76cec4241",
+      "newDefinitionMD5": "0af853293f65fb45a51887a3a0dd82cc",
+      "newBodyMD5": "f9ba2e9d587edbb4cb50a1ef9fccfe50",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": true,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_trg()",
+      "oldDefinitionMD5": "f2e639dbf4135c8fc7f0a5897698a0ec",
+      "newDefinitionMD5": "10e7ba5957e8e70479208ab82e1fbfd4",
+      "newBodyMD5": "9c9c348d9554d97e15f5e66818406539",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": true,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_local_instant(timestamp without time zone,text)",
+      "oldDefinitionMD5": null,
+      "newDefinitionMD5": "4ed00c8d501110ec36eb79f62eb2a396",
+      "newBodyMD5": "14886a8204e75e8f5b4816c4b7d89750",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": false,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_local_ts(timestamp with time zone,text)",
+      "oldDefinitionMD5": null,
+      "newDefinitionMD5": "b813c1f2e4533f54e00675911a39883f",
+      "newBodyMD5": "43edb54b0a5b4eb3b86d1e166dc91e9c",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": false,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "dashboard_kpi_rebuild_day(uuid,date,uuid,bigint[])",
+      "oldDefinitionMD5": "3a2c424ccdc3df3ef560c453d4ddb0ef",
+      "newDefinitionMD5": "93c3b3244bec4fa57346120dc691af4c",
+      "newBodyMD5": "434de140177a2e1cea5aca42fd050804",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": true,
+      "otherAttributeDifferences": []
+    },
+    {
+      "signature": "rpc_dashboard_kpi_reader(uuid[],date,date,boolean)",
+      "oldDefinitionMD5": "5e3da52944df79d3dd806db35cc1a8c8",
+      "newDefinitionMD5": "3f535506d9a59e9ae11898f3566f2107",
+      "newBodyMD5": "b95d97616b6ba7c513c5937f78ada3c4",
+      "ownerOid": "16388",
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "proconfig": [
+        "search_path=public, pg_temp"
+      ],
+      "securityDefiner": true,
+      "otherAttributeDifferences": []
+    }
+  ],
+  "tests": {
+    "exit": 0,
+    "restored": true,
+    "errors": "NOTICE:  PASS boundaries 13 forward + 12 inverse + other zones + 25h day + financial direct\r\nNOTICE:  PASS invalidations\r\nNOTICE:  PASS reconstruction and financial aggregates\r\n"
+  },
+  "policiesUnchanged": true,
+  "triggersUnchanged": true,
+  "applicationWrapper": {
+    "path": "TZ-COMPAT-APPLY.sql",
+    "sha256": "b40f00aec5b4c09a8195e4fbb39a7fd506da2d4938552da75f54b4a7cca55d0e"
+  },
+  "productionCompatibility": {
+    "path": "TZ-PRODUCTION-COMPATIBILITY.json",
+    "sha256": "a57bfa52e4dd1b418dbd2c633d4481cad7b4d2fa3ad8345f6b008376d4d5b932"
+  }
+}
