@@ -134,6 +134,7 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
             v5Scope.coverage.days_total,
             v5Scope.stores,
             v5Scope.points[0]?.date ?? null,
+            v5Granularity,
           )
         : null,
     [v5Scope, v5ChartRange],

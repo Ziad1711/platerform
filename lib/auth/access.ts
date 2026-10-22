@@ -26,8 +26,11 @@ export type UserAccess = {
  * `/api/stores`) : appartenance active, puis propriété du store en filet de
  * sécurité — la RLS `stores` autorise `owner_user_id = auth.uid()`.
  */
-/** Borne de la lecture d'accès pendant la redirection post-login. */
-const ACCESS_LOOKUP_TIMEOUT_MS = 6_000
+/** Borne de la lecture d'accès pendant la redirection post-login.
+ *  Doit rester supérieure à la latence p95 de `store_members` (~15 s) pour ne
+ *  pas faire échouer une connexion qui aurait abouti : seule une dégradation
+ *  pathologique est interrompue. */
+const ACCESS_LOOKUP_TIMEOUT_MS = 20_000
 
 export async function getUserAccess(
   supabase: ServerSupabaseClient,

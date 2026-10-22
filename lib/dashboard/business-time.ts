@@ -248,9 +248,13 @@ export function chartGranularity(
  * période, y compris celles sans donnée.
  *
  * - la borne haute s'arrête à aujourd'hui : aucune journée future inventée ;
- * - la borne basse ne remonte jamais avant l'historique réel de la boutique :
- *   `coverageDays` est le nombre de journées renvoyées par le lecteur après
- *   application de `history_from`, ce qui permet de retrouver le début couvert ;
+ * - en vue mensuelle, on affiche le calendrier complet de la période (ex. toute
+ *   l'année, janvier → mois courant) : les mois antérieurs à l'historique de la
+ *   boutique deviennent des buckets vides au lieu de tronquer le début ;
+ * - en vue journalière, la borne basse ne remonte jamais avant l'historique réel
+ *   de la boutique : `coverageDays` est le nombre de journées renvoyées par le
+ *   lecteur après application de `history_from`, ce qui permet de retrouver le
+ *   début couvert ;
  * - en multi-boutiques (historiques différents), la borne basse est ramenée au
  *   premier point réellement renvoyé plutôt que de fabriquer des journées.
  */
@@ -259,6 +263,7 @@ export function chartFillWindow(
   coverageDays: number,
   storeCount: number,
   firstDay: string | null = null,
+  granularity: 'day' | 'month' = 'day',
   now: Date = new Date(),
 ): BusinessRange {
   const today = businessTodayIso(now)
@@ -268,7 +273,9 @@ export function chartFillWindow(
   const totalDays = businessDayCount(range)
   let from = range.from
 
-  if (storeCount === 1 && coverageDays > 0 && coverageDays < totalDays) {
+  if (granularity === 'month') {
+    from = range.from
+  } else if (storeCount === 1 && coverageDays > 0 && coverageDays < totalDays) {
     from = addBusinessDays(range.to, -coverageDays)
   } else if (storeCount > 1 && firstDay) {
     from = firstDay
