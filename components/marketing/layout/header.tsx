@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Menu, X } from 'lucide-react'
+import { Loader2, Menu, X } from 'lucide-react'
 import { marketingNav } from '@/lib/marketing/site'
 import { Container } from '@/components/marketing/shared/container'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
@@ -12,6 +12,7 @@ import { JisraMark, JisraWordmark } from '@/components/logo'
 export function MarketingHeader() {
   const [open, setOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
+  const [navigating, setNavigating] = useState(false)
 
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 16)
@@ -63,9 +64,11 @@ export function MarketingHeader() {
             </nav>
 
             <div className="hidden items-center gap-3 lg:flex">
-              <MarketingLink href="/login" variant="ghost">
-                Se connecter
-              </MarketingLink>
+              <div onClick={() => setNavigating(true)} className="contents">
+                <MarketingLink href="/login" variant="ghost">
+                  {navigating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Se connecter'}
+                </MarketingLink>
+              </div>
               <MarketingLink href="/signup">
                 Démarrer
               </MarketingLink>
@@ -110,9 +113,11 @@ export function MarketingHeader() {
                 </div>
 
                 <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
-                  <MarketingLink href="/login" variant="ghost">
-                    Se connecter
-                  </MarketingLink>
+                  <div onClick={() => setNavigating(true)} className="contents">
+                    <MarketingLink href="/login" variant="ghost">
+                      {navigating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Se connecter'}
+                    </MarketingLink>
+                  </div>
                   <MarketingLink href="/signup">
                     Démarrer
                   </MarketingLink>

@@ -9,7 +9,7 @@
  * - focus/reconnexion : comportement par défaut de React Query (revalidation) ;
  * - changement de boutique : la clé change, donc nouvelle lecture.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -18,6 +18,7 @@ import {
   type KpiReaderPayload,
 } from './kpi-reader'
 import type { DashboardPeriod } from '@/lib/utils'
+import { DASHBOARD_ANALYTICS_STALE_MS } from './analytics-cache'
 import {
   BUSINESS_TIME_ZONE,
   businessRange,
@@ -78,6 +79,12 @@ export function useKpiReader({
   const main = useQuery<KpiReaderPayload>({
     queryKey: dashboardKpiReaderKey(boundary, input),
     enabled: enabled && Boolean(from) && Boolean(to),
+    // Fraîcheur analytique explicite : une période déjà consultée n'est pas
+    // relue dans la fenêtre (60 s), tout en restant invalidée par la révision
+    // ou après une mutation réussie.
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
+    // Une seule reprise : ne pas marteler le pool PostgREST sur une 5xx.
+    retry: 1,
     // Pas de données de la boutique/mode précédent pendant un changement de clé.
     // Le signal annule réellement la requête réseau quand le filtre change.
     queryFn: ({ signal }) => fetchDashboardKpiReader(supabase, { ...input, signal }),
@@ -129,10 +136,19 @@ export function useKpiReader({
     [revision.data],
   )
 
+  // Invalidation SCOPÉE à la frontière d'identité courante (jamais une autre
+  // boutique ni un autre compte) : seule la clé `dashboard-kpi-reader` de ce
+  // `boundary` est relue. La première réception de révision ne rejoue pas la
+  // lecture (données déjà fraîches) ; seuls les changements ultérieurs de
+  // révision déclenchent une relecture.
+  const previousRevisionKeyRef = useRef<string | null>(null)
   useEffect(() => {
     if (!revisionKey) return
-    void queryClient.invalidateQueries({ queryKey: ['dashboard-kpi-reader'] })
-  }, [revisionKey, queryClient])
+    const previous = previousRevisionKeyRef.current
+    previousRevisionKeyRef.current = revisionKey
+    if (previous === null || previous === revisionKey) return
+    void queryClient.invalidateQueries({ queryKey: ['dashboard-kpi-reader', boundary] })
+  }, [revisionKey, boundary, queryClient])
 
   return {
     data: main.data,

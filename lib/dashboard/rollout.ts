@@ -75,15 +75,34 @@ export interface KpiShadowCheckPayload {
   diff_fields: string[]
 }
 
+/** Budget d'une lecture de configuration de rollout : au-delà, la requête est annulée. */
+export const KPI_ROLLOUT_REQUEST_TIMEOUT_MS = 8_000
+
 export async function fetchKpiRollout(
   supabase: SupabaseClient,
   storeIds: string[],
+  signal?: AbortSignal,
 ): Promise<KpiRolloutPayload> {
-  const { data, error } = await supabase.rpc('rpc_dashboard_kpi_rollout', {
-    p_store_ids: storeIds,
-  })
-  if (error) throw error
-  return data as KpiRolloutPayload
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), KPI_ROLLOUT_REQUEST_TIMEOUT_MS)
+  const forwardAbort = () => controller.abort()
+  if (signal) {
+    if (signal.aborted) controller.abort()
+    else signal.addEventListener('abort', forwardAbort)
+  }
+
+  try {
+    const { data, error } = await supabase
+      .rpc('rpc_dashboard_kpi_rollout', {
+        p_store_ids: storeIds,
+      })
+      .abortSignal(controller.signal)
+    if (error) throw error
+    return data as KpiRolloutPayload
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', forwardAbort)
+  }
 }
 
 export async function fetchKpiShadowCheck(

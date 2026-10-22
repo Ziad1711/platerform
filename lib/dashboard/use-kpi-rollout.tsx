@@ -36,6 +36,10 @@ export interface KpiRolloutContextValue {
   degraded: boolean
   /** Au moins une tentative de résolution terminée, ou rollout désactivé. */
   resolved: boolean
+  /** Rollout attendu mais décision pas encore tranchée (ni erreur définitive). */
+  pending: boolean
+  /** Décision impossible (erreur/expiration) sans configuration acceptée. */
+  failed: boolean
   currentStoreId: string | null
   storeIds: string[]
   /** Empreinte boutique:rôle ; invalide les caches lors d'un changement d'accès. */
@@ -52,6 +56,8 @@ const DEFAULT_CONTEXT: KpiRolloutContextValue = {
   stale: false,
   degraded: false,
   resolved: true,
+  pending: false,
+  failed: false,
   currentStoreId: null,
   storeIds: [],
   accessFingerprint: '',
@@ -104,9 +110,9 @@ export function KpiRolloutProvider({
   const rollout = useQuery({
     queryKey: ['dashboard-kpi-rollout', boundary, storeIds, accessFingerprint],
     enabled: canPoll,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const seq = ++requestSeqRef.current
-      const payload = await fetchKpiRollout(supabase, storeIds)
+      const payload = await fetchKpiRollout(supabase, storeIds, signal)
       return { payload, seq }
     },
     refetchInterval: KPI_ROLLOUT_POLL_MS,
@@ -184,6 +190,11 @@ export function KpiRolloutProvider({
   const acceptedHere = accepted.scope === scope
   const mode: KpiReaderMode = canPoll && acceptedHere ? accepted.mode : 'legacy'
   const configVersion = acceptedHere ? accepted.version : '0'
+  // États dérivés pour un rendu progressif : la structure du dashboard est
+  // toujours affichée, seules les lectures financières attendent la décision.
+  const resolved = !enabled || (canPoll && acceptedHere)
+  const pending = enabled && !resolved && !rollout.isError
+  const failed = enabled && !resolved && rollout.isError
   const shadowDate = useMemo(
     () => businessRange('today', null, null, new Date(), BUSINESS_TIME_ZONE, 365).from,
     [],
@@ -274,7 +285,9 @@ export function KpiRolloutProvider({
       killSwitch: data?.kill_switch ?? true,
       stale: enabled && canPoll && !fresh,
       degraded: enabled && rollout.isError,
-      resolved: !enabled || (canPoll && acceptedHere),
+      resolved,
+      pending,
+      failed,
       currentStoreId,
       storeIds,
       accessFingerprint,
@@ -290,27 +303,36 @@ export function KpiRolloutProvider({
       fresh,
       rollout.isError,
       acceptedHere,
+      pending,
+      failed,
       currentStoreId,
       storeIds,
       accessFingerprint,
     ],
   )
 
-  // Avant la première décision serveur, ne jamais lancer le lecteur legacy pour
-  // une boutique dont le rollout n'est pas encore connu. Une panne affiche un
-  // état explicite, sans substituer silencieusement une autre source de chiffres.
-  if (enabled && (isStoresLoading || (canPoll && !acceptedHere))) {
-    return (
-      <KpiRolloutContext.Provider value={value}>
-        <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-          {rollout.isError ? 'Configuration des indicateurs indisponible. Réessayez en actualisant la page.' : 'Chargement des indicateurs…'}
-        </div>
-      </KpiRolloutContext.Provider>
-    )
-  }
-
+  // Rendu progressif : la structure du dashboard (en-tête, sélecteurs, enveloppes
+  // des widgets) est toujours rendue immédiatement. Aucune source financière
+  // n'est lancée tant que le mode legacy/V5 n'est pas tranché : les lectures
+  // legacy sont déjà conditionnées à `rollout.resolved` dans les composants, et
+  // leur état de chargement s'appuie sur `rollout.pending`. En cas d'échec
+  // définitif du rollout, une erreur locale NON bloquante est affichée — sans
+  // jamais substituer silencieusement une autre source de chiffres.
   return (
     <KpiRolloutContext.Provider value={value}>
+      {failed ? (
+        <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+          Configuration des indicateurs indisponible. Les chiffres ne sont pas
+          chargés pour éviter toute valeur erronée.
+          <button
+            type="button"
+            onClick={() => void rollout.refetch()}
+            className="ml-3 underline underline-offset-2 hover:opacity-80"
+          >
+            Réessayer
+          </button>
+        </div>
+      ) : null}
       {children}
     </KpiRolloutContext.Provider>
   )

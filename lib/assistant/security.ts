@@ -94,13 +94,15 @@ export async function verifyStoreAccess(
 
 export async function getAccessibleStoreIds(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string
+  userId: string,
+  signal?: AbortSignal
 ) {
   const { data, error } = await supabase
     .from('store_members')
     .select('store_id')
     .eq('user_id', userId)
     .eq('status', 'active')
+    .abortSignal(signal as never)
 
   if (error) {
     throw new Error('STORE_ACCESS_CHECK_FAILED')

@@ -26,39 +26,54 @@ export type UserAccess = {
  * `/api/stores`) : appartenance active, puis propriété du store en filet de
  * sécurité — la RLS `stores` autorise `owner_user_id = auth.uid()`.
  */
+/** Borne de la lecture d'accès pendant la redirection post-login. */
+const ACCESS_LOOKUP_TIMEOUT_MS = 6_000
+
 export async function getUserAccess(
   supabase: ServerSupabaseClient,
   userId: string,
 ): Promise<UserAccess> {
-  const { data, error } = await supabase
-    .from('store_members')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .limit(1)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ACCESS_LOOKUP_TIMEOUT_MS)
 
-  if (error) {
+  try {
+    const { data, error } = await supabase
+      .from('store_members')
+      .select('role')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .limit(1)
+      .abortSignal(controller.signal as never)
+
+    if (error) {
+      return { role: null, hasStore: false, lookupFailed: true }
+    }
+
+    const role = ((data?.[0]?.role as Role | undefined) ?? null)
+    if (role) {
+      return { role, hasStore: true, lookupFailed: false }
+    }
+
+    const { data: owned, error: ownedError } = await supabase
+      .from('stores')
+      .select('id')
+      .eq('owner_user_id', userId)
+      .limit(1)
+      .abortSignal(controller.signal as never)
+
+    if (ownedError) {
+      return { role: null, hasStore: false, lookupFailed: true }
+    }
+
+    if ((owned?.length ?? 0) > 0) {
+      return { role: 'owner', hasStore: true, lookupFailed: false }
+    }
+
+    return { role: null, hasStore: false, lookupFailed: false }
+  } catch {
+    // Expiration ou annulation : accès non déterminé, jamais « aucun store ».
     return { role: null, hasStore: false, lookupFailed: true }
+  } finally {
+    clearTimeout(timer)
   }
-
-  const role = ((data?.[0]?.role as Role | undefined) ?? null)
-  if (role) {
-    return { role, hasStore: true, lookupFailed: false }
-  }
-
-  const { data: owned, error: ownedError } = await supabase
-    .from('stores')
-    .select('id')
-    .eq('owner_user_id', userId)
-    .limit(1)
-
-  if (ownedError) {
-    return { role: null, hasStore: false, lookupFailed: true }
-  }
-
-  if ((owned?.length ?? 0) > 0) {
-    return { role: 'owner', hasStore: true, lookupFailed: false }
-  }
-
-  return { role: null, hasStore: false, lookupFailed: false }
 }

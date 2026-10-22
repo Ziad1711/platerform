@@ -44,6 +44,9 @@ const USER_BATCH_LIMIT = 20
 /** Nombre maximal de stores traites par requete (protection du budget). */
 const MAX_STORES_PER_REQUEST = 3
 
+/** Budget d'une lecture de statut (GET) : aligne sur l'abandon navigateur. */
+const DELIVERY_STATUS_BUDGET_MS = 8_000
+
 const postSchema = z.object({
   storeId: z.string().uuid().optional(),
   storeIds: z.array(z.string().uuid()).max(MAX_STORES_PER_REQUEST).optional(),
@@ -51,32 +54,63 @@ const postSchema = z.object({
 })
 
 export async function GET(request: Request) {
+  let timedOut = false
+
   try {
     assertTrustedOrigin(request)
     const { supabase, user } = await requireAuthenticatedUser()
 
-    const requested = String(new URL(request.url).searchParams.get('storeId') || '').trim()
-    const accessible = await getAccessibleStoreIds(supabase, user.id)
-
-    if (requested && !accessible.includes(requested)) {
-      return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+    // Budget serveur : si le navigateur abandonne (il borne de son côté à 8 s)
+    // ou si le budget est atteint, on stoppe les lectures lourdes au lieu de
+    // courir jusqu'au `maxDuration` (60 s) en maintenant une connexion ouverte.
+    // L'identité (`requireAuthenticatedUser`) reste hors budget : elle doit
+    // aboutir avant toute lecture ; toute expérience reste un échec fermé (503),
+    // jamais une liste d'accès vide ni un accès élargi.
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, DELIVERY_STATUS_BUDGET_MS)
+    const abortFromRequest = () => {
+      timedOut = true
+      controller.abort()
     }
+    if (request.signal.aborted) controller.abort()
+    else request.signal.addEventListener('abort', abortFromRequest)
 
-    const admin = createAdminClient()
-    const stores = await readDeliveryTrackingFreshness(admin, accessible)
+    try {
+      const requested = String(new URL(request.url).searchParams.get('storeId') || '').trim()
+      const accessible = await getAccessibleStoreIds(supabase, user.id, controller.signal)
 
-    // Detail exact uniquement pour le store courant : le rattrapage est fiable
-    // meme quand aucun claim n'existe encore (premier acces, tables vides).
-    const store = requested ? await readStoreTrackingDetail(admin, requested, DELIVERY_TRACKING_FRESHNESS_MS) : null
+      if (requested && !accessible.includes(requested)) {
+        return NextResponse.json({ error: 'STORE_ACCESS_DENIED' }, { status: 403 })
+      }
 
-    return NextResponse.json({
-      ok: true,
-      thresholdMs: DELIVERY_TRACKING_FRESHNESS_MS,
-      stores,
-      store,
-      needsCatchUp: store ? store.needsCatchUp : stores.some((entry) => entry.stale),
-    })
+      const admin = createAdminClient()
+      const stores = await readDeliveryTrackingFreshness(admin, accessible, DELIVERY_TRACKING_FRESHNESS_MS, controller.signal)
+
+      // Detail exact uniquement pour le store courant : le rattrapage est fiable
+      // meme quand aucun claim n'existe encore (premier acces, tables vides).
+      const store = requested ? await readStoreTrackingDetail(admin, requested, DELIVERY_TRACKING_FRESHNESS_MS, controller.signal) : null
+
+      return NextResponse.json({
+        ok: true,
+        thresholdMs: DELIVERY_TRACKING_FRESHNESS_MS,
+        stores,
+        store,
+        needsCatchUp: store ? store.needsCatchUp : stores.some((entry) => entry.stale),
+      })
+    } finally {
+      clearTimeout(timer)
+      request.signal.removeEventListener('abort', abortFromRequest)
+    }
   } catch (error) {
+    if (timedOut || request.signal.aborted || (error as { name?: string })?.name === 'AbortError') {
+      return NextResponse.json(
+        { error: 'DELIVERY_TRACKING_STATUS_TIMEOUT', stores: [], store: null, needsCatchUp: false },
+        { status: 503 }
+      )
+    }
     const message = error instanceof Error ? error.message : 'DELIVERY_TRACKING_STATUS_FAILED'
     if (getErrorStatus(error) >= 500) console.error('[delivery-tracking] status failed', { error: message })
     return NextResponse.json({ error: message }, { status: getErrorStatus(error) })

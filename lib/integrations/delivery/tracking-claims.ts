@@ -150,6 +150,7 @@ export async function readTrackingCoverage(
     exchangeActiveStatuses: string[]
     freshSeconds?: number
     leaseSeconds?: number
+    signal?: AbortSignal
   }
 ): Promise<TrackingCoverage> {
   const { data, error } = await admin.rpc('delivery_tracking_coverage', {
@@ -161,7 +162,7 @@ export async function readTrackingCoverage(
     p_exchange_active_statuses: params.exchangeActiveStatuses,
     p_fresh_seconds: params.freshSeconds ?? 900,
     p_lease_seconds: params.leaseSeconds ?? 180,
-  })
+  }).abortSignal(params.signal as never)
 
   // Une erreur de comptage ne doit JAMAIS devenir "zero restant".
   if (error) throw new Error(`COVERAGE_FAILED:${error.message}`)

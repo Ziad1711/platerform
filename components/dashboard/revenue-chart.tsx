@@ -433,7 +433,7 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
   // s'affichent dès que la série est disponible, les compteurs suivent.
   const isLoading = v5Enabled
     ? isStoresLoading || v5.isLoading
-    : isStoresLoading || legacyLoading || !rollout.resolved
+    : isStoresLoading || legacyLoading || rollout.pending
   const v5Failed = v5Enabled && !v5.isLoading && v5.isError
   const v5NoTotals = v5Enabled && !isLoading && !v5Failed && !v5Scope?.totals
   const points = data?.points || []

@@ -98,11 +98,20 @@ function buildDataVersion(providers: Array<{ provider: string; lastChangedAt: st
 }
 
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    const error = new Error('DELIVERY_TRACKING_STATUS_ABORTED')
+    ;(error as Error & { name: string }).name = 'AbortError'
+    throw error
+  }
+}
+
 /** Vue legere (table d'etat) pour un ensemble de stores. */
 export async function readDeliveryTrackingFreshness(
   admin: AdminClient,
   storeIds: string[],
-  freshnessMs = DELIVERY_TRACKING_FRESHNESS_MS
+  freshnessMs = DELIVERY_TRACKING_FRESHNESS_MS,
+  signal?: AbortSignal
 ): Promise<StoreTrackingFreshness[]> {
   const ids = storeIds.filter(Boolean)
   if (ids.length === 0) return []
@@ -113,6 +122,7 @@ export async function readDeliveryTrackingFreshness(
       'store_id, provider, last_attempt_at, last_success_at, last_complete_at, last_changed_at, last_outcome, last_error, changed, failed, revision'
     )
     .in('store_id', ids)
+    .abortSignal(signal as never)
 
   if (error) throw error
 
@@ -123,6 +133,7 @@ export async function readDeliveryTrackingFreshness(
     .select('store_id, api_provider')
     .in('store_id', ids)
     .not('api_provider', 'is', null)
+    .abortSignal(signal as never)
 
   if (companiesError) throw companiesError
 
@@ -199,13 +210,15 @@ export async function readDeliveryTrackingFreshness(
 export async function readStoreTrackingDetail(
   admin: AdminClient,
   storeId: string,
-  freshnessMs = DELIVERY_TRACKING_FRESHNESS_MS
+  freshnessMs = DELIVERY_TRACKING_FRESHNESS_MS,
+  signal?: AbortSignal
 ): Promise<StoreTrackingDetail> {
   const { data: companies, error: companiesError } = await admin
     .from('delivery_companies')
     .select('id, api_provider')
     .eq('store_id', storeId)
     .not('api_provider', 'is', null)
+    .abortSignal(signal as never)
 
   if (companiesError) throw companiesError
 
@@ -222,6 +235,7 @@ export async function readStoreTrackingDetail(
       'provider, last_attempt_at, last_success_at, last_complete_at, last_changed_at, last_outcome, last_error, changed, failed, revision'
     )
     .eq('store_id', storeId)
+    .abortSignal(signal as never)
 
   if (stateError) throw stateError
 
@@ -233,14 +247,17 @@ export async function readStoreTrackingDetail(
   let totals = emptyTotals()
 
   for (const [slug, companyIds] of companiesBySlug.entries()) {
+    throwIfAborted(signal)
     const provider: DeliveryTrackingProvider | null = getTrackingProvider(slug)
     if (!provider) continue
 
+    throwIfAborted(signal)
     const integration = await resolveStoreIntegration(admin, slug, storeId)
     const connected = Boolean(integration && integration.status === 'connected')
 
     let coverage: TrackingCoverage = { ...EMPTY_COVERAGE }
     if (connected) {
+      throwIfAborted(signal)
       coverage = await readTrackingCoverage(admin, {
         storeId,
         provider: slug,
@@ -249,6 +266,7 @@ export async function readStoreTrackingDetail(
         excludedStatuses: provider.excludedStatuses,
         exchangeActiveStatuses: EXCHANGE_ACTIVE_STATUSES,
         freshSeconds: Math.round(freshnessMs / 1000),
+        signal,
       })
     }
 
