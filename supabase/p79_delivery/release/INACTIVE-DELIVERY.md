@@ -33,12 +33,12 @@ PSQL="psql \"$URL\" -v ON_ERROR_STOP=1"
 | 5 | CAPTURE_SOCLE (verify) | `p79_delivery/93_preflight_capture.sql` | `kpi` vide ; compteurs de référence enregistrés ; `prerequisites` vrais hors `pg_cron`/`pg_net` |
 | 10 | P7.1_SOCLE (install) | `p7_1_package/10_install_objects.sql` | 6 tables, 23 fonctions, **0 trigger**, worker/réveil `false` |
 | 20 | P7.1_VERIFY_INSTALL (verify) | `p7_1_package/90_verify.sql` stage `install` | toutes lignes PASS. À exécuter **ici**, avant R-BL4/P7.7 : les empreintes P7.1 ne sont plus valides après corrections |
-| 30 | RBL4 (security) | `p7_1_package/reference/20261018213537_dashboard_legacy_financial_permissions.sql` | `dashboard_legacy_access` + `_rbl4_impl_*` présents ; wrappers owner/commercial ; surcharge `uuid[]` fermée aux clients |
+| 30 | RBL4 (security) | `p7_1_package/reference/20261018213537_dashboard_legacy_financial_permissions.sql` | `dashboard_legacy_access` + `_rbl4_impl_*` présents (8 implémentations), wrappers owner/commercial. **Ne pas exiger ici la fermeture client de la surcharge `uuid[]` : elle intervient au lot 70.** |
 | 40 | P7.4_ROLLOUT_CONFIG (install) | 6 fichiers `20261019183241` → `20261019183800` | `kill_switch=true`, `legacy`, 0 cohorte, 0 événement |
 | 50 | P7.7_CORRECTIONS (install) | 6 fichiers `20261020100000` → `20261020105000` | `to_regprocedure` des fonctions cibles ; **ne pas** relancer `90_verify` par empreinte |
 | 60 | P7.8_CORRECTIONS (install) | `20261020110000`, `20261020111000` | `dashboard_kpi_finalize_store_state` présent, transitions appliquées |
 | 70 | P7.9_INACTIVE (install) | `p79_delivery/10_install_p79_functions.sql` | 4 objets P7.9 présents, **0 trigger** `trg_kpi_%` |
-| 80 | P7.9_VERIFY_INACTIVE (verify) | `p79_delivery/90_verify_p79.sql` stage `inactive` | toutes lignes PASS |
+| 80 | P7.9_VERIFY_INACTIVE (verify) | `p79_delivery/90_verify_p79.sql` avec `p79.stage='inactive'` **obligatoire** | toutes lignes PASS. Attention : le script défaut à `active` ; sans ce réglage, 7 assertions échouent à tort (trigger qualité attendu présent) |
 | 90 | P8.1 (security) | `20261021120000` | `can_invite_to_store` présent |
 | 91 | P8.2 (security) | `20261022093000` | `can_manage_store_expenses` + 6 politiques Dépenses |
 | 92 | P8.3_M1 (security) | `20261023100000` | 3 fonctions produits filtrées |
@@ -83,8 +83,11 @@ done
 # 70 — P7.9 inactif (aucun producteur)
 $PSQL --single-transaction -f supabase/p79_delivery/10_install_p79_functions.sql
 
-# 80 — vérification P7.9 inactif
-$PSQL -c "set p79.stage='inactive'" -f supabase/p79_delivery/90_verify_p79.sql
+# 80 — stage 'inactive' OBLIGATOIRE (défaut du script = 'active').
+# SET LOCAL dans une transaction : aucun réglage ne persiste dans le pooler.
+printf "begin;\\nset local p79.stage = 'inactive';\\n\\\\i 'supabase/p79_delivery/90_verify_p79.sql'\\nrollback;\\n" \
+  > /tmp/verify-p79-inactive.sql
+$PSQL -f /tmp/verify-p79-inactive.sql
 
 # 90 → 97 — P8, ordre strict, une transaction par fichier
 for f in 20261021120000 20261022093000 20261023100000 20261023100100 \

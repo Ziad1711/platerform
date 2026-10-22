@@ -3,6 +3,23 @@
 \set ON_ERROR_STOP on
 \pset pager off
 
+-- Sonde cron : cron.job peut être absent sur la cible. Une sous-requête statique
+-- serait analysée par le planificateur même dans une branche non prise, d'où
+-- l'échec observé. La sonde dynamique conserve exactement la sémantique :
+-- schéma absent => 0 job.
+create temp table if not exists _cron_kpi_probe(n text);
+do $cron$
+declare v text;
+begin
+  if to_regclass('cron.job') is null then
+    v := '0';
+  else
+    execute 'select count(*)::text from cron.job where jobname like ''jisra\_kpi%''' into v;
+  end if;
+  insert into _cron_kpi_probe values (v);
+end
+$cron$;
+
 with checks(check_id, expected, observed, kind) as (
   select 'kpi_producers_active', '0',
          (select count(*)::text from pg_trigger t join pg_class c on c.oid = t.tgrelid
@@ -12,8 +29,7 @@ with checks(check_id, expected, observed, kind) as (
          'bloquant'
   union all
   select 'kpi_cron_jobs', '0',
-         (case when to_regclass('cron.job') is null then '0'
-               else (select count(*)::text from cron.job where jobname like 'jisra\_kpi%') end),
+         (select n from _cron_kpi_probe),
          'bloquant'
   union all
   select 'worker_disabled', 'false',
@@ -89,8 +105,7 @@ begin
                 and t.tgname like 'trg\_kpi\_%' and t.tgenabled = 'O') as observed
       union all
       select 'kpi_cron_jobs', '0',
-             (case when to_regclass('cron.job') is null then '0'
-                   else (select count(*)::text from cron.job where jobname like 'jisra\_kpi%') end)
+             (select n from _cron_kpi_probe)
       union all
       select 'worker_disabled', 'false',
              coalesce((select enabled::text from public.dashboard_kpi_worker_config where id = 1), 'ABSENT')
