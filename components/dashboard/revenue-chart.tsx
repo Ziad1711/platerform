@@ -397,7 +397,9 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
       financialAccess: v5Scope.access === 'full',
       // Toutes les journées de la fenêtre sont tracées (jours vides inclus),
       // avec regroupement mensuel pour l'année et « Toujours ».
-      points: revenueSeries(v5Scope.points, v5Granularity, selectedPeriod, v5FillWindow).map((bucket) => ({
+      // Si la couverture est incomplète, une date absente du lecteur peut être
+      // indisponible plutôt que réellement à zéro : ne pas inventer de bucket.
+      points: revenueSeries(v5Scope.points, v5Granularity, selectedPeriod, v5Scope.incomplete ? null : v5FillWindow).map((bucket) => ({
         date: bucket.date,
         label: formatBusinessDayLabel(bucket.date, v5Granularity),
         revenue: bucket.revenue,

@@ -119,7 +119,7 @@ export default function AdsCostChart({ source }: { source?: KpiReaderMode } = {}
     // CPL/CPA sont recalculés APRÈS addition des dépenses et des compteurs du
     // bucket (jamais la moyenne des ratios journaliers).
     return {
-      points: adsSeries(v5Scope.points, v5Granularity, selectedPeriod, v5FillWindow).map((bucket) => ({
+      points: adsSeries(v5Scope.points, v5Granularity, selectedPeriod, v5Scope.incomplete ? null : v5FillWindow).map((bucket) => ({
         date: bucket.date,
         label: formatBusinessDayLabel(bucket.date, v5Granularity),
         ...bucketRatios(bucket),

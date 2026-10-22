@@ -218,7 +218,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
     const notes: string[] = []
     if (selectedPeriod === 'all') {
       notes.push('Variations non calculées sur « Toujours ».')
-    } else if (!v5Comparable) {
+    } else if (v5ComparablePeriod && !v5Previous.isLoading && !v5Previous.isFetching && !v5Comparable) {
       notes.push('Comparaison indisponible pour cette période.')
     }
     if (v5Coverage) {
@@ -238,7 +238,7 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
       }
     }
     return notes.length > 0 ? notes.join(' ') : null
-  }, [v5Enabled, v5Coverage, v5Comparable, v5Previous.isError, v5Previous.data, selectedPeriod])
+  }, [v5Enabled, v5Coverage, v5Comparable, v5Previous.isLoading, v5Previous.isFetching, v5ComparablePeriod, selectedPeriod])
 
 
 

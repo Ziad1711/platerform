@@ -219,7 +219,7 @@ export async function fetchDashboardKpiReader(
     return fetchDashboardKpiReaderWindow(supabase, input)
   }
 
-  const payloads: KpiReaderPayload[] = []
+  const windows: KpiReaderInput[] = []
   let cursor = input.from
   while (isoDayNumber(cursor) < isoDayNumber(input.to)) {
     const endDay = Math.min(
@@ -227,12 +227,15 @@ export async function fetchDashboardKpiReader(
       isoDayNumber(input.to),
     )
     const windowTo = isoFromDayNumber(endDay)
-    payloads.push(
-      await fetchDashboardKpiReaderWindow(supabase, { ...input, from: cursor, to: windowTo }),
-    )
+    windows.push({ ...input, from: cursor, to: windowTo })
     cursor = windowTo
   }
 
+  // Les fenêtres sont disjointes : leur lecture simultanée n'affecte aucun
+  // total mais évite l'attente cumulative (notamment l'année précédente).
+  const payloads = await Promise.all(
+    windows.map((window) => fetchDashboardKpiReaderWindow(supabase, window)),
+  )
   return mergeReaderPayloads(payloads)
 }
 

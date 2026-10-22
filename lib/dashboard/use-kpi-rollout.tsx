@@ -81,10 +81,11 @@ export function KpiRolloutProvider({
   const queryClient = useQueryClient()
   const boundary = userId ?? 'anonymous'
 
-  const storeIds = useMemo(() => {
-    const ids = currentStoreId ? [currentStoreId] : accessibleStoreIds
-    return Array.from(new Set(ids)).sort()
-  }, [currentStoreId, accessibleStoreIds])
+  // Les tableaux du StoreProvider sont reconstruits à chaque rendu. Une dépendance
+  // par référence réinitialisait le mode confirmé à chaque polling/tick.
+  const storeIdsKey = (currentStoreId ? [currentStoreId] : accessibleStoreIds)
+    .slice().sort().join('|')
+  const storeIds = useMemo(() => (storeIdsKey ? storeIdsKey.split('|') : []), [storeIdsKey])
 
   const accessFingerprint = useMemo(
     () =>
@@ -96,6 +97,7 @@ export function KpiRolloutProvider({
   )
 
   const canPoll = enabled && !isStoresLoading && storeIds.length > 0
+  const scope = `${boundary}:${storeIdsKey}:${accessFingerprint}`
   const requestSeqRef = useRef(0)
   const minAcceptedSeqRef = useRef(0)
   const previousRawModeRef = useRef<KpiReaderMode>('legacy')
@@ -124,7 +126,8 @@ export function KpiRolloutProvider({
   // demandé inclus). Une réponse périmée ou une erreur réseau ne doit plus
   // faire rebasculer l'interface vers l'ancien dashboard : le mode confirmé est
   // conservé, l'état `stale`/`degraded` signale seulement la fraîcheur.
-  const [accepted, setAccepted] = useState<{ mode: KpiReaderMode; version: string }>({
+  const [accepted, setAccepted] = useState<{ scope: string; mode: KpiReaderMode; version: string }>({
+    scope: '',
     mode: 'legacy',
     version: '0',
   })
@@ -136,18 +139,23 @@ export function KpiRolloutProvider({
   const rawMode: KpiReaderMode = canPoll
     ? resolveKpiRolloutMode(rawPayload, fresh && Boolean(rawPayload))
     : 'legacy'
-  const latestVersionRef = useRef(0)
+  // Les versions ne sont comparables qu'au sein d'une même frontière d'accès.
+  // Une autre boutique peut avoir une version de configuration différente.
+  const latestVersionRef = useRef({ scope: '', version: 0 })
   useEffect(() => {
-    if (Number.isFinite(rawVersion) && rawVersion > latestVersionRef.current) {
-      latestVersionRef.current = rawVersion
+    if (latestVersionRef.current.scope !== scope) {
+      latestVersionRef.current = { scope, version: 0 }
     }
-  }, [rawVersion])
+    if (Number.isFinite(rawVersion) && rawVersion > latestVersionRef.current.version) {
+      latestVersionRef.current.version = rawVersion
+    }
+  }, [scope, rawVersion])
   useEffect(() => {
-    if (rawMode === 'legacy' && previousRawModeRef.current !== 'legacy') {
+    if (fresh && rawPayload && rawMode === 'legacy' && previousRawModeRef.current !== 'legacy') {
       // Une réponse en vol avant le retour legacy ne doit pas le réactiver.
-      minAcceptedSeqRef.current = requestSeqRef.current + (fresh && rawPayload ? 0 : 1)
+      minAcceptedSeqRef.current = requestSeqRef.current
     }
-    previousRawModeRef.current = rawMode
+    if (fresh && rawPayload) previousRawModeRef.current = rawMode
   }, [rawMode, fresh, rawPayload])
   // Une réponse tardive d'une version antérieure ne doit jamais réactiver V5.
   const data =
@@ -155,7 +163,7 @@ export function KpiRolloutProvider({
     acceptsRolloutEntry(
       rawEntry,
       minAcceptedSeqRef.current,
-      latestVersionRef.current,
+      latestVersionRef.current.scope === scope ? latestVersionRef.current.version : 0,
     )
       ? rawEntry.payload
       : undefined
@@ -167,20 +175,15 @@ export function KpiRolloutProvider({
     if (!data) return
     const nextMode: KpiReaderMode = data.kill_switch ? 'legacy' : data.selection_mode
     setAccepted((previous) =>
-      previous.mode === nextMode && previous.version === data.config_version
+      previous.scope === scope && previous.mode === nextMode && previous.version === data.config_version
         ? previous
-        : { mode: nextMode, version: data.config_version },
+        : { scope, mode: nextMode, version: data.config_version },
     )
-  }, [data])
+  }, [data, scope])
 
-  // Nouvelle frontière (identité, session, boutiques) : aucune autorisation V5
-  // acquise pour une autre sélection n'est réutilisée.
-  useEffect(() => {
-    setAccepted({ mode: 'legacy', version: '0' })
-  }, [boundary, storeIds])
-
-  const mode: KpiReaderMode = canPoll ? accepted.mode : 'legacy'
-  const configVersion = data?.config_version ?? accepted.version
+  const acceptedHere = accepted.scope === scope
+  const mode: KpiReaderMode = canPoll && acceptedHere ? accepted.mode : 'legacy'
+  const configVersion = acceptedHere ? accepted.version : '0'
   const shadowDate = useMemo(
     () => businessRange('today', null, null, new Date(), BUSINESS_TIME_ZONE, 365).from,
     [],
@@ -271,7 +274,7 @@ export function KpiRolloutProvider({
       killSwitch: data?.kill_switch ?? true,
       stale: enabled && canPoll && !fresh,
       degraded: enabled && rollout.isError,
-      resolved: !enabled || !canPoll || rollout.isFetched,
+      resolved: !enabled || (canPoll && acceptedHere),
       currentStoreId,
       storeIds,
       accessFingerprint,
@@ -286,12 +289,25 @@ export function KpiRolloutProvider({
       canPoll,
       fresh,
       rollout.isError,
-      rollout.isFetched,
+      acceptedHere,
       currentStoreId,
       storeIds,
       accessFingerprint,
     ],
   )
+
+  // Avant la première décision serveur, ne jamais lancer le lecteur legacy pour
+  // une boutique dont le rollout n'est pas encore connu. Une panne affiche un
+  // état explicite, sans substituer silencieusement une autre source de chiffres.
+  if (enabled && (isStoresLoading || (canPoll && !acceptedHere))) {
+    return (
+      <KpiRolloutContext.Provider value={value}>
+        <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+          {rollout.isError ? 'Configuration des indicateurs indisponible. Réessayez en actualisant la page.' : 'Chargement des indicateurs…'}
+        </div>
+      </KpiRolloutContext.Provider>
+    )
+  }
 
   return (
     <KpiRolloutContext.Provider value={value}>

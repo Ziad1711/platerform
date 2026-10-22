@@ -137,6 +137,7 @@ export function useKpiReader({
   return {
     data: main.data,
     isLoading: main.isLoading,
+    isFetching: main.isFetching,
     isError: main.isError,
     error: main.error,
     refetch: main.refetch,
