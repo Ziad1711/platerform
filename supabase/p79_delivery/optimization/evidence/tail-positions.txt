@@ -1,0 +1,6 @@
+tail-4-A.log n=400 med_all=77.913 med_first50=83.822 med_rest=77.567 spikes=27 spike_idx=0,46,53,56,88,89,94,103,114,115,117,124
+tail-4-C0.log n=400 med_all=77.168 med_first50=76.745 med_rest=77.257 spikes=5 spike_idx=108,243,244,276,287
+tail-4-CF.log n=400 med_all=75.621 med_first50=75.564 med_rest=75.647 spikes=24 spike_idx=15,20,107,109,110,111,114,118,134,143,155,181
+tail-5-A.log n=400 med_all=74.665 med_first50=79.315 med_rest=74.559 spikes=21 spike_idx=0,12,16,17,47,48,49,51,54,58,68,87
+tail-5-C0.log n=400 med_all=74.660 med_first50=74.682 med_rest=74.660 spikes=2 spike_idx=306,345
+tail-5-CF.log n=400 med_all=75.077 med_first50=79.219 med_rest=74.834 spikes=21 spike_idx=11,37,38,46,47,52,54,61,62,70,74,79

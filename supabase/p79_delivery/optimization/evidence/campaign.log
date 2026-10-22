@@ -1,0 +1,12 @@
+nohup: ignoring input
+done warmup A 15:50:55
+done perf-1 A 15:51:16
+done perf-1 C0 15:51:39
+done perf-1 CF 15:52:00
+done perf-2 CF 15:52:22
+done perf-2 C0 15:52:45
+done perf-2 A 15:53:05
+done perf-3 A 15:53:25
+done perf-3 C0 15:53:48
+done perf-3 CF 15:54:11
+CAMPAIGN_DONE

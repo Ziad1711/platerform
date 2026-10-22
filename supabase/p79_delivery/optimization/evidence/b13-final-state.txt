@@ -1,0 +1,23 @@
+         check         |              value               
+-----------------------+----------------------------------
+ ad_spend_daily        | 0
+ daily_metrics         | 0
+ kpi_invalidation      | 0
+ kpi_triggers          | 0
+ order_items           | 0
+ orders                | 0
+ prod_fingerprint_stmt | 2536fe3c58c8af6b18acb844ac585049
+ producer_config_table | ABSENT
+ producer_functions    | 0
+ producer_status_view  | ABSENT
+ producer_stores_table | ABSENT
+ reader_cohorts        | 0
+ rollout               | true/legacy
+ store_state           | 0
+ stores                | 0
+ test_objects_p710     | 0
+ tz_helper_local_ts    | ABSENT
+ worker_enabled        | false
+ worker_runs           | 0
+(19 rows)
+

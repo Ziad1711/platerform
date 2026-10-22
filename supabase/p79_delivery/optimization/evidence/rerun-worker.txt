@@ -1,0 +1,30 @@
+SET
+SET
+CREATE TABLE
+CREATE FUNCTION
+DO
+DO
+DO
+DO
+UPDATE 1
+              label              | status |                         detail                         
+---------------------------------+--------+--------------------------------------------------------
+ W1_backlog_kept                 | PASS   | attendu=2 obtenu=2
+ W1_worker_disabled_stop         | PASS   | attendu=disabled obtenu=disabled
+ W2_aggregate_matches_direct     | PASS   | attendu=1 obtenu=1
+ W2_backlog_drained              | PASS   | attendu=0 obtenu=0
+ W2_no_failure                   | PASS   | attendu=0 obtenu=0
+ W3_all_partitions_computed      | PASS   | attendu=8 obtenu=8
+ W3_eight_partitions             | PASS   | attendu=8 obtenu=8
+ W3_partial_drain                | PASS   | attendu=true obtenu=true
+ W3_partial_stop                 | PASS   | attendu=true obtenu=true
+ W3_resume_drained               | PASS   | attendu=0 obtenu=0
+ W3_resume_no_failure            | PASS   | attendu=0 obtenu=0
+ W4_forced_resume_drained        | PASS   | attendu=0 obtenu=0
+ W4_forced_resume_no_failure     | PASS   | attendu=0 obtenu=0
+ W4_forced_resume_rebuilt        | PASS   | attendu=1 obtenu=1
+ W4_resume_blocked_when_disabled | PASS   | attendu=KPI_WORKER_DISABLED obtenu=KPI_WORKER_DISABLED
+(15 rows)
+
+psql:tests/qualification_worker.sql:98: NOTICE:  WORKER_PASS : 15 controles
+DO

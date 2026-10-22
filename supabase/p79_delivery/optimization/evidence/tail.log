@@ -1,0 +1,8 @@
+nohup: ignoring input
+done tail 4 A 15:57:08
+done tail 4 C0 15:57:46
+done tail 4 CF 15:58:27
+done tail 5 CF 15:59:07
+done tail 5 C0 15:59:42
+done tail 5 A 16:00:23
+TAIL_DONE

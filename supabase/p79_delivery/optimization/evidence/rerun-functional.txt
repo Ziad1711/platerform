@@ -1,0 +1,107 @@
+Pager usage is off.
+SET
+SET
+DO
+DO
+CREATE TABLE
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+      dashboard_kpi_producer_arm       
+---------------------------------------
+ {"armed": true, "eligible_stores": 0}
+(1 row)
+
+                                                 dashboard_kpi_producer_enable_store                                                 
+-------------------------------------------------------------------------------------------------------------------------------------
+ {"gap_to": "2026-10-22", "enabled": true, "gap_from": null, "store_id": "7e000000-0000-4000-8000-0000000000a1", "enqueued_days": 0}
+(1 row)
+
+                                                 dashboard_kpi_producer_enable_store                                                 
+-------------------------------------------------------------------------------------------------------------------------------------
+ {"gap_to": "2026-10-22", "enabled": true, "gap_from": null, "store_id": "7e000000-0000-4000-8000-0000000000a2", "enqueued_days": 0}
+(1 row)
+
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+           label            | status |                           detail                           
+----------------------------+--------+------------------------------------------------------------
+ T1_day                     | PASS   | attendu=2035-01-01 obtenu=2035-01-01
+ T1_events                  | PASS   | attendu=1 obtenu=1
+ T10_move_to_disabled_a1    | PASS   | attendu=1 obtenu=1
+ T10_move_to_disabled_a2    | PASS   | attendu=0 obtenu=0
+ T11a_ad_insert_events      | PASS   | attendu=1 obtenu=1
+ T11b_ad_amount_events      | PASS   | attendu=1 obtenu=1
+ T11c_ad_irrelevant_events  | PASS   | attendu=0 obtenu=0
+ T12_order_delete_events    | PASS   | attendu=1 obtenu=1
+ T13_disarmed_events        | PASS   | attendu=0 obtenu=0
+ T14_disabled_store_events  | PASS   | attendu=0 obtenu=0
+ T14_enabled_store_events   | PASS   | attendu=1 obtenu=1
+ T15_resume_enabled         | PASS   | attendu=true obtenu=true
+ T15_resume_events_positive | PASS   | attendu=true obtenu=true
+ T15_resume_gap_present     | PASS   | attendu=true obtenu=true
+ T15_resume_reason          | PASS   | attendu=1 obtenu=1
+ T16a_2359_local            | PASS   | attendu=2026-10-22 obtenu=2026-10-22
+ T16b_0001_local            | PASS   | attendu=2026-10-23 obtenu=2026-10-23
+ T16c_pre_patch_offset      | PASS   | attendu=2026-09-20 obtenu=2026-09-20
+ T17a_revenue               | PASS   | attendu=500.00 obtenu=500.00
+ T17b_orders                | PASS   | attendu=1 obtenu=1
+ T17c_delivered             | PASS   | attendu=1 obtenu=1
+ T17d_purchase              | PASS   | attendu=140.00 obtenu=140.00
+ T17e_revenue_value         | PASS   | attendu=500.00 obtenu=500.00
+ T2_events_same_tx          | PASS   | attendu=1 obtenu=1
+ T3a_order_tx_events        | PASS   | attendu=1 obtenu=1
+ T3b_item_tx_events         | PASS   | attendu=2 obtenu=2
+ T4_import600_day           | PASS   | attendu=2035-01-02 obtenu=2035-01-02
+ T4_import600_events        | PASS   | attendu=1 obtenu=1
+ T5a_item_price_events      | PASS   | attendu=1 obtenu=1
+ T5b_item_irrelevant_events | PASS   | attendu=0 obtenu=0
+ T5c_item_cost_events       | PASS   | attendu=1 obtenu=1
+ T6a_parent_move_events     | PASS   | attendu=2 obtenu=2
+ T6b_item_delete_events     | PASS   | attendu=1 obtenu=1
+ T7a_status_events          | PASS   | attendu=1 obtenu=1
+ T7b_irrelevant_events      | PASS   | attendu=0 obtenu=0
+ T8_date_move_days          | PASS   | attendu=2035-01-03,2035-01-04 obtenu=2035-01-03,2035-01-04
+ T8_date_move_events        | PASS   | attendu=2 obtenu=2
+ T9_store_move_a1           | PASS   | attendu=1 obtenu=1
+ T9_store_move_a2           | PASS   | attendu=1 obtenu=1
+(39 rows)
+
+psql:tests/producers_optimization_tests.sql:514: NOTICE:  P710_TESTS_PASS : 39 controles
+DO
+DO
+      check      | value 
+-----------------+-------
+ residual_stores | 0
+ residual_events | 0
+(2 rows)
+

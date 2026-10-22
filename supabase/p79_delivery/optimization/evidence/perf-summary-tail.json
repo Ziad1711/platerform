@@ -1,0 +1,152 @@
+{
+  "prefix": "tail",
+  "runs": 6,
+  "sections": {
+    "update_item_price": {
+      "A": {
+        "n": 800,
+        "median": 76.0735,
+        "p95": 165.00819999999996,
+        "p95Nearest": 164.986,
+        "max": 731.627,
+        "over140": 48,
+        "over250": 11,
+        "perRound": [
+          {
+            "round": 4,
+            "n": 400,
+            "median": 77.8845
+          },
+          {
+            "round": 5,
+            "n": 400,
+            "median": 74.6585
+          }
+        ]
+      },
+      "C0": {
+        "n": 800,
+        "median": 75.8335,
+        "p95": 96.95024999999997,
+        "p95Nearest": 96.914,
+        "max": 487.571,
+        "over140": 7,
+        "over250": 3,
+        "perRound": [
+          {
+            "round": 4,
+            "n": 400,
+            "median": 77.15950000000001
+          },
+          {
+            "round": 5,
+            "n": 400,
+            "median": 74.65950000000001
+          }
+        ]
+      },
+      "CF": {
+        "n": 800,
+        "median": 75.27850000000001,
+        "p95": 151.4937499999999,
+        "p95Nearest": 151.378,
+        "max": 770.105,
+        "over140": 45,
+        "over250": 21,
+        "perRound": [
+          {
+            "round": 4,
+            "n": 400,
+            "median": 75.6175
+          },
+          {
+            "round": 5,
+            "n": 400,
+            "median": 75.06649999999999
+          }
+        ]
+      },
+      "delta": {
+        "C0_vs_A_median_pct": -0.32,
+        "C0_vs_A_p95_pct": -41.25,
+        "CF_vs_A_median_pct": -1.05,
+        "CF_vs_A_p95_pct": -8.19,
+        "CF_vs_C0_median_pct": -0.73,
+        "CF_vs_C0_p95_pct": 56.26
+      }
+    },
+    "import_orders_600": {
+      "A": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "p95Nearest": null,
+        "max": null,
+        "over140": 0,
+        "over250": 0,
+        "perRound": [
+          {
+            "round": 4,
+            "n": 0,
+            "median": null
+          },
+          {
+            "round": 5,
+            "n": 0,
+            "median": null
+          }
+        ]
+      },
+      "C0": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "p95Nearest": null,
+        "max": null,
+        "over140": 0,
+        "over250": 0,
+        "perRound": [
+          {
+            "round": 4,
+            "n": 0,
+            "median": null
+          },
+          {
+            "round": 5,
+            "n": 0,
+            "median": null
+          }
+        ]
+      },
+      "CF": {
+        "n": 0,
+        "median": null,
+        "p95": null,
+        "p95Nearest": null,
+        "max": null,
+        "over140": 0,
+        "over250": 0,
+        "perRound": [
+          {
+            "round": 4,
+            "n": 0,
+            "median": null
+          },
+          {
+            "round": 5,
+            "n": 0,
+            "median": null
+          }
+        ]
+      },
+      "delta": {
+        "C0_vs_A_median_pct": null,
+        "C0_vs_A_p95_pct": null,
+        "CF_vs_A_median_pct": null,
+        "CF_vs_A_p95_pct": null,
+        "CF_vs_C0_median_pct": null,
+        "CF_vs_C0_p95_pct": null
+      }
+    }
+  }
+}

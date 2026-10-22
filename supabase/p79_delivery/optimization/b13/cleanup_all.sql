@@ -1,0 +1,30 @@
+-- Nettoyage complet des artefacts de qualification P7.10 sur B13.
+\set ON_ERROR_STOP on
+update public.dashboard_kpi_worker_config set enabled = false where id = 1;
+select public.dashboard_kpi_producer_arm(false);
+delete from public.dashboard_kpi_producer_stores where store_id::text like '7e000000-%';
+delete from public.dashboard_kpi_invalidation where store_id::text like '7e000000-%';
+delete from public.dashboard_daily_metrics where store_id::text like '7e000000-%';
+delete from public.ad_spend_daily where store_id::text like '7e000000-%';
+delete from public.order_items where store_id::text like '7e000000-%';
+delete from public.orders where store_id::text like '7e000000-%';
+delete from public.dashboard_kpi_store_state where store_id::text like '7e000000-%';
+delete from public.products where id::text like '7e000000-%';
+delete from public.stores where id::text like '7e000000-%';
+delete from public.dashboard_kpi_worker_run where worker in ('p710-tests','qualif','failtest','recovery','drain','pilot-manual','w1','w2');
+drop function if exists public.p710_server_series(uuid, integer);
+drop function if exists public.p710_server_series(integer);
+drop function if exists public.p710_drain(integer);
+drop function if exists public.p710_bulk(uuid, date, integer, text);
+drop function if exists public.p710_write_one(uuid, date, integer);
+drop function if exists public.p710_cycle_slow(numeric);
+drop function if exists public.p710_deadlocks();
+drop function if exists public.p710_agg(uuid, date);
+drop function if exists public.p710_pending_total();
+drop function if exists public.p710_pending(uuid, date);
+drop function if exists public.p710_mk_order(uuid, date, text);
+drop function if exists public.p710_reset_ev();
+drop function if exists public.p710_c0_invalidate_trg();
+drop function if exists public.p710_c0_invalidate_insert_stmt();
+drop function if exists public.p710_c0_quality_trg();
+drop function if exists public.p710_c0_mark_order_insert();

@@ -1,0 +1,32 @@
+SET
+SET
+DO
+psql:91_rollback_producer_optimization.sql:27: NOTICE:  trigger "trg_kpi_invalidate_ad_spend" for relation "public.ad_spend_daily" does not exist, skipping
+DROP TRIGGER
+psql:91_rollback_producer_optimization.sql:28: NOTICE:  trigger "trg_kpi_invalidate_order_items" for relation "public.order_items" does not exist, skipping
+DROP TRIGGER
+psql:91_rollback_producer_optimization.sql:29: NOTICE:  trigger "trg_kpi_invalidate_orders" for relation "public.orders" does not exist, skipping
+DROP TRIGGER
+psql:91_rollback_producer_optimization.sql:30: NOTICE:  trigger "trg_kpi_invalidate_orders_insert" for relation "public.orders" does not exist, skipping
+DROP TRIGGER
+psql:91_rollback_producer_optimization.sql:31: NOTICE:  trigger "trg_kpi_invalidate_orders_quality" for relation "public.orders" does not exist, skipping
+DROP TRIGGER
+psql:91_rollback_producer_optimization.sql:32: NOTICE:  trigger "trg_kpi_mark_order_insert" for relation "public.orders" does not exist, skipping
+DROP TRIGGER
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+DROP VIEW
+DROP FUNCTION
+DROP FUNCTION
+DROP FUNCTION
+DROP FUNCTION
+DROP FUNCTION
+DROP FUNCTION
+DROP FUNCTION
+DROP TABLE
+DROP TABLE
+psql:91_rollback_producer_optimization.sql:432: NOTICE:  ROLLBACK_OK_C0_RESTORED_NO_PRODUCER
+DO

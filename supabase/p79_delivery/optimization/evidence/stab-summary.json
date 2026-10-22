@@ -1,0 +1,104 @@
+{
+  "blocks": 6,
+  "perVariant": {
+    "A": {
+      "client": {
+        "n": 80,
+        "median": 77.153,
+        "p95": 95.2514,
+        "max": 364.41,
+        "over140": 1
+      },
+      "server": {
+        "n": 80,
+        "median": 1.3645,
+        "p95": 1.97605,
+        "max": 2.744
+      },
+      "blocks": [
+        {
+          "round": 1,
+          "clientMedian": 77.67750000000001,
+          "clientP95": 87.77969999999999,
+          "serverMedian": 1.3735,
+          "serverP95": 1.9415
+        },
+        {
+          "round": 2,
+          "clientMedian": 74.5125,
+          "clientP95": 95.807,
+          "serverMedian": 1.3565,
+          "serverP95": 2.0038499999999995
+        }
+      ]
+    },
+    "C0": {
+      "client": {
+        "n": 80,
+        "median": 78.94149999999999,
+        "p95": 104.1605,
+        "max": 382.999,
+        "over140": 1
+      },
+      "server": {
+        "n": 80,
+        "median": 1.7774999999999999,
+        "p95": 5.333549999999998,
+        "max": 14.728
+      },
+      "blocks": [
+        {
+          "round": 1,
+          "clientMedian": 84.209,
+          "clientP95": 102.20555,
+          "serverMedian": 2.1395,
+          "serverP95": 6.80355
+        },
+        {
+          "round": 2,
+          "clientMedian": 75.1625,
+          "clientP95": 105.79949999999994,
+          "serverMedian": 1.718,
+          "serverP95": 2.3969
+        }
+      ]
+    },
+    "CF": {
+      "client": {
+        "n": 80,
+        "median": 75.1395,
+        "p95": 98.3646,
+        "max": 356.591,
+        "over140": 2
+      },
+      "server": {
+        "n": 80,
+        "median": 1.7205,
+        "p95": 2.576,
+        "max": 4.04
+      },
+      "blocks": [
+        {
+          "round": 1,
+          "clientMedian": 75.477,
+          "clientP95": 99.45345,
+          "serverMedian": 1.7135,
+          "serverP95": 2.596099999999999
+        },
+        {
+          "round": 2,
+          "clientMedian": 75.04650000000001,
+          "clientP95": 76.67869999999999,
+          "serverMedian": 1.729,
+          "serverP95": 2.4182999999999995
+        }
+      ]
+    }
+  },
+  "aStability": {
+    "clientMedianDeltaPct": 4.25,
+    "clientP95DeltaPct": 9.14,
+    "medianStable": true,
+    "p95Stable": true
+  }
+}

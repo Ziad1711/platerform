@@ -1,0 +1,17 @@
+=== update_item_price
+A   n= 300 median=75.358 p95=100.121 p95nn=100.016 max=280.309 >140=4 >250=1
+    per-round: r1=75.698(n=100) r2=74.392(n=100) r3=76.073(n=100)
+C0  n= 300 median=77.115 p95=93.964 p95nn=93.941 max=561.078 >140=4 >250=3
+    per-round: r1=77.026(n=100) r2=76.140(n=100) r3=77.449(n=100)
+CF  n= 300 median=76.758 p95=91.316 p95nn=91.28 max=123.715 >140=0 >250=0
+    per-round: r1=76.725(n=100) r2=74.256(n=100) r3=77.943(n=100)
+delta {"C0_vs_A_median_pct":2.33,"C0_vs_A_p95_pct":-6.15,"CF_vs_A_median_pct":1.86,"CF_vs_A_p95_pct":-8.79,"CF_vs_C0_median_pct":-0.46,"CF_vs_C0_p95_pct":-2.82}
+
+=== import_orders_600
+A   n=  60 median=305.156 p95=376.294 p95nn=375.899 max=450.572 >140=60 >250=51
+    per-round: r1=305.450(n=20) r2=302.675(n=20) r3=305.461(n=20)
+C0  n=  60 median=307.036 p95=412.198 p95nn=412.182 max=634.671 >140=60 >250=60
+    per-round: r1=306.766(n=20) r2=307.357(n=20) r3=306.732(n=20)
+CF  n=  60 median=306.598 p95=410.814 p95nn=410.8 max=427.927 >140=60 >250=60
+    per-round: r1=275.933(n=20) r2=291.543(n=20) r3=345.692(n=20)
+delta {"C0_vs_A_median_pct":0.62,"C0_vs_A_p95_pct":9.54,"CF_vs_A_median_pct":0.47,"CF_vs_A_p95_pct":9.17,"CF_vs_C0_median_pct":-0.14,"CF_vs_C0_p95_pct":-0.34}

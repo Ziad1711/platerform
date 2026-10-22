@@ -1,0 +1,7 @@
+A client n=80 med=77.15 p95=95.25 max=364.4 >140=1 | server med=1.365 p95=1.976 max=2.744
+   blocks: r1 cMed=77.68 cP95=87.78 sMed=1.373 | r2 cMed=74.51 cP95=95.81 sMed=1.357
+C0 client n=80 med=78.94 p95=104.16 max=383.0 >140=1 | server med=1.777 p95=5.334 max=14.728
+   blocks: r1 cMed=84.21 cP95=102.21 sMed=2.139 | r2 cMed=75.16 cP95=105.80 sMed=1.718
+CF client n=80 med=75.14 p95=98.36 max=356.6 >140=2 | server med=1.720 p95=2.576 max=4.040
+   blocks: r1 cMed=75.48 cP95=99.45 sMed=1.714 | r2 cMed=75.05 cP95=76.68 sMed=1.729
+A stability: {"clientMedianDeltaPct":4.25,"clientP95DeltaPct":9.14,"medianStable":true,"p95Stable":true}

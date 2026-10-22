@@ -1,0 +1,20 @@
+nohup: ignoring input
+PASS S1_late_event_pending (=1)
+PASS S1_drained (=0)
+PASS S1_aggregate_two_orders (=2)
+PASS S2_writes_registered (>=4)
+PASS S2_drained (=0)
+PASS S2_aggregate_single_order (=1)
+INFO worker_runs w1=concurrent_run|0|0 w2=drained|2|0
+PASS S3_mutual_exclusion (concurrent_run observe)
+PASS S3_backlog_drained (=0)
+PASS S3_aggregate_day06 (=1)
+PASS S3_aggregate_day07 (=1)
+PASS S4_two_transactions_two_events (=2)
+PASS S4_aggregate_100_orders (=100)
+PASS S5_old_store_event_pending (>=1)
+PASS S5_new_store_event_pending (>=1)
+PASS S5_old_store_aggregate_empty (=0)
+PASS S5_new_store_aggregate_one (=1)
+PASS deadlock_delta (=0)
+CONCURRENCY_FAILED=0

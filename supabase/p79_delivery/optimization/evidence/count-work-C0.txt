@@ -1,0 +1,30 @@
+psql:b13/count_work.sql:3: NOTICE:  relation "p710_attempts" already exists, skipping
+CREATE TABLE
+TRUNCATE TABLE
+INSERT 0 1
+CREATE FUNCTION
+psql:b13/count_work.sql:11: NOTICE:  trigger "p710_count" for relation "public.dashboard_kpi_invalidation" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+{"armed": true, "eligible_stores": 0}
+{"gap_to": "2026-10-22", "enabled": true, "gap_from": "2026-10-22", "store_id": "7f100000-0000-4000-8000-0000000000e1", "enqueued_days": 1}
+
+
+DELETE 1
+UPDATE 1
+
+item_change_attempts|6
+item_change_persisted|1
+DELETE 1
+UPDATE 1
+
+item_noop_attempts|4
+DELETE 1
+UPDATE 1
+600
+import600_attempts|1200
+import600_persisted|1
+DROP TRIGGER
+
+{"rule": "aggregates after disabled_at are not trustworthy until resume", "enabled": false, "store_id": "7f100000-0000-4000-8000-0000000000e1", "disabled_at": "2026-10-22T15:02:25.260161+00:00"}
+{"armed": false, "eligible_stores": 0}

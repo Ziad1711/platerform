@@ -1,0 +1,13 @@
+nohup: ignoring input
+PASS WF_single_pending_partition (=1)
+INFO worker_run=partition_error|1
+PASS WF_failure_observed (stop=partition_error|1) (>=1)
+PASS WF_event_not_lost (>=1)
+PASS WF_attempt_counted (>=1)
+PASS WF_error_recorded (>=1)
+PASS WF_backoff_set (>=1)
+INFO backoff wait
+INFO recovery_run=drained|1|0
+PASS WF_recovered_backlog_empty (=0)
+PASS WF_aggregate_matches_direct (=8)
+WORKER_FAILURE_FAILED=0

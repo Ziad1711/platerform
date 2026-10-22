@@ -1,0 +1,119 @@
+PASS LF_ONLY 10_install_producer_optimization.sql
+PASS SHA256 10_install_producer_optimization.sql
+PASS LF_ONLY 20_activate_producers_optimized.sql
+PASS SHA256 20_activate_producers_optimized.sql
+PASS LF_ONLY 89_verify_inactive_install.sql
+PASS SHA256 89_verify_inactive_install.sql
+PASS LF_ONLY 90_verify_producer_optimization.sql
+PASS SHA256 90_verify_producer_optimization.sql
+PASS LF_ONLY 91_rollback_producer_optimization.sql
+PASS SHA256 91_rollback_producer_optimization.sql
+PASS LF_ONLY tests/producers_optimization_tests.sql
+PASS SHA256 tests/producers_optimization_tests.sql
+PASS LF_ONLY 11_worker_failure_resilience.sql
+PASS SHA256 11_worker_failure_resilience.sql
+PASS LF_ONLY 92_verify_production_compatibility.sql
+PASS SHA256 92_verify_production_compatibility.sql
+PASS LF_ONLY INSTALL-INACTIVE.md
+PASS SHA256 INSTALL-INACTIVE.md
+PASS LF_ONLY PILOT-PROCEDURE.md
+PASS SHA256 PILOT-PROCEDURE.md
+PASS LF_ONLY QUALIFICATION-P710.md
+PASS SHA256 QUALIFICATION-P710.md
+PASS LF_ONLY tests/setup_fixtures.sql
+PASS SHA256 tests/setup_fixtures.sql
+PASS LF_ONLY tests/qualification_permissions.sql
+PASS SHA256 tests/qualification_permissions.sql
+PASS LF_ONLY tests/qualification_worker.sql
+PASS SHA256 tests/qualification_worker.sql
+PASS LF_ONLY b13/bench.sql
+PASS SHA256 b13/bench.sql
+PASS LF_ONLY b13/variant.sql
+PASS SHA256 b13/variant.sql
+PASS LF_ONLY b13/qualif_helpers.sql
+PASS SHA256 b13/qualif_helpers.sql
+PASS LF_ONLY b13/concurrency_run.sh
+PASS SHA256 b13/concurrency_run.sh
+PASS LF_ONLY b13/worker_failure_run.sh
+PASS SHA256 b13/worker_failure_run.sh
+PASS LF_ONLY b13/stab_bench.sql
+PASS SHA256 b13/stab_bench.sql
+PASS LF_ONLY b13/stab_run.sh
+PASS SHA256 b13/stab_run.sh
+PASS LF_ONLY b13/stab_parse.cjs
+PASS SHA256 b13/stab_parse.cjs
+PASS LF_ONLY b13/prepare_variants.sh
+PASS SHA256 b13/prepare_variants.sh
+PASS LF_ONLY b13/cleanup_all.sql
+PASS SHA256 b13/cleanup_all.sql
+PASS LF_ONLY b13/analyze_tail.cjs
+PASS SHA256 b13/analyze_tail.cjs
+PASS LF_ONLY b13/parse_perf.cjs
+PASS SHA256 b13/parse_perf.cjs
+PASS LF_ONLY b13/count_work.sql
+PASS SHA256 b13/count_work.sql
+PASS LF_ONLY b13/cleanup.sql
+PASS SHA256 b13/cleanup.sql
+PASS LF_ONLY b13/run_campaign.sh
+PASS SHA256 b13/run_campaign.sh
+PASS LF_ONLY b13/run_tail.sh
+PASS SHA256 b13/run_tail.sh
+PASS SIX_PRODUCERS
+PASS TRIGGER trg_kpi_mark_order_insert
+PASS TRIGGER trg_kpi_invalidate_orders
+PASS TRIGGER trg_kpi_invalidate_orders_insert
+PASS TRIGGER trg_kpi_invalidate_order_items
+PASS TRIGGER trg_kpi_invalidate_ad_spend
+PASS TRIGGER trg_kpi_invalidate_orders_quality
+PASS INSTALL_GUARDS
+PASS INSTALL_POSTCONDITIONS
+PASS ACTIVATION_DRIFT_AND_DISARM_GUARDS
+PASS RISK_AND_PROJECT_GUARDS
+PASS MANIFEST_INVENTORY
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_invalidate_trg()
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_invalidate_insert_stmt()
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_mark_order_insert()
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_invalidate_orders_quality_trg()
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_producers_armed()
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_producer_active(uuid)
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_day_claimed(uuid,date)
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_producer_arm(boolean)
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_producer_disable_store(uuid,text)
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_producer_enable_store(uuid,date,text)
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_worker_run(text,integer,bigint,numeric)
+PASS MANIFEST_HASH_IN_ACTIVATION dashboard_kpi_worker_note_failure(uuid,date,uuid,text)
+PASS C0_HASH_IN_ROLLBACK dashboard_kpi_invalidate_trg()
+PASS C0_HASH_IN_ROLLBACK dashboard_kpi_invalidate_insert_stmt()
+PASS C0_HASH_IN_ROLLBACK dashboard_kpi_mark_order_insert()
+PASS C0_HASH_IN_ROLLBACK dashboard_kpi_worker_run(text,integer,bigint,numeric)
+PASS C0_HASH_IN_ROLLBACK dashboard_kpi_invalidate_orders_quality_trg()
+PASS ROLLBACK_DROPS_SIX_TRIGGERS
+PASS ROLLBACK_RESTORES_PRODUCERS_AND_WORKER
+PASS VERIFY_IS_READ_ONLY
+PASS NO_CRON_OR_EXTENSION
+PASS NO_IMPLICIT_WORKER_ENABLE
+PASS RESILIENCE_GUARDS
+PASS RESILIENCE_SAVEPOINTS
+PASS RESILIENCE_LOCK_BOUND
+PASS RESILIENCE_HELPER_USED
+PASS PRODUCTION_VERIFY_READ_ONLY
+PASS PILOT_STEP enable_store
+PASS PILOT_STEP Rapprochement
+PASS PILOT_STEP kill_switch
+PASS PILOT_STEP producer_arm(false)
+PASS PILOT_STEP 91_rollback_producer_optimization.sql
+PASS INSTALL_FILES_CREATE_NO_TRIGGER
+PASS INSTALL_FILES_NO_CRON_EXTENSION
+PASS INSTALL_FILES_TOUCH_NO_COHORT
+PASS INSTALL_FILES_TOUCH_NO_ROLLOUT
+PASS INSTALL_FILES_DO_NOT_ARM_STORE
+PASS NO_FINANCIAL_FORMULA_CHANGE
+PASS INACTIVE_VERIFIER_PRESENT
+PASS INACTIVE_VERIFIER_READ_ONLY
+PASS INSTALL_DOC_LINKS_VERIFY_AND_ROLLBACK
+PASS INSTALL_DOC_STEP 92_verify_production_compatibility.sql
+PASS INSTALL_DOC_STEP 10_install_producer_optimization.sql
+PASS INSTALL_DOC_STEP 11_worker_failure_resilience.sql
+PASS INSTALL_DOC_STEP Conditions d'arrêt
+PASS NO_SECRET
+PASS PROJECT_ALLOWLIST_ONLY

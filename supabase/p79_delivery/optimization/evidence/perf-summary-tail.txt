@@ -1,0 +1,8 @@
+=== update_item_price
+A   n= 800 median=76.073 p95=165.008 p95nn=164.986 max=731.627 >140=48 >250=11
+    per-round: r4=77.885(n=400) r5=74.659(n=400)
+C0  n= 800 median=75.834 p95=96.950 p95nn=96.914 max=487.571 >140=7 >250=3
+    per-round: r4=77.160(n=400) r5=74.660(n=400)
+CF  n= 800 median=75.279 p95=151.494 p95nn=151.378 max=770.105 >140=45 >250=21
+    per-round: r4=75.618(n=400) r5=75.066(n=400)
+delta {"C0_vs_A_median_pct":-0.32,"C0_vs_A_p95_pct":-41.25,"CF_vs_A_median_pct":-1.05,"CF_vs_A_p95_pct":-8.19,"CF_vs_C0_median_pct":-0.73,"CF_vs_C0_p95_pct":56.26}

@@ -1,0 +1,25 @@
+Pager usage is off.
+CREATE TABLE
+DO
+                          label                           | status |                                detail                                 
+----------------------------------------------------------+--------+-----------------------------------------------------------------------
+ capture_state_reported                                   | PASS   | armed=false eligible_stores=0
+ config_present                                           | PASS   | tables de capture
+ hash_dashboard_kpi_day_claimed(uuid,date)                | PASS   | d3b8a065a801678631d0fc2278eafbb0
+ hash_dashboard_kpi_invalidate_insert_stmt()              | PASS   | 60a03918fcb663b4f908f13486179d8e
+ hash_dashboard_kpi_invalidate_orders_quality_trg()       | PASS   | 4a5b55cb2e2d443c8f0c7a4fd5287b8a
+ hash_dashboard_kpi_invalidate_trg()                      | PASS   | 3a11c2a622833bd58ba64244a9f23a08
+ hash_dashboard_kpi_mark_order_insert()                   | PASS   | 80ed494f8623b37e92937b26677a2546
+ hash_dashboard_kpi_producer_active(uuid)                 | PASS   | 70fb8a5b5c3861755036a37798cf5cf7
+ hash_dashboard_kpi_producer_arm(boolean)                 | PASS   | 4cc7900d7392566e0ef4c11f71141038
+ hash_dashboard_kpi_producer_disable_store(uuid,text)     | PASS   | d4621a5768dd08783d7071dbd1a0750f
+ hash_dashboard_kpi_producer_enable_store(uuid,date,text) | PASS   | c3b12d082732bb8ebddf37f6309d694d
+ hash_dashboard_kpi_producers_armed()                     | PASS   | ca961583cb7c5722e9d3d453424c33db
+ mark_is_statement_level                                  | PASS   | trg_kpi_mark_order_insert doit être un trigger AFTER INSERT STATEMENT
+ reader_implies_capture                                   | PASS   | cohortes lecteur sans capture=0
+ six_producers                                            | PASS   | actifs=6
+ view_present                                             | PASS   | vue de statut
+(16 rows)
+
+psql:../90_verify_producer_optimization.sql:91: NOTICE:  P710_VERIFY_PASS : 16 controles
+DO

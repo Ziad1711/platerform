@@ -1,0 +1,300 @@
+{
+  "package": "p79_delivery/optimization",
+  "version": "P7.10-producer-optimization",
+  "createdAt": "2026-10-22T15:45:16.067Z",
+  "provenance": "Casablanca IANA 2026c already applied (TZ-COMPAT-PATCH)",
+  "defaultState": {
+    "armed": false,
+    "eligibleStores": 0,
+    "producers": 0
+  },
+  "producers": 6,
+  "files": [
+    {
+      "path": "10_install_producer_optimization.sql",
+      "bytes": 28030,
+      "lines": 665,
+      "lfOnly": true,
+      "sha256": "5201cec5b8379aa4fc26c38b6e4065e0e980a726fddcefda5502d73cfb07b6c2"
+    },
+    {
+      "path": "20_activate_producers_optimized.sql",
+      "bytes": 5236,
+      "lines": 101,
+      "lfOnly": true,
+      "sha256": "f89e1e08e51d200d914505fcae883553326529a547ea4ffff264b88a9b93173c"
+    },
+    {
+      "path": "89_verify_inactive_install.sql",
+      "bytes": 4427,
+      "lines": 85,
+      "lfOnly": true,
+      "sha256": "8120e119c13c5cedf9b21a0d5c186604ae568f1d98cff853477f1a84f4f78502"
+    },
+    {
+      "path": "90_verify_producer_optimization.sql",
+      "bytes": 4400,
+      "lines": 93,
+      "lfOnly": true,
+      "sha256": "d7d13053579e343b1146b3cdef714b3934a26b22ffee7671bf634ab937f2fc61"
+    },
+    {
+      "path": "91_rollback_producer_optimization.sql",
+      "bytes": 18218,
+      "lines": 432,
+      "lfOnly": true,
+      "sha256": "4eb97803f0dc6cd0b0fc9593f29ef07db34a5fe7cd0f66565fc16591031aae51"
+    },
+    {
+      "path": "tests/producers_optimization_tests.sql",
+      "bytes": 27885,
+      "lines": 558,
+      "lfOnly": true,
+      "sha256": "c5900021878935a7e9418e8d8655408e5650bc7e377da5353eb156b524dfb0c9"
+    },
+    {
+      "path": "11_worker_failure_resilience.sql",
+      "bytes": 6937,
+      "lines": 189,
+      "lfOnly": true,
+      "sha256": "eb06389ad32c1935c98b918717b6be71c8cfafe2c306869c0f276e32ae7cd8f4"
+    },
+    {
+      "path": "92_verify_production_compatibility.sql",
+      "bytes": 2110,
+      "lines": 28,
+      "lfOnly": true,
+      "sha256": "767d29bec48ed447ab2c31443e4c59e95310e1aaea9a1bc49c7323d54f172bbe"
+    },
+    {
+      "path": "INSTALL-INACTIVE.md",
+      "bytes": 3746,
+      "lines": 87,
+      "lfOnly": true,
+      "sha256": "ba869ac075894d356838e4f180b41cc144b5019b27a736e61ada1967e675c8fb"
+    },
+    {
+      "path": "PILOT-PROCEDURE.md",
+      "bytes": 8599,
+      "lines": 196,
+      "lfOnly": true,
+      "sha256": "42ff5737b62d024cb1344b4079ca575cee57c092dc7490b1ec17988c47cf665a"
+    },
+    {
+      "path": "QUALIFICATION-P710.md",
+      "bytes": 8703,
+      "lines": 185,
+      "lfOnly": true,
+      "sha256": "cd2efbb5e8ee237b97c8fa6fad22d37802ab39362f85ce5f4683685d9efe1ad0"
+    },
+    {
+      "path": "tests/setup_fixtures.sql",
+      "bytes": 2339,
+      "lines": 41,
+      "lfOnly": true,
+      "sha256": "c95fd720fb0070bf70a139f0b632598737425805f711fef0a59ee36379764b06"
+    },
+    {
+      "path": "tests/qualification_permissions.sql",
+      "bytes": 4355,
+      "lines": 105,
+      "lfOnly": true,
+      "sha256": "d1f612d8d9678758443ca40668549990d8df56bf17e999c5f2eee901aadf1084"
+    },
+    {
+      "path": "tests/qualification_worker.sql",
+      "bytes": 4778,
+      "lines": 98,
+      "lfOnly": true,
+      "sha256": "a5e67d3a259cda1f92cef2d33d20a95ae5e48a0e3116d7937e5cac60a9f1b5b7"
+    },
+    {
+      "path": "b13/bench.sql",
+      "bytes": 5897,
+      "lines": 130,
+      "lfOnly": true,
+      "sha256": "563cfdc6c55ab91aacd0a3ef35f891a88df7aff683b78950e582761f6fee49a1"
+    },
+    {
+      "path": "b13/variant.sql",
+      "bytes": 3441,
+      "lines": 46,
+      "lfOnly": true,
+      "sha256": "e9c5f11de48d64dd8d9b6d64058ecc72dd7782098471c06d1b438d3e4efcf43b"
+    },
+    {
+      "path": "b13/qualif_helpers.sql",
+      "bytes": 4957,
+      "lines": 107,
+      "lfOnly": true,
+      "sha256": "384a3c4ae2011dc95756cdc2165444c05d9f619dcb022ce2a12a65bf8f7e3bef"
+    },
+    {
+      "path": "b13/concurrency_run.sh",
+      "bytes": 4858,
+      "lines": 90,
+      "lfOnly": true,
+      "sha256": "a8ad39632b072d442e5792ddc29fef4b4197a54875e24d93afda133814f93819"
+    },
+    {
+      "path": "b13/worker_failure_run.sh",
+      "bytes": 3242,
+      "lines": 52,
+      "lfOnly": true,
+      "sha256": "107780c7e90fd8ffbc72e56a4d610e4242179c63a12f6a1247306f5e462ecf78"
+    },
+    {
+      "path": "b13/stab_bench.sql",
+      "bytes": 2264,
+      "lines": 38,
+      "lfOnly": true,
+      "sha256": "eb2702919229747d0520018ce448e0c7b38503f86768dc4d2254841698242973"
+    },
+    {
+      "path": "b13/stab_run.sh",
+      "bytes": 649,
+      "lines": 16,
+      "lfOnly": true,
+      "sha256": "5fe05a81e3e40832dfb3a6254068aaac2f0deb282f2d6c502a8f011ee8e0ce5f"
+    },
+    {
+      "path": "b13/stab_parse.cjs",
+      "bytes": 3400,
+      "lines": 55,
+      "lfOnly": true,
+      "sha256": "3834bdc8061f94b0838d91bbdba4c2bd327c2d5d816398c013df0710f0a1926c"
+    },
+    {
+      "path": "b13/prepare_variants.sh",
+      "bytes": 2971,
+      "lines": 40,
+      "lfOnly": true,
+      "sha256": "73097126accc070d0b23c3302da413a35bb46ac2b0784ed7777047515b22fe81"
+    },
+    {
+      "path": "b13/cleanup_all.sql",
+      "bytes": 1962,
+      "lines": 30,
+      "lfOnly": true,
+      "sha256": "7bba492fbf676b38f1a921e771aa996e38e9243f32f973031d616c5124547c14"
+    },
+    {
+      "path": "b13/analyze_tail.cjs",
+      "bytes": 1440,
+      "lines": 29,
+      "lfOnly": true,
+      "sha256": "14f7b3d55ddaca98b86755e82dfce585426e38c375b51146856f4970b94acdf2"
+    },
+    {
+      "path": "b13/parse_perf.cjs",
+      "bytes": 3737,
+      "lines": 88,
+      "lfOnly": true,
+      "sha256": "204e3be2baabc7be130ffd28865c4b41029aa3d80e133f743858bc1a4c70e6a7"
+    },
+    {
+      "path": "b13/count_work.sql",
+      "bytes": 2171,
+      "lines": 45,
+      "lfOnly": true,
+      "sha256": "03899f92865a4459a8a15532ecfa8eaa695194bbaf05a4e2d36d9935102e0715"
+    },
+    {
+      "path": "b13/cleanup.sql",
+      "bytes": 2668,
+      "lines": 53,
+      "lfOnly": true,
+      "sha256": "b99a0442d41c124fb85c10e7cef476875bbd3d51f791e121fdad7e8bf635bf3c"
+    },
+    {
+      "path": "b13/run_campaign.sh",
+      "bytes": 839,
+      "lines": 20,
+      "lfOnly": true,
+      "sha256": "c7fd3f68c41329f024804f93bc096064a1644a214490131273fa0a5fdce56121"
+    },
+    {
+      "path": "b13/run_tail.sh",
+      "bytes": 723,
+      "lines": 14,
+      "lfOnly": true,
+      "sha256": "32be44a32cbf287b700dd88a2084160796f3a7dd6209661efac64fc08e0fd78f"
+    }
+  ],
+  "functionHashes": [
+    {
+      "signature": "dashboard_kpi_invalidate_trg()",
+      "md5": "3a11c2a622833bd58ba64244a9f23a08"
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_insert_stmt()",
+      "md5": "60a03918fcb663b4f908f13486179d8e"
+    },
+    {
+      "signature": "dashboard_kpi_mark_order_insert()",
+      "md5": "80ed494f8623b37e92937b26677a2546"
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_orders_quality_trg()",
+      "md5": "4a5b55cb2e2d443c8f0c7a4fd5287b8a"
+    },
+    {
+      "signature": "dashboard_kpi_producers_armed()",
+      "md5": "ca961583cb7c5722e9d3d453424c33db"
+    },
+    {
+      "signature": "dashboard_kpi_producer_active(uuid)",
+      "md5": "70fb8a5b5c3861755036a37798cf5cf7"
+    },
+    {
+      "signature": "dashboard_kpi_day_claimed(uuid,date)",
+      "md5": "d3b8a065a801678631d0fc2278eafbb0"
+    },
+    {
+      "signature": "dashboard_kpi_producer_arm(boolean)",
+      "md5": "4cc7900d7392566e0ef4c11f71141038"
+    },
+    {
+      "signature": "dashboard_kpi_producer_disable_store(uuid,text)",
+      "md5": "d4621a5768dd08783d7071dbd1a0750f"
+    },
+    {
+      "signature": "dashboard_kpi_producer_enable_store(uuid,date,text)",
+      "md5": "c3b12d082732bb8ebddf37f6309d694d"
+    },
+    {
+      "signature": "dashboard_kpi_worker_run(text,integer,bigint,numeric)",
+      "md5": "98cb969dd827a1dc1858f69bfea6d3ac"
+    },
+    {
+      "signature": "dashboard_kpi_worker_note_failure(uuid,date,uuid,text)",
+      "md5": "1b1cc0fc8dd90bd28f5fd645b4ef67ee"
+    }
+  ],
+  "c0Hashes": [
+    {
+      "signature": "dashboard_kpi_invalidate_trg()",
+      "md5": "10e7ba5957e8e70479208ab82e1fbfd4"
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_insert_stmt()",
+      "md5": "db18817564f6348743ee82b389ec56db"
+    },
+    {
+      "signature": "dashboard_kpi_mark_order_insert()",
+      "md5": "51396e7b26984fc83a72852f79f9490e"
+    },
+    {
+      "signature": "dashboard_kpi_worker_run(text,integer,bigint,numeric)",
+      "md5": "f41abff2c59cbba39ef740740307eb07"
+    },
+    {
+      "signature": "dashboard_kpi_invalidate_orders_quality_trg()",
+      "md5": "0af853293f65fb45a51887a3a0dd82cc"
+    }
+  ],
+  "budgets": {
+    "medianOvercostPctMax": 15,
+    "p95OvercostPctMax": 25
+  }
+}

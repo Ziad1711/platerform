@@ -1,0 +1,27 @@
+Pager usage is off.
+SET
+          check           |                         value                         
+--------------------------+-------------------------------------------------------
+ kpi_functions            | 27
+ kpi_triggers             | 0
+ local_ts_present         | dashboard_kpi_local_ts(timestamp with time zone,text)
+ producer_config_table    | ABSENT
+ reader_cohorts           | 0
+ rollout                  | true/legacy
+ server_version           | 17.6
+ timezone_data_version    | UTC / system tzdata
+ worker_enabled           | false
+ worker_resilience_helper | ABSENT
+(10 rows)
+
+                  fonction                   |               md5                
+---------------------------------------------+----------------------------------
+ dashboard_kpi_invalidate_insert_stmt        | db18817564f6348743ee82b389ec56db
+ dashboard_kpi_invalidate_orders_quality_trg | 0af853293f65fb45a51887a3a0dd82cc
+ dashboard_kpi_invalidate_trg                | 10e7ba5957e8e70479208ab82e1fbfd4
+ dashboard_kpi_local_instant                 | 4ed00c8d501110ec36eb79f62eb2a396
+ dashboard_kpi_local_ts                      | b813c1f2e4533f54e00675911a39883f
+ dashboard_kpi_mark_order_insert             | 51396e7b26984fc83a72852f79f9490e
+ dashboard_kpi_worker_run                    | f41abff2c59cbba39ef740740307eb07
+(7 rows)
+
