@@ -228,15 +228,17 @@ export function businessDayCount(range: BusinessRange): number {
  *
  * Règle appliquée :
  * - « Cette année », « L'année dernière » et « Toujours » sont mensuels ;
- * - une période personnalisée devient mensuelle au-delà de 31 jours ;
+ * - « Ce trimestre » et une période personnalisée au-delà de 31 jours sont
+ *   mensuels (cohérent avec le dashboard legacy) ;
  * - tous les autres filtres (« Aujourd'hui », « Hier », « Cette semaine »,
- *   « Ce mois », « Mois dernier », « Ce trimestre ») restent journaliers.
+ *   « Ce mois », « Mois dernier ») restent journaliers.
  */
 export function chartGranularity(
   period: DashboardPeriod,
   dayCount: number,
 ): 'day' | 'month' {
   if (period === 'year' || period === 'last_year' || period === 'all') return 'month'
+  if (period === 'quarter') return 'month'
   if (period === 'custom' && dayCount > 31) return 'month'
   return 'day'
 }
