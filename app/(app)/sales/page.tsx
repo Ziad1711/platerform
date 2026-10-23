@@ -3640,9 +3640,11 @@ export default function VentesPage() {
       alignScrollRangeWithPin()
     }
 
+    let wasPinned = false
     const syncPinnedState = () => {
       const maxScroll = main.scrollHeight - main.clientHeight
       const pinned = maxScroll <= 8 ? true : main.scrollTop >= maxScroll - 4
+      wasPinned = pinned
       setIsTableFullscreen((current) => (current === pinned ? current : pinned))
     }
 
@@ -3660,12 +3662,23 @@ export default function VentesPage() {
     let exitArmedAt = 0
     let wheelUpAmount = 0
     let wheelUpAt = 0
+    let exiting = false
+    let exitingTimer: ReturnType<typeof setTimeout> | null = null
+
+    const startExit = () => {
+      exiting = true
+      main.scrollTo({ top: 0, behavior: 'smooth' })
+      if (exitingTimer) clearTimeout(exitingTimer)
+      exitingTimer = setTimeout(() => {
+        exiting = false
+      }, 900)
+    }
 
     const requestExit = () => {
       const now = Date.now()
       if (exitArmedAt > 0 && now - exitArmedAt < 1400) {
         exitArmedAt = 0
-        main.scrollTo({ top: 0, behavior: 'smooth' })
+        startExit()
         return
       }
       exitArmedAt = now
@@ -3690,7 +3703,7 @@ export default function VentesPage() {
       // Deux crans de molette (≈150 px) vers le haut depuis le début de la liste.
       if (wheelUpAmount >= 150) {
         wheelUpAmount = 0
-        main.scrollTo({ top: 0, behavior: 'smooth' })
+        startExit()
       }
     }
 
@@ -3733,6 +3746,13 @@ export default function VentesPage() {
       const top = main.scrollTop
       const maxScroll = main.scrollHeight - main.clientHeight
 
+      // Sortie volontaire en cours : on laisse le scroll se dérouler.
+      if (exiting) {
+        if (top <= 1) exiting = false
+        lastTop = top
+        return
+      }
+
       if (destination !== null) {
         if (Math.abs(top - destination) <= 1) destination = null
         lastTop = top
@@ -3743,9 +3763,20 @@ export default function VentesPage() {
       lastTop = top
 
       if (maxScroll <= 8 || Math.abs(delta) < 2) return
-      if (delta > 0 && top >= maxScroll - 4) return
 
-      destination = delta > 0 ? maxScroll : 0
+      if (delta < 0) {
+        // Léger recul près du pin (arrondis, barre d'adresse du navigateur) :
+        // on recolle au pin au lieu de refermer le plein écran.
+        if (maxScroll - top < 48) {
+          main.scrollTop = maxScroll
+          lastTop = maxScroll
+        }
+        return
+      }
+
+      if (top >= maxScroll - 4) return
+
+      destination = maxScroll
       main.scrollTo({ top: destination, behavior: 'smooth' })
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = setTimeout(() => {
@@ -3755,7 +3786,12 @@ export default function VentesPage() {
     }
 
     const handleResize = () => {
+      const previouslyPinned = wasPinned
       syncCardOffset()
+      const maxScroll = main.scrollHeight - main.clientHeight
+      if (previouslyPinned && maxScroll > 8) {
+        main.scrollTop = maxScroll
+      }
       syncPinnedState()
     }
 
@@ -3782,6 +3818,7 @@ export default function VentesPage() {
       wrapper?.removeEventListener('touchmove', handleTouchMoveExit)
       wrapper?.removeEventListener('touchend', handleTouchEndExit)
       if (releaseTimer) clearTimeout(releaseTimer)
+      if (exitingTimer) clearTimeout(exitingTimer)
     }
   }, [])
 
