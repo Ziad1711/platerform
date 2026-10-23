@@ -3657,8 +3657,9 @@ export default function VentesPage() {
     // liste (évite une sortie accidentelle).
     let touchStartY: number | null = null
     let touchExitHandled = false
-    let lastWheelAt = 0
     let exitArmedAt = 0
+    let wheelUpAmount = 0
+    let wheelUpAt = 0
 
     const requestExit = () => {
       const now = Date.now()
@@ -3672,15 +3673,25 @@ export default function VentesPage() {
 
     const handleWheelExit = (event: WheelEvent) => {
       const wrapper = tableWrapperRef.current
-      const now = Date.now()
-      const isNewGesture = now - lastWheelAt > 250
-      lastWheelAt = now
-      if (!wrapper || !pinnedNow() || !isNewGesture) return
-      if (wrapper.scrollTop > 0 || event.deltaY >= 0) {
-        if (event.deltaY > 0) exitArmedAt = 0
+      if (!wrapper) return
+      const deltaPixels =
+        event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? main.clientHeight : 1)
+      if (deltaPixels > 0) {
+        wheelUpAmount = 0
         return
       }
-      requestExit()
+      if (!pinnedNow() || wrapper.scrollTop > 0) return
+
+      const now = Date.now()
+      if (now - wheelUpAt > 1200) wheelUpAmount = 0
+      wheelUpAt = now
+      wheelUpAmount += Math.abs(deltaPixels)
+
+      // Deux crans de molette (≈150 px) vers le haut depuis le début de la liste.
+      if (wheelUpAmount >= 150) {
+        wheelUpAmount = 0
+        main.scrollTo({ top: 0, behavior: 'smooth' })
+      }
     }
 
     const handleTouchStartExit = (event: TouchEvent) => {
