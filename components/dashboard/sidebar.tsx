@@ -261,6 +261,7 @@ export default function Sidebar() {
       {/* Mobile Menu Button */}
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
+        data-mobile-nav-toggle
         className="lg:hidden fixed top-4 left-4 z-50 p-2.5 rounded-xl bg-background border border-border shadow-lg shadow-[#1fa971]/30 text-[#1fa971] hover:bg-gradient-to-br hover:from-[#1fa971] hover:to-[#178a5a] hover:text-white hover:shadow-xl hover:shadow-[#1fa971]/50 hover:scale-105 active:scale-95 transition-all duration-200"
         aria-label={mobileOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
       >

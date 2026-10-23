@@ -235,3 +235,16 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Bouton de navigation mobile : disparaît en fondu quand le tableau est en
+   plein écran, et réapparaît instantanément à la sortie. */
+[data-mobile-nav-toggle] {
+  transition: opacity 0ms, transform 0ms, background-color 200ms, color 200ms, box-shadow 200ms;
+}
+
+body[data-table-fullscreen='true'] [data-mobile-nav-toggle] {
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}

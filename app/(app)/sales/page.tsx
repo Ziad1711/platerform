@@ -79,6 +79,26 @@ const EXCHANGE_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Échange annulé',
 }
 
+// Date de commande affichée sur deux lignes : date puis heure (hh:mm).
+const ORDER_DATE_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+})
+const ORDER_TIME_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+function formatOrderDateParts(value?: string | Date | null) {
+  const date = value ? new Date(value) : null
+  if (!date || Number.isNaN(date.getTime())) return { dateLabel: '-', timeLabel: '' }
+  return {
+    dateLabel: ORDER_DATE_FORMATTER.format(date),
+    timeLabel: ORDER_TIME_FORMATTER.format(date),
+  }
+}
+
 const USER_EDITABLE_STATUSES = [
   'new',
   'confirmation_rejected',
@@ -434,7 +454,7 @@ const areStringMapsEqual = (a: Record<string, string>, b: Record<string, string>
 }
 
 export default function VentesPage() {
-  const PAGE_SIZE = 10
+  const PAGE_SIZE = 15
   const { currentStoreId, accessibleStoreIds, accessibleStores } = useStore()
   const { role, can } = usePermissions(currentStoreId)
   const isConfirmationRole = role === 'confirmation'
@@ -484,6 +504,7 @@ export default function VentesPage() {
   } | null>(null)
   const allowOutOfStockOrderRef = useRef(false)
   const createFormScrollRef = useRef<HTMLDivElement | null>(null)
+  const ordersTableCardRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (formError && createFormScrollRef.current) {
       createFormScrollRef.current.scrollTo({ top: createFormScrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -2483,6 +2504,31 @@ export default function VentesPage() {
     })
   }, [orders?.data, blacklistFilter, blacklistPhonesSet])
 
+  // Colonne Statut : largeur exacte (mesurée dans le navigateur) du libellé le
+  // plus large réellement affiché dans la page, sans marge ajoutée.
+  const pageStatusLabels = useMemo(() => {
+    const labels = new Set<string>()
+    ;(filteredOrders || []).forEach((order: any) => {
+      const label =
+        statusConfig[order?.status as keyof typeof statusConfig]?.label || String(order?.status || '')
+      if (label) labels.add(label)
+    })
+    return Array.from(labels)
+  }, [filteredOrders])
+  const statusFallbackWidth = useMemo(() => {
+    const longest = pageStatusLabels.reduce((max, label) => Math.max(max, label.length), 0)
+    return `calc(${Math.max(longest, 5)}ch + 2.4rem)`
+  }, [pageStatusLabels])
+  const statusMeasureRef = useRef<HTMLSelectElement | null>(null)
+  const [statusSelectWidth, setStatusSelectWidth] = useState('')
+
+  useEffect(() => {
+    const element = statusMeasureRef.current
+    if (!element) return
+    const width = Math.ceil(element.getBoundingClientRect().width)
+    if (width > 0) setStatusSelectWidth(`${width}px`)
+  }, [pageStatusLabels])
+
   const totalOrders = orders?.count || 0
   const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total_selling_price || 0), 0)
   const totalPages = Math.max(1, Math.ceil(totalOrders / PAGE_SIZE))
@@ -3563,8 +3609,101 @@ export default function VentesPage() {
     },
   })
 
+  const [isTableFullscreen, setIsTableFullscreen] = useState(false)
+
+  // Un seul geste de scroll fait passer le tableau en plein écran (ou revient
+  // aux filtres vers le haut), puis le scroll continue dans la liste.
+  useEffect(() => {
+    const main = document.querySelector('main') as HTMLElement | null
+    const card = ordersTableCardRef.current
+    if (!main || !card) return
+
+    // Ajuste la marge basse pour que le scroll de la page s'arrête exactement
+    // quand l'en-tête du tableau touche le haut de l'écran.
+    const syncCardOffset = () => {
+      const paddingBottom = parseFloat(getComputedStyle(main).paddingBottom) || 0
+      const offset = main.clientHeight - card.getBoundingClientRect().height - paddingBottom
+      card.style.marginBottom = `${Math.round(offset * 100) / 100}px`
+    }
+
+    const syncPinnedState = () => {
+      const maxScroll = main.scrollHeight - main.clientHeight
+      const pinned = maxScroll <= 8 ? true : main.scrollTop >= maxScroll - 1
+      setIsTableFullscreen((current) => (current === pinned ? current : pinned))
+    }
+
+    let lastTop = main.scrollTop
+    let destination: number | null = null
+    let releaseTimer: ReturnType<typeof setTimeout> | null = null
+
+    const handleScroll = () => {
+      syncPinnedState()
+
+      const top = main.scrollTop
+      const maxScroll = main.scrollHeight - main.clientHeight
+
+      if (destination !== null) {
+        if (Math.abs(top - destination) <= 1) destination = null
+        lastTop = top
+        return
+      }
+
+      const delta = top - lastTop
+      lastTop = top
+
+      if (maxScroll <= 8 || Math.abs(delta) < 2) return
+      if (delta > 0 && top >= maxScroll - 1) return
+
+      destination = delta > 0 ? maxScroll : 0
+      main.scrollTo({ top: destination, behavior: 'smooth' })
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = setTimeout(() => {
+        destination = null
+        lastTop = main.scrollTop
+      }, 700)
+    }
+
+    const handleResize = () => {
+      syncCardOffset()
+      syncPinnedState()
+    }
+
+    syncCardOffset()
+    syncPinnedState()
+    const resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver.observe(main)
+    resizeObserver.observe(card)
+    window.addEventListener('resize', handleResize)
+    main.addEventListener('scroll', handleScroll, { passive: true })
+
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', handleResize)
+      main.removeEventListener('scroll', handleScroll)
+      if (releaseTimer) clearTimeout(releaseTimer)
+    }
+  }, [])
+
+  // En plein écran, le bouton de navigation mobile s'efface après 1 seconde
+  // (et réapparaît avec animation dès qu'on quitte le plein écran).
+  useEffect(() => {
+    if (!isTableFullscreen) {
+      delete document.body.dataset.tableFullscreen
+      return
+    }
+
+    const timer = setTimeout(() => {
+      document.body.dataset.tableFullscreen = 'true'
+    }, 350)
+
+    return () => {
+      clearTimeout(timer)
+      delete document.body.dataset.tableFullscreen
+    }
+  }, [isTableFullscreen])
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 pt-2 sm:gap-6 sm:pt-0">
+    <div className="flex flex-col gap-2 pt-2 sm:gap-3 sm:pt-0 lg:gap-6">
 
       <div className="flex shrink-0 flex-col items-center sm:items-start gap-1">
         <div className="flex items-center gap-2">
@@ -5323,9 +5462,28 @@ export default function VentesPage() {
         </div>
       ) : null}
 
+      {/* Mesure invisible : largeur exacte du select Statut (sans marge ajoutée). */}
+      <select
+        ref={statusMeasureRef}
+        aria-hidden="true"
+        tabIndex={-1}
+        disabled
+        className="pointer-events-none invisible absolute text-xs font-medium rounded-full px-2 py-1 border"
+      >
+        {(pageStatusLabels.length > 0 ? pageStatusLabels : ['Nouvelle']).map((label) => (
+          <option key={label}>{label}</option>
+        ))}
+      </select>
+
       {/* Orders Table */}
-      <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-xl bg-card shadow">
-        <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={ordersTableCardRef} className="flex flex-col overflow-hidden bg-card shadow -mx-3 sm:-mx-4 lg:-mx-6 rounded-none sticky top-0 h-[100dvh] mb-[calc(100vh_-_100dvh_-_0.75rem)] sm:mb-[calc(100vh_-_100dvh_-_1rem)] lg:mb-[calc(100vh_-_100dvh_-_1.5rem)]">
+        <div
+          className={`min-h-0 flex-1 ${
+            isTableFullscreen
+              ? 'overflow-auto animate-in slide-in-from-bottom-1 duration-300'
+              : 'overflow-x-auto overflow-y-hidden'
+          }`}
+        >
           {isLoading ? (
             <div className="p-8 text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
@@ -5353,7 +5511,7 @@ export default function VentesPage() {
                   <th rowSpan={2} className="sticky left-0 z-10 bg-secondary px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border">
                     <div className="flex items-center justify-center text-center">Client</div>
                   </th>
-                  <th rowSpan={2} className="px-1.5 sm:px-4 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th rowSpan={2} className="w-px whitespace-nowrap px-1 sm:px-2 py-1.5 sm:py-3 text-center align-middle text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <div className="flex items-center justify-center text-center">Statut</div>
                   </th>
                   <th rowSpan={2} className="px-8 sm:px-16 py-1 sm:py-2 text-center align-middle text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -5436,6 +5594,7 @@ export default function VentesPage() {
                       return variantName ? `${productName} (${variantName})` : productName
                     })
                     .filter(Boolean)
+                  const { dateLabel: orderDateLabel, timeLabel: orderTimeLabel } = formatOrderDateParts(order.order_date)
                   return (
                     <tr key={order.id} className="hover:bg-secondary/50">
                       <td className="w-10 px-2 py-1.5 sm:py-3 align-top text-center">
@@ -5462,7 +5621,8 @@ export default function VentesPage() {
                         )}
                       </td>
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-muted-foreground">
-                        {formatDateTime(order.order_date)}
+                        <div>{orderDateLabel}</div>
+                        {orderTimeLabel ? <div>{orderTimeLabel}</div> : null}
                       </td>
                       <td className="sticky left-0 z-10 bg-card px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border">
                         <div className="text-xs sm:text-sm font-medium text-foreground">
@@ -5485,8 +5645,8 @@ export default function VentesPage() {
                           </div>
                         ) : null}
                       </td>
-                      <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
+                      <td className="px-1 sm:px-2 py-1.5 sm:py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
                           <StatusIcon className="w-3.5 h-3.5 text-muted-foreground" />
                           <select
                             value={order.status}
@@ -5523,7 +5683,8 @@ export default function VentesPage() {
                               )
                             }}
                             disabled={updateOrderStatusMutation.isPending && updatingOrderId === order.id}
-                            className={`text-xs font-medium rounded-full px-2.5 py-1 border ${status?.color || 'bg-secondary text-foreground'} ${
+                            style={{ width: statusSelectWidth || statusFallbackWidth }}
+                            className={`text-xs font-medium rounded-full px-2 py-1 border ${status?.color || 'bg-secondary text-foreground'} ${
                               updateOrderStatusMutation.isPending && updatingOrderId === order.id
                                 ? 'opacity-60 cursor-not-allowed'
                                 : ''
