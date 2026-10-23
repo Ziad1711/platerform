@@ -505,6 +505,7 @@ export default function VentesPage() {
   const allowOutOfStockOrderRef = useRef(false)
   const createFormScrollRef = useRef<HTMLDivElement | null>(null)
   const ordersTableCardRef = useRef<HTMLDivElement | null>(null)
+  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (formError && createFormScrollRef.current) {
       createFormScrollRef.current.scrollTo({ top: createFormScrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -3619,17 +3620,96 @@ export default function VentesPage() {
     if (!main || !card) return
 
     // Ajuste la marge basse pour que le scroll de la page s'arrête exactement
-    // quand l'en-tête du tableau touche le haut de l'écran.
+    // quand l'en-tête du tableau touche le haut de l'écran (aucun dépassement).
+    const alignScrollRangeWithPin = () => {
+      if (main.scrollTop > 2) return
+      const mainRect = main.getBoundingClientRect()
+      const cardRect = card.getBoundingClientRect()
+      const pin = cardRect.top - mainRect.top + main.scrollTop
+      const residual = main.scrollHeight - main.clientHeight - pin
+      if (Math.abs(residual) > 0.5) {
+        const current = parseFloat(card.style.marginBottom) || 0
+        card.style.marginBottom = `${Math.round((current - residual) * 100) / 100}px`
+      }
+    }
+
     const syncCardOffset = () => {
       const paddingBottom = parseFloat(getComputedStyle(main).paddingBottom) || 0
       const offset = main.clientHeight - card.getBoundingClientRect().height - paddingBottom
       card.style.marginBottom = `${Math.round(offset * 100) / 100}px`
+      alignScrollRangeWithPin()
     }
 
     const syncPinnedState = () => {
       const maxScroll = main.scrollHeight - main.clientHeight
-      const pinned = maxScroll <= 8 ? true : main.scrollTop >= maxScroll - 1
+      const pinned = maxScroll <= 8 ? true : main.scrollTop >= maxScroll - 4
       setIsTableFullscreen((current) => (current === pinned ? current : pinned))
+    }
+
+    const pinnedNow = () => {
+      const maxScroll = main.scrollHeight - main.clientHeight
+      return maxScroll > 8 && main.scrollTop >= maxScroll - 4
+    }
+
+    // En plein écran, le défilement reste contenu dans le tableau (aucun rebond
+    // ni transfert vers la page, dans les 4 directions). Pour quitter le plein
+    // écran il faut deux gestes de scroll vers le haut depuis le début de la
+    // liste (évite une sortie accidentelle).
+    let touchStartY: number | null = null
+    let touchExitHandled = false
+    let lastWheelAt = 0
+    let exitArmedAt = 0
+
+    const requestExit = () => {
+      const now = Date.now()
+      if (exitArmedAt > 0 && now - exitArmedAt < 1400) {
+        exitArmedAt = 0
+        main.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+      exitArmedAt = now
+    }
+
+    const handleWheelExit = (event: WheelEvent) => {
+      const wrapper = tableWrapperRef.current
+      const now = Date.now()
+      const isNewGesture = now - lastWheelAt > 250
+      lastWheelAt = now
+      if (!wrapper || !pinnedNow() || !isNewGesture) return
+      if (wrapper.scrollTop > 0 || event.deltaY >= 0) {
+        if (event.deltaY > 0) exitArmedAt = 0
+        return
+      }
+      requestExit()
+    }
+
+    const handleTouchStartExit = (event: TouchEvent) => {
+      const wrapper = tableWrapperRef.current
+      touchExitHandled = false
+      if (!wrapper || !pinnedNow() || wrapper.scrollTop > 0) {
+        touchStartY = null
+        return
+      }
+      touchStartY = event.touches[0]?.clientY ?? null
+    }
+
+    const handleTouchMoveExit = (event: TouchEvent) => {
+      if (touchStartY === null || touchExitHandled) return
+      const currentY = event.touches[0]?.clientY
+      if (typeof currentY !== 'number') return
+      const delta = currentY - touchStartY
+      if (delta < -20) {
+        exitArmedAt = 0
+        return
+      }
+      if (delta > 40) {
+        touchExitHandled = true
+        requestExit()
+      }
+    }
+
+    const handleTouchEndExit = () => {
+      touchStartY = null
     }
 
     let lastTop = main.scrollTop
@@ -3652,7 +3732,7 @@ export default function VentesPage() {
       lastTop = top
 
       if (maxScroll <= 8 || Math.abs(delta) < 2) return
-      if (delta > 0 && top >= maxScroll - 1) return
+      if (delta > 0 && top >= maxScroll - 4) return
 
       destination = delta > 0 ? maxScroll : 0
       main.scrollTo({ top: destination, behavior: 'smooth' })
@@ -3676,10 +3756,20 @@ export default function VentesPage() {
     window.addEventListener('resize', handleResize)
     main.addEventListener('scroll', handleScroll, { passive: true })
 
+    const wrapper = tableWrapperRef.current
+    wrapper?.addEventListener('wheel', handleWheelExit, { passive: true })
+    wrapper?.addEventListener('touchstart', handleTouchStartExit, { passive: true })
+    wrapper?.addEventListener('touchmove', handleTouchMoveExit, { passive: true })
+    wrapper?.addEventListener('touchend', handleTouchEndExit, { passive: true })
+
     return () => {
       resizeObserver.disconnect()
       window.removeEventListener('resize', handleResize)
       main.removeEventListener('scroll', handleScroll)
+      wrapper?.removeEventListener('wheel', handleWheelExit)
+      wrapper?.removeEventListener('touchstart', handleTouchStartExit)
+      wrapper?.removeEventListener('touchmove', handleTouchMoveExit)
+      wrapper?.removeEventListener('touchend', handleTouchEndExit)
       if (releaseTimer) clearTimeout(releaseTimer)
     }
   }, [])
@@ -3687,6 +3777,13 @@ export default function VentesPage() {
   // En plein écran, le bouton de navigation mobile s'efface après 1 seconde
   // (et réapparaît avec animation dès qu'on quitte le plein écran).
   useEffect(() => {
+    const main = document.querySelector('main') as HTMLElement | null
+    // Empêche tout rebond de la page tant que le tableau est plein écran :
+    // le contenu ne bouge plus quand on arrive en bas de la liste.
+    if (main) {
+      main.style.overscrollBehaviorY = isTableFullscreen ? 'none' : ''
+    }
+
     if (!isTableFullscreen) {
       delete document.body.dataset.tableFullscreen
       return
@@ -3699,6 +3796,7 @@ export default function VentesPage() {
     return () => {
       clearTimeout(timer)
       delete document.body.dataset.tableFullscreen
+      if (main) main.style.overscrollBehaviorY = ''
     }
   }, [isTableFullscreen])
 
@@ -5478,9 +5576,10 @@ export default function VentesPage() {
       {/* Orders Table */}
       <div ref={ordersTableCardRef} className="flex flex-col overflow-hidden bg-card shadow -mx-3 sm:-mx-4 lg:-mx-6 rounded-none sticky top-0 h-[100dvh] mb-[calc(100vh_-_100dvh_-_0.75rem)] sm:mb-[calc(100vh_-_100dvh_-_1rem)] lg:mb-[calc(100vh_-_100dvh_-_1.5rem)]">
         <div
+          ref={tableWrapperRef}
           className={`min-h-0 flex-1 ${
             isTableFullscreen
-              ? 'overflow-auto animate-in slide-in-from-bottom-1 duration-300'
+              ? 'overflow-auto overscroll-none animate-in slide-in-from-bottom-1 duration-300'
               : 'overflow-x-auto overflow-y-hidden'
           }`}
         >
