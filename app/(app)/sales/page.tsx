@@ -3564,9 +3564,9 @@ export default function VentesPage() {
   })
 
   return (
-    <div className="space-y-4 sm:space-y-6 pt-2 sm:pt-0">
+    <div className="flex h-full min-h-0 flex-col gap-4 pt-2 sm:gap-6 sm:pt-0">
 
-      <div className="flex flex-col items-center sm:items-start gap-1">
+      <div className="flex shrink-0 flex-col items-center sm:items-start gap-1">
         <div className="flex items-center gap-2">
           <JisraMark size={28} />
           <span className="text-lg font-bold text-[#1fa971] bg-[#1fa971]/10 px-3 py-1 rounded-full">
@@ -5129,7 +5129,7 @@ export default function VentesPage() {
       ) : null}
 
       {/* Filters */}
-      <div className="bg-card rounded-xl shadow p-4">
+      <div className="shrink-0 bg-card rounded-xl shadow p-4">
         <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
           <div className="flex flex-row items-center justify-center gap-3">
             <StoreSelector />
@@ -5262,7 +5262,7 @@ export default function VentesPage() {
 
       {/* Actions groupées */}
       {selectedOrderIds.length > 0 ? (
-        <div className="bg-card rounded-xl shadow p-4 border border-primary/30">
+        <div className="shrink-0 bg-card rounded-xl shadow p-4 border border-primary/30">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-foreground">
@@ -5324,16 +5324,16 @@ export default function VentesPage() {
       ) : null}
 
       {/* Orders Table */}
-      <div className="bg-card rounded-xl shadow overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-xl bg-card shadow">
+        <div className="min-h-0 flex-1 overflow-auto">
           {isLoading ? (
             <div className="p-8 text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
               <p className="text-muted-foreground mt-2">Chargement des commandes...</p>
             </div>
           ) : orders && filteredOrders.length > 0 ? (
-              <table className="min-w-full divide-y divide-border text-xs sm:text-sm">
-              <thead className="bg-secondary">
+              <table className="min-w-full border-separate border-spacing-0 divide-y divide-border text-xs sm:text-sm">
+              <thead className="sticky top-0 z-20 bg-secondary [&>tr>th]:bg-secondary">
                 <tr>
                   <th rowSpan={2} className="w-10 px-2 py-1.5 sm:py-3 text-center align-middle">
                     <input
@@ -5687,7 +5687,7 @@ export default function VentesPage() {
         </div>
 
         {orders && orders.count > 0 ? (
-          <div className="border-t border-border px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="shrink-0 border-t border-border px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row items-center justify-between gap-2">
             <div className="text-xs sm:text-sm text-muted-foreground order-2 sm:order-1">
               Page {currentPage} / {totalPages} • {orders.count} commandes
             </div>
