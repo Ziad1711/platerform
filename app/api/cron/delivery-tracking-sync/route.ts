@@ -19,9 +19,9 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 /** Marge sous la limite d'execution : le cron s'arrete proprement. */
-const CRON_TOTAL_BUDGET_MS = 45_000
-const CRON_BATCH_BUDGET_MS = 8_000
-const CRON_BATCH_LIMIT = 20
+const CRON_TOTAL_BUDGET_MS = 25_000
+const CRON_BATCH_BUDGET_MS = 6_000
+const CRON_BATCH_LIMIT = 15
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET || ''
@@ -36,27 +36,39 @@ export async function GET(request: Request) {
   try {
     const admin = createAdminClient()
 
-    // Seuls les stores ayant une integration transporteur CONNECTEE sont
-    // traites : filtrage explicite, jamais de parcours inter-store.
+    // Cibles = couples (store, transporteur) REELLEMENT connectes. Jamais le
+    // produit cartesien stores x transporteurs : il multipliait les lots pour
+    // des integrations inexistantes et saturait la base (incident du
+    // 24/10/2026 : PostgREST en 503, cache de schema en timeout).
     const { data: integrations, error } = await admin
       .from('integrations')
-      .select('store_id')
+      .select('store_id, provider')
       .in('provider', getTrackingProviderSlugs())
       .eq('status', 'connected')
       .not('store_id', 'is', null)
 
     if (error) throw error
-    const storeIds = Array.from(
-      new Set(((integrations || []) as Array<{ store_id: string | null }>).map((row) => row.store_id).filter(Boolean))
-    ) as string[]
 
-    if (storeIds.length === 0) {
-      return NextResponse.json({ ok: true, stores: 0, truncated: false, results: [] })
+    const targets = Array.from(
+      new Map(
+        ((integrations || []) as Array<{ store_id: string | null; provider: string | null }>)
+          .filter((row) => Boolean(row.store_id) && Boolean(row.provider))
+          .map((row) => [
+            `${row.store_id}::${row.provider}`,
+            { storeId: row.store_id as string, provider: row.provider as string },
+          ])
+      ).values()
+    )
+    const storeIds = Array.from(new Set(targets.map((target) => target.storeId)))
+
+    if (targets.length === 0) {
+      return NextResponse.json({ ok: true, stores: 0, targets: 0, truncated: false, results: [] })
     }
 
     const { results, truncated } = await runDeliveryTrackingSweep({
       admin,
       storeIds,
+      targets,
       userId: 'system',
       worker: `cron:${crypto.randomUUID()}`,
       limitPerProvider: CRON_BATCH_LIMIT,
@@ -83,6 +95,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       stores: storeIds.length,
+      targets: targets.length,
       truncated,
       carriersBusy,
       rateLimited,

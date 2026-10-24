@@ -533,6 +533,13 @@ export async function runDeliveryTrackingSweep(params: {
   userId: string
   worker: string
   providers?: string[]
+  /**
+   * Couples (store, transporteur) reellement connectes. Fourni par le cron :
+   * sans cela, le parcours fabrique le PRODUIT CARTESIEN des stores et des
+   * transporteurs (32 cibles pour 4 stores) et sature la base pour des
+   * integrations inexistantes.
+   */
+  targets?: Array<{ storeId: string; provider: string }>
   limitPerProvider?: number
   totalBudgetMs?: number
   perBatchBudgetMs?: number
@@ -562,9 +569,17 @@ export async function runDeliveryTrackingSweep(params: {
     if (row.last_attempt_at) lastAttemptByTarget.set(`${row.store_id}::${row.provider}`, row.last_attempt_at)
   }
 
-  const targets = storeIds
-    .flatMap((storeId) => providers.map((provider) => ({ storeId, provider })))
-    .sort((a, b) => {
+  const explicit = Array.isArray(params.targets) ? params.targets : []
+  const pairs: Array<{ storeId: string; provider: DeliveryTrackingProvider }> = explicit.length > 0
+    ? explicit
+        .map((target) => {
+          const provider = getTrackingProvider(String(target.provider || ''))
+          return provider ? { storeId: target.storeId, provider } : null
+        })
+        .filter((target): target is { storeId: string; provider: DeliveryTrackingProvider } => target !== null)
+    : storeIds.flatMap((storeId) => providers.map((provider) => ({ storeId, provider })))
+
+  const targets = pairs.sort((a, b) => {
       const aAttempt = lastAttemptByTarget.get(`${a.storeId}::${a.provider.slug}`)
       const bAttempt = lastAttemptByTarget.get(`${b.storeId}::${b.provider.slug}`)
       if (aAttempt === bAttempt) return 0
