@@ -382,78 +382,102 @@ export async function runDeliveryTrackingBatch(params: {
   let configError = false
   let coverage: TrackingCoverage = { ...EMPTY_COVERAGE }
 
+  const deadline = startedAt + budgetMs - FINALIZE_MARGIN_MS
+  let stopRequested = false
+
   try {
-    const { data: claimed, error: claimError } = await admin.rpc('claim_delivery_tracking_batch', {
-      p_store_id: storeId,
-      p_provider: provider.slug,
-      p_tracking_column: provider.trackingColumn,
-      p_delivery_company_ids: companyIds,
-      p_excluded_statuses: provider.excludedStatuses,
-      p_exchange_active_statuses: EXCHANGE_ACTIVE_STATUSES,
-      p_limit: limit,
-      p_lease_seconds: leaseSeconds,
-      p_worker: worker,
-    })
+    // Plusieurs vagues successives dans le MEME budget : chaque vague ne
+    // reclame que les colis qu'elle peut reellement interroger. Un colis
+    // reclame est donc toujours suivi d'un appel transporteur, jamais
+    // abandonne apres coup. C'est ce qui evite qu'un colis reste des heures
+    // sans etre relu alors que des passages ont bien eu lieu.
+    while (!stopRequested && processed < limit) {
+      const claimLimit = Math.min(
+        limit - processed,
+        Math.floor((deadline - Date.now()) / MIN_CALL_BUDGET_MS)
+      )
+      // Budget insuffisant pour un appel ET sa finalisation : on n'ouvre pas
+      // de vague (un appel tronque serait pire qu'un report au passage suivant).
+      if (claimLimit < 1) break
 
-    if (claimError) throw new Error(`CLAIM_FAILED:${claimError.message}`)
-
-    const orders = (claimed || []) as ClaimedOrder[]
-    const untouched: string[] = []
-    const deadline = startedAt + budgetMs - FINALIZE_MARGIN_MS
-
-    for (let index = 0; index < orders.length; index += 1) {
-      const remainingBudget = deadline - Date.now()
-      // Budget insuffisant pour un appel ET sa finalisation : on ne commence
-      // pas (un appel tronque serait pire qu'un report au lot suivant).
-      if (remainingBudget < MIN_CALL_BUDGET_MS) {
-        untouched.push(...orders.slice(index).map((rest) => rest.order_id))
-        break
-      }
-
-      processed += 1
-      const result = await processClaimedOrder({
-        admin,
-        storeId,
-        provider,
-        order: orders[index],
-        tracker,
-        worker,
-        freshnessMs,
-        companyIds,
-        leaseSeconds,
-        // La marge de finalisation est DEJA retiree de `deadline` : on ne la
-        // retire pas une seconde fois, sinon le timeout mange la marge.
-        callTimeoutMs: Math.max(MIN_CALL_BUDGET_MS, Math.min(CALL_TIMEOUT_MS, remainingBudget)),
+      const { data: claimed, error: claimError } = await admin.rpc('claim_delivery_tracking_batch', {
+        p_store_id: storeId,
+        p_provider: provider.slug,
+        p_tracking_column: provider.trackingColumn,
+        p_delivery_company_ids: companyIds,
+        p_excluded_statuses: provider.excludedStatuses,
+        p_exchange_active_statuses: EXCHANGE_ACTIVE_STATUSES,
+        p_limit: claimLimit,
+        p_lease_seconds: leaseSeconds,
+        p_worker: worker,
       })
 
-      if (result.outcome === 'changed') changed += 1
-      else if (
-        result.outcome === 'failed' ||
-        result.outcome === 'carrier_cooldown' ||
-        result.outcome === 'carrier_config_error'
-      ) {
-        failed += 1
-      } else if (result.outcome === 'skipped') skipped += 1
+      if (claimError) throw new Error(`CLAIM_FAILED:${claimError.message}`)
 
-      if (result.cooldownMs) {
-        // Repos impose au COMPTE transporteur : le reste du lot est libere.
-        cooldownMs = result.cooldownMs
-        await extendCarrierCooldown(admin, integration.id, worker, result.cooldownMs)
-        untouched.push(...orders.slice(index + 1).map((rest) => rest.order_id))
-        break
+      const orders = (claimed || []) as ClaimedOrder[]
+      const untouched: string[] = []
+
+      for (let index = 0; index < orders.length; index += 1) {
+        const remainingBudget = deadline - Date.now()
+        // Budget insuffisant pour un appel ET sa finalisation : on ne commence
+        // pas (un appel tronque serait pire qu'un report au lot suivant).
+        if (remainingBudget < MIN_CALL_BUDGET_MS) {
+          untouched.push(...orders.slice(index).map((rest) => rest.order_id))
+          break
+        }
+
+        processed += 1
+        const result = await processClaimedOrder({
+          admin,
+          storeId,
+          provider,
+          order: orders[index],
+          tracker,
+          worker,
+          freshnessMs,
+          companyIds,
+          leaseSeconds,
+          // La marge de finalisation est DEJA retiree de `deadline` : on ne la
+          // retire pas une seconde fois, sinon le timeout mange la marge.
+          callTimeoutMs: Math.max(MIN_CALL_BUDGET_MS, Math.min(CALL_TIMEOUT_MS, remainingBudget)),
+        })
+
+        if (result.outcome === 'changed') changed += 1
+        else if (
+          result.outcome === 'failed' ||
+          result.outcome === 'carrier_cooldown' ||
+          result.outcome === 'carrier_config_error'
+        ) {
+          failed += 1
+        } else if (result.outcome === 'skipped') skipped += 1
+
+        if (result.cooldownMs) {
+          // Repos impose au COMPTE transporteur : le reste du lot est libere.
+          cooldownMs = result.cooldownMs
+          await extendCarrierCooldown(admin, integration.id, worker, result.cooldownMs)
+          untouched.push(...orders.slice(index + 1).map((rest) => rest.order_id))
+          stopRequested = true
+          break
+        }
+
+        if (result.outcome === 'carrier_config_error') {
+          // 401/403 : le compte est BLOQUE (pas seulement mis au repos).
+          configError = true
+          cooldownMs = CONFIG_ERROR_PARK_MS
+          await extendCarrierCooldown(admin, integration.id, worker, CONFIG_ERROR_PARK_MS, true)
+          untouched.push(...orders.slice(index + 1).map((rest) => rest.order_id))
+          stopRequested = true
+          break
+        }
       }
 
-      if (result.outcome === 'carrier_config_error') {
-        // 401/403 : le compte est BLOQUE (pas seulement mis au repos).
-        configError = true
-        cooldownMs = CONFIG_ERROR_PARK_MS
-        await extendCarrierCooldown(admin, integration.id, worker, CONFIG_ERROR_PARK_MS, true)
-        untouched.push(...orders.slice(index + 1).map((rest) => rest.order_id))
-        break
-      }
+      await releaseUntouched(admin, untouched, worker)
+
+      // File vide (moins de colis disponibles que demande) : aucune vague de
+      // plus n'apporterait de travail.
+      if (orders.length < claimLimit) break
     }
 
-    await releaseUntouched(admin, untouched, worker)
     coverage = await readTrackingCoverage(admin, coverageParams)
   } finally {
     // Le bail est toujours rendu : le repos transporteur et le delai minimum
