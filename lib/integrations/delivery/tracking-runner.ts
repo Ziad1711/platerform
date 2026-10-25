@@ -21,6 +21,10 @@ import { finalizeTrackedStatus } from './apply-tracked-status'
 import { getTrackingProvider, getTrackingProviderSlugs, type DeliveryTrackingProvider, type TrackedStatus } from './tracking-providers'
 import { CarrierError } from './carrier-error'
 import {
+  isQueueStalled,
+  resolveTargetBudget,
+} from './tracking-budget'
+import {
   EXCHANGE_ACTIVE_STATUSES,
   EXCHANGE_RETURN_ORDER_STATUS,
   isExchangeFollowUpOrder,
@@ -486,6 +490,12 @@ export async function runDeliveryTrackingBatch(params: {
   }
 
   const outcome = decideOutcome(processed, failed, coverage)
+  // Une file qui ne progresse plus doit etre visible dans l'interface
+  // existante (`delivery_tracking_state.last_error`), sans nouveau service.
+  const stalled = isQueueStalled({
+    remaining: coverage.remaining,
+    oldestPendingSyncedAt: coverage.oldestPendingSyncedAt,
+  })
   await saveTrackingState(admin, {
     storeId,
     provider: provider.slug,
@@ -497,9 +507,11 @@ export async function runDeliveryTrackingBatch(params: {
     coverage,
     error: configError
       ? 'configuration transporteur a corriger (401/403)'
-      : failed > 0
-        ? `${failed} colis en erreur`
-        : null,
+      : stalled
+        ? `file de suivi bloquee : ${coverage.remaining} colis en attente depuis plus de 30 minutes`
+        : failed > 0
+          ? `${failed} colis en erreur`
+          : null,
   })
 
   return {
@@ -556,17 +568,26 @@ export async function runDeliveryTrackingSweep(params: {
   const results: TrackingBatchResult[] = []
   let truncated = false
 
-  // Etat par (store, transporteur) : sert a prioriser les cibles en retard.
+  // Etat par (store, transporteur) : sert a prioriser les cibles en retard et
+  // a mesurer la progression reelle depuis le passage precedent.
   const { data: stateRows, error: stateError } = await admin
     .from('delivery_tracking_state')
-    .select('store_id, provider, last_attempt_at, last_outcome')
+    .select('store_id, provider, last_attempt_at, last_outcome, remaining')
     .in('store_id', storeIds)
 
   if (stateError) throw stateError
 
   const lastAttemptByTarget = new Map<string, string>()
-  for (const row of (stateRows || []) as Array<{ store_id: string; provider: string; last_attempt_at: string | null }>) {
-    if (row.last_attempt_at) lastAttemptByTarget.set(`${row.store_id}::${row.provider}`, row.last_attempt_at)
+  const remainingBeforeByTarget = new Map<string, number>()
+  for (const row of (stateRows || []) as Array<{
+    store_id: string
+    provider: string
+    last_attempt_at: string | null
+    remaining: number | null
+  }>) {
+    const key = `${row.store_id}::${row.provider}`
+    if (row.last_attempt_at) lastAttemptByTarget.set(key, row.last_attempt_at)
+    if (typeof row.remaining === 'number') remainingBeforeByTarget.set(key, row.remaining)
   }
 
   const explicit = Array.isArray(params.targets) ? params.targets : []
@@ -589,25 +610,34 @@ export async function runDeliveryTrackingSweep(params: {
     })
 
   for (const target of targets) {
-    if (Date.now() - startedAt > totalBudgetMs - 2000) {
+    // Budget borne par le temps total restant : un couple ne peut pas
+    // consommer un budget qui n'existe plus. Zero = report au passage suivant.
+    const budgetMs = resolveTargetBudget({
+      totalBudgetMs,
+      elapsedMs: Date.now() - startedAt,
+      preferredBudgetMs: params.perBatchBudgetMs,
+    })
+    if (budgetMs <= 0) {
       truncated = true
       break
     }
 
     try {
-      results.push(
-        await runDeliveryTrackingBatch({
-          admin,
-          storeId: target.storeId,
-          provider: target.provider,
-          userId,
-          worker,
-          limit: params.limitPerProvider,
-          budgetMs: params.perBatchBudgetMs,
-          freshnessMs: params.freshnessMs,
-          minIntervalSeconds: params.minIntervalSeconds,
-        })
-      )
+      const result = await runDeliveryTrackingBatch({
+        admin,
+        storeId: target.storeId,
+        provider: target.provider,
+        userId,
+        worker,
+        limit: params.limitPerProvider,
+        budgetMs,
+        freshnessMs: params.freshnessMs,
+        minIntervalSeconds: params.minIntervalSeconds,
+      })
+      results.push({
+        ...result,
+        remainingBefore: remainingBeforeByTarget.get(`${target.storeId}::${target.provider.slug}`),
+      })
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'TRACKING_BATCH_FAILED'
       // Une panne transporteur reste visible et ne bloque pas les autres.
