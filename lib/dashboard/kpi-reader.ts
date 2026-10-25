@@ -16,6 +16,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { mergeReaderPayloads } from './kpi-reader-merge'
 
 export const KPI_READER_RPC = 'rpc_dashboard_kpi_reader'
+/**
+ * Même contrat que `KPI_READER_RPC`, avec `delivery_fee_cost` par point
+ * journalier (axe `order`, accès `full` uniquement). Utilisé par le graphique
+ * « Performance du business » ; les autres widgets restent sur le lecteur
+ * d'origine.
+ */
+export const KPI_READER_RPC_V2 = 'rpc_dashboard_kpi_reader_v2'
 export const KPI_READER_DIRECT_LIMIT = 7
 /** Plage maximale acceptée par `rpc_dashboard_kpi_reader`. */
 export const KPI_READER_MAX_RPC_DAYS = 400
@@ -104,6 +111,11 @@ export interface KpiReaderPoint {
   ads: string
   /** Absent pour un accès `commercial`. */
   purchase_cost?: string
+  /**
+   * Coût de livraison de la journée (axe `order`). Absent pour un accès
+   * `commercial` ou si le coût n'est pas calculable : jamais un faux zéro.
+   */
+  delivery_fee_cost?: string
   /** Absent pour un accès `commercial`. */
   contribution_margin?: string
 }
@@ -166,6 +178,8 @@ export interface KpiReaderInput {
   /** Journée métier exclue, `YYYY-MM-DD`. */
   to: string
   includeDirect?: boolean
+  /** RPC à appeler ; `KPI_READER_RPC` par défaut. */
+  rpc?: string
   /** Annulation transmise par React Query (changement de filtre, démontage). */
   signal?: AbortSignal
 }
@@ -204,6 +218,7 @@ export function dashboardKpiReaderKey(boundary: string, input: KpiReaderInput) {
     input.from,
     input.to,
     input.includeDirect ?? true,
+    input.rpc ?? KPI_READER_RPC,
   ] as const
 }
 
@@ -265,7 +280,7 @@ async function fetchDashboardKpiReaderWindow(
 
   try {
     const { data, error } = await supabase
-      .rpc(KPI_READER_RPC, {
+      .rpc(input.rpc ?? KPI_READER_RPC, {
         p_store_ids: input.storeIds,
         p_from: input.from,
         p_to: input.to,

@@ -8,6 +8,7 @@
  *
  * - les composantes additives sont regroupées **avant** tout ratio : CPL et CPA
  *   ne sont jamais la moyenne de ratios journaliers ;
+ * - le coût de livraison suit la même addition (axe `order` uniquement) ;
  * - aucune journée n'est inventée hors de la fenêtre couverte : les journées
  *   antérieures à l'historique de la boutique restent absentes ;
  * - à l'intérieur de la fenêtre, toutes les journées existent, y compris celles
@@ -31,6 +32,8 @@ export interface SeriesBucket {
   ads: number
   purchase: number
   margin: number
+  /** Coût de livraison de la journée (axe `order`), mêmes règles que la courbe. */
+  delivery: number
 }
 
 function bucketKey(date: string, granularity: SeriesGranularity): string {
@@ -52,6 +55,7 @@ function emptyBucket(date: string): SeriesBucket {
     ads: 0,
     purchase: 0,
     margin: 0,
+    delivery: 0,
   }
 }
 
@@ -62,8 +66,8 @@ function toNumber(value: string | undefined): number {
 
 /**
  * Regroupe les journées par bucket (jour ou mois) en additionnant les
- * composantes additives. `delivery` et `confirmation` ne sont pas exposés par
- * point dans le payload V5 : ils ne sont pas reconstitués ici.
+ * composantes additives. Le coût de livraison provient de l'axe `order` et
+ * n'est jamais additionné à l'axe `delivery`.
  */
 export function bucketPoints(
   points: KpiReaderPoint[],
@@ -81,6 +85,7 @@ export function bucketPoints(
       ads: 0,
       purchase: 0,
       margin: 0,
+      delivery: 0,
     }
     bucket.orders_count += point.orders_count
     bucket.delivered_count += point.delivered_count
@@ -88,6 +93,7 @@ export function bucketPoints(
     bucket.ads += toNumber(point.ads)
     bucket.purchase += toNumber(point.purchase_cost)
     bucket.margin += toNumber(point.contribution_margin)
+    bucket.delivery += toNumber(point.delivery_fee_cost)
     byKey.set(key, bucket)
   }
 

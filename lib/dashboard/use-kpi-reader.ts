@@ -45,6 +45,11 @@ export interface UseKpiReaderOptions {
   to: string
   includeDirect?: boolean
   pollMs?: number
+  /**
+   * Lecteur à interroger (`KPI_READER_RPC_V2` pour le coût de livraison
+   * journalier). La sonde de révision reste sur le lecteur léger.
+   */
+  rpc?: string
 }
 
 export function useKpiReader({
@@ -56,6 +61,7 @@ export function useKpiReader({
   to,
   includeDirect = true,
   pollMs = KPI_REVISION_POLL_MS,
+  rpc,
 }: UseKpiReaderOptions) {
   const queryClient = useQueryClient()
   const [visible, setVisible] = useState(true)
@@ -72,8 +78,8 @@ export function useKpiReader({
   }, [])
 
   const input = useMemo(
-    () => ({ storeIds: sortedStoreIds, from, to, includeDirect }),
-    [sortedStoreIds, from, to, includeDirect],
+    () => ({ storeIds: sortedStoreIds, from, to, includeDirect, rpc }),
+    [sortedStoreIds, from, to, includeDirect, rpc],
   )
 
   const main = useQuery<KpiReaderPayload>({
