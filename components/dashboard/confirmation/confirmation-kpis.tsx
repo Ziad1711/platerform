@@ -6,6 +6,8 @@ type ConfirmationKpisProps = {
   counts: Record<string, number>
   activeFilter: string
   onSelectFilter: (filter: string) => void
+  /** Aucune donnée reçue encore : squelettes de même hauteur que les valeurs. */
+  loading?: boolean
 }
 
 type KpiDefinition = {
@@ -24,7 +26,12 @@ const KPIS: KpiDefinition[] = [
   { key: 'cancelledToday', label: 'Annulées aujourd’hui', tone: 'text-rose-600' },
 ]
 
-export default function ConfirmationKpis({ counts, activeFilter, onSelectFilter }: ConfirmationKpisProps) {
+export default function ConfirmationKpis({
+  counts,
+  activeFilter,
+  onSelectFilter,
+  loading = false,
+}: ConfirmationKpisProps) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
       {KPIS.map((kpi) => {
@@ -45,11 +52,16 @@ export default function ConfirmationKpis({ counts, activeFilter, onSelectFilter 
           >
             <div className="text-xs text-muted-foreground">{kpi.label}</div>
             <div className={`mt-1 text-2xl font-bold ${kpi.tone}`}>
-              {counts?.[kpi.key] === undefined ? (
+              {loading ? (
+                <span
+                  className="block h-8 w-12 animate-pulse rounded bg-muted"
+                  aria-hidden="true"
+                />
+              ) : counts?.[kpi.key] === undefined ? (
                 <span
                   className="text-muted-foreground"
-                  aria-label="Compteur en cours de chargement"
-                  title="Compteur en cours de chargement"
+                  aria-label="Compteur indisponible"
+                  title="Compteur indisponible"
                 >
                   —
                 </span>

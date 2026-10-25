@@ -53,6 +53,12 @@ type SecondaryResponse = {
   blacklistAvailable: boolean
 }
 
+/**
+ * Onglets de la page. « Commandes » est la vue de travail par défaut ; « Vue
+ * d'ensemble » ne présente que les cartes KPI déjà calculées côté serveur.
+ */
+type ConfirmationView = 'orders' | 'overview'
+
 type ActionPayload = {
   action?: ConfirmationAction
   status?: string
@@ -221,6 +227,9 @@ export default function ConfirmationPage() {
   const canEdit = can('confirmation.edit')
   const [filter, setFilter] = useState<ConfirmationQueueFilter>('all')
   const [sort, setSort] = useState<ConfirmationSortOrder>('recent')
+  // Onglet actif : « Commandes » par défaut à chaque ouverture de la page.
+  // Les KPI restent chargés en arrière-plan quel que soit l'onglet affiché.
+  const [activeTab, setActiveTab] = useState<ConfirmationView>('orders')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -346,6 +355,10 @@ export default function ConfirmationPage() {
     queryKey: ['confirmation-queue', currentStoreId, filter, sort, search, todayStart, page, 'secondary'],
     enabled: Boolean(currentStoreId) && data !== undefined,
     retry: 1,
+    // Les compteurs restent frais 30 s : un aller-retour entre onglets ne
+    // relance pas les huit requêtes, mais une donnée périmée est revalidée au
+    // focus. Les mutations continuent d'invalider explicitement la clé.
+    staleTime: 30_000,
     queryFn: async () => {
       const params = new URLSearchParams({
         view: 'secondary',
@@ -772,12 +785,64 @@ export default function ConfirmationPage() {
         </div>
       ) : (
         <>
-          <ConfirmationKpis
-            counts={counts || {}}
-            activeFilter={filter}
-            onSelectFilter={(next) => setFilter(next as ConfirmationQueueFilter)}
-          />
+          {/* Onglets de vue : « Commandes » par défaut. Aucune requête n'est
+              relancée au basculement — React Query conserve le cache de la file
+              comme celui des compteurs. */}
+          <div
+            className="flex flex-wrap items-center gap-2"
+            role="tablist"
+            aria-label="Vue de la confirmation"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'orders'}
+              onClick={() => setActiveTab('orders')}
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === 'orders'
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-border text-muted-foreground hover:bg-secondary'
+              }`}
+            >
+              Commandes
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'overview'}
+              onClick={() => setActiveTab('overview')}
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === 'overview'
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-border text-muted-foreground hover:bg-secondary'
+              }`}
+            >
+              Vue d&apos;ensemble
+            </button>
+          </div>
 
+          {activeTab === 'overview' ? (
+            <div role="tabpanel" aria-label="Vue d'ensemble" className="space-y-3">
+              <ConfirmationKpis
+                counts={counts || {}}
+                loading={!counts && !secondaryFailed}
+                activeFilter={filter}
+                onSelectFilter={(next) => {
+                  // Un clic sur une carte KPI ramène à la file filtrée.
+                  setFilter(next as ConfirmationQueueFilter)
+                  setPage(1)
+                  setActiveTab('orders')
+                }}
+              />
+              {secondaryFailed ? (
+                <p className="text-xs text-muted-foreground">
+                  Statistiques momentanément indisponibles. Le travail sur les commandes
+                  n&apos;est pas affecté.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <>
           <div className="rounded-xl border border-border bg-card p-3 space-y-3">
             <div className="flex flex-wrap gap-2">
               {FILTER_TABS.map((tab) => (
@@ -901,6 +966,8 @@ export default function ConfirmationPage() {
               </button>
             </div>
           ) : null}
+            </>
+          )}
         </>
       )}
 
