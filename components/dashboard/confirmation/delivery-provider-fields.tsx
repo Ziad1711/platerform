@@ -27,6 +27,12 @@ type DeliveryProviderFieldsProps = {
   value: ConfirmationDeliveryOptions
   onChange: (next: ConfirmationDeliveryOptions) => void
   onConfigError: (code: DeliveryOptionsErrorCode | null) => void
+  /**
+   * Affiche le sélecteur de ville des transporteurs à détection automatique.
+   * Il reste masqué tant que la résolution a réussi ou n'a pas encore échoué :
+   * comme dans `/sales`, seuls la société et la note sont demandés d'emblée.
+   */
+  showCityFallback?: boolean
 }
 
 const CITY_PROVIDER_LABEL: Partial<Record<ConfirmationDeliveryProvider, string>> = {
@@ -96,6 +102,7 @@ export default function DeliveryProviderFields({
   value,
   onChange,
   onConfigError,
+  showCityFallback = false,
 }: DeliveryProviderFieldsProps) {
   const supabase = useMemo(() => createClient(), [])
   const [cityQuery, setCityQuery] = useState('')
@@ -345,6 +352,11 @@ export default function DeliveryProviderFields({
     if (provider === 'rushliv') update({ rushlivCityKey: undefined, rushlivCityName: undefined })
   }
 
+  // Maroc Go / Rapid / Rushliv : comme dans `/sales`, aucun champ ville n'est
+  // demandé d'emblée. Le sélecteur n'apparaît qu'en repli, après un échec de la
+  // résolution automatique — la ville déjà résolue reste transmise en silence.
+  if (usesSlugCities && !showCityFallback) return null
+
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
       <div className="text-sm font-medium text-foreground">{PROVIDER_TITLE[provider]}</div>
@@ -362,7 +374,7 @@ export default function DeliveryProviderFields({
             provider === 'ozone'
               ? 'OZONE nécessite un choix manuel de la ville.'
               : usesSlugCities
-                ? 'Ville détectée automatiquement si possible ; choisissez-la dans la liste si elle est vide.'
+                ? 'Ville non reconnue automatiquement : choisissez-la dans la liste.'
                 : undefined
           }
           cities={cities}

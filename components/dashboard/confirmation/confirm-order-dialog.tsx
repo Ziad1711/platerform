@@ -162,6 +162,9 @@ export default function ConfirmOrderDialog({
   const [deliveryNote, setDeliveryNote] = useState('')
   const [localError, setLocalError] = useState('')
   const [resolvingCity, setResolvingCity] = useState(false)
+  // Repli manuel : le sélecteur de ville n'apparaît qu'après un échec de la
+  // résolution automatique, au clic sur « Confirmer ».
+  const [cityFallbackRequired, setCityFallbackRequired] = useState(false)
   const [providerIssue, setProviderIssue] = useState<DeliveryOptionsErrorCode | null>(null)
   const [deliveryOptionsState, setDeliveryOptionsState] = useState<DeliveryOptionsState>({
     companyId: '',
@@ -201,6 +204,8 @@ export default function ConfirmOrderDialog({
       companyId: deliveryChoice,
       options: createDefaultDeliveryOptions(providerSlug),
     })
+    // Nouveau transporteur : le repli manuel précédent ne s'applique plus.
+    setCityFallbackRequired(false)
   }, [deliveryChoice, providerSlug])
 
   useEffect(() => {
@@ -208,6 +213,7 @@ export default function ConfirmOrderDialog({
     setDeliveryNote(order?.delivery_note || '')
     setLocalError('')
     setProviderIssue(null)
+    setCityFallbackRequired(false)
     setDeliveryOptionsState({ companyId: '', options: {} })
     // Une société déjà rattachée reste sélectionnée ; sinon l'agent doit choisir.
     setDeliveryChoice(order?.delivery_company_id ? String(order.delivery_company_id) : '')
@@ -278,8 +284,9 @@ export default function ConfirmOrderDialog({
       }
 
       if (!deliveryCityKeyOf(providerSlug, effectiveOptions)) {
+        setCityFallbackRequired(true)
         setLocalError(
-          'Ville non reconnue automatiquement. Sélectionnez la ville du transporteur pour confirmer.'
+          'Ville non reconnue automatiquement. Choisissez la ville du transporteur ci-dessous pour confirmer.'
         )
         return
       }
@@ -442,6 +449,7 @@ export default function ConfirmOrderDialog({
                 orderId={order?.id ?? null}
                 orderCity={order?.city ?? null}
                 value={deliveryOptions}
+                showCityFallback={cityFallbackRequired}
                 onChange={handleDeliveryOptionsChange}
                 onConfigError={setProviderIssue}
               />
