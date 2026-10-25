@@ -38,7 +38,19 @@ const FILTER_TABS: { value: ConfirmationQueueFilter; label: string }[] = [
 type QueueResponse = {
   settings: ConfirmationSettings
   orders: ConfirmationOrder[]
-  counts: Record<string, number>
+  view?: 'queue'
+}
+
+/**
+ * Données secondaires : compteurs de files et avertissement blacklist.
+ * Lues après la réponse principale, elles ne conditionnent jamais l'affichage
+ * des commandes.
+ */
+type SecondaryResponse = {
+  counts: Record<string, number> | null
+  countsAvailable: boolean
+  blacklist: Record<string, boolean> | null
+  blacklistAvailable: boolean
 }
 
 type ActionPayload = {
@@ -324,7 +336,83 @@ export default function ConfirmationPage() {
   })
 
   const maxAttempts = Number(data?.settings?.max_attempts || DEFAULT_MAX_ATTEMPTS)
-  const orders = useMemo(() => data?.orders || [], [data?.orders])
+
+  /**
+   * Compteurs et avertissement blacklist : lus séparément, une fois la file
+   * affichée. La clé commence par `confirmation-queue` afin que les invalidations
+   * existantes après action rafraîchissent aussi ces données.
+   */
+  const { data: secondary, isError: secondaryFailed } = useQuery<SecondaryResponse>({
+    queryKey: ['confirmation-queue', currentStoreId, filter, sort, search, todayStart, page, 'secondary'],
+    enabled: Boolean(currentStoreId) && data !== undefined,
+    retry: 1,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        view: 'secondary',
+        storeId: String(currentStoreId),
+        filter,
+        sort,
+        todayStart,
+        limit: String(PAGE_SIZE),
+        offset: String((page - 1) * PAGE_SIZE),
+      })
+      if (search.trim()) params.set('search', search.trim())
+
+      const response = await fetch(`/api/orders/confirmation/queue?${params.toString()}`)
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error || 'CONFIRMATION_SECONDARY_FETCH_FAILED')
+      }
+      return payload as SecondaryResponse
+    },
+  })
+
+  const counts = secondary?.counts ?? null
+
+  /**
+   * Fusionne l'état blacklist vérifié dans les commandes. Sans réponse
+   * secondaire, l'état reste « pending » ; si la vérification a échoué, il passe
+   * à « unavailable ». Aucun cas ne présente un numéro comme non blacklisté
+   * avant vérification réelle.
+   */
+  const orders = useMemo<ConfirmationOrder[]>(() => {
+    const base = data?.orders || []
+    const blacklist = secondary?.blacklist
+
+    if (!secondary) {
+      // Échec définitif de la vue secondaire : l'avertissement passe à
+      // « non vérifiée » au lieu de laisser « vérification… » indéfiniment.
+      return base.map((order) => ({
+        ...order,
+        is_blacklisted: undefined,
+        blacklist_status: secondaryFailed ? ('unavailable' as const) : ('pending' as const),
+      }))
+    }
+
+    if (!secondary.blacklistAvailable || !blacklist) {
+      return base.map((order) => ({
+        ...order,
+        is_blacklisted: undefined,
+        blacklist_status: 'unavailable' as const,
+      }))
+    }
+
+    return base.map((order) => ({
+      ...order,
+      is_blacklisted: blacklist[order.id] === true,
+      blacklist_status: 'verified' as const,
+    }))
+  }, [data?.orders, secondary, secondaryFailed])
+
+  /**
+   * Commande présentée dans la modale de confirmation : dès que la vérification
+   * blacklist aboutit, la modale affiche le résultat réel au lieu de rester sur
+   * l'instantané « vérification en cours » pris à l'ouverture.
+   */
+  const confirmOrderView = useMemo(() => {
+    if (!confirmOrder) return null
+    return orders.find((order) => order.id === confirmOrder.id) ?? confirmOrder
+  }, [confirmOrder, orders])
 
   // Étapes réellement atteintes pendant la confirmation en cours (flux SSE).
   const [confirmProgress, setConfirmProgress] = useState<ConfirmationProgressStage[]>([])
@@ -685,7 +773,7 @@ export default function ConfirmationPage() {
       ) : (
         <>
           <ConfirmationKpis
-            counts={data?.counts || {}}
+            counts={counts || {}}
             activeFilter={filter}
             onSelectFilter={(next) => setFilter(next as ConfirmationQueueFilter)}
           />
@@ -711,8 +799,8 @@ export default function ConfirmationPage() {
                   }`}
                 >
                   {tab.label}
-                  {data?.counts?.[tab.value] !== undefined ? (
-                    <span className="ml-2 text-xs opacity-80">{data.counts[tab.value]}</span>
+                  {counts?.[tab.value] !== undefined ? (
+                    <span className="ml-2 text-xs opacity-80">{counts[tab.value]}</span>
                   ) : null}
                 </button>
               ))}
@@ -842,7 +930,7 @@ export default function ConfirmationPage() {
 
       <ConfirmOrderDialog
         open={Boolean(confirmOrder)}
-        order={confirmOrder}
+        order={confirmOrderView}
         busy={actionMutation.isPending || Boolean(verifyingOrderId)}
         progressStages={confirmProgress}
         finished={Boolean(confirmOutcome)}

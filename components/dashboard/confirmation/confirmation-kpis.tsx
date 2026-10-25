@@ -45,7 +45,17 @@ export default function ConfirmationKpis({ counts, activeFilter, onSelectFilter 
           >
             <div className="text-xs text-muted-foreground">{kpi.label}</div>
             <div className={`mt-1 text-2xl font-bold ${kpi.tone}`}>
-              {formatNumber(Number(counts?.[kpi.key] || 0))}
+              {counts?.[kpi.key] === undefined ? (
+                <span
+                  className="text-muted-foreground"
+                  aria-label="Compteur en cours de chargement"
+                  title="Compteur en cours de chargement"
+                >
+                  —
+                </span>
+              ) : (
+                formatNumber(Number(counts[kpi.key] || 0))
+              )}
             </div>
           </button>
         )

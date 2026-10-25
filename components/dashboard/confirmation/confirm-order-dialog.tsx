@@ -345,6 +345,15 @@ export default function ConfirmOrderDialog({
                 Ce numéro est blacklisté. Confirmez uniquement si vous avez vérifié la commande.
               </span>
             </section>
+          ) : order && order.blacklist_status !== 'verified' ? (
+            <section className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {order.blacklist_status === 'unavailable'
+                  ? 'Vérification blacklist indisponible : contrôlez le numéro avant de confirmer.'
+                  : 'Vérification blacklist en cours : le résultat s’affichera dès sa réception.'}
+              </span>
+            </section>
           ) : null}
 
           <section className="space-y-4 rounded-xl border border-border p-4">

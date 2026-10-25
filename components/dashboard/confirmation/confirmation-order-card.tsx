@@ -147,9 +147,17 @@ export default function ConfirmationOrderCard({
             >
               {getConfirmationStatusLabel(order.status)}
             </span>
-            {order.is_blacklisted ? (
+            {order.is_blacklisted === true ? (
               <span className="text-[11px] font-medium rounded-full bg-red-100 text-red-700 px-2 py-0.5">
                 Numéro blacklisté
+              </span>
+            ) : order.blacklist_status === 'pending' ? (
+              <span className="text-[11px] font-medium rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">
+                Blacklist : vérification…
+              </span>
+            ) : order.blacklist_status === 'unavailable' ? (
+              <span className="text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">
+                Blacklist non vérifiée
               </span>
             ) : null}
           </div>
