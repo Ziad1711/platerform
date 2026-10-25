@@ -212,10 +212,19 @@ export default function DeliveryProviderFields({
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    queryFn: () =>
-      autoCityProvider
-        ? fetchCityPreview({ provider: autoCityProvider, orderId, rawCity: rawOrderCity })
-        : Promise.resolve(null),
+    queryFn: async () => {
+      if (!autoCityProvider) return null
+      const resolved = await fetchCityPreview({
+        provider: autoCityProvider,
+        orderId,
+        rawCity: rawOrderCity,
+      })
+      // Un échec technique (endpoint indisponible, configuration serveur
+      // incomplète, IA en erreur) ne doit jamais être mémorisé comme « aucune
+      // ville trouvée » : la tentative suivante doit pouvoir aboutir.
+      if (!resolved) throw new Error('CITY_NOT_RESOLVED')
+      return resolved
+    },
   })
 
   // La ville reconnue est appliquée uniquement si elle appartient au catalogue
