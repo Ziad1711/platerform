@@ -235,7 +235,9 @@ export default function ConfirmationPage() {
   const [page, setPage] = useState(1)
   const [todayStart] = useState(getTodayStartIso)
 
-  const PAGE_SIZE = 40
+  // 16 commandes par page : premier affichage plus rapide, sans changer la
+  // pagination serveur ni le périmètre de la vue secondaire (même page).
+  const PAGE_SIZE = 16
 
   // Évite une requête serveur à chaque frappe.
   useEffect(() => {
@@ -763,11 +765,11 @@ export default function ConfirmationPage() {
               Confirmation
             </span>
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-center text-sm text-muted-foreground md:text-left">
             Traitez les commandes en attente : appels, rappels, confirmations et annulations.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
           <StoreSelector />
           <button
             type="button"
@@ -789,7 +791,7 @@ export default function ConfirmationPage() {
               relancée au basculement — React Query conserve le cache de la file
               comme celui des compteurs. */}
           <div
-            className="flex flex-wrap items-center gap-2"
+            className="flex flex-wrap items-center justify-center gap-2 md:justify-start"
             role="tablist"
             aria-label="Vue de la confirmation"
           >
