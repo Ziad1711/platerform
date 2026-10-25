@@ -45,6 +45,18 @@ const PROVIDER_TITLE: Record<ConfirmationDeliveryProvider, string> = {
 const inputClass =
   'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring'
 
+/** Champs de ville des transporteurs à détection automatique (aucun autre transporteur). */
+const SLUG_CITY_FIELDS: Partial<
+  Record<
+    ConfirmationDeliveryProvider,
+    { key: keyof ConfirmationDeliveryOptions; name: keyof ConfirmationDeliveryOptions }
+  >
+> = {
+  'maroc-go-delivery': { key: 'marocGoCityKey', name: 'marocGoCityName' },
+  'rapid-delivery': { key: 'rapidCityKey', name: 'rapidCityName' },
+  rushliv: { key: 'rushlivCityKey', name: 'rushlivCityName' },
+}
+
 function ToggleRow({
   label,
   checked,
@@ -95,7 +107,18 @@ export default function DeliveryProviderFields({
   const [pickupQuery, setPickupQuery] = useState('')
   const pickupPrefilledRef = useRef(false)
   const digylogPrefilledRef = useRef(false)
-  const slugPrefilledRef = useRef(false)
+  // Le dialogue parent recrée ses callbacks à chaque rendu : on conserve la
+  // dernière version pour que la résolution de ville ne dépende jamais de leur
+  // identité (source de l'annulation prématurée de l'ancien effet).
+  const onChangeRef = useRef(onChange)
+  const valueRef = useRef(value)
+  // Un choix (ou une saisie) manuel de ville prime toujours sur l'auto-détection.
+  const manualCitySelectionRef = useRef(false)
+
+  useEffect(() => {
+    onChangeRef.current = onChange
+    valueRef.current = value
+  }, [onChange, value])
 
   const catalogueId = deliveryProviderCatalogueId(provider)
 
@@ -171,6 +194,78 @@ export default function DeliveryProviderFields({
 
   const cities = usesSlugCities ? slugCities : catalogueCities
 
+  // Prévisualisation de la ville pour les transporteurs à détection automatique
+  // (Maroc Go / Rapid / Rushliv). La clé de requête identifie strictement la
+  // recherche : un rerender du dialogue (blacklist, compteurs P0, onglets) ne
+  // relance ni l'appel serveur ni l'IA. Résolution en lecture seule : ouvrir le
+  // dialogue ne modifie ni la commande ni les alias.
+  const autoCityProvider = usesSlugCities ? provider : null
+  const rawOrderCity = String(orderCity || '').trim()
+
+  const { data: resolvedCity } = useQuery<{
+    cityKey: string
+    cityName: string
+    source?: string
+  } | null>({
+    queryKey: ['confirmation-city-resolution', autoCityProvider, orderId, rawOrderCity],
+    enabled: Boolean(autoCityProvider && orderId && rawOrderCity),
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async () => {
+      const response = await fetch('/api/orders/normalize-city', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          city: rawOrderCity,
+          orderId,
+          providerSlug: autoCityProvider,
+          preview: true,
+        }),
+      })
+      if (!response.ok) return null
+      const payload = (await response.json().catch(() => null)) as {
+        cityKey?: string | null
+        cityName?: string | null
+        source?: string | null
+      } | null
+      const key = payload?.cityKey ? String(payload.cityKey) : ''
+      if (!key) return null
+      return {
+        cityKey: key,
+        cityName: String(payload?.cityName || rawOrderCity),
+        source: payload?.source ? String(payload.source) : undefined,
+      }
+    },
+  })
+
+  // La ville reconnue est appliquée uniquement si elle appartient au catalogue
+  // affiché du transporteur et si l'agent n'a pas déjà choisi une ville. Le
+  // composant est remonté à chaque changement de société (clé = société) : une
+  // réponse d'un ancien transporteur ne peut donc jamais être appliquée ici.
+  useEffect(() => {
+    const fields = SLUG_CITY_FIELDS[provider]
+    if (!fields || !resolvedCity) return
+    if (manualCitySelectionRef.current) return
+
+    const current = valueRef.current
+    if (current[fields.key]) return
+
+    // Clé absente du catalogue du transporteur : pas de présélection hasardeuse,
+    // la sélection manuelle reste la seule issue.
+    const inCatalogue = cities.some((city) => String(city.city_key) === resolvedCity.cityKey)
+    if (!inCatalogue) return
+
+    const next: ConfirmationDeliveryOptions = { ...current }
+    ;(next as Record<string, unknown>)[fields.key as string] = resolvedCity.cityKey
+    ;(next as Record<string, unknown>)[fields.name as string] = resolvedCity.cityName
+
+    setCityQuery(resolvedCity.cityName)
+    onChangeRef.current(next)
+  }, [provider, orderId, resolvedCity, cities, value])
+
   const { data: senditConfig } = useQuery<{ default_pickup_district_id: string | null } | null>({
     queryKey: ['confirmation-sendit-config', storeId],
     enabled: Boolean(storeId) && provider === 'sendit',
@@ -239,51 +334,6 @@ export default function DeliveryProviderFields({
     })
   }, [provider, digylogConfig, digylogError, onChange, value])
 
-  // Maroc Go / Rapid Delivery / Rushliv : la ville est normalement détectée
-  // automatiquement. On tente la résolution côté serveur pour pré-remplir le
-  // sélecteur ; si elle échoue, le champ reste vide et l'agent doit choisir la
-  // ville manuellement.
-  useEffect(() => {
-    if (slugPrefilledRef.current) return
-    const isSlugProvider =
-      provider === 'maroc-go-delivery' || provider === 'rapid-delivery' || provider === 'rushliv'
-    if (!isSlugProvider) return
-    const rawCity = String(orderCity || '').trim()
-    if (!rawCity || !orderId) return
-    slugPrefilledRef.current = true
-    let cancelled = false
-    void (async () => {
-      try {
-        const response = await fetch('/api/orders/normalize-city', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ city: rawCity, orderId, providerSlug: provider }),
-        })
-        const payload = (await response.json().catch(() => null)) as {
-          cityKey?: string | null
-          cityName?: string | null
-        } | null
-        if (cancelled) return
-        const key = payload?.cityKey ? String(payload.cityKey) : ''
-        if (!key) return
-        const name = String(payload?.cityName || rawCity)
-        setCityQuery(name)
-        if (provider === 'maroc-go-delivery') {
-          onChange({ ...value, marocGoCityKey: key, marocGoCityName: name })
-        } else if (provider === 'rapid-delivery') {
-          onChange({ ...value, rapidCityKey: key, rapidCityName: name })
-        } else if (provider === 'rushliv') {
-          onChange({ ...value, rushlivCityKey: key, rushlivCityName: name })
-        }
-      } catch {
-        // Non bloquant : repli sur le choix manuel de la ville.
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [provider, orderId, orderCity, onChange, value])
-
   const update = (partial: Partial<ConfirmationDeliveryOptions>) => onChange({ ...value, ...partial })
 
   const cityKey =
@@ -304,6 +354,7 @@ export default function DeliveryProviderFields({
                 : ''
 
   const selectCity = (city: DeliveryCityOption) => {
+    manualCitySelectionRef.current = true
     const key = String(city.city_key)
     const name = String(city.city_name || '')
     setCityQuery(name)
@@ -316,6 +367,7 @@ export default function DeliveryProviderFields({
   }
 
   const changeCityQuery = (next: string) => {
+    manualCitySelectionRef.current = true
     setCityQuery(next)
     if (provider === 'ozone') update({ ozoneCityKey: undefined, ozoneCityName: undefined })
     if (provider === 'ameex') update({ ameexCityKey: undefined, ameexCityName: undefined })

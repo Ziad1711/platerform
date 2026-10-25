@@ -16,6 +16,12 @@ type NormalizeCityParams = {
   providerSlug: string
   /** Signal d'étape émis pendant la normalisation (ex. appel IA en cours). */
   onStage?: (stage: CityNormalizationStage) => void
+  /**
+   * Résolution en lecture seule : aucune écriture sur la commande ni sur les
+   * alias. Utilisé pour prévisualiser une ville dans l'interface ; le moteur et
+   * les règles de correspondance restent strictement identiques.
+   */
+  preview?: boolean
 }
 
 export type NormalizeCityResult = {
@@ -358,6 +364,34 @@ function resolveCityKeyFromCandidates(
   return match ? String(match.city_key || '') : null
 }
 
+/**
+ * Borne l'attente de l'IA de normalisation. Sans borne, un fournisseur lent
+ * bloque la confirmation ; au-delà du délai le moteur échoue en `ai_failed` et
+ * l'agent sélectionne la ville manuellement. Aucun quota n'est introduit ici.
+ */
+const DEFAULT_AI_TIMEOUT_MS = 8000
+
+function resolveAiTimeoutMs() {
+  const configured = Number(process.env.CITY_NORMALIZATION_AI_TIMEOUT_MS || 0)
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_AI_TIMEOUT_MS
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('CITY_NORMALIZATION_AI_TIMEOUT')), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
 async function resolveWithDeepSeek(rawCity: string, candidates: string[]) {
   const provider = new DeepSeekProvider()
   const normalizedModel = String(process.env.DEEPSEEK_MODEL || 'deepseek-chat')
@@ -365,22 +399,25 @@ async function resolveWithDeepSeek(rawCity: string, candidates: string[]) {
     .toLowerCase()
     .replace(/\s+/g, '-')
 
-  const result = await provider.chat({
-    model: normalizedModel || 'deepseek-chat',
-    systemPrompt:
-      'Tu normalises uniquement des noms de villes marocaines. Réponds strictement avec un seul nom exact issu de la liste fournie, sans explication, sans ponctuation supplémentaire, ou NOT_FOUND si aucune ville ne correspond.',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          `Ville à normaliser: ${rawCity}`,
-          'Exemples: casa -> Casablanca, rabat -> Rabat, marrakech -> Marrakech.',
-          `Villes disponibles: ${candidates.join(', ')}`,
-          'Choisis strictement un nom présent dans la liste. Si aucune correspondance fiable n\'existe, réponds uniquement NOT_FOUND.',
-        ].join('\n'),
-      },
-    ],
-  })
+  const result = await withTimeout(
+    provider.chat({
+      model: normalizedModel || 'deepseek-chat',
+      systemPrompt:
+        'Tu normalises uniquement des noms de villes marocaines. Réponds strictement avec un seul nom exact issu de la liste fournie, sans explication, sans ponctuation supplémentaire, ou NOT_FOUND si aucune ville ne correspond.',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            `Ville à normaliser: ${rawCity}`,
+            'Exemples: casa -> Casablanca, rabat -> Rabat, marrakech -> Marrakech.',
+            `Villes disponibles: ${candidates.join(', ')}`,
+            'Choisis strictement un nom présent dans la liste. Si aucune correspondance fiable n\'existe, réponds uniquement NOT_FOUND.',
+          ].join('\n'),
+        },
+      ],
+    }),
+    resolveAiTimeoutMs()
+  )
 
   return String(result.text || '').trim()
 }
@@ -438,7 +475,7 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
       matchedCity: exactMatch.city_name,
       cityKey,
     })
-    if (params.orderId) {
+    if (!params.preview && params.orderId) {
       await persistOrderDeliveryCity({
         supabase,
         orderId: params.orderId,
@@ -467,9 +504,11 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
       cityKey: repairedCityKey,
     })
 
-    await updateAliasUsage(supabase, normalizedAlias, repairedCityKey, params.providerSlug)
+    if (!params.preview) {
+      await updateAliasUsage(supabase, normalizedAlias, repairedCityKey, params.providerSlug)
+    }
 
-    if (params.orderId) {
+    if (!params.preview && params.orderId) {
       await persistOrderDeliveryCity({
         supabase,
         orderId: params.orderId,
@@ -509,18 +548,20 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
       cityKey,
     })
 
-    await persistAliasForProvider({
-      supabase,
-      alias: normalizedAlias,
-      canonicalCityName: match.city_name,
-      cityKey,
-      orderId: params.orderId,
-      source: 'partial_match',
-      confidenceScore: 0.9,
-      providerSlug: params.providerSlug,
-    })
+    if (!params.preview) {
+      await persistAliasForProvider({
+        supabase,
+        alias: normalizedAlias,
+        canonicalCityName: match.city_name,
+        cityKey,
+        orderId: params.orderId,
+        source: 'partial_match',
+        confidenceScore: 0.9,
+        providerSlug: params.providerSlug,
+      })
+    }
 
-    if (params.orderId) {
+    if (!params.preview && params.orderId) {
       await persistOrderDeliveryCity({
         supabase,
         orderId: params.orderId,
@@ -595,16 +636,18 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
 
   const aiCityKey = String(aiCity.city_key || '') || resolveCityKeyFromCandidates(aiCity.city_name, cities)
 
-  await persistAliasForProvider({
-    supabase,
-    alias: normalizedAlias,
-    canonicalCityName: aiCity.city_name,
-    cityKey: aiCityKey,
-    orderId: params.orderId,
-    source: 'ai_learned',
-    confidenceScore: 0.9,
-    providerSlug: params.providerSlug,
-  })
+  if (!params.preview) {
+    await persistAliasForProvider({
+      supabase,
+      alias: normalizedAlias,
+      canonicalCityName: aiCity.city_name,
+      cityKey: aiCityKey,
+      orderId: params.orderId,
+      source: 'ai_learned',
+      confidenceScore: 0.9,
+      providerSlug: params.providerSlug,
+    })
+  }
 
   console.log('[city-normalizer] ai-learned-alias-created', {
     rawCity,
@@ -613,7 +656,7 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
     cityKey: aiCityKey,
   })
 
-  if (params.orderId) {
+  if (!params.preview && params.orderId) {
     await persistOrderDeliveryCity({
       supabase,
       orderId: params.orderId,
