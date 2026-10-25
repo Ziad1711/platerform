@@ -495,16 +495,32 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
   // 3. Alias en cache
   const cachedAlias = await findAliasForProvider(supabase, normalizedAlias, params.providerSlug)
   if (cachedAlias) {
-    const repairedCityKey = cachedAlias.city_key || resolveCityKeyFromCandidates(cachedAlias.canonical_city_name, cities)
+    // La clé mémorisée peut être fausse : un alias appris avec la clé d'une autre
+    // ville envoie le colis au mauvais endroit (ex. « الدارالبيضاء » mémorisé sur
+    // la clé de MOULAY ABDELLAH au lieu de casablanca). Le nom canonique du
+    // catalogue fait donc foi ; la clé mémorisée ne sert que si ce nom n'existe
+    // pas dans le catalogue du transporteur.
+    const catalogueKey = resolveCityKeyFromCandidates(cachedAlias.canonical_city_name, cities)
+    const cachedCityKey = cachedAlias.city_key ? String(cachedAlias.city_key) : ''
+    const cachedKeyInCatalogue =
+      cachedCityKey !== '' && cities.some((city) => String(city.city_key) === cachedCityKey)
+    const repairedCityKey = catalogueKey || (cachedKeyInCatalogue ? cachedCityKey : null)
+    const resolvedCityName =
+      (catalogueKey
+        ? cities.find((city) => String(city.city_key) === catalogueKey)?.city_name
+        : null) || String(cachedAlias.canonical_city_name || '').trim()
 
     console.log('[city-normalizer] alias-cache-hit', {
       rawCity,
       normalizedAlias,
-      canonicalCityName: cachedAlias.canonical_city_name,
+      canonicalCityName: resolvedCityName,
       cityKey: repairedCityKey,
+      cachedCityKey: cachedCityKey || null,
+      keyRepaired: Boolean(catalogueKey && cachedCityKey && catalogueKey !== cachedCityKey),
     })
 
     if (!params.preview) {
+      // La clé corrigée est réenregistrée : l'alias fautif se répare à l'usage.
       await updateAliasUsage(supabase, normalizedAlias, repairedCityKey, params.providerSlug)
     }
 
@@ -512,13 +528,13 @@ export async function normalizeCityName(params: NormalizeCityParams): Promise<No
       await persistOrderDeliveryCity({
         supabase,
         orderId: params.orderId,
-        cityName: cachedAlias.canonical_city_name,
+        cityName: resolvedCityName,
         cityKey: repairedCityKey,
       })
     }
 
     return {
-      cityName: cachedAlias.canonical_city_name,
+      cityName: resolvedCityName,
       cityKey: repairedCityKey,
       source: 'alias_cache',
       learned: false,
