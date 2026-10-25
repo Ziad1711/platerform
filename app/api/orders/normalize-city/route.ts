@@ -9,6 +9,35 @@ import { createAdminClient } from '@/lib/supabase/admin'
  */
 const PREVIEW_PROVIDER_SLUGS = new Set(['rapid-delivery', 'maroc-go-delivery', 'rushliv'])
 
+/**
+ * Vérifie que la clé résolue existe réellement dans le catalogue du transporteur
+ * (`delivery_rates`), c'est-à-dire exactement la liste affichée à l'agent.
+ * Une clé hors catalogue n'est jamais proposée : le choix manuel prend le relais.
+ */
+async function isCityKeyInCarrierCatalogue(
+  admin: ReturnType<typeof createAdminClient>,
+  providerSlug: string,
+  cityKey: string
+) {
+  const { data: provider } = await admin
+    .from('integration_providers')
+    .select('id')
+    .eq('slug', providerSlug)
+    .maybeSingle()
+
+  if (!provider?.id) return false
+
+  const { data: rate, error } = await admin
+    .from('delivery_rates')
+    .select('external_city_key')
+    .eq('provider_id', provider.id)
+    .eq('external_city_key', cityKey)
+    .maybeSingle()
+
+  if (error) throw error
+  return Boolean(rate)
+}
+
 export async function POST(request: Request) {
   let rawCity = ''
   try {
@@ -86,6 +115,24 @@ export async function POST(request: Request) {
     })
 
     console.log('[api/orders/normalize-city] result', { ...result, preview })
+
+    if (preview && result.cityKey) {
+      const inCatalogue = await isCityKeyInCarrierCatalogue(
+        createAdminClient(),
+        providerSlug,
+        String(result.cityKey)
+      )
+      if (!inCatalogue) {
+        return NextResponse.json({
+          ok: true,
+          cityName: rawCity,
+          cityKey: null,
+          source: 'not_in_catalogue',
+          learned: false,
+          preview: true,
+        })
+      }
+    }
 
     return NextResponse.json({ ok: true, ...result, preview })
   } catch (error) {

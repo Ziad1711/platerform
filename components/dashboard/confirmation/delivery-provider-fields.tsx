@@ -10,6 +10,13 @@ import {
   type ConfirmationDeliveryProvider,
   type DeliveryOptionsErrorCode,
 } from '@/lib/confirmation/delivery-options'
+import {
+  SLUG_CITY_FIELDS,
+  cityPreviewQueryKey,
+  fetchCityPreview,
+  withResolvedCity,
+  type CityPreview,
+} from '@/lib/confirmation/city-preview'
 
 type DeliveryProviderFieldsProps = {
   provider: ConfirmationDeliveryProvider
@@ -44,18 +51,6 @@ const PROVIDER_TITLE: Record<ConfirmationDeliveryProvider, string> = {
 
 const inputClass =
   'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring'
-
-/** Champs de ville des transporteurs à détection automatique (aucun autre transporteur). */
-const SLUG_CITY_FIELDS: Partial<
-  Record<
-    ConfirmationDeliveryProvider,
-    { key: keyof ConfirmationDeliveryOptions; name: keyof ConfirmationDeliveryOptions }
-  >
-> = {
-  'maroc-go-delivery': { key: 'marocGoCityKey', name: 'marocGoCityName' },
-  'rapid-delivery': { key: 'rapidCityKey', name: 'rapidCityName' },
-  rushliv: { key: 'rushlivCityKey', name: 'rushlivCityName' },
-}
 
 function ToggleRow({
   label,
@@ -202,43 +197,18 @@ export default function DeliveryProviderFields({
   const autoCityProvider = usesSlugCities ? provider : null
   const rawOrderCity = String(orderCity || '').trim()
 
-  const { data: resolvedCity } = useQuery<{
-    cityKey: string
-    cityName: string
-    source?: string
-  } | null>({
-    queryKey: ['confirmation-city-resolution', autoCityProvider, orderId, rawOrderCity],
+  const { data: resolvedCity } = useQuery<CityPreview | null>({
+    queryKey: cityPreviewQueryKey(autoCityProvider || '', orderId, rawOrderCity),
     enabled: Boolean(autoCityProvider && orderId && rawOrderCity),
     staleTime: Infinity,
     gcTime: 30 * 60 * 1000,
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    queryFn: async () => {
-      const response = await fetch('/api/orders/normalize-city', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          city: rawOrderCity,
-          orderId,
-          providerSlug: autoCityProvider,
-          preview: true,
-        }),
-      })
-      if (!response.ok) return null
-      const payload = (await response.json().catch(() => null)) as {
-        cityKey?: string | null
-        cityName?: string | null
-        source?: string | null
-      } | null
-      const key = payload?.cityKey ? String(payload.cityKey) : ''
-      if (!key) return null
-      return {
-        cityKey: key,
-        cityName: String(payload?.cityName || rawOrderCity),
-        source: payload?.source ? String(payload.source) : undefined,
-      }
-    },
+    queryFn: () =>
+      autoCityProvider
+        ? fetchCityPreview({ provider: autoCityProvider, orderId, rawCity: rawOrderCity })
+        : Promise.resolve(null),
   })
 
   // La ville reconnue est appliquée uniquement si elle appartient au catalogue
@@ -258,9 +228,7 @@ export default function DeliveryProviderFields({
     const inCatalogue = cities.some((city) => String(city.city_key) === resolvedCity.cityKey)
     if (!inCatalogue) return
 
-    const next: ConfirmationDeliveryOptions = { ...current }
-    ;(next as Record<string, unknown>)[fields.key as string] = resolvedCity.cityKey
-    ;(next as Record<string, unknown>)[fields.name as string] = resolvedCity.cityName
+    const next = withResolvedCity(provider, current, resolvedCity)
 
     setCityQuery(resolvedCity.cityName)
     onChangeRef.current(next)

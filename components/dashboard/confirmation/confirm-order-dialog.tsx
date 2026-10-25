@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,7 @@ import {
 } from '@/lib/confirmation/progress'
 import {
   createDefaultDeliveryOptions,
+  deliveryCityKeyOf,
   resolveDeliveryProvider,
   sanitizeDeliveryOptions,
   validateDeliveryOptions,
@@ -41,6 +42,12 @@ import {
   type DeliveryOptionsErrorCode,
 } from '@/lib/confirmation/delivery-options'
 import DeliveryProviderFields from './delivery-provider-fields'
+import {
+  cityPreviewQueryKey,
+  fetchCityPreview,
+  isCityPreviewProvider,
+  withResolvedCity,
+} from '@/lib/confirmation/city-preview'
 
 export type ConfirmDeliveryChoice = {
   deliveryMode: 'internal' | 'shipping'
@@ -148,11 +155,13 @@ export default function ConfirmOrderDialog({
   onSubmit,
 }: ConfirmOrderDialogProps) {
   const supabase = useMemo(() => createClient(), [])
+  const queryClient = useQueryClient()
   const storeId = order?.store_id || null
 
   const [deliveryChoice, setDeliveryChoice] = useState('')
   const [deliveryNote, setDeliveryNote] = useState('')
   const [localError, setLocalError] = useState('')
+  const [resolvingCity, setResolvingCity] = useState(false)
   const [providerIssue, setProviderIssue] = useState<DeliveryOptionsErrorCode | null>(null)
   const [deliveryOptionsState, setDeliveryOptionsState] = useState<DeliveryOptionsState>({
     companyId: '',
@@ -214,7 +223,7 @@ export default function ConfirmOrderDialog({
     setDeliveryOptionsState({ companyId: deliveryChoice, options: next })
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (missingPhone) {
       setLocalError('Le numéro de téléphone est obligatoire pour confirmer.')
       return
@@ -232,9 +241,53 @@ export default function ConfirmOrderDialog({
       return
     }
 
+    let effectiveOptions = deliveryOptions
+
+    // Maroc Go / Rapid / Rushliv : « Confirmer » lance la résolution automatique.
+    // Le choix manuel n'est demandé que si aucune ville fiable n'est trouvée.
+    // La requête est partagée avec le préremplissage : si elle a déjà abouti, le
+    // clic réutilise le résultat en cache (aucun appel supplémentaire).
+    if (
+      deliveryChoice !== 'internal' &&
+      isCityPreviewProvider(providerSlug) &&
+      !deliveryCityKeyOf(providerSlug, effectiveOptions)
+    ) {
+      const rawCity = String(order?.city || '').trim()
+      if (!rawCity) {
+        setLocalError('La ville est obligatoire pour confirmer.')
+        return
+      }
+
+      setLocalError('')
+      setResolvingCity(true)
+      try {
+        const resolved = await queryClient.fetchQuery({
+          queryKey: cityPreviewQueryKey(providerSlug, order?.id ?? null, rawCity),
+          queryFn: () =>
+            fetchCityPreview({ provider: providerSlug, orderId: order?.id ?? null, rawCity }),
+          staleTime: Infinity,
+        })
+        if (resolved) {
+          effectiveOptions = withResolvedCity(providerSlug, effectiveOptions, resolved)
+          setDeliveryOptionsState({ companyId: deliveryChoice, options: effectiveOptions })
+        }
+      } catch {
+        // Résolution indisponible : le choix manuel reste la seule issue.
+      } finally {
+        setResolvingCity(false)
+      }
+
+      if (!deliveryCityKeyOf(providerSlug, effectiveOptions)) {
+        setLocalError(
+          'Ville non reconnue automatiquement. Sélectionnez la ville du transporteur pour confirmer.'
+        )
+        return
+      }
+    }
+
     const optionsError =
       deliveryChoice !== 'internal' && providerSlug
-        ? providerIssue || validateDeliveryOptions(providerSlug, deliveryOptions)
+        ? providerIssue || validateDeliveryOptions(providerSlug, effectiveOptions)
         : null
 
     if (optionsError) {
@@ -245,7 +298,7 @@ export default function ConfirmOrderDialog({
     const sanitizedOptions =
       deliveryChoice === 'internal'
         ? {}
-        : sanitizeDeliveryOptions(providerSlug, deliveryOptions).options
+        : sanitizeDeliveryOptions(providerSlug, effectiveOptions).options
 
     onSubmit({
       deliveryMode: deliveryChoice === 'internal' ? 'internal' : 'shipping',
@@ -486,12 +539,16 @@ export default function ConfirmOrderDialog({
                   Modifier la commande
                 </Button>
               ) : null}
-              <Button variant="outline" onClick={onClose} disabled={busy}>
+              <Button variant="outline" onClick={onClose} disabled={busy || resolvingCity}>
                 Fermer
               </Button>
-              <Button onClick={handleSubmit} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-                {busy ? 'Confirmation...' : 'Confirmer la commande'}
+              <Button onClick={handleSubmit} disabled={busy || resolvingCity}>
+                {busy || resolvingCity ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PackageCheck className="h-4 w-4" />
+                )}
+                {busy ? 'Confirmation...' : resolvingCity ? 'Recherche de la ville...' : 'Confirmer la commande'}
               </Button>
             </>
           )}
