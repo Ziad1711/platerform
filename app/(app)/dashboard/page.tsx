@@ -7,6 +7,7 @@ import OrderTimePerformance from '@/components/dashboard/order-time-performance'
 import RecentOrders from '@/components/dashboard/recent-orders'
 import CityPerformance from '@/components/dashboard/city-performance'
 import ConfirmationPerformance from '@/components/dashboard/confirmation-performance'
+import DeferredSection from '@/components/dashboard/deferred-section'
 import PeriodFilter from '@/components/dashboard/period-filter'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
@@ -73,41 +74,70 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs — priorité réseau : seuls ces blocs lisent au montage initial.
+          Le premier commit ne contient que l'en-tête et les cartes, ce qui
+          laisse les lectures KPI partir avant toute lecture secondaire. */}
       <div className="animate-fade-in-up animate-delay-100">
         <KpiCards />
       </div>
 
-      {/* Revenue Chart */}
-      <div className="animate-fade-in-up animate-delay-200">
+      {/* Graphique de performance du business (lecteur V5 V2) : secondaire.
+          Monté dès qu'il approche du viewport, jamais avant les cartes. */}
+      <DeferredSection
+        label="Chargement du graphique de performance du business"
+        minHeight={420}
+        className="animate-fade-in-up animate-delay-200"
+      >
         <RevenueChart />
-      </div>
+      </DeferredSection>
 
-      {/* Marketing KPIs */}
-      <div className="animate-fade-in-up animate-delay-300">
+      {/* Marketing KPIs + graphique de coûts publicitaires */}
+      <DeferredSection
+        label="Chargement des indicateurs marketing"
+        minHeight={380}
+        className="animate-fade-in-up animate-delay-300"
+      >
         <KpiCards variant="marketing" />
-      </div>
+      </DeferredSection>
 
-      {/* Grid: Top Products + City Performance */}
-      <div className="grid grid-cols-1 xl:grid-cols-[3fr_1fr] gap-6 animate-fade-in-up animate-delay-400">
-        <TopProducts />
-        <CityPerformance />
-      </div>
+      {/* Grid: Top Products + City Performance (un RPC par boutique chacun) */}
+      <DeferredSection
+        label="Chargement des performances produits et villes"
+        minHeight={360}
+        className="animate-fade-in-up animate-delay-400"
+      >
+        <div className="grid grid-cols-1 xl:grid-cols-[3fr_1fr] gap-6">
+          <TopProducts />
+          <CityPerformance />
+        </div>
+      </DeferredSection>
 
       {/* Order time performance (best days & hours) */}
-      <div className="animate-fade-in-up animate-delay-400">
+      <DeferredSection
+        label="Chargement des meilleurs jours et heures"
+        minHeight={340}
+        className="animate-fade-in-up animate-delay-400"
+      >
         <OrderTimePerformance />
-      </div>
+      </DeferredSection>
 
       {/* Confirmation Performance */}
-      <div className="animate-fade-in-up animate-delay-500">
+      <DeferredSection
+        label="Chargement des performances de confirmation"
+        minHeight={320}
+        className="animate-fade-in-up animate-delay-500"
+      >
         <ConfirmationPerformance />
-      </div>
+      </DeferredSection>
 
       {/* Recent Orders */}
-      <div className="animate-fade-in-up animate-delay-500">
+      <DeferredSection
+        label="Chargement des commandes récentes"
+        minHeight={320}
+        className="animate-fade-in-up animate-delay-500"
+      >
         <RecentOrders />
-      </div>
+      </DeferredSection>
     </div>
     </KpiRolloutProvider>
   )
