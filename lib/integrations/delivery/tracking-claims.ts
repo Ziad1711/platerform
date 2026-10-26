@@ -43,6 +43,8 @@ export type TrackingBatchResult = {
   failed: number
   coverage: TrackingCoverage
   reason?: string
+  /** Reste a traiter avant ce passage (observabilite de la progression). */
+  remainingBefore?: number
 }
 
 export type ParkReason = 'manual' | 'terminal' | 'unrecognized' | 'stale'

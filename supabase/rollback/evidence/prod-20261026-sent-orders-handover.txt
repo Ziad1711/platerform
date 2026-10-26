@@ -1,0 +1,42 @@
+Projet Supabase : attvfeoqgbxsnnsllatt (Production)
+Objet           : public.rpc_dashboard_confirmation_counters(uuid[], timestamptz, timestamptz)
+Migration       : 20261026120000_kpi_sent_orders_handover.sql
+Rollback        : 20261026120000_kpi_sent_orders_handover_rollback.sql
+Commit          : bcca880
+Déployé le      : 2026-10-25 (session)
+
+Empreintes SQL (md5 de pg_get_functiondef)
+- Avant  : bf64e3a1c6c9d1d31df76e6cdf70e26a
+- Après  : f1b1f6af5d2cc5f877e21892cfdb4b6a
+- Rollback rejoue exactement la définition « Avant » (vérifié sur l'environnement isolé) :
+  md5 identique à bf64e3a1c6c9d1d31df76e6cdf70e26a.
+
+Autres objets (inchangés)
+- rpc_dashboard_kpi_reader      : 1547401b645a262c544b37bd5cfdb446
+- dashboard_kpi_aggregate_order : 89676e8ac539c9d73be02cf44fe8d8c5
+- rpc_dashboard_revenue_chart   : 59d56d1331449e0190c092a51fc73c5c
+- rpc_dashboard_kpi_reader_v2 / order_counts_as_confirmed : non modifiés par cette migration.
+ACL : authenticated + service_role (EXECUTE), anon refusé, SECURITY DEFINER conservé.
+
+Tests en lecture seule (Production)
+- ziilart, journée métier 24/10/2026 : 8 commandes, Confirmées 5, Expédiées 4 -> 5,
+  En attente 0, Livrées 0, Retours 0, Annulées 1, En traitement 2.
+  Commande 640c2608-4eb9-4531-9130-fec0595f2ccb (dl_out_for_delivery, sent_at) désormais comptée.
+- ziilart, 25/10/2026 : 8 / 0 / 0 / 0 / 0 / 0 / 0 / 8. Période vide 2024 : 0 partout.
+- Multi-boutiques (4 boutiques) : Total 2026 = somme 2026 ; Expédiées 1598 = somme 1598 ;
+  Confirmées 1739 = somme 1739.
+- Utilisateur non membre : 0 sur les huit compteurs (aucune fuite).
+
+Latence (EXPLAIN ANALYZE, lecture seule)
+- 1 boutique / 1 jour : 6,3 ms
+- 3 boutiques / 1 mois : 31,0 ms
+- 4 boutiques / 2 ans : 44,7 ms
+
+KPI V5 / worker (avant et après, identiques)
+- rollout v5 / kill_switch false / config v13 ; 10 cohortes activées ; 10 états ;
+  4590 partitions ; 0 invalidation en attente ; 0 boutique en erreur ;
+  dernière passe cron 13:58 UTC.
+
+Données métier
+- Aucune instruction DML exécutée ; aucune commande, aucun statut, aucun agrégat,
+  aucune commission et aucun cron modifié.

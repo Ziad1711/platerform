@@ -22,6 +22,11 @@ export async function GET() {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'FETCH_FAILED'
     console.error('[PENDING_INVITATION_ERROR]', message)
+    // Configuration serveur incomplète (clé service absente) : état explicite,
+    // distinct d'une erreur métier. Aucun nom de variable technique n'est renvoyé.
+    if (message === 'MISSING_SUPABASE_ADMIN_CONFIG') {
+      return NextResponse.json({ error: 'INVITATION_LOOKUP_UNAVAILABLE' }, { status: 503 })
+    }
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

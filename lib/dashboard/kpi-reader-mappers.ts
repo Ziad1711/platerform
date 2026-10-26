@@ -286,6 +286,12 @@ function mergePoints(stores: KpiReaderStore[]): KpiReaderPoint[] {
       if (point.purchase_cost !== undefined) {
         current.purchase_cost = sumDecimal([current.purchase_cost ?? '0', point.purchase_cost])
       }
+      if (point.delivery_fee_cost !== undefined) {
+        current.delivery_fee_cost = sumDecimal([
+          current.delivery_fee_cost ?? '0',
+          point.delivery_fee_cost,
+        ])
+      }
       if (point.contribution_margin !== undefined) {
         current.contribution_margin = sumDecimal([
           current.contribution_margin ?? '0',

@@ -72,6 +72,7 @@ const CACHE_PREFIXES = [
   'dashboard-business-trends',
   'dashboard-ads-cost-chart',
   'dashboard-v5-order-counters',
+  'dashboard-confirmation-counters',
   'dashboard-kpi-shadow-check',
 ]
 

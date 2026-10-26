@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-safe.cjs",
+    "dev:safe": "node scripts/dev-safe.cjs",
+    "dev:next": "next dev -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3100",
+    "start:build": "next start -p 3100",
     "lint": "eslint ."
   },
   "dependencies": {

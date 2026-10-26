@@ -147,9 +147,17 @@ export default function ConfirmationOrderCard({
             >
               {getConfirmationStatusLabel(order.status)}
             </span>
-            {order.is_blacklisted ? (
+            {order.is_blacklisted === true ? (
               <span className="text-[11px] font-medium rounded-full bg-red-100 text-red-700 px-2 py-0.5">
                 Numéro blacklisté
+              </span>
+            ) : order.blacklist_status === 'pending' ? (
+              <span className="text-[11px] font-medium rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">
+                Blacklist : vérification…
+              </span>
+            ) : order.blacklist_status === 'unavailable' ? (
+              <span className="text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">
+                Blacklist non vérifiée
               </span>
             ) : null}
           </div>
@@ -172,8 +180,8 @@ export default function ConfirmationOrderCard({
       <div className="flex gap-4">
         {(order.order_items || []).length > 0 ? (
           <div
-            className={`grid shrink-0 gap-1.5 ${
-              (order.order_items || []).length > 1 ? 'grid-cols-2' : 'grid-cols-1'
+            className={`grid shrink-0 grid-flow-col gap-1.5 ${
+              (order.order_items || []).length > 1 ? 'grid-rows-2' : 'grid-rows-1'
             }`}
           >
             {(order.order_items || []).map((item, index) => {
@@ -189,15 +197,15 @@ export default function ConfirmationOrderCard({
                   src={url}
                   alt={label}
                   title={label}
-                  className="h-28 w-28 rounded-md border border-border object-cover sm:h-40 sm:w-40"
+                  className="h-24 w-24 rounded-md border border-border object-cover sm:h-40 sm:w-40"
                 />
               ) : (
                 <div
                   key={`${name}-${index}`}
                   title={label}
-                  className="flex h-28 w-28 items-center justify-center rounded-md border border-border bg-muted sm:h-40 sm:w-40"
+                  className="flex h-24 w-24 items-center justify-center rounded-md border border-border bg-muted sm:h-40 sm:w-40"
                 >
-                  <Package className="h-8 w-8 text-muted-foreground sm:h-10 sm:w-10" />
+                  <Package className="h-7 w-7 text-muted-foreground sm:h-10 sm:w-10" />
                 </div>
               )
             })}

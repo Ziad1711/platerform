@@ -1,11 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -34,6 +33,7 @@ import {
 } from '@/lib/confirmation/progress'
 import {
   createDefaultDeliveryOptions,
+  deliveryCityKeyOf,
   resolveDeliveryProvider,
   sanitizeDeliveryOptions,
   validateDeliveryOptions,
@@ -41,6 +41,13 @@ import {
   type DeliveryOptionsErrorCode,
 } from '@/lib/confirmation/delivery-options'
 import DeliveryProviderFields from './delivery-provider-fields'
+import {
+  SLUG_CITY_FIELDS,
+  cityPreviewQueryKey,
+  fetchCityPreview,
+  isCityPreviewProvider,
+  withResolvedCity,
+} from '@/lib/confirmation/city-preview'
 
 export type ConfirmDeliveryChoice = {
   deliveryMode: 'internal' | 'shipping'
@@ -142,17 +149,24 @@ export default function ConfirmOrderDialog({
   progressStages = [],
   finished = false,
   outcome = null,
-  canEdit,
   onClose,
-  onEdit,
   onSubmit,
 }: ConfirmOrderDialogProps) {
   const supabase = useMemo(() => createClient(), [])
+  const queryClient = useQueryClient()
   const storeId = order?.store_id || null
 
   const [deliveryChoice, setDeliveryChoice] = useState('')
   const [deliveryNote, setDeliveryNote] = useState('')
   const [localError, setLocalError] = useState('')
+  const [resolvingCity, setResolvingCity] = useState(false)
+  // Repli manuel : le sélecteur de ville n'apparaît qu'après un échec de la
+  // résolution automatique, au clic sur « Confirmer ».
+  const [cityFallbackRequired, setCityFallbackRequired] = useState(false)
+  // Correction proposée par notre résolution : l'agent valide, sinon il choisit.
+  const [cityCorrection, setCityCorrection] = useState<{ received: string; resolved: string } | null>(
+    null
+  )
   const [providerIssue, setProviderIssue] = useState<DeliveryOptionsErrorCode | null>(null)
   const [deliveryOptionsState, setDeliveryOptionsState] = useState<DeliveryOptionsState>({
     companyId: '',
@@ -192,6 +206,9 @@ export default function ConfirmOrderDialog({
       companyId: deliveryChoice,
       options: createDefaultDeliveryOptions(providerSlug),
     })
+    // Nouveau transporteur : le repli manuel précédent ne s'applique plus.
+    setCityFallbackRequired(false)
+    setCityCorrection(null)
   }, [deliveryChoice, providerSlug])
 
   useEffect(() => {
@@ -199,6 +216,8 @@ export default function ConfirmOrderDialog({
     setDeliveryNote(order?.delivery_note || '')
     setLocalError('')
     setProviderIssue(null)
+    setCityFallbackRequired(false)
+    setCityCorrection(null)
     setDeliveryOptionsState({ companyId: '', options: {} })
     // Une société déjà rattachée reste sélectionnée ; sinon l'agent doit choisir.
     setDeliveryChoice(order?.delivery_company_id ? String(order.delivery_company_id) : '')
@@ -214,7 +233,7 @@ export default function ConfirmOrderDialog({
     setDeliveryOptionsState({ companyId: deliveryChoice, options: next })
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (missingPhone) {
       setLocalError('Le numéro de téléphone est obligatoire pour confirmer.')
       return
@@ -232,9 +251,54 @@ export default function ConfirmOrderDialog({
       return
     }
 
+    let effectiveOptions = deliveryOptions
+
+    // Maroc Go / Rapid / Rushliv : « Confirmer » lance la résolution automatique.
+    // Le choix manuel n'est demandé que si aucune ville fiable n'est trouvée.
+    // La requête est partagée avec le préremplissage : si elle a déjà abouti, le
+    // clic réutilise le résultat en cache (aucun appel supplémentaire).
+    if (
+      deliveryChoice !== 'internal' &&
+      isCityPreviewProvider(providerSlug) &&
+      !deliveryCityKeyOf(providerSlug, effectiveOptions)
+    ) {
+      const rawCity = String(order?.city || '').trim()
+      if (!rawCity) {
+        setLocalError('La ville est obligatoire pour confirmer.')
+        return
+      }
+
+      setLocalError('')
+      setResolvingCity(true)
+      try {
+        const resolved = await queryClient.fetchQuery({
+          queryKey: cityPreviewQueryKey(providerSlug, order?.id ?? null, rawCity),
+          queryFn: () =>
+            fetchCityPreview({ provider: providerSlug, orderId: order?.id ?? null, rawCity }),
+          staleTime: Infinity,
+        })
+        if (resolved) {
+          effectiveOptions = withResolvedCity(providerSlug, effectiveOptions, resolved)
+          setDeliveryOptionsState({ companyId: deliveryChoice, options: effectiveOptions })
+        }
+      } catch {
+        // Résolution indisponible : le choix manuel reste la seule issue.
+      } finally {
+        setResolvingCity(false)
+      }
+
+      if (!deliveryCityKeyOf(providerSlug, effectiveOptions)) {
+        setCityFallbackRequired(true)
+        setLocalError(
+          'Ville non reconnue automatiquement. Choisissez la ville du transporteur ci-dessous pour confirmer.'
+        )
+        return
+      }
+    }
+
     const optionsError =
       deliveryChoice !== 'internal' && providerSlug
-        ? providerIssue || validateDeliveryOptions(providerSlug, deliveryOptions)
+        ? providerIssue || validateDeliveryOptions(providerSlug, effectiveOptions)
         : null
 
     if (optionsError) {
@@ -245,7 +309,7 @@ export default function ConfirmOrderDialog({
     const sanitizedOptions =
       deliveryChoice === 'internal'
         ? {}
-        : sanitizeDeliveryOptions(providerSlug, deliveryOptions).options
+        : sanitizeDeliveryOptions(providerSlug, effectiveOptions).options
 
     onSubmit({
       deliveryMode: deliveryChoice === 'internal' ? 'internal' : 'shipping',
@@ -262,23 +326,30 @@ export default function ConfirmOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
-      <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
-        <DialogHeader className="gap-3 border-b border-border bg-muted/40 px-6 py-4 pr-14">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-              <PackageCheck className="h-5 w-5" />
+      <DialogContent hideClose className="!max-w-xl !gap-0 !p-0">
+        <DialogHeader className="sticky top-0 z-10 gap-3 border-b border-border bg-muted px-6 py-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 sm:h-11 sm:w-11">
+              <PackageCheck className="h-5 w-5 sm:h-6 sm:w-6" />
             </span>
-            <div className="space-y-1">
-              <DialogTitle className="text-base font-semibold">Confirmer la commande</DialogTitle>
-              <DialogDescription className="text-xs">
-                Vérifiez les informations avant validation. Une commande confirmée sort de la file
-                de confirmation.
-              </DialogDescription>
+            <div className="flex min-w-0 flex-1 items-center justify-center">
+              <DialogTitle className="whitespace-nowrap text-center text-[15px] font-semibold leading-tight text-emerald-600 sm:text-lg">
+                Confirmer la commande
+              </DialogTitle>
             </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onClose}
+              disabled={busy || resolvingCity}
+              className="shrink-0"
+            >
+              Fermer
+            </Button>
           </div>
         </DialogHeader>
 
-        <div className="modal-scroll max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
+        <div className="modal-scroll space-y-4 px-6 py-4 text-sm text-foreground">
           <section className="space-y-3 rounded-xl border border-border p-4">
             <SectionTitle icon={<User className="h-3.5 w-3.5" />} label="Client" />
 
@@ -345,10 +416,53 @@ export default function ConfirmOrderDialog({
                 Ce numéro est blacklisté. Confirmez uniquement si vous avez vérifié la commande.
               </span>
             </section>
+          ) : order && order.blacklist_status !== 'verified' ? (
+            <section className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {order.blacklist_status === 'unavailable'
+                  ? 'Vérification blacklist indisponible : contrôlez le numéro avant de confirmer.'
+                  : 'Vérification blacklist en cours : le résultat s’affichera dès sa réception.'}
+              </span>
+            </section>
           ) : null}
 
           <section className="space-y-4 rounded-xl border border-border p-4">
             <SectionTitle icon={<Truck className="h-3.5 w-3.5" />} label="Livraison" />
+
+            {cityCorrection && !cityFallbackRequired ? (
+              <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <div>
+                  Ville reçue : <span className="font-semibold">{cityCorrection.received}</span> →
+                  ville trouvée : <span className="font-semibold">{cityCorrection.resolved}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => setCityCorrection(null)}>
+                    Oui, c’est la bonne ville
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const fields = providerSlug ? SLUG_CITY_FIELDS[providerSlug] : undefined
+                      if (fields) {
+                        const next = { ...deliveryOptions } as Record<string, unknown>
+                        next[fields.key as string] = undefined
+                        next[fields.name as string] = undefined
+                        setDeliveryOptionsState({
+                          companyId: deliveryChoice,
+                          options: next as ConfirmationDeliveryOptions,
+                        })
+                      }
+                      setCityCorrection(null)
+                      setCityFallbackRequired(true)
+                    }}
+                  >
+                    Non, choisir la ville
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <label className="block space-y-1 text-sm">
               <span className="font-medium">Société de livraison *</span>
@@ -380,6 +494,16 @@ export default function ConfirmOrderDialog({
                 orderId={order?.id ?? null}
                 orderCity={order?.city ?? null}
                 value={deliveryOptions}
+                showCityFallback={cityFallbackRequired}
+                onCityResolved={(city) => {
+                  const received = String(order?.city || '').trim()
+                  const resolved = String(city?.cityName || '').trim()
+                  setCityCorrection(
+                    city && resolved && received && resolved.toLowerCase() !== received.toLowerCase()
+                      ? { received, resolved }
+                      : null
+                  )
+                }}
                 onChange={handleDeliveryOptionsChange}
                 onConfigError={setProviderIssue}
               />
@@ -467,26 +591,18 @@ export default function ConfirmOrderDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
-          {outcome ? (
-            <Button onClick={onClose}>Fermer</Button>
-          ) : (
-            <>
-              {canEdit ? (
-                <Button variant="outline" onClick={onEdit} disabled={busy} className="sm:mr-auto">
-                  Modifier la commande
-                </Button>
-              ) : null}
-              <Button variant="outline" onClick={onClose} disabled={busy}>
-                Fermer
-              </Button>
-              <Button onClick={handleSubmit} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-                {busy ? 'Confirmation...' : 'Confirmer la commande'}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
+        {outcome ? null : (
+          <DialogFooter className="shrink-0 gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
+            <Button onClick={handleSubmit} disabled={busy || resolvingCity}>
+              {busy || resolvingCity ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PackageCheck className="h-4 w-4" />
+              )}
+              {busy ? 'Confirmation...' : resolvingCity ? 'Recherche de la ville...' : 'Confirmer la commande'}
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   )

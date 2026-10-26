@@ -38,8 +38,26 @@ const FILTER_TABS: { value: ConfirmationQueueFilter; label: string }[] = [
 type QueueResponse = {
   settings: ConfirmationSettings
   orders: ConfirmationOrder[]
-  counts: Record<string, number>
+  view?: 'queue'
 }
+
+/**
+ * Données secondaires : compteurs de files et avertissement blacklist.
+ * Lues après la réponse principale, elles ne conditionnent jamais l'affichage
+ * des commandes.
+ */
+type SecondaryResponse = {
+  counts: Record<string, number> | null
+  countsAvailable: boolean
+  blacklist: Record<string, boolean> | null
+  blacklistAvailable: boolean
+}
+
+/**
+ * Onglets de la page. « Commandes » est la vue de travail par défaut ; « Vue
+ * d'ensemble » ne présente que les cartes KPI déjà calculées côté serveur.
+ */
+type ConfirmationView = 'orders' | 'overview'
 
 type ActionPayload = {
   action?: ConfirmationAction
@@ -209,12 +227,20 @@ export default function ConfirmationPage() {
   const canEdit = can('confirmation.edit')
   const [filter, setFilter] = useState<ConfirmationQueueFilter>('all')
   const [sort, setSort] = useState<ConfirmationSortOrder>('recent')
+  // Onglet actif : « Commandes » par défaut à chaque ouverture de la page.
+  // Les KPI restent chargés en arrière-plan quel que soit l'onglet affiché.
+  const [activeTab, setActiveTab] = useState<ConfirmationView>('orders')
+  // Filtres repliés à chaque ouverture de la page ; la sélection active reste
+  // visible via le bouton « Filtres ».
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [todayStart] = useState(getTodayStartIso)
 
-  const PAGE_SIZE = 40
+  // 16 commandes par page : premier affichage plus rapide, sans changer la
+  // pagination serveur ni le périmètre de la vue secondaire (même page).
+  const PAGE_SIZE = 16
 
   // Évite une requête serveur à chaque frappe.
   useEffect(() => {
@@ -324,7 +350,127 @@ export default function ConfirmationPage() {
   })
 
   const maxAttempts = Number(data?.settings?.max_attempts || DEFAULT_MAX_ATTEMPTS)
-  const orders = useMemo(() => data?.orders || [], [data?.orders])
+
+  /**
+   * Compteurs : ils ne dépendent que de la boutique, de la recherche et du début
+   * de journée. La page, le filtre et le tri ne les recalculent donc plus.
+   * La clé commence par `confirmation-queue` afin que les invalidations
+   * existantes (confirmation, annulation, modification, actualisation) les
+   * rafraîchissent aussi.
+   */
+  const { data: countsData, isError: countsFailed } = useQuery<{ counts: Record<string, number>; countsAvailable: boolean }>({
+    queryKey: ['confirmation-queue', currentStoreId, todayStart, search.trim(), 'counts'],
+    enabled: Boolean(currentStoreId) && data !== undefined,
+    retry: 1,
+    staleTime: 30_000,
+    // Un rappel dont l'heure arrive doit apparaître sans action de l'utilisateur.
+    // Une seule requête par minute (compteurs uniquement), mise en pause quand
+    // l'onglet est inactif : aucun polling agressif.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        view: 'counts',
+        storeId: String(currentStoreId),
+        todayStart,
+      })
+      if (search.trim()) params.set('search', search.trim())
+
+      const response = await fetch(`/api/orders/confirmation/queue?${params.toString()}`)
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error || 'CONFIRMATION_COUNTS_FETCH_FAILED')
+      }
+      return payload as { counts: Record<string, number>; countsAvailable: boolean }
+    },
+  })
+
+  /**
+   * Blacklist de la page courante : dépend du filtre, du tri, de la recherche et
+   * de la page. Elle est lue indépendamment des compteurs : l'échec de l'une
+   * n'affecte jamais l'autre.
+   */
+  const { data: blacklistData, isError: blacklistFailed } = useQuery<{
+    blacklist: Record<string, boolean> | null
+    blacklistAvailable: boolean
+  }>({
+    queryKey: ['confirmation-queue', currentStoreId, filter, sort, search, todayStart, page, 'blacklist'],
+    enabled: Boolean(currentStoreId) && data !== undefined,
+    retry: 1,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        view: 'blacklist',
+        storeId: String(currentStoreId),
+        filter,
+        sort,
+        todayStart,
+        limit: String(PAGE_SIZE),
+        offset: String((page - 1) * PAGE_SIZE),
+      })
+      if (search.trim()) params.set('search', search.trim())
+
+      const response = await fetch(`/api/orders/confirmation/queue?${params.toString()}`)
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error || 'CONFIRMATION_BLACKLIST_FETCH_FAILED')
+      }
+      return payload as { blacklist: Record<string, boolean> | null; blacklistAvailable: boolean }
+    },
+  })
+
+  const counts = countsData?.counts ?? null
+  /**
+   * Alertes de rappel : le compteur `late` de l'API compte exactement les
+   * commandes en attente dont `next_callback_at` est déjà dépassé (règle métier
+   * de `applyQueueFilter`). Aucun nouveau calcul, aucune nouvelle requête.
+   */
+  const dueAlert = Number(counts?.late || 0)
+
+  /**
+   * Fusionne l'état blacklist vérifié dans les commandes. Sans réponse
+   * blacklist de la page courante, l'état reste « pending » ; si la vérification
+   * a échoué, il passe à « unavailable ». Aucun cas ne présente un numéro comme
+   * non blacklisté avant vérification réelle.
+   */
+  const orders = useMemo<ConfirmationOrder[]>(() => {
+    const base = data?.orders || []
+    const blacklist = blacklistData?.blacklist
+
+    if (!blacklistData) {
+      // Échec définitif de la vérification de cette page : l'avertissement passe
+      // à « non vérifiée » au lieu de laisser « vérification… » indéfiniment.
+      return base.map((order) => ({
+        ...order,
+        is_blacklisted: undefined,
+        blacklist_status: blacklistFailed ? ('unavailable' as const) : ('pending' as const),
+      }))
+    }
+
+    if (!blacklistData.blacklistAvailable || !blacklist) {
+      return base.map((order) => ({
+        ...order,
+        is_blacklisted: undefined,
+        blacklist_status: 'unavailable' as const,
+      }))
+    }
+
+    return base.map((order) => ({
+      ...order,
+      is_blacklisted: blacklist[order.id] === true,
+      blacklist_status: 'verified' as const,
+    }))
+  }, [data?.orders, blacklistData, blacklistFailed])
+
+  /**
+   * Commande présentée dans la modale de confirmation : dès que la vérification
+   * blacklist aboutit, la modale affiche le résultat réel au lieu de rester sur
+   * l'instantané « vérification en cours » pris à l'ouverture.
+   */
+  const confirmOrderView = useMemo(() => {
+    if (!confirmOrder) return null
+    return orders.find((order) => order.id === confirmOrder.id) ?? confirmOrder
+  }, [confirmOrder, orders])
 
   // Étapes réellement atteintes pendant la confirmation en cours (flux SSE).
   const [confirmProgress, setConfirmProgress] = useState<ConfirmationProgressStage[]>([])
@@ -662,11 +808,11 @@ export default function ConfirmationPage() {
               Confirmation
             </span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Traitez les commandes en attente : appels, rappels, confirmations et annulations.
+          <p className="text-center text-sm text-muted-foreground md:text-left">
+            Traitez l&apos;état de vos commandes
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
           <StoreSelector />
           <button
             type="button"
@@ -684,14 +830,128 @@ export default function ConfirmationPage() {
         </div>
       ) : (
         <>
-          <ConfirmationKpis
-            counts={data?.counts || {}}
-            activeFilter={filter}
-            onSelectFilter={(next) => setFilter(next as ConfirmationQueueFilter)}
-          />
+          {/* Onglets de vue : « Commandes » par défaut. Aucune requête n'est
+              relancée au basculement — React Query conserve le cache de la file
+              comme celui des compteurs. */}
+          <div
+            className="flex flex-wrap items-center justify-center gap-2 md:justify-start"
+            role="tablist"
+            aria-label="Vue de la confirmation"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'orders'}
+              onClick={() => setActiveTab('orders')}
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === 'orders'
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-border text-muted-foreground hover:bg-secondary'
+              }`}
+            >
+              Commandes
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'overview'}
+              onClick={() => setActiveTab('overview')}
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === 'overview'
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-border text-muted-foreground hover:bg-secondary'
+              }`}
+            >
+              Vue d&apos;ensemble
+            </button>
+          </div>
 
+          {activeTab === 'overview' ? (
+            <div role="tabpanel" aria-label="Vue d'ensemble" className="space-y-3">
+              <ConfirmationKpis
+                counts={counts || {}}
+                loading={!counts && !countsFailed}
+                activeFilter={filter}
+                onSelectFilter={(next) => {
+                  // Un clic sur une carte KPI ramène à la file filtrée.
+                  setFilter(next as ConfirmationQueueFilter)
+                  setPage(1)
+                  setActiveTab('orders')
+                }}
+              />
+              {countsFailed ? (
+                <p className="text-xs text-muted-foreground">
+                  Statistiques momentanément indisponibles. Le travail sur les commandes
+                  n&apos;est pas affecté.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <>
           <div className="rounded-xl border border-border bg-card p-3 space-y-3">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="Rechercher un client, un téléphone ou un numéro de suivi"
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                aria-expanded={filtersOpen}
+                aria-controls="confirmation-filters"
+                onClick={() => setFiltersOpen((open) => !open)}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                  filter !== 'all'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-foreground hover:bg-secondary'
+                }`}
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 5h16M7 12h10M10 19h4" />
+                </svg>
+                Filtres
+                {dueAlert > 0 ? (
+                  <span
+                    title={`${dueAlert} rappel(s) arrivé(s) à échéance`}
+                    className="ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold text-white"
+                  >
+                    {dueAlert}
+                  </span>
+                ) : null}
+              </button>
+            </div>
+
+            {!filtersOpen && (filter !== 'all' || sort !== 'recent') ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                {filter !== 'all' ? (
+                  <>
+                    Filtre actif :
+                    <span className="rounded-full border border-primary bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                      {FILTER_TABS.find((tab) => tab.value === filter)?.label || filter}
+                    </span>
+                  </>
+                ) : null}
+                {sort !== 'recent' ? (
+                  <>
+                    Tri :
+                    <span className="rounded-full border border-primary bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                      {getSortOptions(filter).find((option) => option.value === sort)?.label || sort}
+                    </span>
+                  </>
+                ) : null}
+                <button type="button" onClick={() => setFiltersOpen(true)} className="underline">
+                  modifier
+                </button>
+              </div>
+            ) : null}
+
+            {filtersOpen ? (
+              <div
+                id="confirmation-filters"
+                className="flex flex-wrap gap-2 border-t border-border/60 pt-3"
+              >
               {FILTER_TABS.map((tab) => (
                 <button
                   key={tab.value}
@@ -711,41 +971,42 @@ export default function ConfirmationPage() {
                   }`}
                 >
                   {tab.label}
-                  {data?.counts?.[tab.value] !== undefined ? (
-                    <span className="ml-2 text-xs opacity-80">{data.counts[tab.value]}</span>
+                  {counts?.[tab.value] !== undefined ? (
+                    <span
+                      className={`ml-2 text-xs ${
+                        tab.value === 'late' && dueAlert > 0
+                          ? 'rounded-full bg-amber-500 px-1.5 py-0.5 font-semibold text-white'
+                          : 'opacity-80'
+                      }`}
+                    >
+                      {counts[tab.value]}
+                    </span>
                   ) : null}
                 </button>
               ))}
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-muted-foreground">Tri :</span>
-              {getSortOptions(filter).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    setSort(option.value)
-                    setPage(1)
-                  }}
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    sort === option.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:bg-secondary'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            <input
-              type="search"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Rechercher un client, un téléphone ou un numéro de suivi"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            />
+                <div className="flex basis-full flex-wrap items-center gap-2 border-t border-border/40 pt-3">
+                  <span className="text-xs font-medium text-muted-foreground">Tri :</span>
+                  {getSortOptions(filter).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setSort(option.value)
+                        setPage(1)
+                      }}
+                      className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        sort === option.value
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:bg-secondary'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {!canProcess && !isPermissionsLoading ? (
@@ -813,6 +1074,8 @@ export default function ConfirmationPage() {
               </button>
             </div>
           ) : null}
+            </>
+          )}
         </>
       )}
 
@@ -842,7 +1105,7 @@ export default function ConfirmationPage() {
 
       <ConfirmOrderDialog
         open={Boolean(confirmOrder)}
-        order={confirmOrder}
+        order={confirmOrderView}
         busy={actionMutation.isPending || Boolean(verifyingOrderId)}
         progressStages={confirmProgress}
         finished={Boolean(confirmOutcome)}

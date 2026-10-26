@@ -41,6 +41,7 @@ export const DASHBOARD_ANALYTICS_QUERY_PREFIXES = [
   'dashboard-profit-chart',
   'dashboard-recent-orders',
   'dashboard-v5-order-counters',
+  'dashboard-confirmation-counters',
 ] as const
 
 type InvalidateClient = {

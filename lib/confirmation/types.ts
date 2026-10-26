@@ -46,8 +46,20 @@ export type ConfirmationOrder = {
   confirmation_agents?: { name: string | null } | null
   confirmation_assigned_at: string | null
   confirmation_assignment_source: string | null
-  /** Avertissement calculé côté serveur, informatif uniquement. */
+  /**
+   * Avertissement calculé côté serveur, informatif uniquement.
+   * `true` seulement après vérification réelle ; absent tant que la lecture
+   * blacklist n'a pas répondu.
+   */
   is_blacklisted?: boolean
+  /**
+   * État de la vérification blacklist de cette commande :
+   * - `pending` : lecture encore en cours ;
+   * - `verified` : `is_blacklisted` reflète le résultat réel ;
+   * - `unavailable` : vérification impossible — le numéro ne doit pas être
+   *   présenté comme non blacklisté.
+   */
+  blacklist_status?: 'pending' | 'verified' | 'unavailable'
   delivery_companies?: { name: string | null } | null
   order_items?: Array<{
     product_id: string | null

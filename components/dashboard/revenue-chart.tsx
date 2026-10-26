@@ -8,6 +8,7 @@ import { DASHBOARD_ANALYTICS_STALE_MS } from '@/lib/dashboard/analytics-cache'
 import { Info } from 'lucide-react'
 import { formatCurrency, formatNumber, buildRoundedPath } from '@/lib/utils'
 import { businessRange, useKpiReader } from '@/lib/dashboard/use-kpi-reader'
+import { KPI_READER_RPC_V2 } from '@/lib/dashboard/kpi-reader'
 import {
   addBusinessDays,
   businessDayCount,
@@ -26,24 +27,9 @@ import { useKpiReaderErrorTelemetry, useKpiRollout } from '@/lib/dashboard/use-k
 
 type SeriesKey = 'revenue' | 'profit' | 'ads' | 'purchase'
 
-/**
- * Statuts du tunnel de conversion, identiques à `rpc_dashboard_revenue_chart`
- * (migration 20261020105000) : « Confirmées » est cumulatif.
- */
-const CONFIRMED_ORDER_STATUSES: string[] = [
-  'confirmed',
-  'picked_up',
-  'sent',
-  'delivered',
-  'returned_not_stocked',
-  'returned_stocked',
-]
-const SENT_ORDER_STATUSES: string[] = [
-  'sent',
-  'delivered',
-  'returned_not_stocked',
-  'returned_stocked',
-]
+// Le tunnel de conversion ne dépend plus d'une liste de statuts côté client :
+// `rpc_dashboard_confirmation_counters` applique la définition métier commune
+// (progression logistique conservée, annulation exclue) sur la période exacte.
 
 function formatAxisValue(value: number) {
   const abs = Math.abs(value)
@@ -57,6 +43,55 @@ function formatShortCurrency(value: number) {
   if (abs >= 1000000) return `${(value / 1000000).toFixed(1)}M`
   if (abs >= 1000) return `${(value / 1000).toFixed(1)}k`
   return Math.round(value).toString()
+}
+
+/**
+ * Anti-collision des repères colorés de l'axe Y.
+ *
+ * Chaque repère reste à la hauteur de sa valeur ; seuls de très légers
+ * décalages verticaux (en % de la hauteur du tracé) sont appliqués pour éviter
+ * un chevauchement avec les graduations grises ou avec l'autre repère.
+ */
+function resolveMarkerLabels(
+  markers: Array<{ key: string; y: number }>,
+  tickYs: number[],
+  minGap: number,
+  maxShift: number
+): Record<string, number> {
+  const top = 3
+  const bottom = 97
+  const result: Record<string, number> = {}
+  const placed: number[] = []
+
+  const distance = (y: number) => {
+    const obstacles = placed.length > 0 ? [...tickYs, ...placed] : tickYs
+    if (obstacles.length === 0) return Number.POSITIVE_INFINITY
+    return Math.min(...obstacles.map((o) => Math.abs(o - y)))
+  }
+
+  for (const marker of [...markers].sort((a, b) => a.y - b.y)) {
+    let best = Math.min(bottom, Math.max(top, marker.y))
+    let bestScore = distance(best)
+
+    if (bestScore < minGap) {
+      for (let shift = minGap; shift <= maxShift + 0.001; shift += 1) {
+        for (const candidate of [marker.y - shift, marker.y + shift]) {
+          if (candidate < top || candidate > bottom) continue
+          const score = distance(candidate)
+          if (score > bestScore) {
+            best = candidate
+            bestScore = score
+          }
+        }
+        if (bestScore >= minGap) break
+      }
+    }
+
+    result[marker.key] = best
+    placed.push(best)
+  }
+
+  return result
 }
 
 // Position horizontale de l'infobulle : à côté du trait, mais toujours dans le cadre
@@ -100,7 +135,11 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     selectedPeriod === 'today' || selectedPeriod === 'yesterday'
       ? { from: addBusinessDays(legacyRange.from, -6), to: legacyRange.to }
       : legacyRange
+  // Fenêtre visuelle du graphique (7 journées pour « Aujourd'hui » / « Hier »).
   const legacyPeriod = businessRangeToInstants(legacyQueryRange)
+  // Période réellement sélectionnée : seule source du tunnel de conversion.
+  // Le graphique conserve sa fenêtre élargie, pas les compteurs du tunnel.
+  const legacyConversionPeriod = businessRangeToInstants(legacyRange)
 
   const v5Enabled = mode === 'v5'
   // Période réelle (cartes, compteurs) et fenêtre du graphique (7 journées pour
@@ -122,6 +161,9 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     from: v5ChartRange.from,
     to: v5ChartRange.to,
     pollMs: 0,
+    // Variante du lecteur qui expose le coût de livraison journalier ; les
+    // totaux, la couverture et les permissions restent ceux du lecteur.
+    rpc: KPI_READER_RPC_V2,
   })
   const v5Scope = useMemo(() => (v5.data ? buildReaderScope(v5.data) : null), [v5.data])
   // Fenêtre calendaire complète : toutes les journées de la période, y compris
@@ -140,8 +182,6 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     [v5Scope, v5ChartRange],
   )
   useKpiReaderErrorTelemetry('revenue-chart', v5Enabled, v5.isError)
-  const strictPeriodStart = legacyPeriod.start
-  const strictPeriodEnd = legacyPeriod.end
   const [visibleSeries, setVisibleSeries] = useState<Record<SeriesKey, boolean>>({
     revenue: true,
     profit: true,
@@ -203,8 +243,8 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
             p_start_date: periodStart.toISOString(),
             p_end_date: periodEndExclusive.toISOString(),
             p_granularity: granularity,
-            p_conversion_start: (strictPeriodStart || periodStart).toISOString(),
-            p_conversion_end: (strictPeriodEnd || periodEndExclusive).toISOString(),
+            p_conversion_start: legacyConversionPeriod.start.toISOString(),
+            p_conversion_end: legacyConversionPeriod.end.toISOString(),
           })
           if (error) throw error
           return payload
@@ -286,23 +326,6 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
         returnedOrders += Number(conv.returned_orders || 0)
       }
 
-      // Waiting pickup query
-      let waitingPickupQuery = supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'dl_pickup_pending')
-        .gte('order_date', (strictPeriodStart || periodStart).toISOString())
-        .lt('order_date', (strictPeriodEnd || periodEndExclusive).toISOString())
-
-      if (currentStoreId) {
-        waitingPickupQuery = waitingPickupQuery.eq('store_id', currentStoreId)
-      } else if (storeIds.length > 0) {
-        waitingPickupQuery = waitingPickupQuery.in('store_id', storeIds)
-      }
-
-      const { count: waitingPickupCount, error: waitingPickupError } = await waitingPickupQuery
-      if (waitingPickupError) throw waitingPickupError
-
       return {
         points,
         financialAccess: results.every((payload) =>
@@ -321,70 +344,84 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
           sentOrders,
           deliveredOrders,
           returnedOrders,
-          waitingPickupOrders: Number(waitingPickupCount || 0),
+          // Compteurs lus par `rpc_dashboard_confirmation_counters` (période
+          // exacte, définition commune aux modes legacy et V5).
+          waitingPickupOrders: null,
         },
       }
     },
   })
 
 
-  // ---- V5 : source commune (lecteur agrégé), conservée derrière le flag ----
-  // Compteurs du tunnel : lecture bornée et non financière, regroupée avec
-  // « non ramassé ». Aucun appel à la RPC financière complète.
-  const v5Counters = useQuery<{
+  // ---- Tunnel de conversion : compteurs communs legacy / V5 ----
+  // Période réellement sélectionnée (jamais la fenêtre élargie du graphique),
+  // définition métier unique côté base, permissions identiques à la RLS
+  // `orders`. Une lecture en échec reste `null` : jamais un faux zéro.
+  const confirmationRange = v5Enabled ? v5Range : legacyRange
+  const confirmationPeriod = businessRangeToInstants(confirmationRange)
+  const confirmationCounters = useQuery<{
+    total: number | null
     confirmed: number | null
     sent: number | null
     waitingPickup: number | null
+    delivered: number | null
+    returned: number | null
+    cancelled: number | null
+    pending: number | null
   }>({
-    queryKey: ['dashboard-v5-order-counters', currentStoreId, accessibleStoreIds, v5Range.from, v5Range.to, userId, rollout.accessFingerprint],
-    enabled: v5Enabled && !isStoresLoading,
+    queryKey: [
+      'dashboard-confirmation-counters',
+      currentStoreId,
+      accessibleStoreIds,
+      confirmationRange.from,
+      confirmationRange.to,
+      userId,
+      rollout.accessFingerprint,
+    ],
+    enabled: !isStoresLoading && rollout.resolved,
     queryFn: async () => {
       const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
-      if (storeIds.length === 0) return { confirmed: 0, sent: 0, waitingPickup: 0 }
-      const { start, end } = businessRangeToInstants(v5Range)
-      const startIso = start.toISOString()
-      const endIso = end.toISOString()
-
-      let waitingQuery = supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'dl_pickup_pending')
-        .gte('order_date', startIso)
-        .lt('order_date', endIso)
-      let confirmedQuery = supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .in('status', CONFIRMED_ORDER_STATUSES)
-        .gte('order_date', startIso)
-        .lt('order_date', endIso)
-      let sentQuery = supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .in('status', SENT_ORDER_STATUSES)
-        .gte('order_date', startIso)
-        .lt('order_date', endIso)
-
-      if (currentStoreId) {
-        waitingQuery = waitingQuery.eq('store_id', currentStoreId)
-        confirmedQuery = confirmedQuery.eq('store_id', currentStoreId)
-        sentQuery = sentQuery.eq('store_id', currentStoreId)
-      } else {
-        waitingQuery = waitingQuery.in('store_id', storeIds)
-        confirmedQuery = confirmedQuery.in('store_id', storeIds)
-        sentQuery = sentQuery.in('store_id', storeIds)
+      if (storeIds.length === 0) {
+        return {
+          total: 0,
+          confirmed: 0,
+          sent: 0,
+          waitingPickup: 0,
+          delivered: 0,
+          returned: 0,
+          cancelled: 0,
+          pending: 0,
+        }
       }
 
-      const [waiting, confirmed, sent] = await Promise.all([
-        waitingQuery,
-        confirmedQuery,
-        sentQuery,
-      ])
+      const { data, error } = await supabase.rpc('rpc_dashboard_confirmation_counters', {
+        p_store_ids: storeIds,
+        p_start_date: confirmationPeriod.start.toISOString(),
+        p_end_date: confirmationPeriod.end.toISOString(),
+      })
+      if (error) throw error
 
-      // Une erreur laisse `null` (indisponible) : jamais un faux zéro.
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | {
+            total_orders?: number
+            confirmed_orders?: number
+            sent_orders?: number
+            waiting_pickup_orders?: number
+            delivered_orders?: number
+            returned_orders?: number
+            cancelled_orders?: number
+            pending_orders?: number
+          }
+        | null
       return {
-        confirmed: confirmed.error ? null : Number(confirmed.count ?? 0),
-        sent: sent.error ? null : Number(sent.count ?? 0),
-        waitingPickup: waiting.error ? null : Number(waiting.count ?? 0),
+        total: Number(row?.total_orders ?? 0),
+        confirmed: Number(row?.confirmed_orders ?? 0),
+        sent: Number(row?.sent_orders ?? 0),
+        waitingPickup: Number(row?.waiting_pickup_orders ?? 0),
+        delivered: Number(row?.delivered_orders ?? 0),
+        returned: Number(row?.returned_orders ?? 0),
+        cancelled: Number(row?.cancelled_orders ?? 0),
+        pending: Number(row?.pending_orders ?? 0),
       }
     },
   })
@@ -407,9 +444,10 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
         profit: bucket.margin,
         ads: bucket.ads,
         purchase: bucket.purchase,
-        // Le lecteur V5 n'expose pas le coût de livraison par journée :
-        // `null` signifie « indisponible », jamais un faux zéro.
-        delivery: null,
+        // Coût de livraison de l'axe `order` (jamais additionné à l'axe
+        // `delivery`). Un accès commercial n'y a pas droit : `null` =
+        // « indisponible », jamais un faux zéro.
+        delivery: v5Scope.access === 'full' ? bucket.delivery : null,
       })),
       granularity: v5Granularity,
       totalRevenue: n('revenue'),
@@ -418,16 +456,17 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
       totalPurchase: n('purchase_cost'),
       conversion: {
         totalOrders: n('orders_count'),
-        confirmedOrders: v5Counters.data ? v5Counters.data.confirmed : null,
+        // Compteurs du tunnel fournis par `rpc_dashboard_confirmation_counters`.
+        confirmedOrders: null,
         cancelledOrders: n('cancelled_count'),
         pendingOrders: n('pending_count'),
-        sentOrders: v5Counters.data ? v5Counters.data.sent : null,
+        sentOrders: null,
         deliveredOrders: n('delivered_count'),
         returnedOrders: n('returned_count'),
-        waitingPickupOrders: v5Counters.data ? v5Counters.data.waitingPickup : null,
+        waitingPickupOrders: null,
       },
     }
-  }, [v5Enabled, v5Scope, v5Counters.data, v5Granularity, v5FillWindow, selectedPeriod])
+  }, [v5Enabled, v5Scope, v5Granularity, v5FillWindow, selectedPeriod])
 
   const data = v5Enabled ? v5Data : legacyData
   // Les courbes financières ne dépendent plus des compteurs du tunnel : elles
@@ -476,7 +515,36 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
   const labelTicks = points
     .map((p, index) => ({ ...p, index }))
     .filter((p) => p.index % labelStep === 0 || p.index === points.length - 1)
-  const conversion = data?.conversion
+  const conversionBase = data?.conversion
+  const counters = confirmationCounters.data
+  // Tunnel de conversion : source unique pour les deux modes. Sans compteurs,
+  // seuls les totaux legacy (période exacte) restent lisibles ; en V5 les
+  // totaux du graphique portent la fenêtre élargie et ne doivent pas être
+  // affichés comme ceux de la période sélectionnée.
+  const conversion = counters
+    ? {
+        totalOrders: counters.total ?? 0,
+        confirmedOrders: counters.confirmed ?? 0,
+        cancelledOrders: counters.cancelled ?? 0,
+        pendingOrders: counters.pending ?? 0,
+        sentOrders: counters.sent ?? 0,
+        deliveredOrders: counters.delivered ?? 0,
+        returnedOrders: counters.returned ?? 0,
+        waitingPickupOrders: counters.waitingPickup ?? 0,
+      }
+    : conversionBase
+      ? {
+          ...conversionBase,
+          totalOrders: v5Enabled ? null : conversionBase.totalOrders,
+          confirmedOrders: null,
+          cancelledOrders: v5Enabled ? null : conversionBase.cancelledOrders,
+          pendingOrders: v5Enabled ? null : conversionBase.pendingOrders,
+          sentOrders: v5Enabled ? null : conversionBase.sentOrders,
+          deliveredOrders: v5Enabled ? null : conversionBase.deliveredOrders,
+          returnedOrders: v5Enabled ? null : conversionBase.returnedOrders,
+          waitingPickupOrders: null,
+        }
+      : undefined
   // `null` = compteur indisponible (erreur de lecture) : jamais affiché en zéro.
   const baseOrders = conversion?.totalOrders ?? null
   const waitingPickupOrders = conversion?.waitingPickupOrders ?? null
@@ -571,17 +639,39 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
 
     const minVal = Math.min(...values, 0)
     const maxVal = Math.max(...values, 0)
+    const range = Math.max(1, maxVal - minVal)
 
-    let min = 0
-    let max = maxVal === 0 ? 1 : maxVal * 1.1
-
-    if (minVal < 0) {
-      const range = Math.max(1, maxVal - minVal)
+    // Échelle verticale : marge de 10 % au-dessus et de 14 % en dessous, afin
+    // que la ligne zéro reste toujours visible à l'intérieur du cadre, même
+    // quand toutes les valeurs sont positives ou toutes négatives.
+    let min: number
+    let max: number
+    if (minVal < 0 && maxVal > 0) {
       min = minVal - range * 0.1
       max = maxVal + range * 0.1
+    } else if (minVal < 0) {
+      min = minVal - range * 0.1
+      max = range * 0.14
+    } else if (maxVal > 0) {
+      min = -range * 0.14
+      max = maxVal + range * 0.1
+    } else {
+      min = -1
+      max = 1
     }
 
-    const ticks = Array.from({ length: 5 }, (_, i) => max - (i * (max - min)) / 4)
+    const baseTicks = Array.from({ length: 5 }, (_, i) => max - (i * (max - min)) / 4)
+    // Graduation 0 garantie : on remplace la graduation déjà trop proche de
+    // zéro (risque de chevauchement), sinon on l'ajoute aux graduations.
+    const zeroTolerance = (max - min) * 0.06
+    const closest = baseTicks.reduce(
+      (best, tick, index) => (Math.abs(tick) < Math.abs(baseTicks[best]) ? index : best),
+      0,
+    )
+    const ticks =
+      Math.abs(baseTicks[closest]) <= zeroTolerance
+        ? baseTicks.map((tick, index) => (index === closest ? 0 : tick))
+        : [...baseTicks, 0]
 
     return { yMin: min, yMax: max, yTicks: ticks }
   }, [points, activeKeys])
@@ -654,6 +744,23 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
     return { index: maxIdx, value: maxVal }
   }, [points])
 
+  // Repères colorés : hauteur de valeur, avec un décalage vertical minimal
+  // lorsque la graduation grise (ou l'autre repère) occupe la même bande.
+  // `minGap` ≈ hauteur d'un libellé (13 px) rapportée à la hauteur du tracé.
+  const markerLabelY = resolveMarkerLabels(
+    [
+      ...(visibleSeries.revenue && maxRevenuePoint
+        ? [{ key: 'revenue', y: valueToY(maxRevenuePoint.value) }]
+        : []),
+      ...(allowedSeries.includes('profit') && visibleSeries.profit && maxProfitPoint
+        ? [{ key: 'profit', y: valueToY(maxProfitPoint.value) }]
+        : []),
+    ],
+    yTicks.map((tick) => valueToY(tick)),
+    4.5,
+    9,
+  )
+
   return (
     <div className="bg-card rounded-xl shadow p-4 sm:p-6 overflow-hidden">
 
@@ -704,22 +811,26 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
               <div className="absolute left-0 top-0 bottom-0 w-9 text-[10px] text-muted-foreground">
                 <div className="relative w-full h-full">
                   {yTicks.map((tick, idx) => (
-                    <span key={idx} className="absolute left-0" style={{ top: `${valueToY(tick)}%`, transform: 'translateY(-50%)' }}>
+                    <span
+                      key={idx}
+                      className="absolute left-0 tabular-nums opacity-70"
+                      style={{ top: `${valueToY(tick)}%`, transform: 'translateY(-50%)' }}
+                    >
                       {formatAxisValue(tick)}
                     </span>
                   ))}
                   {visibleSeries.revenue && maxRevenuePoint && (
                     <span
-                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
-                      style={{ top: `${valueToY(maxRevenuePoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.revenue.color }}
+                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums leading-none"
+                      style={{ top: `${markerLabelY.revenue ?? valueToY(maxRevenuePoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.revenue.color }}
                     >
                       {formatShortCurrency(maxRevenuePoint.value)}
                     </span>
                   )}
                   {allowedSeries.includes('profit') && visibleSeries.profit && maxProfitPoint && (
                     <span
-                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums"
-                      style={{ top: `${valueToY(maxProfitPoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.profit.color }}
+                      className="absolute right-0 translate-x-1 text-[11px] font-bold tabular-nums leading-none"
+                      style={{ top: `${markerLabelY.profit ?? valueToY(maxProfitPoint.value)}%`, transform: 'translateY(-50%)', color: seriesConfig.profit.color }}
                     >
                       {formatShortCurrency(maxProfitPoint.value)}
                     </span>
@@ -728,21 +839,34 @@ export default function RevenueChart({ source }: { source?: KpiReaderMode } = {}
               </div>
 
               <svg ref={plotRef} viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
-                {yTicks.map((tick, idx) => (
-                  <line
-                    key={idx}
-                    x1="0"
-                    y1={valueToY(tick)}
-                    x2="100"
-                    y2={valueToY(tick)}
-                    stroke="var(--border)"
-                    strokeWidth="0.4"
-                  />
-                ))}
-
-                {yMin < 0 && yMax > 0 && (
-                  <line x1="0" y1={valueToY(0)} x2="100" y2={valueToY(0)} stroke="var(--border)" strokeWidth="0.6" />
+                {yTicks.map((tick, idx) =>
+                  // La graduation 0 est remplacée par la ligne zéro dédiée
+                  // ci-dessous : une seule ligne, plus lisible que la grille.
+                  Math.abs(tick) < 1e-9 ? null : (
+                    <line
+                      key={idx}
+                      x1="0"
+                      y1={valueToY(tick)}
+                      x2="100"
+                      y2={valueToY(tick)}
+                      stroke="var(--border)"
+                      strokeWidth="0.4"
+                    />
+                  ),
                 )}
+
+                {/* Ligne zéro : repère de lecture toujours visible, un peu plus
+                    marquée que la grille mais distincte des courbes de données. */}
+                <line
+                  x1="0"
+                  y1={valueToY(0)}
+                  x2="100"
+                  y2={valueToY(0)}
+                  stroke="currentColor"
+                  className="text-muted-foreground"
+                  strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
+                />
 
                 {(Object.keys(seriesConfig) as SeriesKey[]).map((key) =>
                   allowedSeries.includes(key) && visibleSeries[key] ? (

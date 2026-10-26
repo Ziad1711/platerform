@@ -42,11 +42,20 @@ const STATUS_DATE_FIELD_MAP: Record<string, string> = {
   dl_out_for_delivery: 'dl_out_for_delivery_at',
 }
 
-export async function POST(request: Request) {
-  try {
-    const { supabase, user } = await requireAuthenticatedUser()
-    const admin = createAdminClient()
-    const body = (await request.json().catch(() => ({}))) as {
+type StatusStage = 'validating' | 'confirmed' | 'city_search' | 'city_ai' | 'parcel'
+
+/**
+ * Ville exacte retenue par l'agent : elle est enregistrée sur la commande pour
+ * que les listes (Ventes, Confirmation) affichent le nom réel du transporteur et
+ * non la saisie brute du formulaire. Nom absent : le champ n'est pas modifié.
+ */
+function manualCityNamePatch(cityName: unknown): { city?: string } {
+  const name = typeof cityName === 'string' ? cityName.trim() : ''
+  return name ? { city: name } : {}
+}
+
+/** Corps accepté par la mise à jour de statut (champs transporteur transmis tels quels). */
+type StatusUpdateBody = {
       orderId?: string
       status?: string
       deliveryNote?: string
@@ -94,7 +103,16 @@ export async function POST(request: Request) {
       rushlivCityName?: string
       /** La ville a déjà été normalisée en amont (confirmation) : ne pas la recalculer. */
       cityAlreadyNormalized?: boolean
-    }
+    } & { stream?: boolean }
+
+async function handleStatusUpdate(
+  body: StatusUpdateBody,
+  report: (stage: StatusStage) => void
+): Promise<Response> {
+  try {
+    const { supabase, user } = await requireAuthenticatedUser()
+    const admin = createAdminClient()
+    report('validating')
     const orderId = String(body.orderId || '').trim()
     const status = String(body.status || '').trim()
     const deliveryNote = typeof body.deliveryNote === 'string' ? body.deliveryNote.trim() : ''
@@ -192,6 +210,7 @@ export async function POST(request: Request) {
 
     const { error: updateError } = await admin.from('orders').update(updatePayload).eq('id', orderId)
     if (updateError) throw updateError
+    report('confirmed')
 
     let warning = ''
     let trackingNumber = String(order.tracking_number || '')
@@ -202,6 +221,7 @@ export async function POST(request: Request) {
       : (deliveryCompanyId || order.delivery_company_id)
 
     if (status === 'confirmed' && !trackingNumber && resolvedDeliveryCompanyId) {
+      report('parcel')
       const [{ data: deliveryCompany }, integration] = await Promise.all([
         supabase
           .from('delivery_companies')
@@ -253,10 +273,11 @@ export async function POST(request: Request) {
             // l'auto-détection et est enregistrée sur la commande.
             await admin
               .from('orders')
-              .update({ delivery_city_external_id: manualRapidCityKey, updated_at: now })
+              .update({ delivery_city_external_id: manualRapidCityKey, ...manualCityNamePatch(body.rapidCityName), updated_at: now })
               .eq('id', orderId)
           } else if (!cityAlreadyNormalized) {
-            await normalizeOrderCityById(orderId, admin, 'rapid-delivery')
+            report('city_search')
+            await normalizeOrderCityById(orderId, admin, 'rapid-delivery', () => report('city_ai'))
           }
           // Recharger la commande pour avoir delivery_city_external_id à jour
           const { data: freshOrder } = await admin
@@ -342,7 +363,7 @@ export async function POST(request: Request) {
               // l'auto-détection et est enregistrée sur la commande.
               await admin
                 .from('orders')
-                .update({ delivery_city_external_id: manualMarocGoCityKey, updated_at: now })
+                .update({ delivery_city_external_id: manualMarocGoCityKey, ...manualCityNamePatch(body.marocGoCityName), updated_at: now })
                 .eq('id', orderId)
             } else if (!cityAlreadyNormalized) {
               await normalizeOrderCityById(orderId, admin, 'maroc-go-delivery')
@@ -428,7 +449,7 @@ export async function POST(request: Request) {
               // l'auto-détection et est enregistrée sur la commande.
               await admin
                 .from('orders')
-                .update({ delivery_city_external_id: manualRushlivCityKey, updated_at: now })
+                .update({ delivery_city_external_id: manualRushlivCityKey, ...manualCityNamePatch(body.rushlivCityName), updated_at: now })
                 .eq('id', orderId)
             } else if (!cityAlreadyNormalized) {
               await normalizeOrderCityById(orderId, admin, 'rushliv')
@@ -786,3 +807,79 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
+
+/**
+ * Même travail que la mise à jour classique, mais en flux SSE quand le client le
+ * demande : chaque étape est diffusée dès qu'elle est réellement terminée
+ * (statut enregistré, ville normalisée, colis créé). Sans flux, la réponse JSON
+ * et le comportement restent strictement identiques.
+ */
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as StatusUpdateBody
+
+  const wantsStream =
+    body.stream === true || (request.headers.get('accept') || '').includes('text/event-stream')
+
+  if (!wantsStream) return handleStatusUpdate(body, () => {})
+
+  const encoder = new TextEncoder()
+  const queue: string[] = []
+  let finished = false
+  let notify: (() => void) | null = null
+
+  const emit = (event: Record<string, unknown>) => {
+    queue.push(`data: ${JSON.stringify(event)}\n\n`)
+    notify?.()
+    notify = null
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      void handleStatusUpdate(body, (stage) => emit({ type: 'progress', stage }))
+        .then(async (response) => {
+          const payload = await response.json().catch(() => null)
+          if (response.ok) {
+            emit({ type: 'result', result: payload })
+          } else {
+            emit({
+              type: 'error',
+              error: String((payload as { error?: string } | null)?.error || 'ORDER_STATUS_UPDATE_FAILED'),
+            })
+          }
+        })
+        .catch((error) => {
+          emit({
+            type: 'error',
+            error: error instanceof Error ? error.message : 'ORDER_STATUS_UPDATE_FAILED',
+          })
+        })
+        .finally(() => {
+          finished = true
+          notify?.()
+          notify = null
+        })
+
+      while (!finished || queue.length > 0) {
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            notify = () => resolve()
+          })
+          continue
+        }
+        controller.enqueue(encoder.encode(queue.shift() as string))
+      }
+
+      controller.close()
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  })
+}
+

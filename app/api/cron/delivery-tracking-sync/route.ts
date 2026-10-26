@@ -13,14 +13,21 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { runDeliveryTrackingSweep } from '@/lib/integrations/delivery/tracking-runner'
 import { getTrackingProviderSlugs } from '@/lib/integrations/delivery/tracking-providers'
+import { computeQueueProgress, isQueueStalled } from '@/lib/integrations/delivery/tracking-budget'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-/** Marge sous la limite d'execution : le cron s'arrete proprement. */
-const CRON_TOTAL_BUDGET_MS = 25_000
-const CRON_BATCH_BUDGET_MS = 6_000
+/**
+ * Budget total du passage, sous la duree maximale de la fonction.
+ * Auparavant 25 s avec 6 s par couple : sur 10 couples connectes et des
+ * appels transporteur de 2 a 4 s, seuls 1 ou 2 colis etaient traites alors
+ * que 11 attendaient. Le budget ne cree aucun parallelisme : le verrou SQL
+ * par transporteur reste la seule voie d'execution.
+ */
+const CRON_TOTAL_BUDGET_MS = 45_000
+const CRON_BATCH_BUDGET_MS = 12_000
 const CRON_BATCH_LIMIT = 15
 
 export async function GET(request: Request) {
@@ -85,9 +92,32 @@ export async function GET(request: Request) {
         remaining: totals.remaining + result.coverage.remaining,
         blocked: totals.blocked + result.coverage.blocked,
         unresolved: totals.unresolved + result.coverage.unresolved,
+        ready: totals.ready + result.coverage.ready,
+        drained: totals.drained + computeQueueProgress(
+          result.remainingBefore ?? result.coverage.remaining,
+          result.coverage.remaining,
+        ),
+        stalled: totals.stalled + (
+          isQueueStalled({
+            remaining: result.coverage.remaining,
+            oldestPendingSyncedAt: result.coverage.oldestPendingSyncedAt,
+          }) ? 1 : 0
+        ),
       }),
-      { processed: 0, changed: 0, skipped: 0, failed: 0, remaining: 0, blocked: 0, unresolved: 0 }
+      {
+        processed: 0, changed: 0, skipped: 0, failed: 0,
+        remaining: 0, blocked: 0, unresolved: 0,
+        ready: 0, drained: 0, stalled: 0,
+      }
     )
+
+    const oldestPending = results
+      .map((result) => result.coverage.oldestPendingSyncedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] || null
+    const oldestPendingSeconds = oldestPending
+      ? Math.max(0, Math.round((Date.now() - new Date(oldestPending).getTime()) / 1000))
+      : null
 
     const carriersBusy = results.filter((result) => result.reason === 'CARRIER_BUSY').length
     const rateLimited = results.filter((result) => result.reason === 'CARRIER_RATE_LIMITED').length
@@ -99,6 +129,7 @@ export async function GET(request: Request) {
       truncated,
       carriersBusy,
       rateLimited,
+      oldestPendingSeconds,
       summary,
       results,
     })
