@@ -2333,12 +2333,20 @@ export default function VentesPage() {
       cityKey?: number | null
     }) => {
       // La normalisation serveur reste l'autorité (nom exact + clé du catalogue
-      // du transporteur du store) : elle est systématiquement utilisée pour ne
+      // du transporteur du store) : elle est systématiquement tentée pour ne
       // jamais enregistrer une clé qui ne correspondrait pas au transporteur.
       // `orderId` permet au serveur de déduire le transporteur de la commande.
-      const normalized = await normalizeOrderCityRequest(cityName, orderId)
-      const resolvedCityName = String(normalized.cityName || cityName).trim()
-      const resolvedCityKey = Number(normalized.cityKey || 0) || cityKey || null
+      let resolvedCityName = cityName.trim()
+      let resolvedCityKey: number | null = cityKey ?? null
+      try {
+        const normalized = await normalizeOrderCityRequest(cityName, orderId)
+        resolvedCityName = String(normalized.cityName || cityName).trim()
+        resolvedCityKey = Number(normalized.cityKey || 0) || cityKey || null
+      } catch {
+        // Normalisation indisponible (réseau, refus) : le nom saisi est
+        // conservé sans clé plutôt que de perdre la modification. L'UPDATE
+        // reste soumis aux RLS (commande hors périmètre → ORDER_NOT_UPDATED).
+      }
 
       // Frais de livraison : uniquement si le catalogue chargé correspond bien
       // au store de la commande (jamais le tarif d'une autre boutique).

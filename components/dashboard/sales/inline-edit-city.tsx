@@ -69,20 +69,7 @@ export default function InlineEditCity({
     }
   }, [open, updateMenuPosition])
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node
-      // Le menu est désormais hors du conteneur (portail) : il fait partie de
-      // l'éditeur et ne doit jamais provoquer sa fermeture avant sélection.
-      if (containerRef.current?.contains(target)) return
-      if (menuRef.current?.contains(target)) return
-      setEditing(false)
-      setOpen(false)
-      setSearch(value)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [value])
+  // (Le gestionnaire de clic extérieur est défini plus bas, après `commitCurrent`.)
 
   const filtered = useMemo(
     () =>
@@ -98,6 +85,52 @@ export default function InlineEditCity({
     setEditing(false)
     setOpen(false)
   }
+
+  // Libellé comparable pour retrouver une correspondance exacte saisie à la main.
+  const cityLabel = (raw: string) =>
+    raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+
+  /**
+   * Valide la saisie courante :
+   * - correspondance exacte du catalogue → nom + clé du transporteur ;
+   * - sinon première correspondance partielle (comportement historique) ;
+   * - sinon le **nom saisi est conservé tel quel**, sans clé inventée : une
+   *   ville absente des alias doit quand même pouvoir être enregistrée.
+   */
+  const commitCurrent = useCallback(() => {
+    const typed = search.trim()
+    if (!typed || typed === value) return
+    if (filtered.length > 0) {
+      const exact = filtered.find((city) => cityLabel(city.city_name) === cityLabel(typed))
+      const target = exact || filtered[0]
+      onSave(target.city_name, target.city_key)
+      return
+    }
+    onSave(typed, null)
+  }, [search, value, filtered, onSave])
+
+  // Clic extérieur = validation de la saisie (nom libre inclus), sauf Échap.
+  // Le menu étant un portail hors du conteneur, il fait partie de l'éditeur et
+  // ne doit jamais provoquer sa fermeture avant sélection.
+  useEffect(() => {
+    if (!editing) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (containerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      commitCurrent()
+      setEditing(false)
+      setOpen(false)
+      setSearch(value)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [editing, value, commitCurrent])
 
   if (editing) {
     return (
@@ -119,19 +152,11 @@ export default function InlineEditCity({
               setOpen(false)
             }
             if (e.key === 'Enter') {
-              // Une correspondance (ou la première) est retenue ; sinon le nom
-              // saisi est enregistré tel quel et normalisé par la mutation
-              // existante (même parcours qu'un choix manuel).
-              if (filtered.length > 0) {
-                handleSelect(filtered[0])
-                return
-              }
-              const typed = search.trim()
-              if (typed && typed !== value) {
-                onSave(typed, null)
-                setEditing(false)
-                setOpen(false)
-              }
+              // Sélection exacte, sinon première correspondance, sinon le nom
+              // saisi est conservé (jamais de clé inventée).
+              commitCurrent()
+              setEditing(false)
+              setOpen(false)
             }
           }}
           placeholder="Taper une ville puis Entrée..."
