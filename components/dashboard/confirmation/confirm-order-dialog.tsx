@@ -42,6 +42,7 @@ import {
 } from '@/lib/confirmation/delivery-options'
 import DeliveryProviderFields from './delivery-provider-fields'
 import {
+  SLUG_CITY_FIELDS,
   cityPreviewQueryKey,
   fetchCityPreview,
   isCityPreviewProvider,
@@ -162,6 +163,10 @@ export default function ConfirmOrderDialog({
   // Repli manuel : le sélecteur de ville n'apparaît qu'après un échec de la
   // résolution automatique, au clic sur « Confirmer ».
   const [cityFallbackRequired, setCityFallbackRequired] = useState(false)
+  // Correction proposée par notre résolution : l'agent valide, sinon il choisit.
+  const [cityCorrection, setCityCorrection] = useState<{ received: string; resolved: string } | null>(
+    null
+  )
   const [providerIssue, setProviderIssue] = useState<DeliveryOptionsErrorCode | null>(null)
   const [deliveryOptionsState, setDeliveryOptionsState] = useState<DeliveryOptionsState>({
     companyId: '',
@@ -203,6 +208,7 @@ export default function ConfirmOrderDialog({
     })
     // Nouveau transporteur : le repli manuel précédent ne s'applique plus.
     setCityFallbackRequired(false)
+    setCityCorrection(null)
   }, [deliveryChoice, providerSlug])
 
   useEffect(() => {
@@ -211,6 +217,7 @@ export default function ConfirmOrderDialog({
     setLocalError('')
     setProviderIssue(null)
     setCityFallbackRequired(false)
+    setCityCorrection(null)
     setDeliveryOptionsState({ companyId: '', options: {} })
     // Une société déjà rattachée reste sélectionnée ; sinon l'agent doit choisir.
     setDeliveryChoice(order?.delivery_company_id ? String(order.delivery_company_id) : '')
@@ -423,6 +430,40 @@ export default function ConfirmOrderDialog({
           <section className="space-y-4 rounded-xl border border-border p-4">
             <SectionTitle icon={<Truck className="h-3.5 w-3.5" />} label="Livraison" />
 
+            {cityCorrection && !cityFallbackRequired ? (
+              <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <div>
+                  Ville reçue : <span className="font-semibold">{cityCorrection.received}</span> →
+                  ville trouvée : <span className="font-semibold">{cityCorrection.resolved}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => setCityCorrection(null)}>
+                    Oui, c’est la bonne ville
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const fields = providerSlug ? SLUG_CITY_FIELDS[providerSlug] : undefined
+                      if (fields) {
+                        const next = { ...deliveryOptions } as Record<string, unknown>
+                        next[fields.key as string] = undefined
+                        next[fields.name as string] = undefined
+                        setDeliveryOptionsState({
+                          companyId: deliveryChoice,
+                          options: next as ConfirmationDeliveryOptions,
+                        })
+                      }
+                      setCityCorrection(null)
+                      setCityFallbackRequired(true)
+                    }}
+                  >
+                    Non, choisir la ville
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             <label className="block space-y-1 text-sm">
               <span className="font-medium">Société de livraison *</span>
               <select
@@ -454,6 +495,15 @@ export default function ConfirmOrderDialog({
                 orderCity={order?.city ?? null}
                 value={deliveryOptions}
                 showCityFallback={cityFallbackRequired}
+                onCityResolved={(city) => {
+                  const received = String(order?.city || '').trim()
+                  const resolved = String(city?.cityName || '').trim()
+                  setCityCorrection(
+                    city && resolved && received && resolved.toLowerCase() !== received.toLowerCase()
+                      ? { received, resolved }
+                      : null
+                  )
+                }}
                 onChange={handleDeliveryOptionsChange}
                 onConfigError={setProviderIssue}
               />
