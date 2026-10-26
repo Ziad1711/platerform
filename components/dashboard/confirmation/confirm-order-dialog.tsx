@@ -319,8 +319,8 @@ export default function ConfirmOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
-      <DialogContent hideClose className="flex max-h-[88vh] max-w-xl flex-col gap-0 overflow-y-hidden p-0">
-        <DialogHeader className="sticky top-0 z-10 shrink-0 gap-3 border-b border-border bg-muted/40 px-6 py-4">
+      <DialogContent hideClose className="max-w-xl gap-0 p-0">
+        <DialogHeader className="sticky top-0 z-10 gap-3 border-b border-border bg-muted/40 px-6 py-4">
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 sm:h-9 sm:w-9">
               <PackageCheck className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -342,7 +342,7 @@ export default function ConfirmOrderDialog({
           </div>
         </DialogHeader>
 
-        <div className="modal-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
+        <div className="modal-scroll space-y-4 px-6 py-4 text-sm text-foreground">
           <section className="space-y-3 rounded-xl border border-border p-4">
             <SectionTitle icon={<User className="h-3.5 w-3.5" />} label="Client" />
 
