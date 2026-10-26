@@ -935,11 +935,11 @@ export default function ConfirmationPage() {
               </div>
             ) : null}
 
-            <div
-              id="confirmation-filters"
-              hidden={!filtersOpen}
-              className="flex flex-wrap gap-2"
-            >
+            {filtersOpen ? (
+              <div
+                id="confirmation-filters"
+                className="flex flex-wrap gap-2 border-t border-border/60 pt-3"
+              >
               {FILTER_TABS.map((tab) => (
                 <button
                   key={tab.value}
@@ -972,7 +972,8 @@ export default function ConfirmationPage() {
                   ) : null}
                 </button>
               ))}
-            </div>
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">Tri :</span>
