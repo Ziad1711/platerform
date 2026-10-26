@@ -33,6 +33,8 @@ type DeliveryProviderFieldsProps = {
    * comme dans `/sales`, seuls la société et la note sont demandés d'emblée.
    */
   showCityFallback?: boolean
+  /** Ville réellement retenue par notre résolution (pour l'afficher à l'agent). */
+  onCityResolved?: (city: { cityKey: string; cityName: string } | null) => void
 }
 
 const CITY_PROVIDER_LABEL: Partial<Record<ConfirmationDeliveryProvider, string>> = {
@@ -103,6 +105,7 @@ export default function DeliveryProviderFields({
   onChange,
   onConfigError,
   showCityFallback = false,
+  onCityResolved,
 }: DeliveryProviderFieldsProps) {
   const supabase = useMemo(() => createClient(), [])
   const [cityQuery, setCityQuery] = useState('')
@@ -248,7 +251,8 @@ export default function DeliveryProviderFields({
 
     setCityQuery(resolvedCity.cityName)
     onChangeRef.current(next)
-  }, [provider, orderId, resolvedCity, cities, value])
+    onCityResolved?.(resolvedCity)
+  }, [provider, orderId, resolvedCity, cities, value, onCityResolved])
 
   const { data: senditConfig } = useQuery<{ default_pickup_district_id: string | null } | null>({
     queryKey: ['confirmation-sendit-config', storeId],
@@ -342,6 +346,7 @@ export default function DeliveryProviderFields({
     const key = String(city.city_key)
     const name = String(city.city_name || '')
     setCityQuery(name)
+    onCityResolved?.({ cityKey: key, cityName: name })
     if (provider === 'ozone') update({ ozoneCityKey: Number(key) || undefined, ozoneCityName: name })
     if (provider === 'ameex') update({ ameexCityKey: key, ameexCityName: name })
     if (provider === 'sendit') update({ senditCityKey: key, senditCityName: name })
