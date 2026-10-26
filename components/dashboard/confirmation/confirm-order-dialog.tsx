@@ -322,17 +322,26 @@ export default function ConfirmOrderDialog({
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
       <DialogContent hideClose className="flex max-h-[88vh] max-w-xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 gap-3 border-b border-border bg-muted/40 px-6 py-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
               <PackageCheck className="h-5 w-5" />
             </span>
-            <div className="space-y-1">
+            <div className="min-w-0 flex-1 space-y-1">
               <DialogTitle className="text-base font-semibold">Confirmer la commande</DialogTitle>
               <DialogDescription className="text-xs">
                 Vérifiez les informations avant validation. Une commande confirmée sort de la file
                 de confirmation.
               </DialogDescription>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              disabled={busy || resolvingCity}
+              className="shrink-0"
+            >
+              Fermer
+            </Button>
           </div>
         </DialogHeader>
 
@@ -535,25 +544,18 @@ export default function ConfirmOrderDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="shrink-0 gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
-          {outcome ? (
-            <Button onClick={onClose}>Fermer</Button>
-          ) : (
-            <>
-              <Button variant="outline" onClick={onClose} disabled={busy || resolvingCity}>
-                Fermer
-              </Button>
-              <Button onClick={handleSubmit} disabled={busy || resolvingCity}>
-                {busy || resolvingCity ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <PackageCheck className="h-4 w-4" />
-                )}
-                {busy ? 'Confirmation...' : resolvingCity ? 'Recherche de la ville...' : 'Confirmer la commande'}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
+        {outcome ? null : (
+          <DialogFooter className="shrink-0 gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
+            <Button onClick={handleSubmit} disabled={busy || resolvingCity}>
+              {busy || resolvingCity ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PackageCheck className="h-4 w-4" />
+              )}
+              {busy ? 'Confirmation...' : resolvingCity ? 'Recherche de la ville...' : 'Confirmer la commande'}
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   )
