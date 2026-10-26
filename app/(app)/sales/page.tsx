@@ -2281,10 +2281,17 @@ export default function VentesPage() {
 
   const updateOrderCityMutation = useMutation({
     mutationFn: async ({ orderId, cityName, cityKey }: { orderId: string; cityName: string; cityKey?: number | null }) => {
-      // Normaliser la ville via l'API (comme à la création)
-      const normalized = await normalizeOrderCityRequest(cityName)
-      const resolvedCityName = String(normalized.cityName || cityName).trim()
-      const resolvedCityKey = Number(normalized.cityKey || 0) || cityKey || null
+      // Sélection dans la liste du transporteur : le nom exact et la clé sont
+      // déjà connus, donc aucun aller-retour de normalisation n'est nécessaire
+      // (c'était le coût principal d'un changement de ville). La normalisation
+      // reste utilisée pour une ville saisie librement.
+      let resolvedCityName = cityName.trim()
+      let resolvedCityKey = cityKey ?? null
+      if (!resolvedCityKey) {
+        const normalized = await normalizeOrderCityRequest(cityName)
+        resolvedCityName = String(normalized.cityName || cityName).trim()
+        resolvedCityKey = Number(normalized.cityKey || 0) || null
+      }
 
       // Calculer les frais de livraison si on a un cityKey
       let resolvedDeliveryFee: number | undefined

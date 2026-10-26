@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, X, Package, Pencil } from 'lucide-react'
 
 interface Product {
@@ -250,9 +251,10 @@ export default function InlineEditProducts({
     <>
       <button
         type="button"
+        onClick={open}
         onDoubleClick={open}
-        className="group text-left text-[10px] sm:text-[11px] text-foreground hover:text-primary transition-colors cursor-default"
-        title="Double-clic pour modifier"
+        className="group text-left text-[10px] sm:text-[11px] text-foreground hover:text-primary transition-colors cursor-pointer"
+        title="Cliquer pour modifier"
       >
         {triggerLabel || summary || <span className="text-muted-foreground italic">Aucun produit</span>}
         <span
@@ -261,14 +263,15 @@ export default function InlineEditProducts({
             e.stopPropagation()
             open()
           }}
-          className="ml-1 inline-block align-middle cursor-pointer text-muted-foreground/30 hover:text-primary transition-colors"
+          className="ml-1 inline-block cursor-pointer p-0.5 align-middle text-muted-foreground/60 hover:text-primary transition-colors"
           title="Modifier"
         >
-          <Pencil className="inline-block h-3 w-3 align-middle" />
+          <Pencil className="inline-block h-3.5 w-3.5 align-middle" />
         </span>
       </button>
 
-      {isOpen && (
+      {isOpen && typeof document !== 'undefined'
+        ? createPortal(
         <div
           ref={containerRef}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -618,8 +621,10 @@ export default function InlineEditProducts({
               </div>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )
+        : null}
     </>
   )
 }

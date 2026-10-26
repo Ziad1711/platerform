@@ -64,12 +64,16 @@ export default function InlineEditText({
 
   return (
     <div
+      onClick={() => {
+        setDraft(value)
+        setEditing(true)
+      }}
       onDoubleClick={() => {
         setDraft(value)
         setEditing(true)
       }}
-      className={`group inline-flex items-center gap-1 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
-      title="Double-clic pour modifier"
+      className={`group inline-flex items-center gap-1 cursor-text hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+      title="Cliquer pour modifier"
     >
       <span>{value || <span className="text-muted-foreground italic">{placeholder || '—'}</span>}</span>
       <span
@@ -79,10 +83,10 @@ export default function InlineEditText({
           setDraft(value)
           setEditing(true)
         }}
-        className="shrink-0 cursor-pointer text-muted-foreground/30 hover:text-foreground transition-colors"
+        className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/60 hover:text-foreground transition-colors"
         title="Modifier"
       >
-        <Pencil className="h-3 w-3" />
+        <Pencil className="h-3.5 w-3.5" />
       </span>
     </div>
   )

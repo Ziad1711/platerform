@@ -79,11 +79,23 @@ export default function InlineEditCity({
               setSearch(value)
               setOpen(false)
             }
-            if (e.key === 'Enter' && filtered.length === 1) {
-              handleSelect(filtered[0])
+            if (e.key === 'Enter') {
+              // Une correspondance (ou la première) est retenue ; sinon le nom
+              // saisi est enregistré tel quel et normalisé par la mutation
+              // existante (même parcours qu'un choix manuel).
+              if (filtered.length > 0) {
+                handleSelect(filtered[0])
+                return
+              }
+              const typed = search.trim()
+              if (typed && typed !== value) {
+                onSave(typed, null)
+                setEditing(false)
+                setOpen(false)
+              }
             }
           }}
-          placeholder="Taper pour chercher une ville..."
+          placeholder="Taper une ville puis Entrée..."
           className="w-full border border-primary rounded px-2 py-1 bg-background text-foreground text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
         />
         {open && filtered.length > 0 && (
@@ -121,12 +133,16 @@ export default function InlineEditCity({
 
   return (
     <div
+      onClick={() => {
+        setSearch('')
+        setEditing(true)
+      }}
       onDoubleClick={() => {
         setSearch('')
         setEditing(true)
       }}
-      className={`group inline-flex items-center gap-1 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
-      title="Double-clic pour changer la ville"
+      className={`group inline-flex items-center gap-1 cursor-text hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+      title="Cliquer pour changer la ville"
     >
       <span>{value || <span className="text-muted-foreground italic">—</span>}</span>
       <span
@@ -136,10 +152,10 @@ export default function InlineEditCity({
           setSearch('')
           setEditing(true)
         }}
-        className="shrink-0 cursor-pointer text-muted-foreground/30 hover:text-foreground transition-colors"
+        className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/60 hover:text-foreground transition-colors"
         title="Modifier"
       >
-        <Pencil className="h-3 w-3" />
+        <Pencil className="h-3.5 w-3.5" />
       </span>
     </div>
   )

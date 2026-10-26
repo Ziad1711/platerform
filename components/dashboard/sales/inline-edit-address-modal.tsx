@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { MapPin, Pencil } from 'lucide-react'
 
 interface InlineEditAddressModalProps {
@@ -54,9 +55,10 @@ export default function InlineEditAddressModal({
   return (
     <>
       <div
+        onClick={() => setOpen(true)}
         onDoubleClick={() => setOpen(true)}
-        className={`group w-full min-w-0 cursor-pointer hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
-        title="Double-clic pour modifier l'adresse"
+        className={`group w-full min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 -mx-1 ${className}`}
+        title="Cliquer pour modifier l'adresse"
       >
         {value || <span className="text-muted-foreground italic">Adresse</span>}
         <span
@@ -65,14 +67,15 @@ export default function InlineEditAddressModal({
             e.stopPropagation()
             setOpen(true)
           }}
-          className="ml-1 inline-block align-middle cursor-pointer text-muted-foreground/30 hover:text-foreground transition-colors"
+          className="ml-1 inline-block align-middle cursor-pointer p-0.5 text-muted-foreground/60 hover:text-foreground transition-colors"
           title="Modifier"
         >
-          <Pencil className="inline-block h-3 w-3 align-middle" />
+          <Pencil className="inline-block h-3.5 w-3.5 align-middle" />
         </span>
       </div>
 
-      {open && (
+      {open && typeof document !== 'undefined'
+        ? createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={handleCancel} />
           <div
@@ -131,8 +134,10 @@ export default function InlineEditAddressModal({
               </div>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )
+        : null}
     </>
   )
 }
