@@ -162,9 +162,6 @@ export default function ConfirmOrderDialog({
   // Repli manuel : le sélecteur de ville n'apparaît qu'après un échec de la
   // résolution automatique, au clic sur « Confirmer ».
   const [cityFallbackRequired, setCityFallbackRequired] = useState(false)
-  // Ville réellement retenue par notre résolution : c'est elle qui doit être
-  // affichée, et non la ville brute reçue du formulaire.
-  const [resolvedCityName, setResolvedCityName] = useState<string | null>(null)
   const [providerIssue, setProviderIssue] = useState<DeliveryOptionsErrorCode | null>(null)
   const [deliveryOptionsState, setDeliveryOptionsState] = useState<DeliveryOptionsState>({
     companyId: '',
@@ -206,7 +203,6 @@ export default function ConfirmOrderDialog({
     })
     // Nouveau transporteur : le repli manuel précédent ne s'applique plus.
     setCityFallbackRequired(false)
-    setResolvedCityName(null)
   }, [deliveryChoice, providerSlug])
 
   useEffect(() => {
@@ -215,7 +211,6 @@ export default function ConfirmOrderDialog({
     setLocalError('')
     setProviderIssue(null)
     setCityFallbackRequired(false)
-    setResolvedCityName(null)
     setDeliveryOptionsState({ companyId: '', options: {} })
     // Une société déjà rattachée reste sélectionnée ; sinon l'agent doit choisir.
     setDeliveryChoice(order?.delivery_company_id ? String(order.delivery_company_id) : '')
@@ -278,7 +273,6 @@ export default function ConfirmOrderDialog({
         if (resolved) {
           effectiveOptions = withResolvedCity(providerSlug, effectiveOptions, resolved)
           setDeliveryOptionsState({ companyId: deliveryChoice, options: effectiveOptions })
-          setResolvedCityName(resolved.cityName)
         }
       } catch {
         // Résolution indisponible : le choix manuel reste la seule issue.
@@ -373,17 +367,7 @@ export default function ConfirmOrderDialog({
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
                 <MapPin className="h-3.5 w-3.5" />
-                {resolvedCityName ? (
-                  <>
-                    <span className="font-medium text-foreground">{resolvedCityName}</span>
-                    {order?.city &&
-                    order.city.trim().toLowerCase() !== resolvedCityName.trim().toLowerCase() ? (
-                      <span className="text-xs text-muted-foreground">(reçue : {order.city})</span>
-                    ) : null}
-                  </>
-                ) : (
-                  order?.city || 'Ville manquante'
-                )}
+                {order?.city || 'Ville manquante'}
               </span>
               {order?.address ? (
                 <span className="inline-flex items-center gap-1.5">
@@ -470,7 +454,6 @@ export default function ConfirmOrderDialog({
                 orderCity={order?.city ?? null}
                 value={deliveryOptions}
                 showCityFallback={cityFallbackRequired}
-                onCityResolved={(city) => setResolvedCityName(city?.cityName ?? null)}
                 onChange={handleDeliveryOptionsChange}
                 onConfigError={setProviderIssue}
               />
