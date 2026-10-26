@@ -923,12 +923,24 @@ export default function ConfirmationPage() {
               </button>
             </div>
 
-            {!filtersOpen && filter !== 'all' ? (
+            {!filtersOpen && (filter !== 'all' || sort !== 'recent') ? (
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                Filtre actif :
-                <span className="rounded-full border border-primary bg-primary/10 px-2 py-0.5 font-medium text-primary">
-                  {FILTER_TABS.find((tab) => tab.value === filter)?.label || filter}
-                </span>
+                {filter !== 'all' ? (
+                  <>
+                    Filtre actif :
+                    <span className="rounded-full border border-primary bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                      {FILTER_TABS.find((tab) => tab.value === filter)?.label || filter}
+                    </span>
+                  </>
+                ) : null}
+                {sort !== 'recent' ? (
+                  <>
+                    Tri :
+                    <span className="rounded-full border border-primary bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                      {getSortOptions(filter).find((option) => option.value === sort)?.label || sort}
+                    </span>
+                  </>
+                ) : null}
                 <button type="button" onClick={() => setFiltersOpen(true)} className="underline">
                   modifier
                 </button>
@@ -972,29 +984,29 @@ export default function ConfirmationPage() {
                   ) : null}
                 </button>
               ))}
+
+                <div className="flex basis-full flex-wrap items-center gap-2 border-t border-border/40 pt-3">
+                  <span className="text-xs font-medium text-muted-foreground">Tri :</span>
+                  {getSortOptions(filter).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setSort(option.value)
+                        setPage(1)
+                      }}
+                      className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        sort === option.value
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:bg-secondary'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-muted-foreground">Tri :</span>
-              {getSortOptions(filter).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    setSort(option.value)
-                    setPage(1)
-                  }}
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    sort === option.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:bg-secondary'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {!canProcess && !isPermissionsLoading ? (
