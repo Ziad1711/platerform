@@ -321,12 +321,14 @@ export default function ConfirmOrderDialog({
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
       <DialogContent hideClose className="flex max-h-[88vh] max-w-xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 gap-3 border-b border-border bg-muted/40 px-6 py-4">
-          <div className="flex items-start gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 sm:h-9 sm:w-9">
               <PackageCheck className="h-4 w-4 sm:h-5 sm:w-5" />
             </span>
-            <div className="min-w-0 flex-1 space-y-1">
-              <DialogTitle className="whitespace-nowrap text-sm font-semibold sm:text-base">Confirmer la commande</DialogTitle>
+            <div className="flex min-w-0 flex-1 items-center justify-center">
+              <DialogTitle className="whitespace-nowrap text-center text-sm font-semibold text-emerald-600 sm:text-base">
+                Confirmer la commande
+              </DialogTitle>
             </div>
             <Button
               variant="destructive"
