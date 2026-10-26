@@ -149,9 +149,7 @@ export default function ConfirmOrderDialog({
   progressStages = [],
   finished = false,
   outcome = null,
-  canEdit,
   onClose,
-  onEdit,
   onSubmit,
 }: ConfirmOrderDialogProps) {
   const supabase = useMemo(() => createClient(), [])
@@ -322,8 +320,8 @@ export default function ConfirmOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
-      <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
-        <DialogHeader className="gap-3 border-b border-border bg-muted/40 px-6 py-4 pr-14">
+      <DialogContent hideClose className="flex max-h-[88vh] max-w-xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 gap-3 border-b border-border bg-muted/40 px-6 py-4">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
               <PackageCheck className="h-5 w-5" />
@@ -338,7 +336,7 @@ export default function ConfirmOrderDialog({
           </div>
         </DialogHeader>
 
-        <div className="modal-scroll max-h-[60vh] space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
+        <div className="modal-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm text-foreground">
           <section className="space-y-3 rounded-xl border border-border p-4">
             <SectionTitle icon={<User className="h-3.5 w-3.5" />} label="Client" />
 
@@ -537,16 +535,11 @@ export default function ConfirmOrderDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
+        <DialogFooter className="shrink-0 gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:justify-end">
           {outcome ? (
             <Button onClick={onClose}>Fermer</Button>
           ) : (
             <>
-              {canEdit ? (
-                <Button variant="outline" onClick={onEdit} disabled={busy} className="sm:mr-auto">
-                  Modifier la commande
-                </Button>
-              ) : null}
               <Button variant="outline" onClick={onClose} disabled={busy || resolvingCity}>
                 Fermer
               </Button>

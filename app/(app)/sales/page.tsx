@@ -9,6 +9,10 @@ import { parseCsvText } from '@/lib/imports/csv'
 import { Search, Filter, MoreVertical, CheckCircle, Clock, Truck, XCircle, Plus, Upload, RefreshCw, Info, Pencil, AlertTriangle, X, Copy, Trash2, Loader2 } from 'lucide-react'
 import InlineEditText from '@/components/dashboard/sales/inline-edit-text'
 import InlineEditCity from '@/components/dashboard/sales/inline-edit-city'
+import {
+  CONFIRMATION_PROGRESS_LABELS,
+  type ConfirmationProgressStage,
+} from '@/lib/confirmation/progress'
 import InlineEditAddressModal from '@/components/dashboard/sales/inline-edit-address-modal'
 import InlineEditProducts from '@/components/dashboard/sales/inline-edit-products'
 import ExchangeRequestModal from '@/components/dashboard/sales/exchange-request-modal'
@@ -553,6 +557,8 @@ export default function VentesPage() {
     }
   }, [openProductDropdownIndex])
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+  // Étapes réellement atteintes côté serveur pendant la confirmation (flux SSE).
+  const [statusProgress, setStatusProgress] = useState<ConfirmationProgressStage[]>([])
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any | null>(null)
   const [invoiceOrder, setInvoiceOrder] = useState<any | null>(null)
   const [exchangeOrder, setExchangeOrder] = useState<any | null>(null)
@@ -1915,11 +1921,66 @@ export default function VentesPage() {
 
   const updateOrderStatusMutation = useMutation({
     mutationFn: async ({ orderId, status, deliveryNote, deliveryCompanyId, deliveryMode, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }: { orderId: string; status: string; deliveryNote?: string; deliveryCompanyId?: string; deliveryMode?: 'internal' | 'shipping'; ozoneCityKey?: number; ozoneCityName?: string; ozoneParcelOpen?: 1 | 2; ozoneParcelFragile?: 0 | 1; ozoneParcelReplace?: 0 | 1; forcelogCanOpen?: boolean; forcelogFragile?: boolean; forcelogProductNature?: string; ameexCityKey?: string; ameexCityName?: string; ameexParcelType?: 'SIMPLE' | 'STOCK'; ameexOpen?: boolean; ameexFragile?: boolean; ameexReplace?: boolean; ameexTry?: boolean; senditCityKey?: string; senditCityName?: string; senditAllowOpen?: boolean; senditAllowTry?: boolean; senditProductsFromStock?: boolean; senditPackagingId?: string; senditOptionExchange?: boolean; senditDeliveryExchangeId?: string; senditPickupDistrictId?: string; digylogNetworkId?: number; digylogExternalStore?: string; digylogOrderMode?: 1 | 2; digylogSendStatus?: 0 | 1; digylogCheckDuplicate?: 0 | 1; digylogOpenProduct?: 1 | 2; digylogPort?: 1 | 2 }) => {
+      // Flux SSE : chaque étape est diffusée dès qu'elle est réellement terminée
+      // côté serveur (statut, ville, colis). Hors confirmation, réponse JSON.
+      const readStatusStream = async (res: Response) => {
+        const reader = (res.body as ReadableStream<Uint8Array>).getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let result: { error?: string; warning?: string } | null = null
+        let failure: string | null = null
+
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let index = buffer.indexOf('\n\n')
+          while (index !== -1) {
+            const chunk = buffer.slice(0, index)
+            buffer = buffer.slice(index + 2)
+            const dataLine = chunk.split('\n').find((line) => line.startsWith('data:'))
+            if (dataLine) {
+              try {
+                const event = JSON.parse(dataLine.slice(5).trim()) as {
+                  type?: string
+                  stage?: ConfirmationProgressStage
+                  result?: { error?: string; warning?: string }
+                  error?: string
+                }
+                if (event.type === 'progress' && event.stage) {
+                  const stage = event.stage
+                  setStatusProgress((previous) =>
+                    previous.includes(stage) ? previous : [...previous, stage]
+                  )
+                } else if (event.type === 'result') {
+                  result = event.result || {}
+                } else if (event.type === 'error') {
+                  failure = event.error || 'ORDER_STATUS_UPDATE_FAILED'
+                }
+              } catch {
+                // Trame illisible : ignorée, le verdict reste la réponse finale.
+              }
+            }
+            index = buffer.indexOf('\n\n')
+          }
+        }
+
+        if (failure) throw new Error(failure)
+        return result || {}
+      }
+
       const response = await fetch('/api/orders/status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status, deliveryNote, deliveryCompanyId, deliveryMode, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(status === 'confirmed' ? { Accept: 'text/event-stream' } : {}),
+        },
+        body: JSON.stringify({ stream: status === 'confirmed' || undefined, orderId, status, deliveryNote, deliveryCompanyId, deliveryMode, ozoneCityKey, ozoneCityName, ozoneParcelOpen, ozoneParcelFragile, ozoneParcelReplace, forcelogCanOpen, forcelogFragile, forcelogProductNature, ameexCityKey, ameexCityName, ameexParcelType, ameexOpen, ameexFragile, ameexReplace, ameexTry, senditCityKey, senditCityName, senditAllowOpen, senditAllowTry, senditProductsFromStock, senditPackagingId, senditOptionExchange, senditDeliveryExchangeId, senditPickupDistrictId, digylogNetworkId, digylogExternalStore, digylogOrderMode, digylogSendStatus, digylogCheckDuplicate, digylogOpenProduct, digylogPort }),
       })
+
+      if ((response.headers.get('content-type') || '').includes('text/event-stream') && response.body) {
+        return await readStatusStream(response)
+      }
 
       const payload = (await response.json().catch(() => null)) as { error?: string; warning?: string } | null
       if (!response.ok) {
@@ -1929,6 +1990,7 @@ export default function VentesPage() {
       return payload
     },
     onMutate: async ({ orderId, status: nextStatus }) => {
+      setStatusProgress([])
       // Retour visuel immédiat : le badge de statut change sans attendre
       // le rafraîchissement complet des listes (effectué en arrière-plan).
       await queryClient.cancelQueries({ queryKey: ['orders'] })
@@ -6821,6 +6883,34 @@ export default function VentesPage() {
 
               {/* Footer */}
               <div className="border-t border-border/50 px-6 py-4">
+                {updateOrderStatusMutation.isPending &&
+                updatingOrderId === deliveryNoteModalOrder.id &&
+                statusProgress.length > 0 ? (
+                  <div role="status" aria-live="polite" className="mb-3 rounded-lg bg-muted/50 px-3 py-2">
+                    <ul className="space-y-1">
+                      {statusProgress.map((stage, index) => {
+                        const isActive = index === statusProgress.length - 1 && stage !== 'confirmed'
+                        return (
+                          <li key={stage} className="flex items-center gap-2 text-sm">
+                            {isActive ? (
+                              <svg className="h-4 w-4 shrink-0 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                            ) : (
+                              <svg className="h-4 w-4 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" strokeWidth={2.5} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                              </svg>
+                            )}
+                            <span className={isActive ? 'font-medium text-foreground' : 'text-muted-foreground'}>
+                              {CONFIRMATION_PROGRESS_LABELS[stage]}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
@@ -6917,14 +7007,14 @@ export default function VentesPage() {
                           setDeliveryNoteSenditPickupDropdownOpen(false)
                           setDeliveryNoteSenditConfigLoaded(false)
                           setDeliveryNoteDigylogConfigLoaded(false)
+                          setStatusProgress([])
                         },
                       }
                     )
                   }}
                   disabled={updateOrderStatusMutation.isPending && updatingOrderId === deliveryNoteModalOrder.id}
                   className="group relative w-full overflow-hidden rounded-xl bg-primary py-2.5 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 hover:shadow-xl hover:shadow-primary/30 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
-                >
-                  <span className="relative z-10 flex items-center justify-center gap-2">
+                >                  <span className="relative z-10 flex items-center justify-center gap-2">
                     {updateOrderStatusMutation.isPending && updatingOrderId === deliveryNoteModalOrder.id ? (
                       <>
                         <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
