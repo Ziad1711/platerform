@@ -2,7 +2,7 @@
 
 import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CancelledError, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatCurrency, formatDateTime, normalizeMoroccanPhone } from '@/lib/utils'
 import { normalizeStockMultiplier } from '@/lib/integrations/variant-stock'
 import { parseCsvText } from '@/lib/imports/csv'
@@ -79,14 +79,14 @@ async function fetchStoreCities(
     if (shop?.pricing_group_id) {
       const { data: rates, error: ratesError } = await supabase
         .from('delivery_rates')
-        .select('external_city_key, external_city_name, price')
+        .select('external_city_key, city_name, price')
         .eq('pricing_group_id', shop.pricing_group_id)
-        .order('external_city_name', { ascending: true })
+        .order('city_name', { ascending: true })
 
       if (!ratesError && rates && rates.length > 0) {
         return rates.map((r) => ({
           city_key: r.external_city_key,
-          city_name: r.external_city_name,
+          city_name: r.city_name,
           cost_delivery: r.price,
         }))
       }
@@ -529,7 +529,7 @@ const areStringMapsEqual = (a: Record<string, string>, b: Record<string, string>
 
 export default function VentesPage() {
   const PAGE_SIZE = 15
-  const { currentStoreId, accessibleStoreIds, accessibleStores } = useStore()
+  const { currentStoreId, accessibleStoreIds, accessibleStores, isStoresLoading } = useStore()
   const { role, can } = usePermissions(currentStoreId)
   const isConfirmationRole = role === 'confirmation'
   // Un échange crée une commande de remplacement : réservé aux rôles autorisés
@@ -822,28 +822,66 @@ export default function VentesPage() {
     []
   )
 
+  // Périmètre stabilisé des boutiques accessibles : deux périmètres distincts ne
+  // doivent jamais partager une entrée de cache « Toutes les boutiques ».
+  const accessibleStoreScope = useMemo(
+    () => [...accessibleStoreIds].map(String).sort().join(','),
+    [accessibleStoreIds]
+  )
+
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['orders', currentStoreId, search, statusFilter, currentPage],
-    queryFn: async () => {
+    queryKey: ['orders', currentStoreId, accessibleStoreScope, search, statusFilter, currentPage],
+    // Attendre le périmètre boutique confirmé : une liste d'accès encore inconnue
+    // ne doit pas être lue comme « aucune boutique ».
+    enabled: !isStoresLoading,
+    queryFn: async ({ signal }) => {
       if (!currentStoreId && accessibleStoreIds.length === 0) {
         return { data: [], count: 0 }
       }
 
       let query = supabase
         .from('orders')
+        // Projection explicite : uniquement les colonnes et relations réellement
+        // consommées par le tableau, les détails, les éditeurs et les actions.
         .select(`
-          *,
+          id,
+          store_id,
+          order_date,
+          customer_name,
+          phone,
+          address,
+          city,
+          status,
+          source,
+          buy_price,
+          profit,
+          confirmation_cost_allocated,
+          ads_cost_allocated,
+          delivery_fee,
+          delivery_charge_to_customer,
+          total_selling_price,
+          delivery_note,
+          delivery_company_id,
+          delivery_status_source,
+          tracking_number,
+          rapid_delivery_parcel_key,
+          maroc_go_delivery_parcel_key,
+          exchange_status,
+          exchange_original_order_id,
+          exchange_new_parcel_key,
           order_items(
             quantity,
             product_id,
             product_variant_id,
             unit_selling_price,
+            unit_purchase_cost_snapshot,
+            item_type,
             product_name_override,
             products(name)
           ),
-          delivery_companies(name, api_provider),
-          confirmation_agents(name)
+          delivery_companies(api_provider)
         `, { count: 'exact' })
+        .abortSignal(signal)
         .order('order_date', { ascending: false })
         .range((currentPage - 1) * PAGE_SIZE, (currentPage * PAGE_SIZE) - 1)
 
@@ -861,47 +899,18 @@ export default function VentesPage() {
         query = query.eq('status', statusFilter)
       }
 
-      let { data, error, count } = await query
-
-      if (error) {
-        let fallbackQuery = supabase
-          .from('orders')
-          .select(`
-            *,
-            order_items(
-              quantity,
-              product_id,
-              product_variant_id,
-              unit_selling_price,
-              product_name_override,
-              products(name)
-            ),
-            delivery_companies(name, api_provider),
-            confirmation_agents(name)
-          `, { count: 'exact' })
-
-          .order('order_date', { ascending: false })
-          .range((currentPage - 1) * PAGE_SIZE, (currentPage * PAGE_SIZE) - 1)
-
-        if (currentStoreId) {
-          fallbackQuery = fallbackQuery.eq('store_id', currentStoreId)
-        } else if (accessibleStoreIds.length > 0) {
-          fallbackQuery = fallbackQuery.in('store_id', accessibleStoreIds)
-        }
-
-        if (search) {
-          fallbackQuery = fallbackQuery.or(`customer_name.ilike.%${search}%,phone.ilike.%${search}%,tracking_number.ilike.%${search}%`)
-        }
-
-        if (statusFilter !== 'all') {
-          fallbackQuery = fallbackQuery.eq('status', statusFilter)
-        }
-
-        const fallbackResult = await fallbackQuery
-        data = fallbackResult.data
-        count = fallbackResult.count
-        error = fallbackResult.error
+      // Une lecture abandonnée (recherche, page, filtre ou boutique changés) est
+      // une annulation, jamais une panne métier.
+      let response: Awaited<typeof query>
+      try {
+        response = await query
+      } catch (error) {
+        if (signal.aborted) throw new CancelledError()
+        throw error
       }
+      if (signal.aborted) throw new CancelledError()
+
+      const { data, error, count } = response
 
       if (error) throw error
 
@@ -947,7 +956,11 @@ export default function VentesPage() {
 
   const { userId } = useStore()
 
-  const { data: ownedStores = [] } = useQuery({
+  const {
+    data: ownedStores = [],
+    isLoading: ownedStoresLoading,
+    isError: ownedStoresFailed,
+  } = useQuery({
     queryKey: ['sales-owned-stores', userId],
     enabled: !!userId,
     queryFn: async () => {
@@ -966,7 +979,11 @@ export default function VentesPage() {
     [ownedStores]
   )
 
-  const { data: blacklistEntries = [] } = useQuery({
+  const {
+    data: blacklistEntries = [],
+    isLoading: blacklistEntriesLoading,
+    isError: blacklistEntriesFailed,
+  } = useQuery({
     queryKey: ['sales-blacklist-entries-owner', ownedStoreIds],
     enabled: ownedStoreIds.length > 0,
     queryFn: async () => {
@@ -980,7 +997,11 @@ export default function VentesPage() {
     },
   })
 
-  const { data: blacklistRule } = useQuery({
+  const {
+    data: blacklistRule,
+    isLoading: blacklistRuleLoading,
+    isError: blacklistRuleFailed,
+  } = useQuery({
     queryKey: ['sales-blacklist-rule-owner', ownedStoreIds],
     enabled: ownedStoreIds.length > 0,
     queryFn: async () => {
@@ -996,9 +1017,15 @@ export default function VentesPage() {
     },
   })
 
-  const { data: orderStatusRowsForBlacklist = [] } = useQuery({
+  const {
+    data: orderStatusRowsForBlacklist = [],
+    isLoading: blacklistStatusRowsLoading,
+    isError: blacklistStatusRowsFailed,
+  } = useQuery({
     queryKey: ['sales-blacklist-order-statuses-owner', ownedStoreIds, blacklistRule?.status_filters, blacklistRule?.max_status_hits],
-    enabled: ownedStoreIds.length > 0,
+    // Les historiques ne se lisent qu'avec la règle réellement applicable :
+    // `undefined` = règle pas encore résolue, `null` = aucune règle (défauts).
+    enabled: ownedStoreIds.length > 0 && blacklistRule !== undefined,
     queryFn: async () => {
       const statusFilters = (blacklistRule?.status_filters || ['returned_not_stocked', 'returned_stocked']) as string[]
       if (statusFilters.length === 0) return []
@@ -1014,47 +1041,101 @@ export default function VentesPage() {
     },
   })
 
-  const blacklistPhonesSet = useMemo(() => {
-    const set = new Set<string>()
-    const allowSet = new Set<string>()
+  // Périmètre de calcul : uniquement les numéros réellement affichés (page reçue
+  // avant filtrage blacklist) et celui des détails ouverts. Les lectures restent
+  // interboutiques sur les boutiques du propriétaire : le périmètre métier ne
+  // change pas, seul le calcul local est restreint.
+  const blacklistRelevantPhoneKeys = useMemo(() => {
+    const keys = new Set<string>()
+    ;(orders?.data || []).forEach((order: any) => {
+      const key = normalizePhoneForBlacklist(order?.phone)
+      if (key) keys.add(key)
+    })
+    const detailsKey = normalizePhoneForBlacklist(selectedOrderForDetails?.phone)
+    if (detailsKey) keys.add(detailsKey)
+    return keys
+  }, [orders?.data, selectedOrderForDetails?.phone])
+
+  // Tant que les règles ou les historiques ne sont pas confirmés, le statut
+  // blacklist est inconnu : il ne doit jamais être présenté comme « non blacklisté ».
+  const blacklistStatusKnown =
+    !ownedStoresLoading &&
+    !ownedStoresFailed &&
+    !blacklistEntriesLoading &&
+    !blacklistEntriesFailed &&
+    !blacklistRuleLoading &&
+    !blacklistRuleFailed &&
+    !blacklistStatusRowsLoading &&
+    !blacklistStatusRowsFailed
+
+  const blacklistStatusUnknownLabel = blacklistStatusKnown
+    ? null
+    : ownedStoresFailed ||
+        blacklistEntriesFailed ||
+        blacklistRuleFailed ||
+        blacklistStatusRowsFailed
+      ? 'Vérification blacklist indisponible'
+      : 'Vérification blacklist en cours'
+
+  // Index des dérogations et blocages explicites : construit une seule fois par
+  // lecture des entrées, jamais à chaque page.
+  const blacklistEntryKeys = useMemo(() => {
+    const blocked = new Set<string>()
+    const allow = new Set<string>()
 
     ;(blacklistEntries || []).forEach((row: any) => {
       const normalized = normalizePhoneForBlacklist(row?.phone)
       if (!normalized) return
       if (String(row?.reason || '') === BLACKLIST_ALLOW_REASON) {
-        allowSet.add(normalized)
+        allow.add(normalized)
+      } else {
+        blocked.add(normalized)
       }
     })
 
-    ;(blacklistEntries || []).forEach((row: any) => {
-      const normalized = normalizePhoneForBlacklist(row?.phone)
-      if (normalized) set.add(normalized)
-    })
+    return { blocked, allow }
+  }, [blacklistEntries])
 
-    const threshold = Number(blacklistRule?.max_status_hits || 3)
-    const counts: Record<string, number> = {}
-
+  // Index des historiques par numéro normalisé : coût payé une fois par lecture,
+  // puis simple lecture ciblée pour les numéros affichés.
+  const blacklistHistoryCounts = useMemo(() => {
+    const counts = new Map<string, number>()
     ;(orderStatusRowsForBlacklist || []).forEach((row: any) => {
       const normalized = normalizePhoneForBlacklist(row?.phone)
       if (!normalized) return
-      counts[normalized] = Number(counts[normalized] || 0) + 1
+      counts.set(normalized, (counts.get(normalized) || 0) + 1)
+    })
+    return counts
+  }, [orderStatusRowsForBlacklist])
+
+  const blacklistPhonesSet = useMemo(() => {
+    const set = new Set<string>()
+    const threshold = Number(blacklistRule?.max_status_hits || 3)
+
+    // Seuls les numéros réellement affichés sont évalués ; la décision reste
+    // identique (entrées explicites, seuil d'historiques, dérogations prioritaires).
+    blacklistRelevantPhoneKeys.forEach((phoneKey) => {
+      const explicit = blacklistEntryKeys.blocked.has(phoneKey)
+      const reachedThreshold = (blacklistHistoryCounts.get(phoneKey) || 0) >= threshold
+      if (explicit || reachedThreshold) set.add(phoneKey)
     })
 
-    Object.entries(counts).forEach(([phoneKey, count]) => {
-      if (count >= threshold) {
-        set.add(phoneKey)
-      }
-    })
-
-    allowSet.forEach((phoneKey) => {
+    blacklistEntryKeys.allow.forEach((phoneKey) => {
       set.delete(phoneKey)
     })
 
     return set
-  }, [blacklistEntries, blacklistRule?.max_status_hits, orderStatusRowsForBlacklist])
+  }, [blacklistEntryKeys, blacklistHistoryCounts, blacklistRule?.max_status_hits, blacklistRelevantPhoneKeys])
 
-  const { data: products } = useQuery({
+  const {
+    data: products,
+    isLoading: createProductsLoading,
+    isError: createProductsFailed,
+    refetch: refetchCreateProducts,
+  } = useQuery({
     queryKey: ['sales-products-for-create-order', selectedCreateStoreId],
+    // Référentiel du formulaire de création : lu seulement quand il est ouvert.
+    enabled: isCreateOpen && !!selectedCreateStoreId,
     queryFn: async () => {
       if (!selectedCreateStoreId) return []
 
@@ -1071,47 +1152,49 @@ export default function VentesPage() {
     },
   })
 
-  // Products for editing existing orders
-  // Uses currentStoreId when a specific store is selected, all accessible stores when "Tous les stores"
-  const editProductsStoreIds = useMemo(() => {
-    return currentStoreId ? [currentStoreId] : accessibleStoreIds
-  }, [currentStoreId, accessibleStoreIds])
+  // Catalogues d'édition des produits : lus uniquement à l'ouverture d'un éditeur
+  // de la table, et uniquement pour la boutique de la commande éditée. Le
+  // catalogue du formulaire de création (autre boutique possible) n'est jamais
+  // utilisé pour éditer une commande.
+  const [editingProductsStoreId, setEditingProductsStoreId] = useState<string | null>(null)
 
-  const { data: editProducts } = useQuery({
-    queryKey: ['sales-edit-products', editProductsStoreIds],
-    enabled: editProductsStoreIds.length > 0,
+  const {
+    data: editProducts = [],
+    isLoading: editProductsLoading,
+    isError: editProductsFailed,
+    refetch: refetchEditProducts,
+  } = useQuery({
+    queryKey: ['sales-edit-products', editingProductsStoreId],
+    enabled: !!editingProductsStoreId,
     queryFn: async () => {
-      if (editProductsStoreIds.length === 0) return []
+      if (!editingProductsStoreId) return []
 
-      let query = supabase
+      const { data, error } = await supabase
         .from('products')
         .select('id, name, default_selling_price, default_purchase_cost')
+        .eq('store_id', editingProductsStoreId)
         .order('created_at', { ascending: false })
 
-      query = query.in('store_id', editProductsStoreIds)
-
-      const { data, error } = await query
       if (error) throw error
       return data || []
     },
   })
 
-  // Variants for editing existing orders
-  // Uses currentStoreId when a specific store is selected, all accessible stores when "Tous les stores"
-  const editVariantsStoreIds = useMemo(() => {
-    return currentStoreId ? [currentStoreId] : accessibleStoreIds
-  }, [currentStoreId, accessibleStoreIds])
-
-  const { data: editVariantsByProductId } = useQuery({
-    queryKey: ['sales-edit-variants-by-product', editVariantsStoreIds],
-    enabled: editVariantsStoreIds.length > 0,
+  const {
+    data: editVariantsByProductId = {},
+    isLoading: editVariantsLoading,
+    isError: editVariantsFailed,
+    refetch: refetchEditVariants,
+  } = useQuery({
+    queryKey: ['sales-edit-variants-by-product', editingProductsStoreId],
+    enabled: !!editingProductsStoreId,
     queryFn: async () => {
-      if (editVariantsStoreIds.length === 0) return {} as Record<string, any[]>
+      if (!editingProductsStoreId) return {} as Record<string, any[]>
 
       const { data, error } = await supabase
         .from('product_variants')
         .select('id, product_id, name, sku, selling_price, purchase_cost, stock_multiplier')
-        .in('store_id', editVariantsStoreIds)
+        .eq('store_id', editingProductsStoreId)
         .order('created_at', { ascending: true })
 
       if (error) throw error
@@ -1128,9 +1211,41 @@ export default function VentesPage() {
     },
   })
 
-  const { data: importStoreProducts = [] } = useQuery({
+  // Un catalogue non encore chargé n'autorise aucune modification dépendante :
+  // les lignes existantes restent affichables (nom, quantité, prix, variante).
+  const editCatalogLoading =
+    !!editingProductsStoreId && (editProductsLoading || editVariantsLoading)
+
+  const editCatalogError =
+    !!editingProductsStoreId && (editProductsFailed || editVariantsFailed)
+      ? 'Impossible de charger le catalogue produits et variantes de cette boutique.'
+      : null
+
+  const retryEditCatalog = () => {
+    void refetchEditProducts()
+    void refetchEditVariants()
+  }
+
+  const handleProductsEditorOpen = (orderStoreId?: string | null) => {
+    if (!orderStoreId) return
+    setEditingProductsStoreId(String(orderStoreId))
+  }
+
+  const handleProductsEditorClose = () => {
+    setEditingProductsStoreId(null)
+  }
+
+  // Référentiels de l'outil d'import : lus seulement quand l'outil est ouvert.
+  // Une réponse non encore arrivée ne vaut jamais « catalogue vide » : la
+  // validation de l'import reste bloquée tant qu'ils ne sont pas disponibles.
+  const {
+    data: importStoreProducts = [],
+    isLoading: importStoreProductsLoading,
+    isError: importStoreProductsFailed,
+    refetch: refetchImportStoreProducts,
+  } = useQuery({
     queryKey: ['sales-import-products-by-store', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: isImportOpen && !!currentStoreId,
     queryFn: async () => {
       if (!currentStoreId) return []
 
@@ -1145,9 +1260,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: importStoreVariants = [] } = useQuery({
+  const {
+    data: importStoreVariants = [],
+    isLoading: importStoreVariantsLoading,
+    isError: importStoreVariantsFailed,
+    refetch: refetchImportStoreVariants,
+  } = useQuery({
     queryKey: ['sales-import-variants-by-store', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: isImportOpen && !!currentStoreId,
     queryFn: async () => {
       if (!currentStoreId) return []
 
@@ -1162,8 +1282,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: variantsByProductId } = useQuery({
+  const {
+    data: variantsByProductId,
+    isLoading: createVariantsLoading,
+    isError: createVariantsFailed,
+    refetch: refetchCreateVariants,
+  } = useQuery({
     queryKey: ['sales-variants-by-product', selectedCreateStoreId],
+    enabled: isCreateOpen && !!selectedCreateStoreId,
     queryFn: async () => {
       if (!selectedCreateStoreId) return {} as Record<string, any[]>
 
@@ -1188,8 +1314,14 @@ export default function VentesPage() {
   })
 
 
-  const { data: productStockById } = useQuery({
+  const {
+    data: productStockById,
+    isLoading: createStockLoading,
+    isError: createStockFailed,
+    refetch: refetchCreateStock,
+  } = useQuery({
     queryKey: ['sales-product-stock-by-id', selectedCreateStoreId],
+    enabled: isCreateOpen && !!selectedCreateStoreId,
     queryFn: async () => {
       if (!selectedCreateStoreId) return {} as Record<string, number>
 
@@ -1216,8 +1348,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: confirmationAgents } = useQuery({
+  const {
+    data: confirmationAgents,
+    isLoading: createAgentsLoading,
+    isError: createAgentsFailed,
+    refetch: refetchCreateAgents,
+  } = useQuery({
     queryKey: ['sales-confirmation-agents-for-create-order', selectedCreateStoreId],
+    enabled: isCreateOpen && !!selectedCreateStoreId,
     queryFn: async () => {
       if (!selectedCreateStoreId) return []
 
@@ -1234,9 +1372,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: deliveryCompanies } = useQuery({
+  const {
+    data: deliveryCompanies,
+    isLoading: createDeliveryCompaniesLoading,
+    isError: createDeliveryCompaniesFailed,
+    refetch: refetchCreateDeliveryCompanies,
+  } = useQuery({
     queryKey: ['sales-delivery-companies-for-create-order', selectedCreateStoreId],
-    enabled: !!selectedCreateStoreId,
+    enabled: isCreateOpen && !!selectedCreateStoreId,
     queryFn: async () => {
       if (!selectedCreateStoreId) return []
 
@@ -1252,6 +1395,35 @@ export default function VentesPage() {
       return (data || []).filter((company: any) => company.is_active !== false)
     },
   })
+
+  // Référentiels indispensables à la création : tant qu'ils ne sont pas tous
+  // disponibles, aucune commande ne peut être validée (une liste vide n'est pas
+  // un catalogue vide ni une absence d'agent/transporteur).
+  const createReferencesLoading =
+    isCreateOpen &&
+    !!selectedCreateStoreId &&
+    (createProductsLoading ||
+      createVariantsLoading ||
+      createStockLoading ||
+      createAgentsLoading ||
+      createDeliveryCompaniesLoading)
+
+  const createReferencesFailed =
+    isCreateOpen &&
+    !!selectedCreateStoreId &&
+    (createProductsFailed ||
+      createVariantsFailed ||
+      createStockFailed ||
+      createAgentsFailed ||
+      createDeliveryCompaniesFailed)
+
+  const retryCreateReferences = () => {
+    void refetchCreateProducts()
+    void refetchCreateVariants()
+    void refetchCreateStock()
+    void refetchCreateAgents()
+    void refetchCreateDeliveryCompanies()
+  }
 
   const { data: deliveryCompaniesForOrder } = useQuery({
     queryKey: ['sales-delivery-companies-for-order', deliveryNoteModalOrder?.store_id],
@@ -1284,6 +1456,7 @@ export default function VentesPage() {
 
   const { data: ameexCities = [] } = useQuery({
     queryKey: ['ameex-cities-delivery-note'],
+    enabled: !!deliveryNoteModalOrder && isDeliveryNoteAmeex,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_rates')
@@ -1305,6 +1478,7 @@ export default function VentesPage() {
 
   const { data: senditCities = [] } = useQuery({
     queryKey: ['sendit-cities-delivery-note'],
+    enabled: !!deliveryNoteModalOrder && isDeliveryNoteSendit,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_rates')
@@ -1327,6 +1501,7 @@ export default function VentesPage() {
   // Charger les districts de ramassage Sendit (villes source)
   const { data: senditPickupDistrictsQuery = [] } = useQuery({
     queryKey: ['sendit-pickup-districts-delivery-note'],
+    enabled: !!deliveryNoteModalOrder && isDeliveryNoteSendit,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_rates')
@@ -1426,8 +1601,11 @@ export default function VentesPage() {
     setDeliveryNoteDigylogConfigLoaded(true)
   }, [digylogConfig, isDeliveryNoteDigylog, deliveryNoteDigylogConfigLoaded])
 
+  // Statuts d'intégration transporteur : lus seulement quand un outil qui les
+  // affiche est ouvert (détails d'une commande ou création de colis).
   const { data: rapidDeliveryIntegration } = useQuery({
     queryKey: ['rapid-delivery-integration-status'],
+    enabled: !!selectedOrderForDetails || isRapidDeliveryModalOpen,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('integrations')
@@ -1442,6 +1620,7 @@ export default function VentesPage() {
 
   const { data: marocGoDeliveryIntegration } = useQuery({
     queryKey: ['maroc-go-delivery-integration-status'],
+    enabled: !!selectedOrderForDetails || isMarocGoDeliveryModalOpen,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('integrations')
@@ -1456,6 +1635,7 @@ export default function VentesPage() {
 
   const { data: ozoneIntegration } = useQuery({
     queryKey: ['ozone-integration-status'],
+    enabled: !!selectedOrderForDetails || isOzoneModalOpen,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('integrations')
@@ -1470,6 +1650,7 @@ export default function VentesPage() {
 
   const { data: rushlivIntegration } = useQuery({
     queryKey: ['rushliv-integration-status', currentStoreId],
+    enabled: !!selectedOrderForDetails || isRushlivModalOpen,
     queryFn: async () => {
       let query = supabase
         .from('integrations')
@@ -1487,7 +1668,7 @@ export default function VentesPage() {
 
   const { data: rushlivConfig } = useQuery({
     queryKey: ['rushliv-config', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: !!currentStoreId && (!!selectedOrderForDetails || isRushlivModalOpen),
     queryFn: async () => {
       const { data, error } = await supabase
         .from('rushliv_configs')
@@ -1500,8 +1681,11 @@ export default function VentesPage() {
     },
   })
 
+  // Villes Ozone : partagées par les détails d'une commande et le bon de
+  // livraison, donc jamais désactivées quand l'une de ces deux vues est ouverte.
   const { data: ozoneCities = [] } = useQuery({
     queryKey: ['ozone-cities', OZONE_PROVIDER_ID],
+    enabled: !!selectedOrderForDetails || (!!deliveryNoteModalOrder && isDeliveryNoteOzone),
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_rates')
@@ -1527,7 +1711,9 @@ export default function VentesPage() {
 
   const { data: ozoneShops = [] } = useQuery({
     queryKey: ['ozone-shops', ozoneIntegration?.id],
-    enabled: !!ozoneIntegration?.id,
+    // Outil Ozone ouvert uniquement : un ID d'intégration conservé en cache ne
+    // suffit pas à relancer une lecture de magasins.
+    enabled: (!!selectedOrderForDetails || isOzoneModalOpen) && !!ozoneIntegration?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_shops')
@@ -1542,7 +1728,7 @@ export default function VentesPage() {
 
   const { data: createOrderRapidDeliveryConfig } = useQuery({
     queryKey: ['sales-rapid-delivery-config-create-order', selectedCreateStoreId],
-    enabled: !!selectedCreateStoreId,
+    enabled: isCreateOpen && !!selectedCreateStoreId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('rapid_delivery_configs')
@@ -1555,9 +1741,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: importRapidDeliveryConfig } = useQuery({
+  const {
+    data: importRapidDeliveryConfig,
+    isLoading: importRapidDeliveryConfigLoading,
+    isError: importRapidDeliveryConfigFailed,
+    refetch: refetchImportRapidDeliveryConfig,
+  } = useQuery({
     queryKey: ['sales-rapid-delivery-config-import', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: isImportOpen && !!currentStoreId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('rapid_delivery_configs')
@@ -1617,7 +1808,7 @@ export default function VentesPage() {
 
   const { data: rapidDeliveryShops = [] } = useQuery({
     queryKey: ['rapid-delivery-shops', rapidDeliveryIntegration?.id],
-    enabled: !!rapidDeliveryIntegration?.id,
+    enabled: (!!selectedOrderForDetails || isRapidDeliveryModalOpen) && !!rapidDeliveryIntegration?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('rapid_delivery_shops')
@@ -1632,7 +1823,7 @@ export default function VentesPage() {
 
   const { data: marocGoDeliveryCities = [] } = useQuery({
     queryKey: ['maroc-go-delivery-cities', marocGoDeliveryIntegration?.id],
-    enabled: !!marocGoDeliveryIntegration?.id,
+    enabled: (!!selectedOrderForDetails || isMarocGoDeliveryModalOpen) && !!marocGoDeliveryIntegration?.id,
     queryFn: async () => {
       const { data: shop } = await supabase
         .from('delivery_shops')
@@ -1661,7 +1852,7 @@ export default function VentesPage() {
 
   const { data: marocGoDeliveryShops = [] } = useQuery({
     queryKey: ['maroc-go-delivery-shops', marocGoDeliveryIntegration?.id],
-    enabled: !!marocGoDeliveryIntegration?.id,
+    enabled: (!!selectedOrderForDetails || isMarocGoDeliveryModalOpen) && !!marocGoDeliveryIntegration?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_shops')
@@ -1674,9 +1865,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: importConfirmationAgents = [] } = useQuery({
+  const {
+    data: importConfirmationAgents = [],
+    isLoading: importConfirmationAgentsLoading,
+    isError: importConfirmationAgentsFailed,
+    refetch: refetchImportConfirmationAgents,
+  } = useQuery({
     queryKey: ['sales-import-confirmation-agents-by-store', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: isImportOpen && !!currentStoreId,
     queryFn: async () => {
       if (!currentStoreId) return []
       const { data, error } = await supabase
@@ -1689,9 +1885,14 @@ export default function VentesPage() {
     },
   })
 
-  const { data: importDeliveryCompanies = [] } = useQuery({
+  const {
+    data: importDeliveryCompanies = [],
+    isLoading: importDeliveryCompaniesLoading,
+    isError: importDeliveryCompaniesFailed,
+    refetch: refetchImportDeliveryCompanies,
+  } = useQuery({
     queryKey: ['sales-import-delivery-companies-by-store', currentStoreId],
-    enabled: !!currentStoreId,
+    enabled: isImportOpen && !!currentStoreId,
     queryFn: async () => {
       if (!currentStoreId) return []
       const { data, error } = await supabase
@@ -1703,6 +1904,34 @@ export default function VentesPage() {
       return (data || []).filter((row: any) => row.is_active !== false)
     },
   })
+
+  // Les cinq référentiels de l'import ne sont lus qu'à l'ouverture de l'outil.
+  // Tant qu'ils ne sont pas disponibles, une liste vide ne doit jamais être lue
+  // comme un catalogue vide ni comme une configuration désactivée : l'import
+  // reste bloqué, avec l'état de chargement ou l'erreur réelle affichés.
+  const importReferencesLoading =
+    isImportOpen &&
+    (importStoreProductsLoading ||
+      importStoreVariantsLoading ||
+      importConfirmationAgentsLoading ||
+      importDeliveryCompaniesLoading ||
+      importRapidDeliveryConfigLoading)
+
+  const importReferencesFailed =
+    isImportOpen &&
+    (importStoreProductsFailed ||
+      importStoreVariantsFailed ||
+      importConfirmationAgentsFailed ||
+      importDeliveryCompaniesFailed ||
+      importRapidDeliveryConfigFailed)
+
+  const retryImportReferences = () => {
+    void refetchImportStoreProducts()
+    void refetchImportStoreVariants()
+    void refetchImportConfirmationAgents()
+    void refetchImportDeliveryCompanies()
+    void refetchImportRapidDeliveryConfig()
+  }
 
   useEffect(() => {
     if (!selectedCreateStoreId) return
@@ -1747,6 +1976,15 @@ export default function VentesPage() {
   const createOrderMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCreateStoreId) throw new Error('Choisissez un store dans le formulaire.')
+
+      // Aucune validation tant que les référentiels indispensables ne sont pas
+      // disponibles : une liste vide ne vaut pas « aucun produit / agent / transporteur ».
+      if (createReferencesLoading) {
+        throw new Error('Chargement des référentiels de création en cours. Réessayez dans un instant.')
+      }
+      if (createReferencesFailed) {
+        throw new Error('Impossible de charger les référentiels de création. Utilisez « Réessayer ».')
+      }
 
       const validItems = items.filter((item) => item.product_id && Number(item.quantity) > 0)
       const productsMap = new Map<string, any>((products || []).map((p: any) => [String(p.id), p]))
@@ -2634,14 +2872,16 @@ export default function VentesPage() {
 
   const filteredOrders = useMemo(() => {
     const rows = orders?.data || []
-    if (blacklistFilter === 'all') return rows
+    // Statut blacklist inconnu : le filtre dépend de cette classification, il est
+    // donc suspendu plutôt que d'afficher une commande comme « non blacklistée ».
+    if (blacklistFilter === 'all' || !blacklistStatusKnown) return rows
 
     return rows.filter((order: any) => {
       const normalizedOrderPhone = normalizePhoneForBlacklist(order?.phone)
       const isBlacklisted = normalizedOrderPhone ? blacklistPhonesSet.has(normalizedOrderPhone) : false
       return blacklistFilter === 'blacklisted' ? isBlacklisted : !isBlacklisted
     })
-  }, [orders?.data, blacklistFilter, blacklistPhonesSet])
+  }, [orders?.data, blacklistFilter, blacklistPhonesSet, blacklistStatusKnown])
 
   // Colonne Statut : largeur exacte (mesurée dans le navigateur) du libellé le
   // plus large réellement affiché dans la page, sans marge ajoutée.
@@ -3093,6 +3333,9 @@ export default function VentesPage() {
 
   useEffect(() => {
     if (!linkImportedProducts) return
+    // Référentiels pas encore disponibles : ne jamais écrire un rapprochement
+    // « vide » à partir d'un catalogue non chargé.
+    if (importReferencesLoading || importReferencesFailed) return
 
     const productsById = new Map<string, any>(
       (importStoreProducts || []).map((product: any) => [String(product.id || ''), product])
@@ -3123,10 +3366,11 @@ export default function VentesPage() {
 
     setProductValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkImportedProducts, fieldToColumnMap.product_name, importRows, importStoreProducts])
+  }, [linkImportedProducts, fieldToColumnMap.product_name, importRows, importStoreProducts, importReferencesLoading, importReferencesFailed])
 
   useEffect(() => {
     if (!linkImportedProducts || !fieldToColumnMap.product_variant) return
+    if (importReferencesLoading || importReferencesFailed) return
 
     const variantsById = new Map<string, any>(
       (importStoreVariants || []).map((variant: any) => [String(variant.id || ''), variant])
@@ -3150,10 +3394,11 @@ export default function VentesPage() {
 
     setVariantValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkImportedProducts, fieldToColumnMap.product_variant, variantImportEntries, importStoreVariants])
+  }, [linkImportedProducts, fieldToColumnMap.product_variant, variantImportEntries, importStoreVariants, importReferencesLoading, importReferencesFailed])
 
   useEffect(() => {
     if (!linkImportedAgents || !fieldToColumnMap.confirmation_agent) return
+    if (importReferencesLoading || importReferencesFailed) return
 
     const agentsById = new Map<string, any>(
       (importConfirmationAgents || []).map((agent: any) => [String(agent.id || ''), agent])
@@ -3186,10 +3431,11 @@ export default function VentesPage() {
     })
     setAgentValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkImportedAgents, fieldToColumnMap.confirmation_agent, importRows, importConfirmationAgents])
+  }, [linkImportedAgents, fieldToColumnMap.confirmation_agent, importRows, importConfirmationAgents, importReferencesLoading, importReferencesFailed])
 
   useEffect(() => {
     if (!linkImportedDeliveryCompanies || !fieldToColumnMap.delivery_company) return
+    if (importReferencesLoading || importReferencesFailed) return
 
     const companiesById = new Map<string, any>(
       (importDeliveryCompanies || []).map((company: any) => [String(company.id || ''), company])
@@ -3222,7 +3468,7 @@ export default function VentesPage() {
     })
     setDeliveryCompanyValueMap((prev) => (areStringMapsEqual(prev, nextMap) ? prev : nextMap))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkImportedDeliveryCompanies, fieldToColumnMap.delivery_company, importRows, importDeliveryCompanies])
+  }, [linkImportedDeliveryCompanies, fieldToColumnMap.delivery_company, importRows, importDeliveryCompanies, importReferencesLoading, importReferencesFailed])
 
   const importOrdersMutation = useMutation({
     mutationFn: async () => {
@@ -3234,6 +3480,15 @@ export default function VentesPage() {
         status: 'running',
       })
       if (!currentStoreId) throw new Error('Sélectionnez un store avant import.')
+      // Les référentiels de l'import sont chargés à l'ouverture de l'outil : tant
+      // qu'ils ne sont pas disponibles, aucun rapprochement ne peut être validé
+      // (un catalogue non chargé n'est pas un catalogue vide).
+      if (importReferencesLoading) {
+        throw new Error('Chargement des référentiels de l’import en cours. Réessayez dans un instant.')
+      }
+      if (importReferencesFailed) {
+        throw new Error('Impossible de charger les référentiels de l’import. Utilisez « Réessayer ».')
+      }
       if (missingRequiredFields.length > 0) throw new Error('Veuillez mapper tous les champs obligatoires.')
       if (hasMissingMandatoryImportStatuses) {
         throw new Error(
@@ -4504,6 +4759,27 @@ export default function VentesPage() {
                   {formError}
                 </div>
               )}
+
+              {createReferencesLoading ? (
+                <div className="rounded-lg border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground inline-flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Chargement des référentiels (produits, variantes, stock, agents, transporteurs)…
+                </div>
+              ) : null}
+              {createReferencesFailed ? (
+                <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm flex items-center justify-between gap-3">
+                  <span>
+                    Impossible de charger les référentiels nécessaires à la création. La commande ne peut pas être validée.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={retryCreateReferences}
+                    className="shrink-0 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium hover:bg-red-100 transition-colors"
+                  >
+                    Réessayer
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div className="px-6 py-4 border-t border-border flex items-center justify-between shrink-0 bg-muted/20">
@@ -4517,7 +4793,11 @@ export default function VentesPage() {
               <button
                 type="button"
                 onClick={() => createOrderMutation.mutate()}
-                disabled={createOrderMutation.isPending}
+                disabled={
+                  createOrderMutation.isPending ||
+                  createReferencesLoading ||
+                  createReferencesFailed
+                }
                 className="inline-flex items-center gap-2 px-6 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium shadow-lg shadow-primary/25 transition-all disabled:opacity-50"
               >
                 {createOrderMutation.isPending ? (
@@ -4662,6 +4942,27 @@ export default function VentesPage() {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-5">
+              {importReferencesLoading ? (
+                <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground inline-flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Chargement des référentiels de l’import (produits, variantes, agents, transporteurs, normalisation des villes)…
+                </div>
+              ) : null}
+              {importReferencesFailed ? (
+                <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm flex items-center justify-between gap-3">
+                  <span>
+                    Impossible de charger les référentiels de l’import (produits, variantes, agents, transporteurs ou normalisation des villes).
+                    L’import reste bloqué tant qu’ils ne sont pas disponibles.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={retryImportReferences}
+                    className="shrink-0 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium hover:bg-red-100 transition-colors"
+                  >
+                    Réessayer
+                  </button>
+                </div>
+              ) : null}
               {importStep === 1 ? (
                 <div className="space-y-4">
                   {!currentStoreId ? (
@@ -5166,7 +5467,7 @@ export default function VentesPage() {
                                   className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground"
                                 >
                                   <option value="">-- Choisir une société --</option>
-                                  {(deliveryCompanies || []).map((company: any) => (
+                                  {(importDeliveryCompanies || []).map((company: any) => (
                                     <option key={company.id} value={company.id}>
                                       {company.name}
                                     </option>
@@ -5286,7 +5587,12 @@ export default function VentesPage() {
                   <button
                     type="button"
                     onClick={() => importOrdersMutation.mutate()}
-                    disabled={importOrdersMutation.isPending || importProgress.status === 'success'}
+                    disabled={
+                      importOrdersMutation.isPending ||
+                      importProgress.status === 'success' ||
+                      importReferencesLoading ||
+                      importReferencesFailed
+                    }
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {importOrdersMutation.isPending ? (
@@ -5328,6 +5634,10 @@ export default function VentesPage() {
                   {selectedOrderIsBlacklisted ? (
                     <span className="inline-flex items-center rounded-full bg-red-100 text-red-700 text-[11px] px-2 py-0.5 font-medium">
                       Numéro blacklisté
+                    </span>
+                  ) : blacklistStatusUnknownLabel ? (
+                    <span className="inline-flex items-center rounded-full bg-secondary text-muted-foreground text-[11px] px-2 py-0.5 font-medium">
+                      {blacklistStatusUnknownLabel}
                     </span>
                   ) : null}
                 </div>
@@ -5626,14 +5936,18 @@ export default function VentesPage() {
                       Blacklist
                     </label>
                     <select
-                      className="w-full border border-border rounded-lg px-3 py-2 focus:ring-2 focus:ring-jisra-green focus:border-jisra-green bg-card text-foreground text-sm"
+                      className="w-full border border-border rounded-lg px-3 py-2 focus:ring-2 focus:ring-jisra-green focus:border-jisra-green bg-card text-foreground text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                       value={blacklistFilter}
                       onChange={(e) => setBlacklistFilter(e.target.value as 'all' | 'blacklisted' | 'not_blacklisted')}
+                      disabled={!blacklistStatusKnown}
                     >
                       <option value="all">Tous (blacklist)</option>
                       <option value="blacklisted">Blacklisté</option>
                       <option value="not_blacklisted">Non blacklisté</option>
                     </select>
+                    {blacklistStatusUnknownLabel ? (
+                      <p className="mt-1 text-[11px] text-muted-foreground">{blacklistStatusUnknownLabel}</p>
+                    ) : null}
                   </div>
                 </div>
               </>
@@ -5769,7 +6083,7 @@ export default function VentesPage() {
               : 'overflow-x-auto overflow-y-hidden'
           }`}
         >
-          {isLoading ? (
+          {isLoading || isStoresLoading ? (
             <div className="p-8 text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
               <p className="text-muted-foreground mt-2">Chargement des commandes...</p>
@@ -5928,6 +6242,13 @@ export default function VentesPage() {
                           <div className="mt-1 inline-flex items-center rounded-full bg-red-100 text-red-700 text-[11px] px-2 py-0.5 font-medium">
                             Blacklist
                           </div>
+                        ) : !blacklistStatusKnown && normalizedOrderPhone ? (
+                          <div
+                            className="mt-1 inline-flex items-center rounded-full bg-secondary text-muted-foreground text-[11px] px-2 py-0.5 font-medium"
+                            title="Règles ou historiques blacklist non disponibles : statut non vérifié"
+                          >
+                            Blacklist non vérifiée
+                          </div>
                         ) : null}
                       </td>
                       <td className="px-1 sm:px-2 py-1.5 sm:py-3 whitespace-nowrap">
@@ -5989,8 +6310,14 @@ export default function VentesPage() {
                       <td className="px-4 sm:px-8 py-1 sm:py-2 text-[10px] sm:text-[11px] text-foreground">
                         <InlineEditProducts
                           items={order.order_items || []}
-                          products={(products && products.length > 0) ? products : (editProducts || [])}
-                          variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
+                          products={editProducts}
+                          variantsByProductId={editVariantsByProductId}
+                          catalogLoading={editCatalogLoading}
+                          catalogError={editCatalogError}
+                          onRetryCatalog={retryEditCatalog}
+                          onOpenChange={(open) =>
+                            open ? handleProductsEditorOpen(order.store_id) : handleProductsEditorClose()
+                          }
                           onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
                           onClose={() => {}}
                         />
@@ -5998,8 +6325,14 @@ export default function VentesPage() {
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                         <InlineEditProducts
                           items={order.order_items || []}
-                          products={(products && products.length > 0) ? products : (editProducts || [])}
-                          variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
+                          products={editProducts}
+                          variantsByProductId={editVariantsByProductId}
+                          catalogLoading={editCatalogLoading}
+                          catalogError={editCatalogError}
+                          onRetryCatalog={retryEditCatalog}
+                          onOpenChange={(open) =>
+                            open ? handleProductsEditorOpen(order.store_id) : handleProductsEditorClose()
+                          }
                           onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
                           onClose={() => {}}
                           triggerLabel={(order.order_items || [])
@@ -6037,8 +6370,14 @@ export default function VentesPage() {
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-foreground">
                         <InlineEditProducts
                           items={order.order_items || []}
-                          products={(products && products.length > 0) ? products : (editProducts || [])}
-                          variantsByProductId={(variantsByProductId && Object.keys(variantsByProductId).length > 0) ? variantsByProductId : (editVariantsByProductId || {})}
+                          products={editProducts}
+                          variantsByProductId={editVariantsByProductId}
+                          catalogLoading={editCatalogLoading}
+                          catalogError={editCatalogError}
+                          onRetryCatalog={retryEditCatalog}
+                          onOpenChange={(open) =>
+                            open ? handleProductsEditorOpen(order.store_id) : handleProductsEditorClose()
+                          }
                           onSave={(items) => updateOrderItemsMutation.mutate({ orderId: order.id, storeId: order.store_id, items })}
                           onClose={() => {}}
                           triggerLabel={formatCurrency(order.total_selling_price || 0)}

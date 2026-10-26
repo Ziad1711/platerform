@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, X, Package, Pencil } from 'lucide-react'
+import { Plus, X, Package, Pencil, Loader2 } from 'lucide-react'
 
 interface Product {
   id: string
@@ -36,6 +36,13 @@ interface InlineEditProductsProps {
   onSave: (items: OrderItem[]) => void
   onClose: () => void
   triggerLabel?: string
+  /** Signale l'ouverture au parent : les catalogues ne sont lus qu'à ce moment. */
+  onOpenChange?: (open: boolean) => void
+  /** Catalogues en cours de lecture : aucune modification dépendante n'est permise. */
+  catalogLoading?: boolean
+  /** Échec de lecture des catalogues : message réel affiché, enregistrement bloqué. */
+  catalogError?: string | null
+  onRetryCatalog?: () => void
 }
 
 export default function InlineEditProducts({
@@ -45,6 +52,10 @@ export default function InlineEditProducts({
   onSave,
   onClose,
   triggerLabel,
+  onOpenChange,
+  catalogLoading = false,
+  catalogError = null,
+  onRetryCatalog,
 }: InlineEditProductsProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [localItems, setLocalItems] = useState<OrderItem[]>([])
@@ -80,12 +91,30 @@ export default function InlineEditProducts({
     setAddDropdownOpen(false)
     setAddSearch('')
     setIsOpen(true)
-  }, [items])
+    onOpenChange?.(true)
+  }, [items, products, onOpenChange])
 
   const close = useCallback(() => {
     setIsOpen(false)
+    onOpenChange?.(false)
     onClose()
-  }, [onClose])
+  }, [onClose, onOpenChange])
+
+  // Une ligne peut disparaître (pagination, filtre, changement de boutique) alors
+  // que l'éditeur est ouvert : le parent est prévenu au démontage, afin de ne pas
+  // laisser un catalogue actif sans consommateur. Un `close()` explicite a déjà
+  // remis `isOpen` à false, donc aucun signal n'est envoyé deux fois.
+  const isOpenRef = useRef(false)
+  const onOpenChangeRef = useRef(onOpenChange)
+  useEffect(() => {
+    isOpenRef.current = isOpen
+    onOpenChangeRef.current = onOpenChange
+  })
+  useEffect(() => {
+    return () => {
+      if (isOpenRef.current) onOpenChangeRef.current?.(false)
+    }
+  }, [])
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -160,7 +189,12 @@ export default function InlineEditProducts({
     [products]
   )
 
+  // Tant que le catalogue n'est pas disponible, aucune sélection de produit ni
+  // enregistrement n'est permis ; les lignes existantes restent affichées.
+  const catalogBlocked = catalogLoading || !!catalogError
+
   const handleSelectProduct = (index: number, productId: string) => {
+    if (catalogBlocked) return
     const product = products.find((p) => p.id === productId)
     const variants = variantsByProductId[productId] || []
     const firstVariant = variants[0]
@@ -183,6 +217,7 @@ export default function InlineEditProducts({
   }
 
   const handleSelectVariant = (index: number, variantId: string) => {
+    if (catalogBlocked) return
     setLocalItems((prev) =>
       prev.map((item, i) => {
         if (i !== index) return item
@@ -200,6 +235,7 @@ export default function InlineEditProducts({
   }
 
   const addProduct = (productId: string) => {
+    if (catalogBlocked) return
     const product = products.find((p) => p.id === productId)
     const variants = variantsByProductId[productId] || []
     const firstVariant = variants[0]
@@ -293,6 +329,26 @@ export default function InlineEditProducts({
             </div>
 
             <div className="space-y-3 overflow-y-auto px-6 pb-3 flex-1">
+              {catalogLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Chargement du catalogue produits et variantes de cette boutique…
+                </div>
+              ) : null}
+              {catalogError ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  <span>{catalogError}</span>
+                  {onRetryCatalog ? (
+                    <button
+                      type="button"
+                      onClick={onRetryCatalog}
+                      className="shrink-0 rounded-md border border-red-200 px-2 py-1 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      Réessayer
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {localItems.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-6">
                   Aucun produit sélectionné. Ajoutez un produit ci-dessous.
@@ -325,7 +381,11 @@ export default function InlineEditProducts({
 
                     {/* Product selector: show name if selected, otherwise show search input */}
                     <div className="relative">
-                      {item.product_id && product ? (
+                      {item.product_id && !product && catalogBlocked ? (
+                        <div className="flex h-10 items-center truncate rounded-lg border border-border bg-secondary/40 px-3 text-sm text-muted-foreground">
+                          {item.product_name_override || 'Produit lié — catalogue en cours de chargement'}
+                        </div>
+                      ) : item.product_id && product ? (
                         <div
                           ref={(el) => {
                             productRowRefs.current[index] = el
@@ -349,7 +409,8 @@ export default function InlineEditProducts({
                               )
                               openProductDropdown(index)
                             }}
-                            className="text-xs text-primary hover:underline shrink-0 ml-2"
+                            className="text-xs text-primary hover:underline shrink-0 ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={catalogBlocked}
                           >
                             Changer
                           </button>
@@ -375,8 +436,9 @@ export default function InlineEditProducts({
                               )
                             )
                           }}
-                          className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm"
+                          className="w-full rounded-lg border border-border bg-card px-3 h-10 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                           placeholder="Rechercher un produit..."
+                          disabled={catalogBlocked}
                         />
                       )}
                       {openDropdownIndex === index && dropdownPos && (
@@ -538,10 +600,12 @@ export default function InlineEditProducts({
               <button
                 type="button"
                 onClick={() => {
+                  if (catalogBlocked) return
                   setAddDropdownOpen(!addDropdownOpen)
                   setAddSearch('')
                 }}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary transition-colors"
+                disabled={catalogBlocked}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-2 text-sm text-muted-foreground hover:text-foreground hover:border-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus className="w-4 h-4" />
                 Ajouter un produit
@@ -609,12 +673,13 @@ export default function InlineEditProducts({
                 <button
                   type="button"
                   onClick={() => {
+                    if (catalogBlocked) return
                     if (itemsToSave.length === 0) return
                     onSave(itemsToSave)
                     close()
                   }}
-                  disabled={itemsToSave.length === 0}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  disabled={itemsToSave.length === 0 || catalogBlocked}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Enregistrer
                 </button>

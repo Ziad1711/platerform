@@ -92,9 +92,10 @@ export default function Sidebar() {
   })
 
   // Plan Jisra effectif : même règle que la base (abonnement actif non expiré le
-  // plus élevé, sinon offre gratuite).
+  // plus élevé, sinon offre gratuite). Même clé que `/subscription` et le bandeau
+  // de quota, pour ne lire `rpc_billing_status` qu'une fois par identité.
   const { data: billingStatus } = useQuery({
-    queryKey: ['sidebar-billing-status', userId],
+    queryKey: ['billing-status-dashboard', userId],
     enabled: !!userId,
     queryFn: async () => {
       const { data, error } = await supabase.rpc('rpc_billing_status')
