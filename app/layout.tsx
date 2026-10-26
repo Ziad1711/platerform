@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import './globals.css'
 import { Providers } from '@/components/providers'
+import { THEME_INIT_SCRIPT } from '@/lib/theme-init'
 import { SITE_URL } from '@/lib/marketing/site-url'
 import HashErrorHandler from '@/components/marketing/hash-error-handler'
 import { GoogleAnalytics } from '@/components/analytics/google-analytics'
@@ -36,6 +37,11 @@ export default function RootLayout({
   return (
     <html lang="fr" suppressHydrationWarning>
       <head>
+        {/* Thème appliqué avant le premier paint : aucun flash sombre/clair. */}
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="alternate icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />

@@ -12,10 +12,8 @@ import {
   STORE_PREFERENCE_COOKIE,
   STORE_PREFERENCE_STORAGE_KEY,
 } from '@/lib/store-selection'
+import { THEME_STORAGE_KEY, isThemeValue, type Theme } from '@/lib/theme-init'
 
-type Theme = 'light' | 'dark' | 'system'
-
-const isThemeValue = (value: string | null): value is Theme => value === 'light' || value === 'dark' || value === 'system'
 const resolveTheme = (theme: Theme) => {
   if (theme === 'system') {
     if (typeof window === 'undefined') return 'light'
@@ -40,7 +38,9 @@ export function useTheme() {
 }
 
 function ThemeLoader() {
-  const supabase = createClient()
+  // Client stable : recréé à chaque rendu, il relançait l'effet ci-dessous et
+  // provoquait des relectures répétées de `theme_preference`.
+  const supabase = useMemo(() => createClient(), [])
   const { setTheme } = useTheme()
   const { userId, authReady } = useStore()
 
@@ -56,12 +56,23 @@ function ThemeLoader() {
         .eq('id', userId)
         .maybeSingle()
 
-      if (isActive && profile?.theme_preference && isThemeValue(profile.theme_preference)) {
-        setTheme(profile.theme_preference)
+      if (!isActive || !profile?.theme_preference || !isThemeValue(profile.theme_preference)) return
+
+      // Un choix explicite fait sur cet appareil (bouton de thème) prime : il
+      // n'est jamais enregistré en base par le bouton, donc l'écraser ici
+      // changerait le thème de l'utilisateur à chaque chargement.
+      try {
+        const stored = localStorage.getItem(THEME_STORAGE_KEY)
+        if (stored === 'light' || stored === 'dark') return
+      } catch {
+        // Stockage indisponible : la préférence du profil reste applicable.
       }
+
+      // `setTheme` avec la même valeur ne déclenche aucun rendu.
+      setTheme(profile.theme_preference)
     }
 
-    loadThemeFromProfile()
+    void loadThemeFromProfile()
 
     return () => {
       isActive = false
@@ -73,19 +84,34 @@ function ThemeLoader() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())
+  // `system` est la valeur SSR : le markup reste identique avant et après
+  // hydratation (aucun mismatch sur l'icône du bouton de thème).
   const [theme, setTheme] = useState<Theme>('system')
+  // Aucune application avant la relecture de la préférence stockée : appliquer
+  // `system` d'abord écrasait la classe posée par le script d'amorçage (fond
+  // sombre bref quand l'OS est sombre et la préférence claire).
+  const [themeReady, setThemeReady] = useState(false)
 
-  // Initial load from localStorage for speed
+  // Lecture unique de la préférence de l'appareil (aucune écriture ici : une
+  // écriture transitoire pouvait remplacer la préférence par `system`).
   useEffect(() => {
-    const storedTheme = localStorage.getItem('theme')
-    if (isThemeValue(storedTheme)) {
-      setTheme(storedTheme)
+    try {
+      const storedTheme = localStorage.getItem(THEME_STORAGE_KEY)
+      setTheme(isThemeValue(storedTheme) ? storedTheme : 'system')
+    } catch {
+      setTheme('system')
     }
+    setThemeReady(true)
   }, [])
 
-  // Apply theme to DOM
+  // Application au DOM, uniquement après la lecture, sur la valeur retenue.
   useEffect(() => {
-    localStorage.setItem('theme', theme)
+    if (!themeReady) return
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme)
+    } catch {
+      // Stockage indisponible : le thème reste appliqué pour la session.
+    }
     const htmlElement = document.documentElement
     const appliedTheme = resolveTheme(theme)
     if (appliedTheme === 'dark') {
@@ -95,7 +121,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       htmlElement.classList.remove('dark')
       htmlElement.style.colorScheme = 'light'
     }
-  }, [theme])
+  }, [theme, themeReady])
 
   return (
     <QueryClientProvider client={queryClient}>
