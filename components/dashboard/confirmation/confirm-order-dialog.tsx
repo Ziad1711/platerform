@@ -319,7 +319,7 @@ export default function ConfirmOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={(value) => (value ? undefined : onClose())}>
-      <DialogContent hideClose className="max-w-xl gap-0 p-0">
+      <DialogContent hideClose className="!max-w-xl !gap-0 !p-0">
         <DialogHeader className="sticky top-0 z-10 gap-3 border-b border-border bg-muted px-6 py-4">
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 sm:h-9 sm:w-9">
