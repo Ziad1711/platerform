@@ -44,6 +44,16 @@ const STATUS_DATE_FIELD_MAP: Record<string, string> = {
 
 type StatusStage = 'validating' | 'confirmed' | 'city_search' | 'city_ai' | 'parcel'
 
+/**
+ * Ville exacte retenue par l'agent : elle est enregistrée sur la commande pour
+ * que les listes (Ventes, Confirmation) affichent le nom réel du transporteur et
+ * non la saisie brute du formulaire. Nom absent : le champ n'est pas modifié.
+ */
+function manualCityNamePatch(cityName: unknown): { city?: string } {
+  const name = typeof cityName === 'string' ? cityName.trim() : ''
+  return name ? { city: name } : {}
+}
+
 /** Corps accepté par la mise à jour de statut (champs transporteur transmis tels quels). */
 type StatusUpdateBody = {
       orderId?: string
@@ -263,7 +273,7 @@ async function handleStatusUpdate(
             // l'auto-détection et est enregistrée sur la commande.
             await admin
               .from('orders')
-              .update({ delivery_city_external_id: manualRapidCityKey, updated_at: now })
+              .update({ delivery_city_external_id: manualRapidCityKey, ...manualCityNamePatch(body.rapidCityName), updated_at: now })
               .eq('id', orderId)
           } else if (!cityAlreadyNormalized) {
             report('city_search')
@@ -353,7 +363,7 @@ async function handleStatusUpdate(
               // l'auto-détection et est enregistrée sur la commande.
               await admin
                 .from('orders')
-                .update({ delivery_city_external_id: manualMarocGoCityKey, updated_at: now })
+                .update({ delivery_city_external_id: manualMarocGoCityKey, ...manualCityNamePatch(body.marocGoCityName), updated_at: now })
                 .eq('id', orderId)
             } else if (!cityAlreadyNormalized) {
               await normalizeOrderCityById(orderId, admin, 'maroc-go-delivery')
@@ -439,7 +449,7 @@ async function handleStatusUpdate(
               // l'auto-détection et est enregistrée sur la commande.
               await admin
                 .from('orders')
-                .update({ delivery_city_external_id: manualRushlivCityKey, updated_at: now })
+                .update({ delivery_city_external_id: manualRushlivCityKey, ...manualCityNamePatch(body.rushlivCityName), updated_at: now })
                 .eq('id', orderId)
             } else if (!cityAlreadyNormalized) {
               await normalizeOrderCityById(orderId, admin, 'rushliv')
