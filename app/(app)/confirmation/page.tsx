@@ -230,6 +230,9 @@ export default function ConfirmationPage() {
   // Onglet actif : « Commandes » par défaut à chaque ouverture de la page.
   // Les KPI restent chargés en arrière-plan quel que soit l'onglet affiché.
   const [activeTab, setActiveTab] = useState<ConfirmationView>('orders')
+  // Filtres repliés à chaque ouverture de la page ; la sélection active reste
+  // visible via le bouton « Filtres ».
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -360,6 +363,11 @@ export default function ConfirmationPage() {
     enabled: Boolean(currentStoreId) && data !== undefined,
     retry: 1,
     staleTime: 30_000,
+    // Un rappel dont l'heure arrive doit apparaître sans action de l'utilisateur.
+    // Une seule requête par minute (compteurs uniquement), mise en pause quand
+    // l'onglet est inactif : aucun polling agressif.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       const params = new URLSearchParams({
         view: 'counts',
@@ -412,6 +420,12 @@ export default function ConfirmationPage() {
   })
 
   const counts = countsData?.counts ?? null
+  /**
+   * Alertes de rappel : le compteur `late` de l'API compte exactement les
+   * commandes en attente dont `next_callback_at` est déjà dépassé (règle métier
+   * de `applyQueueFilter`). Aucun nouveau calcul, aucune nouvelle requête.
+   */
+  const dueAlert = Number(counts?.late || 0)
 
   /**
    * Fusionne l'état blacklist vérifié dans les commandes. Sans réponse
@@ -875,7 +889,57 @@ export default function ConfirmationPage() {
           ) : (
             <>
           <div className="rounded-xl border border-border bg-card p-3 space-y-3">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="Rechercher un client, un téléphone ou un numéro de suivi"
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                aria-expanded={filtersOpen}
+                aria-controls="confirmation-filters"
+                onClick={() => setFiltersOpen((open) => !open)}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                  filter !== 'all'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-foreground hover:bg-secondary'
+                }`}
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 5h16M7 12h10M10 19h4" />
+                </svg>
+                Filtres
+                {dueAlert > 0 ? (
+                  <span
+                    title={`${dueAlert} rappel(s) arrivé(s) à échéance`}
+                    className="ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-semibold text-white"
+                  >
+                    {dueAlert}
+                  </span>
+                ) : null}
+              </button>
+            </div>
+
+            {!filtersOpen && filter !== 'all' ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                Filtre actif :
+                <span className="rounded-full border border-primary bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                  {FILTER_TABS.find((tab) => tab.value === filter)?.label || filter}
+                </span>
+                <button type="button" onClick={() => setFiltersOpen(true)} className="underline">
+                  modifier
+                </button>
+              </div>
+            ) : null}
+
+            <div
+              id="confirmation-filters"
+              hidden={!filtersOpen}
+              className="flex flex-wrap gap-2"
+            >
               {FILTER_TABS.map((tab) => (
                 <button
                   key={tab.value}
@@ -896,7 +960,15 @@ export default function ConfirmationPage() {
                 >
                   {tab.label}
                   {counts?.[tab.value] !== undefined ? (
-                    <span className="ml-2 text-xs opacity-80">{counts[tab.value]}</span>
+                    <span
+                      className={`ml-2 text-xs ${
+                        tab.value === 'late' && dueAlert > 0
+                          ? 'rounded-full bg-amber-500 px-1.5 py-0.5 font-semibold text-white'
+                          : 'opacity-80'
+                      }`}
+                    >
+                      {counts[tab.value]}
+                    </span>
                   ) : null}
                 </button>
               ))}
@@ -922,14 +994,6 @@ export default function ConfirmationPage() {
                 </button>
               ))}
             </div>
-
-            <input
-              type="search"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Rechercher un client, un téléphone ou un numéro de suivi"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            />
           </div>
 
           {!canProcess && !isPermissionsLoading ? (
