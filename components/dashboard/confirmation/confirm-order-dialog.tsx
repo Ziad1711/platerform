@@ -326,7 +326,7 @@ export default function ConfirmOrderDialog({
               <PackageCheck className="h-4 w-4 sm:h-5 sm:w-5" />
             </span>
             <div className="flex min-w-0 flex-1 items-center justify-center">
-              <DialogTitle className="whitespace-nowrap text-center text-sm font-semibold text-emerald-600 sm:text-base">
+              <DialogTitle className="whitespace-nowrap text-center text-[15px] font-semibold leading-tight text-emerald-600 sm:text-lg">
                 Confirmer la commande
               </DialogTitle>
             </div>
