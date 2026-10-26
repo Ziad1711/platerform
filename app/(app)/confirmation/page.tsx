@@ -349,21 +349,50 @@ export default function ConfirmationPage() {
   const maxAttempts = Number(data?.settings?.max_attempts || DEFAULT_MAX_ATTEMPTS)
 
   /**
-   * Compteurs et avertissement blacklist : lus séparément, une fois la file
-   * affichée. La clé commence par `confirmation-queue` afin que les invalidations
-   * existantes après action rafraîchissent aussi ces données.
+   * Compteurs : ils ne dépendent que de la boutique, de la recherche et du début
+   * de journée. La page, le filtre et le tri ne les recalculent donc plus.
+   * La clé commence par `confirmation-queue` afin que les invalidations
+   * existantes (confirmation, annulation, modification, actualisation) les
+   * rafraîchissent aussi.
    */
-  const { data: secondary, isError: secondaryFailed } = useQuery<SecondaryResponse>({
-    queryKey: ['confirmation-queue', currentStoreId, filter, sort, search, todayStart, page, 'secondary'],
+  const { data: countsData, isError: countsFailed } = useQuery<{ counts: Record<string, number>; countsAvailable: boolean }>({
+    queryKey: ['confirmation-queue', currentStoreId, todayStart, search.trim(), 'counts'],
     enabled: Boolean(currentStoreId) && data !== undefined,
     retry: 1,
-    // Les compteurs restent frais 30 s : un aller-retour entre onglets ne
-    // relance pas les huit requêtes, mais une donnée périmée est revalidée au
-    // focus. Les mutations continuent d'invalider explicitement la clé.
     staleTime: 30_000,
     queryFn: async () => {
       const params = new URLSearchParams({
-        view: 'secondary',
+        view: 'counts',
+        storeId: String(currentStoreId),
+        todayStart,
+      })
+      if (search.trim()) params.set('search', search.trim())
+
+      const response = await fetch(`/api/orders/confirmation/queue?${params.toString()}`)
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(payload?.error || 'CONFIRMATION_COUNTS_FETCH_FAILED')
+      }
+      return payload as { counts: Record<string, number>; countsAvailable: boolean }
+    },
+  })
+
+  /**
+   * Blacklist de la page courante : dépend du filtre, du tri, de la recherche et
+   * de la page. Elle est lue indépendamment des compteurs : l'échec de l'une
+   * n'affecte jamais l'autre.
+   */
+  const { data: blacklistData, isError: blacklistFailed } = useQuery<{
+    blacklist: Record<string, boolean> | null
+    blacklistAvailable: boolean
+  }>({
+    queryKey: ['confirmation-queue', currentStoreId, filter, sort, search, todayStart, page, 'blacklist'],
+    enabled: Boolean(currentStoreId) && data !== undefined,
+    retry: 1,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        view: 'blacklist',
         storeId: String(currentStoreId),
         filter,
         sort,
@@ -376,35 +405,35 @@ export default function ConfirmationPage() {
       const response = await fetch(`/api/orders/confirmation/queue?${params.toString()}`)
       const payload = await response.json().catch(() => null)
       if (!response.ok) {
-        throw new Error(payload?.error || 'CONFIRMATION_SECONDARY_FETCH_FAILED')
+        throw new Error(payload?.error || 'CONFIRMATION_BLACKLIST_FETCH_FAILED')
       }
-      return payload as SecondaryResponse
+      return payload as { blacklist: Record<string, boolean> | null; blacklistAvailable: boolean }
     },
   })
 
-  const counts = secondary?.counts ?? null
+  const counts = countsData?.counts ?? null
 
   /**
    * Fusionne l'état blacklist vérifié dans les commandes. Sans réponse
-   * secondaire, l'état reste « pending » ; si la vérification a échoué, il passe
-   * à « unavailable ». Aucun cas ne présente un numéro comme non blacklisté
-   * avant vérification réelle.
+   * blacklist de la page courante, l'état reste « pending » ; si la vérification
+   * a échoué, il passe à « unavailable ». Aucun cas ne présente un numéro comme
+   * non blacklisté avant vérification réelle.
    */
   const orders = useMemo<ConfirmationOrder[]>(() => {
     const base = data?.orders || []
-    const blacklist = secondary?.blacklist
+    const blacklist = blacklistData?.blacklist
 
-    if (!secondary) {
-      // Échec définitif de la vue secondaire : l'avertissement passe à
-      // « non vérifiée » au lieu de laisser « vérification… » indéfiniment.
+    if (!blacklistData) {
+      // Échec définitif de la vérification de cette page : l'avertissement passe
+      // à « non vérifiée » au lieu de laisser « vérification… » indéfiniment.
       return base.map((order) => ({
         ...order,
         is_blacklisted: undefined,
-        blacklist_status: secondaryFailed ? ('unavailable' as const) : ('pending' as const),
+        blacklist_status: blacklistFailed ? ('unavailable' as const) : ('pending' as const),
       }))
     }
 
-    if (!secondary.blacklistAvailable || !blacklist) {
+    if (!blacklistData.blacklistAvailable || !blacklist) {
       return base.map((order) => ({
         ...order,
         is_blacklisted: undefined,
@@ -417,7 +446,7 @@ export default function ConfirmationPage() {
       is_blacklisted: blacklist[order.id] === true,
       blacklist_status: 'verified' as const,
     }))
-  }, [data?.orders, secondary, secondaryFailed])
+  }, [data?.orders, blacklistData, blacklistFailed])
 
   /**
    * Commande présentée dans la modale de confirmation : dès que la vérification
@@ -827,7 +856,7 @@ export default function ConfirmationPage() {
             <div role="tabpanel" aria-label="Vue d'ensemble" className="space-y-3">
               <ConfirmationKpis
                 counts={counts || {}}
-                loading={!counts && !secondaryFailed}
+                loading={!counts && !countsFailed}
                 activeFilter={filter}
                 onSelectFilter={(next) => {
                   // Un clic sur une carte KPI ramène à la file filtrée.
@@ -836,7 +865,7 @@ export default function ConfirmationPage() {
                   setActiveTab('orders')
                 }}
               />
-              {secondaryFailed ? (
+              {countsFailed ? (
                 <p className="text-xs text-muted-foreground">
                   Statistiques momentanément indisponibles. Le travail sur les commandes
                   n&apos;est pas affecté.

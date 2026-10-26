@@ -26,7 +26,7 @@ const MAX_LIMIT = 100
  *   la première réponse. Ni leur coût ni leur échec ne retarde ou ne supprime
  *   l'affichage des commandes.
  */
-type QueueView = 'queue' | 'secondary'
+type QueueView = 'queue' | 'secondary' | 'counts' | 'blacklist'
 
 type QueueSupabase = Awaited<ReturnType<typeof requireAuthenticatedUser>>['supabase']
 
@@ -45,7 +45,8 @@ type QueueScope = {
 }
 
 function parseView(raw: string | null): QueueView {
-  return raw === 'secondary' ? 'secondary' : 'queue'
+  if (raw === 'secondary' || raw === 'counts' || raw === 'blacklist') return raw
+  return 'queue'
 }
 
 function parseLimit(raw: string | null) {
@@ -259,6 +260,34 @@ export async function GET(request: Request) {
   try {
     const scope = await resolveQueueScope(request)
     if ('error' in scope) return scope.error
+
+    if (view === 'counts') {
+      // Compteurs uniquement : ils ne dépendent ni de la page ni du filtre ni du
+      // tri, seuls la boutique, la recherche et le début de journée comptent.
+      const countsPromise = readFilterCounts(scope)
+      const todayPromise = readTodayCounts(scope)
+      const [{ counts, countsAvailable }, todayCounts] = await Promise.all([
+        countsPromise,
+        todayPromise,
+      ])
+
+      return NextResponse.json({
+        view,
+        counts: { ...counts, ...todayCounts },
+        countsAvailable,
+      })
+    }
+
+    if (view === 'blacklist') {
+      // Blacklist de la page courante uniquement : dépend du filtre, du tri et
+      // de la page, jamais des compteurs.
+      const blacklistResult = await readPageBlacklist(scope)
+      return NextResponse.json({
+        view,
+        blacklist: blacklistResult.blacklist,
+        blacklistAvailable: blacklistResult.blacklistAvailable,
+      })
+    }
 
     if (view === 'secondary') {
       // Compteurs et page des téléphones démarrent ensemble ; la blacklist ne
