@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Pencil } from 'lucide-react'
 
 interface CityOption {
@@ -25,7 +26,9 @@ export default function InlineEditCity({
   const [editing, setEditing] = useState(false)
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -34,13 +37,48 @@ export default function InlineEditCity({
     }
   }, [editing])
 
+  // Le tableau Sales vit dans un conteneur `overflow-x-auto overflow-y-hidden` :
+  // un menu `absolute` y est clippé (surtout sur les dernières lignes). Le menu
+  // est donc rendu dans `document.body` avec une position `fixed` recalculée.
+  const updateMenuPosition = useCallback(() => {
+    const input = inputRef.current
+    if (!input) return
+    const rect = input.getBoundingClientRect()
+    const margin = 4
+    const spaceBelow = window.innerHeight - rect.bottom - margin
+    const spaceAbove = rect.top - margin
+    const width = Math.max(rect.width, 220)
+    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow
+    const maxHeight = Math.min(288, Math.max(120, (openUp ? spaceAbove : spaceBelow) - 8))
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
+    const top = openUp
+      ? Math.max(8, rect.top - margin - maxHeight)
+      : Math.min(rect.bottom + margin, window.innerHeight - 8)
+    setMenuPos({ top, left, width, maxHeight })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    updateMenuPosition()
+    const onScrollOrResize = () => updateMenuPosition()
+    window.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize)
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true)
+      window.removeEventListener('resize', onScrollOrResize)
+    }
+  }, [open, updateMenuPosition])
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setEditing(false)
-        setOpen(false)
-        setSearch(value)
-      }
+      const target = e.target as Node
+      // Le menu est désormais hors du conteneur (portail) : il fait partie de
+      // l'éditeur et ne doit jamais provoquer sa fermeture avant sélection.
+      if (containerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setEditing(false)
+      setOpen(false)
+      setSearch(value)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -63,6 +101,7 @@ export default function InlineEditCity({
 
   if (editing) {
     return (
+      <>
       <div ref={containerRef} className="relative">
         <input
           ref={inputRef}
@@ -98,36 +137,55 @@ export default function InlineEditCity({
           placeholder="Taper une ville puis Entrée..."
           className="w-full border border-primary rounded px-2 py-1 bg-background text-foreground text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
         />
-        {open && filtered.length > 0 && (
-          <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
-            {filtered.map((city) => (
-              <button
-                key={city.city_key}
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  handleSelect(city)
-                }}
-                className={`w-full text-left px-3 py-2 text-xs sm:text-sm hover:bg-secondary transition-colors ${
-                  city.city_name === value ? 'bg-secondary font-medium' : ''
-                }`}
-              >
-                <span>{city.city_name}</span>
-                {city.cost_delivery != null && (
-                  <span className="text-muted-foreground ml-2">
-                    — {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'MAD' }).format(city.cost_delivery)}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-        {open && filtered.length === 0 && (
-          <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-popover shadow-lg p-3 text-xs text-muted-foreground">
-            Aucune ville trouvée
-          </div>
-        )}
       </div>
+        {open && menuPos && typeof document !== 'undefined'
+          ? createPortal(
+              <div
+                ref={menuRef}
+                role="listbox"
+                style={{
+                  position: 'fixed',
+                  top: menuPos.top,
+                  left: menuPos.left,
+                  width: menuPos.width,
+                  maxHeight: menuPos.maxHeight,
+                  zIndex: 1000,
+                }}
+                className="overflow-y-auto rounded-lg border border-border bg-popover shadow-lg"
+              >
+                {filtered.length > 0 ? (
+                  filtered.map((city) => (
+                    <button
+                      key={city.city_key}
+                      type="button"
+                      role="option"
+                      aria-selected={city.city_name === value}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        handleSelect(city)
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs sm:text-sm hover:bg-secondary transition-colors ${
+                        city.city_name === value ? 'bg-secondary font-medium' : ''
+                      }`}
+                    >
+                      <span>{city.city_name}</span>
+                      {city.cost_delivery != null && (
+                        <span className="text-muted-foreground ml-2">
+                          — {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'MAD' }).format(city.cost_delivery)}
+                        </span>
+                      )}
+                    </button>
+                  ))
+                ) : (
+                  <div className="p-3 text-xs text-muted-foreground">
+                    Aucune ville trouvée. Saisissez un nom puis appuyez sur Entrée.
+                  </div>
+                )}
+              </div>,
+              document.body,
+            )
+          : null}
+      </>
     )
   }
 

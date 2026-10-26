@@ -43,6 +43,76 @@ async function normalizeOrderCityRequest(city: string, orderId?: string) {
   return (await response.json()) as { cityName?: string; cityKey?: number | null; fallback?: boolean }
 }
 
+type StoreCityOption = { city_key: number; city_name: string; cost_delivery?: number }
+
+/**
+ * Villes du catalogue du transporteur pour un store donné.
+ * Partagé par le formulaire de création et par la colonne Ville du tableau :
+ * la liste du tableau ne doit PAS dépendre du store choisi dans le modal de
+ * création (sinon elle reste vide au chargement, ou porte les villes d'un
+ * autre store).
+ */
+async function fetchStoreCities(
+  supabase: ReturnType<typeof createClient>,
+  storeId: string,
+): Promise<Array<{ city_key: number; city_name: string; cost_delivery?: number }>> {
+  // 1. Intégration de livraison liée au store
+  const { data: config, error: configError } = await supabase
+    .from('rapid_delivery_configs')
+    .select('integration_id')
+    .eq('store_id', storeId)
+    .maybeSingle()
+
+  if (configError) throw configError
+
+  if (config?.integration_id) {
+    // 2. Tarifs génériques via le pricing_group_id du shop
+    const { data: shop } = await supabase
+      .from('delivery_shops')
+      .select('pricing_group_id')
+      .eq('integration_id', config.integration_id)
+      .eq('store_id', storeId)
+      .not('pricing_group_id', 'is', null)
+      .limit(1)
+      .maybeSingle()
+
+    if (shop?.pricing_group_id) {
+      const { data: rates, error: ratesError } = await supabase
+        .from('delivery_rates')
+        .select('external_city_key, external_city_name, price')
+        .eq('pricing_group_id', shop.pricing_group_id)
+        .order('external_city_name', { ascending: true })
+
+      if (!ratesError && rates && rates.length > 0) {
+        return rates.map((r) => ({
+          city_key: r.external_city_key,
+          city_name: r.external_city_name,
+          cost_delivery: r.price,
+        }))
+      }
+    }
+
+    // 3. Repli : villes liées à l'intégration
+    const { data: cities, error: citiesError } = await supabase
+      .from('rapid_delivery_cities')
+      .select('city_key, city_name, cost_delivery')
+      .eq('integration_id', config.integration_id)
+      .order('city_name', { ascending: true })
+
+    if (citiesError) throw citiesError
+    if (cities && cities.length > 0) return cities
+  }
+
+  // 4. Repli ultime : villes génériques
+  const { data: fallbackCities, error: fallbackError } = await supabase
+    .from('rapid_delivery_cities_standard')
+    .select('city_key, city_name, cost_delivery')
+    .order('city_name', { ascending: true })
+
+  if (fallbackError) throw fallbackError
+  return (fallbackCities || []) as Array<{ city_key: number; city_name: string; cost_delivery?: number }>
+}
+
 const statusConfig = {
   new: { label: 'Nouvelle', color: 'bg-blue-100 text-blue-800', icon: Clock },
   confirmation_rejected: { label: 'Non confirmé', color: 'bg-slate-100 text-slate-800', icon: XCircle },
@@ -1500,68 +1570,26 @@ export default function VentesPage() {
     },
   })
 
-  const { data: rapidDeliveryCities = [] } = useQuery({
-    queryKey: ['rapid-delivery-cities', selectedCreateStoreId],
-    enabled: !!selectedCreateStoreId,
-    queryFn: async () => {
-      // 1. Récupérer l'intégration Rapid Delivery liée au store sélectionné
-      const { data: config, error: configError } = await supabase
-        .from('rapid_delivery_configs')
-        .select('integration_id')
-        .eq('store_id', selectedCreateStoreId!)
-        .maybeSingle()
-
-      if (configError) throw configError
-
-      if (config?.integration_id) {
-        // 2. Essayer de charger depuis delivery_rates (nouveau schéma générique)
-        //    via le pricing_group_id du shop
-        const { data: shop } = await supabase
-          .from('delivery_shops')
-          .select('pricing_group_id')
-          .eq('integration_id', config.integration_id)
-          .eq('store_id', selectedCreateStoreId!)
-          .not('pricing_group_id', 'is', null)
-          .limit(1)
-          .maybeSingle()
-
-        if (shop?.pricing_group_id) {
-          const { data: rates, error: ratesError } = await supabase
-            .from('delivery_rates')
-            .select('external_city_key, external_city_name, price')
-            .eq('pricing_group_id', shop.pricing_group_id)
-            .order('external_city_name', { ascending: true })
-
-          if (!ratesError && rates && rates.length > 0) {
-            return rates.map((r) => ({
-              city_key: r.external_city_key,
-              city_name: r.external_city_name,
-              cost_delivery: r.price,
-            }))
-          }
-        }
-
-        // 3. Fallback : charger depuis rapid_delivery_cities (liées à l'intégration)
-        const { data: cities, error: citiesError } = await supabase
-          .from('rapid_delivery_cities')
-          .select('city_key, city_name, cost_delivery')
-          .eq('integration_id', config.integration_id)
-          .order('city_name', { ascending: true })
-
-        if (citiesError) throw citiesError
-        if (cities && cities.length > 0) return cities
-      }
-
-      // 4. Fallback ultime : charger depuis rapid_delivery_cities_standard (villes génériques)
-      const { data: fallbackCities, error: fallbackError } = await supabase
-        .from('rapid_delivery_cities_standard')
-        .select('city_key, city_name, cost_delivery')
-        .order('city_name', { ascending: true })
-
-      if (fallbackError) throw fallbackError
-      return fallbackCities || []
-    },
+  // Villes du formulaire de création (store choisi dans le modal).
+  const modalCitiesStoreId = selectedCreateStoreId || currentStoreId || ''
+  const { data: rapidDeliveryCities = [] } = useQuery<StoreCityOption[]>({
+    queryKey: ['rapid-delivery-cities', modalCitiesStoreId],
+    enabled: !!modalCitiesStoreId,
+    queryFn: () => fetchStoreCities(supabase, modalCitiesStoreId),
   })
+
+  // Villes de la colonne Ville du tableau : toujours celles du store courant.
+  // La liste ne doit jamais dépendre du store temporairement choisi dans le
+  // modal de création (sinon elle est vide au chargement, ou porte les villes
+  // d'une autre boutique).
+  const tableCitiesStoreId = currentStoreId || ''
+  const { data: tableCitiesRaw = [] } = useQuery<StoreCityOption[]>({
+    queryKey: ['rapid-delivery-cities', tableCitiesStoreId],
+    enabled: !!tableCitiesStoreId && tableCitiesStoreId !== modalCitiesStoreId,
+    queryFn: () => fetchStoreCities(supabase, tableCitiesStoreId),
+  })
+  const tableCities =
+    tableCitiesStoreId === modalCitiesStoreId ? rapidDeliveryCities : tableCitiesRaw
 
   const rapidDeliveryCityCostByKey = useMemo(() => {
     const map = new Map<number, number>()
@@ -1573,6 +1601,19 @@ export default function VentesPage() {
     }
     return map
   }, [rapidDeliveryCities])
+
+  // Coûts du catalogue du store courant : utilisés par la colonne Ville du
+  // tableau, pour ne jamais appliquer le tarif d'un autre store.
+  const tableCityCostByKey = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const city of (tableCities || [])) {
+      const cityKey = Number(city?.city_key || 0)
+      if (Number.isFinite(cityKey) && cityKey > 0) {
+        map.set(cityKey, Number(city?.cost_delivery || 0))
+      }
+    }
+    return map
+  }, [tableCities])
 
   const { data: rapidDeliveryShops = [] } = useQuery({
     queryKey: ['rapid-delivery-shops', rapidDeliveryIntegration?.id],
@@ -2280,23 +2321,31 @@ export default function VentesPage() {
   })
 
   const updateOrderCityMutation = useMutation({
-    mutationFn: async ({ orderId, cityName, cityKey }: { orderId: string; cityName: string; cityKey?: number | null }) => {
-      // Sélection dans la liste du transporteur : le nom exact et la clé sont
-      // déjà connus, donc aucun aller-retour de normalisation n'est nécessaire
-      // (c'était le coût principal d'un changement de ville). La normalisation
-      // reste utilisée pour une ville saisie librement.
-      let resolvedCityName = cityName.trim()
-      let resolvedCityKey = cityKey ?? null
-      if (!resolvedCityKey) {
-        const normalized = await normalizeOrderCityRequest(cityName)
-        resolvedCityName = String(normalized.cityName || cityName).trim()
-        resolvedCityKey = Number(normalized.cityKey || 0) || null
-      }
+    mutationFn: async ({
+      orderId,
+      storeId,
+      cityName,
+      cityKey,
+    }: {
+      orderId: string
+      storeId?: string
+      cityName: string
+      cityKey?: number | null
+    }) => {
+      // La normalisation serveur reste l'autorité (nom exact + clé du catalogue
+      // du transporteur du store) : elle est systématiquement utilisée pour ne
+      // jamais enregistrer une clé qui ne correspondrait pas au transporteur.
+      // `orderId` permet au serveur de déduire le transporteur de la commande.
+      const normalized = await normalizeOrderCityRequest(cityName, orderId)
+      const resolvedCityName = String(normalized.cityName || cityName).trim()
+      const resolvedCityKey = Number(normalized.cityKey || 0) || cityKey || null
 
-      // Calculer les frais de livraison si on a un cityKey
+      // Frais de livraison : uniquement si le catalogue chargé correspond bien
+      // au store de la commande (jamais le tarif d'une autre boutique).
       let resolvedDeliveryFee: number | undefined
-      if (resolvedCityKey) {
-        const cost = rapidDeliveryCityCostByKey.get(resolvedCityKey)
+      const sameStore = Boolean(currentStoreId) && (!storeId || storeId === currentStoreId)
+      if (resolvedCityKey && sameStore) {
+        const cost = tableCityCostByKey.get(resolvedCityKey)
         if (cost !== undefined) {
           resolvedDeliveryFee = cost
         }
@@ -2310,18 +2359,30 @@ export default function VentesPage() {
         updatePayload.delivery_fee = resolvedDeliveryFee
       }
 
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('orders')
         .update(updatePayload)
         .eq('id', orderId)
+        .select('id')
 
       if (error) throw error
+      // Aucune ligne modifiée (RLS ou commande hors périmètre) : sans ce
+      // contrôle, l'invalidation recharge l'ancienne valeur et l'utilisateur
+      // voit sa modification « revenir » sans aucune explication.
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('ORDER_NOT_UPDATED')
+      }
     },
     onSuccess: async () => {
       await invalidateOrderViews()
     },
     onError: (error: any) => {
-      setFormError(error?.message || 'Erreur de mise à jour de la ville')
+      const message =
+        error?.message === 'ORDER_NOT_UPDATED'
+          ? "Ville non enregistrée : cette commande n'est pas modifiable avec votre rôle."
+          : error?.message || 'Erreur de mise à jour de la ville'
+      setFormError(message)
+      toast.error(message)
     },
   })
 
@@ -5945,9 +6006,9 @@ export default function VentesPage() {
                       <td className="px-1.5 sm:px-4 py-1.5 sm:py-3 whitespace-nowrap text-xs sm:text-sm text-foreground">
                         <InlineEditCity
                           value={order.city || ''}
-                          cities={rapidDeliveryCities || []}
+                          cities={tableCities}
                           onSave={(cityName, cityKey) => {
-                            updateOrderCityMutation.mutate({ orderId: order.id, cityName, cityKey })
+                            updateOrderCityMutation.mutate({ orderId: order.id, storeId: order.store_id, cityName, cityKey })
                           }}
                         />
                       </td>
