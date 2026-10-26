@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -328,13 +327,9 @@ export default function ConfirmOrderDialog({
             </span>
             <div className="min-w-0 flex-1 space-y-1">
               <DialogTitle className="text-base font-semibold">Confirmer la commande</DialogTitle>
-              <DialogDescription className="text-xs">
-                Vérifiez les informations avant validation. Une commande confirmée sort de la file
-                de confirmation.
-              </DialogDescription>
             </div>
             <Button
-              variant="outline"
+              variant="destructive"
               size="sm"
               onClick={onClose}
               disabled={busy || resolvingCity}

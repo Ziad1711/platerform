@@ -766,7 +766,7 @@ export default function ConfirmationPage() {
             </span>
           </div>
           <p className="text-center text-sm text-muted-foreground md:text-left">
-            Traitez les commandes en attente : appels, rappels, confirmations et annulations.
+            Traitez l&apos;état de vos commandes
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
