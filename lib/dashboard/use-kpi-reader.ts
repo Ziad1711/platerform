@@ -4,7 +4,7 @@
  * Accès React Query au lecteur KPI V5.
  *
  * - une seule clé de cache par (frontière d'identité, boutiques, période) ;
- * - révision légère : appel d'un jour, `includeDirect=false`, toutes les 2 s
+ * - révision : RPC minimale dédiée (`publish_counter` seul), toutes les 2 s
  *   quand l'onglet est visible ; un changement de révision invalide la lecture ;
  * - focus/reconnexion : comportement par défaut de React Query (revalidation) ;
  * - changement de boutique : la clé change, donc nouvelle lecture.
@@ -15,12 +15,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   dashboardKpiReaderKey,
   fetchDashboardKpiReader,
+  fetchDashboardKpiRevisions,
+  type KpiRevisionRow,
   type KpiReaderPayload,
 } from './kpi-reader'
 import type { DashboardPeriod } from '@/lib/utils'
 import { DASHBOARD_ANALYTICS_STALE_MS } from './analytics-cache'
 import {
-  BUSINESS_TIME_ZONE,
   businessRange,
   previousBusinessRange,
   type BusinessRange,
@@ -47,7 +48,8 @@ export interface UseKpiReaderOptions {
   pollMs?: number
   /**
    * Lecteur à interroger (`KPI_READER_RPC_V2` pour le coût de livraison
-   * journalier). La sonde de révision reste sur le lecteur léger.
+   * journalier). La sonde de révision n'utilise plus le lecteur : elle appelle
+   * sa propre RPC minimale (`rpc_dashboard_kpi_revisions`).
    */
   rpc?: string
 }
@@ -96,47 +98,27 @@ export function useKpiReader({
     queryFn: ({ signal }) => fetchDashboardKpiReader(supabase, { ...input, signal }),
   })
 
-  // Révision : journée métier courante (Africa/Casablanca), jamais locale.
-  const revisionRange = businessRange(
-    'today',
-    null,
-    null,
-    new Date(),
-    BUSINESS_TIME_ZONE,
-    KPI_READER_MAX_DAYS,
-  )
-  const revisionInput = useMemo(
-    () => ({
-      storeIds: sortedStoreIds,
-      from: revisionRange.from,
-      to: revisionRange.to,
-      includeDirect: false,
-    }),
-    [sortedStoreIds, revisionRange.from, revisionRange.to],
-  )
-
-  // Révision : une seule journée, sans fallback direct → coût minimal.
-  // Clé DISTINCTE du lecteur : cette requête ne doit jamais s'auto-invalider.
-  const revision = useQuery<KpiReaderPayload>({
-    queryKey: [
-      'dashboard-kpi-revision',
-      boundary,
-      sortedStoreIds ?? 'all',
-      revisionInput.from,
-      revisionInput.includeDirect,
-    ],
+  // Révision : RPC minimale dédiée (`publish_counter` seul). Aucune grille
+  // journalière, aucun agrégat ni montant : le coût du polling ne dépend plus
+  // de la période affichée. Clé DISTINCTE du lecteur : cette requête ne doit
+  // jamais s'auto-invalider.
+  const revision = useQuery<KpiRevisionRow[]>({
+    queryKey: ['dashboard-kpi-revision', boundary, sortedStoreIds ?? 'all'],
     enabled: enabled && Boolean(pollMs) && visible,
     refetchInterval: pollMs || false,
     refetchOnWindowFocus: false,
     staleTime: 0,
+    // Pas de reprises internes : le prochain tick normal réessaie la sonde
+    // après une panne, sans modifier les retries du lecteur financier.
+    retry: false,
     queryFn: ({ signal }) =>
-      fetchDashboardKpiReader(supabase, { ...revisionInput, signal }),
+      fetchDashboardKpiRevisions(supabase, { storeIds: sortedStoreIds, signal }),
   })
 
   const revisionKey = useMemo(
     () =>
-      (revision.data?.stores ?? [])
-        .map((store) => `${store.store_id}:${store.revision}`)
+      (revision.data ?? [])
+        .map((row) => `${row.store_id}:${row.publish_counter}`)
         .sort()
         .join('|'),
     [revision.data],

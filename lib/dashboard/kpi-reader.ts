@@ -307,6 +307,67 @@ async function fetchDashboardKpiReaderWindow(
   }
 }
 
+/**
+ * Sonde de révision : RPC minimale dédiée (migration B1).
+ *
+ * Elle renvoie uniquement le compteur de publication par boutique autorisée,
+ * avec exactement la même identité (`auth.uid()`), le même périmètre
+ * (`dashboard_kpi_access_level`) et le même contrat d'erreur que
+ * `rpc_dashboard_kpi_reader` — sans grille journalière, sans agrégat et sans
+ * montant. Le compteur reste un texte décimal exact : aucune conversion en
+ * `Number`, qui perdrait la précision au-delà de 2^53.
+ */
+export const KPI_REVISIONS_RPC = 'rpc_dashboard_kpi_revisions'
+
+export interface KpiRevisionRow {
+  store_id: string
+  /** Compteur de publication `bigint` sérialisé en texte exact. */
+  publish_counter: string
+}
+
+export interface KpiRevisionsInput {
+  /** `null` = toutes les boutiques autorisées. */
+  storeIds: string[] | null
+  /** Annulation transmise par React Query (changement de périmètre, démontage). */
+  signal?: AbortSignal
+}
+
+export async function fetchDashboardKpiRevisions(
+  supabase: SupabaseClient,
+  input: KpiRevisionsInput,
+): Promise<KpiRevisionRow[]> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), KPI_READER_REQUEST_TIMEOUT_MS)
+  const forwardAbort = () => controller.abort()
+  if (input.signal) {
+    if (input.signal.aborted) controller.abort()
+    else input.signal.addEventListener('abort', forwardAbort)
+  }
+
+  try {
+    const { data, error } = await supabase
+      .rpc(KPI_REVISIONS_RPC, { p_store_ids: input.storeIds })
+      .abortSignal(controller.signal)
+
+    if (error) {
+      throw new KpiReaderError(toErrorCode(error.message), error.message)
+    }
+
+    return (data ?? []) as unknown as KpiRevisionRow[]
+  } catch (error) {
+    if (error instanceof KpiReaderError) throw error
+    // Annulation (délai dépassé ou changement de périmètre) : erreur bornée,
+    // jamais un chargement sans fin.
+    throw new KpiReaderError(
+      controller.signal.aborted ? 'KPI_READER_TIMEOUT' : 'KPI_READER_FAILED',
+      error instanceof Error ? error.message : 'KPI_READER_FAILED',
+    )
+  } finally {
+    clearTimeout(timer)
+    input.signal?.removeEventListener('abort', forwardAbort)
+  }
+}
+
 /** Un accès `full` est seul à exposer les coûts, la marge et le profit. */
 export function hasFinancialTotals(
   store: KpiReaderStore,
