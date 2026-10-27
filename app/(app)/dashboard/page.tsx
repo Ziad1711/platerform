@@ -13,6 +13,7 @@ import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { kpiReaderV5Enabled } from '@/lib/dashboard/kpi-reader-flag'
 import { KpiRolloutProbe, KpiRolloutProvider } from '@/lib/dashboard/use-kpi-rollout'
+import { loadRolloutSeed } from '@/lib/dashboard/rollout-seed.server'
 
 export default async function DashboardPage() {
   const { user, authUnavailable } = await getServerUserResult()
@@ -49,9 +50,14 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
+  // Anticipation NON bloquante : la lecture de configuration démarre pendant le
+  // rendu serveur et sa promesse est transmise au navigateur. Le rendu de la
+  // structure n'attend jamais cette lecture, et aucune décision n'est prise
+  // avant les contrôles existants côté client.
+  const rolloutSeed = rolloutEnabled && user ? loadRolloutSeed(user.id) : null
 
   return (
-    <KpiRolloutProvider enabled={rolloutEnabled}>
+    <KpiRolloutProvider enabled={rolloutEnabled} initialRollout={rolloutSeed}>
     <KpiRolloutProbe />
     <div className="space-y-6 pt-2 sm:pt-0 animate-fade-in">
 

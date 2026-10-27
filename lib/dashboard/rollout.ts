@@ -4,6 +4,27 @@ import type { KpiReaderMode } from './kpi-reader-flag'
 export const KPI_ROLLOUT_POLL_MS = 5_000
 export const KPI_ROLLOUT_TTL_MS = 15_000
 export const KPI_ROLLOUT_SHADOW_STALE_MS = 10 * 60 * 1_000
+/**
+ * Fenêtre pendant laquelle une configuration fraîchement reçue (graine serveur)
+ * ou relue n'est pas redemandée au montage. Elle évite une seconde requête
+ * immédiate après hydratation, sans retarder la première lecture quand aucune
+ * anticipation n'est disponible (une requête sans donnée part toujours
+ * immédiatement). Le polling et la revalidation au focus restent inchangés.
+ */
+export const KPI_ROLLOUT_SEED_STALE_MS = 5_000
+
+/**
+ * Budget d'attente de la graine serveur côté navigateur. Au-delà, la lecture
+ * normale démarre : ce plafond est la seule contrepartie d'un échec de
+ * l'anticipation, dans un scénario déjà dégradé (rollout indisponible).
+ */
+export const KPI_ROLLOUT_SEED_WAIT_MS = 2_500
+
+/**
+ * Budget de l'anticipation côté serveur. Il borne la durée pendant laquelle le
+ * flux RSC reste ouvert pour livrer la graine ; au-delà, le navigateur lit seul.
+ */
+export const KPI_ROLLOUT_SEED_SERVER_TIMEOUT_MS = 4_000
 
 export function isKpiRolloutFresh(
   updatedAt: number,
@@ -50,6 +71,28 @@ export interface KpiRolloutEntry {
   payload: KpiRolloutPayload
   seq: number
 }
+
+/**
+ * Configuration anticipée côté serveur, transmise au navigateur.
+ *
+ * Elle n'accorde aucune décision : elle suit les mêmes contrôles que la lecture
+ * client (périmètre, fraîcheur, version, kill switch) avant toute lecture
+ * financière. Un échec laisse le navigateur lire normalement.
+ */
+export type RolloutSeedResult =
+  | {
+      ok: true
+      payload: KpiRolloutPayload
+      /** Périmètre réellement lu ; utilisé seulement s'il correspond au périmètre client. */
+      storeIds: string[]
+      /**
+       * Âge de la décision au moment où le serveur la transmet, en millisecondes.
+       * Durée mesurée côté serveur : insensible au décalage d'horloge, elle empêche
+       * une décision expirée de paraître fraîche à sa réception.
+       */
+      ageMs: number
+    }
+  | { ok: false; storeIds: string[]; reason: string }
 
 /**
  * Décision unique d'acceptation d'une réponse de configuration :

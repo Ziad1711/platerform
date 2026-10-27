@@ -126,11 +126,19 @@ export function StoreProvider({
   initialUserId,
   initialAuthReady,
   initialBootstrap,
+  initialSelectedPeriod,
 }: {
   children: ReactNode
   initialUserId: string | null
   initialAuthReady: boolean
   initialBootstrap: AppBootstrap
+  /**
+   * Période appliquée dès le PREMIER rendu. Absente : `month` (défaut historique
+   * conservé pour tous les écrans). Fournie par l'appelant lorsqu'une page a une
+   * période d'ouverture propre (Dashboard : « Aujourd'hui »), afin d'éviter une
+   * lecture intermédiaire sur la mauvaise période avant l'effet du filtre.
+   */
+  initialSelectedPeriod?: DashboardPeriod
 }) {
   const supabase = useMemo(() => createClient(), [])
   const queryClient = useQueryClient()
@@ -165,7 +173,9 @@ export function StoreProvider({
   // identique ne provoque aucun rendu, donc aucun effet de persistance).
   const [persistenceRevision, setPersistenceRevision] = useState(0)
 
-  const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>('month')
+  const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>(
+    initialSelectedPeriod ?? 'month',
+  )
   const [customStartDate, setCustomStartDate] = useState<string | null>(null)
   const [customEndDate, setCustomEndDate] = useState<string | null>(null)
 

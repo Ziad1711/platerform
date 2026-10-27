@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { cookies } from 'next/headers'
+import { cache } from 'react'
 import { getRequestClient } from '@/lib/supabase/server'
 import { readSessionKey, STORE_ACCESS_UNAVAILABLE } from './store-bootstrap'
 import type { AppBootstrap } from './store-bootstrap'
@@ -89,3 +90,14 @@ export async function buildAppBootstrap(userId: string): Promise<AppBootstrap> {
     }
   }
 }
+
+/**
+ * Mutualisation de la préparation d'accès sur la requête serveur courante.
+ *
+ * `cache()` est borné au rendu de la requête : le layout protégé et la page
+ * Dashboard partagent la même lecture. Aucun cache n'est partagé entre
+ * utilisateurs, sessions ou requêtes, et la revalidation navigateur des accès
+ * reste inchangée.
+ */
+export const getAppBootstrap = cache(buildAppBootstrap)
+

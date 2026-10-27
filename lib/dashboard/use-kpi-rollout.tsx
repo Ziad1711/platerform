@@ -14,8 +14,11 @@ import { useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { BUSINESS_TIME_ZONE, businessRange } from './business-time'
 import type { KpiReaderMode } from './kpi-reader-flag'
+import { decideRolloutSeed } from './rollout-seed-decision'
 import {
   KPI_ROLLOUT_POLL_MS,
+  KPI_ROLLOUT_SEED_STALE_MS,
+  KPI_ROLLOUT_SEED_WAIT_MS,
   KPI_ROLLOUT_SHADOW_STALE_MS,
   fetchKpiRollout,
   fetchKpiShadowCheck,
@@ -23,6 +26,7 @@ import {
   isKpiRolloutFresh,
   reportKpiRolloutEvent,
   resolveKpiRolloutMode,
+  type RolloutSeedResult,
 } from './rollout'
 
 export interface KpiRolloutContextValue {
@@ -79,9 +83,15 @@ const CACHE_PREFIXES = [
 export function KpiRolloutProvider({
   enabled,
   children,
+  initialRollout = null,
 }: {
   enabled: boolean
   children: ReactNode
+  /**
+   * Lecture anticipée côté serveur : même RPC, mêmes droits, aucun cache
+   * partagé. Elle ne bloque jamais le rendu et ne décide rien par elle-même.
+   */
+  initialRollout?: Promise<RolloutSeedResult> | null
 }) {
   const { currentStoreId, accessibleStores, accessibleStoreIds, isStoresLoading, userId } = useStore()
   const supabase = useMemo(() => createClient(), [])
@@ -105,12 +115,64 @@ export function KpiRolloutProvider({
 
   const canPoll = enabled && !isStoresLoading && storeIds.length > 0
   const scope = `${boundary}:${storeIdsKey}:${accessFingerprint}`
+
+  /**
+   * Graine serveur : appliquée uniquement si son périmètre correspond exactement
+   * au périmètre client courant. Elle alimente la même clé que la lecture
+   * normale, donc les contrôles existants (fraîcheur, version acceptée, kill
+   * switch) s'appliquent sans exception avant toute lecture financière.
+   */
+  const [seedSettled, setSeedSettled] = useState(initialRollout === null)
+  useEffect(() => {
+    if (!initialRollout) return
+    let cancelled = false
+    // Garde-fou : une graine qui ne se tranche pas ne doit jamais retarder ni
+    // empêcher la lecture client (celle-ci reste bornée par son propre délai).
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setSeedSettled(true)
+    }, KPI_ROLLOUT_SEED_WAIT_MS)
+
+    // La valeur transmise par le serveur est un thenable sérialisé : on la
+    // normalise pour disposer d'un enchaînement `.catch/.finally` fiable.
+    void Promise.resolve(initialRollout)
+      .then((result) => {
+        if (cancelled) return
+        // Décision unique et testable : périmètre exact, lecture réussie et âge
+        // réel de la décision. Un refus libère immédiatement la lecture client.
+        const decision = decideRolloutSeed({
+          result,
+          storeIds,
+          storeIdsKey,
+          now: Date.now(),
+        })
+        if (decision.apply && result.ok) {
+          queryClient.setQueryData(
+            ['dashboard-kpi-rollout', boundary, storeIds, accessFingerprint],
+            { payload: result.payload, seq: 0 },
+            { updatedAt: decision.updatedAt },
+          )
+        }
+        setSeedSettled(true)
+      })
+      .catch(() => {
+        if (!cancelled) setSeedSettled(true)
+      })
+      .finally(() => window.clearTimeout(timer))
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [initialRollout, boundary, accessFingerprint, storeIds, storeIdsKey, queryClient])
+
   const requestSeqRef = useRef(0)
   const minAcceptedSeqRef = useRef(0)
   const previousRawModeRef = useRef<KpiReaderMode>('legacy')
   const rollout = useQuery({
     queryKey: ['dashboard-kpi-rollout', boundary, storeIds, accessFingerprint],
-    enabled: canPoll,
+    // Tant que la graine serveur n'est pas tranchée, la lecture différée évite
+    // une seconde requête immédiate à l'hydratation. Sans graine : inchangé.
+    enabled: canPoll && seedSettled,
     queryFn: async ({ signal }) => {
       const seq = ++requestSeqRef.current
       const payload = await fetchKpiRollout(supabase, storeIds, signal)
@@ -118,7 +180,9 @@ export function KpiRolloutProvider({
     },
     refetchInterval: KPI_ROLLOUT_POLL_MS,
     refetchOnWindowFocus: true,
-    staleTime: 0,
+    // Une configuration fraîchement reçue n'est pas relue au montage ; le polling
+    // (5 s) et la revalidation au focus restent actifs.
+    staleTime: KPI_ROLLOUT_SEED_STALE_MS,
     retry: 1,
   })
 

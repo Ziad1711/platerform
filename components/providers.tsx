@@ -3,6 +3,7 @@
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { invalidateDashboardAnalytics } from '@/lib/dashboard/analytics-cache'
 import { useState, createContext, useContext, useEffect, useMemo, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import { StoreProvider, useStore } from '@/lib/store-context'
 import { createClient } from '@/lib/supabase/client'
 import { readSessionKey, STORE_ACCESS_UNAVAILABLE } from '@/lib/auth/store-bootstrap'
@@ -157,6 +158,14 @@ function isDefinitiveUnauthenticated(error: AuthErrorLike): boolean {
  * aucune lecture initiale des appartenances n'est nécessaire au premier rendu.
  */
 function PrivateApp({ bootstrap, children }: { bootstrap: AppBootstrap; children: React.ReactNode }) {
+  // Période d'ouverture du Dashboard (« Aujourd'hui ») appliquée dès le premier
+  // rendu : sans cela, la période globale démarre sur `month` et une lecture
+  // mensuelle peut partir avant que le filtre n'applique son défaut. Les autres
+  // pages conservent le défaut historique (`month`) : la valeur n'est fournie
+  // que sur la route du Dashboard.
+  const pathname = usePathname()
+  const initialSelectedPeriod = pathname === '/dashboard' ? 'today' : undefined
+
   // Toute écriture réussie périme les agrégats du dashboard : sans cette
   // invalidation centralisée, le `staleTime` analytique de 60 s laisserait des
   // chiffres périmés après une commande, une dépense, une livraison ou une
@@ -187,6 +196,7 @@ function PrivateApp({ bootstrap, children }: { bootstrap: AppBootstrap; children
         initialUserId={bootstrap.userId}
         initialAuthReady
         initialBootstrap={bootstrap}
+        initialSelectedPeriod={initialSelectedPeriod}
       >
         <ThemeLoader />
         {children}

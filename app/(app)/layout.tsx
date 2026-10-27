@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getServerUserResult } from '@/lib/supabase/server'
-import { buildAppBootstrap } from '@/lib/auth/store-bootstrap.server'
+import { getAppBootstrap } from '@/lib/auth/store-bootstrap.server'
 import { AppProviders } from '@/components/providers'
 import AppLayoutClient from './layout-client'
 
@@ -42,7 +42,9 @@ export default async function AppLayout({
   // Contexte privé minimal préparé par le serveur : magasins accessibles, rôles
   // et sélection validée sont transmis dès le premier rendu, ce qui évite de
   // rejouer la cascade Auth → appartenances → magasins dans le navigateur.
-  const bootstrap = await buildAppBootstrap(user.id)
+  // `getAppBootstrap` est mutualisé sur la requête : la page Dashboard réutilise
+  // exactement cette lecture au lieu de la refaire.
+  const bootstrap = await getAppBootstrap(user.id)
 
   return (
     <AppProviders initialBootstrap={bootstrap}>
