@@ -19,6 +19,7 @@ export const ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED =
 
 export const ASSISTANT_IDEMPOTENCY_RPC = {
   begin: 'rpc_assistant_begin_request',
+  bindThread: 'rpc_assistant_bind_request_thread',
   complete: 'rpc_assistant_complete_request',
   fail: 'rpc_assistant_fail_request',
 } as const
@@ -65,12 +66,12 @@ export type AssistantCreditStatus = 'charged' | 'insufficient' | 'failed' | 'not
 
 export type BeginRequestOutcome =
   | { status: 'proceed'; attemptToken: string | null }
-  | { status: 'replay'; assistantMessageId: string | null; creditStatus: AssistantCreditStatus }
+  | { status: 'replay'; threadId: string; assistantMessageId: string | null; creditStatus: AssistantCreditStatus }
   | { status: 'conflict' }
   | { status: 'in_progress' }
   | { status: 'registry_unavailable' }
 
-function toCreditStatus(value: unknown): AssistantCreditStatus {
+export function toCreditStatus(value: unknown): AssistantCreditStatus {
   return value === 'charged' || value === 'insufficient' || value === 'failed' ? value : 'not_charged'
 }
 
@@ -100,40 +101,59 @@ export async function beginAssistantRequest(
     if (message.includes('IDEMPOTENCY_IN_PROGRESS') || message.includes('IDEMPOTENCY_LEASE_BUSY')) {
       return { status: 'in_progress' }
     }
-    return { status: 'registry_unavailable' }
+    throw new Error('ASSISTANT_BACKEND_UNAVAILABLE')
   }
 
   const row = (Array.isArray(data) ? data[0] : data) as
-    | { state?: string; assistant_message_id?: string | null; attempt_token?: string | null; credit_status?: string | null }
+    | { state?: string; thread_id?: string | null; assistant_message_id?: string | null; attempt_token?: string | null; credit_status?: string | null }
     | null
     | undefined
 
-  if (!row) return { status: 'proceed', attemptToken: null }
+  if (!row) throw new Error('ASSISTANT_BACKEND_UNAVAILABLE')
 
   // Réponse déjà finalisée : rejeu du message + statut de débit réel (jamais
   // « non facturé » par défaut, qui masquerait une facturation antérieure).
   if (row.state === 'completed') {
     return {
       status: 'replay',
+      threadId: row.thread_id ? String(row.thread_id) : '',
       assistantMessageId: row.assistant_message_id ? String(row.assistant_message_id) : null,
       creditStatus: toCreditStatus(row.credit_status),
     }
   }
 
   // 'in_progress' renvoyé sans erreur = bail détenu par CET appelant.
-  return { status: 'proceed', attemptToken: row.attempt_token ? String(row.attempt_token) : null }
+  if (!row.attempt_token) throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
+  return { status: 'proceed', attemptToken: String(row.attempt_token) }
+}
+
+/** Lie le thread créé après acquisition au jeton courant (fencing). */
+export async function bindAssistantRequestThread(
+  supabase: SupabaseServerClient,
+  identity: { requestId: string; attemptToken: string; threadId: string }
+): Promise<void> {
+  if (!ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED) return
+
+  const { error } = await supabase.rpc(ASSISTANT_IDEMPOTENCY_RPC.bindThread, {
+    p_request_id: identity.requestId,
+    p_attempt_token: identity.attemptToken,
+    p_thread_id: identity.threadId,
+  })
+
+  if (error) throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
 }
 
 /** Clôture nominale du registre (après finalisation fiable des écritures). */
 export async function completeAssistantRequest(
   supabase: SupabaseServerClient,
-  identity: { requestId: string; attemptToken: string },
+  identity: { userId: string; requestId: string; attemptToken: string },
   assistantMessageId: string | null,
   creditStatus: AssistantCreditStatus
 ): Promise<boolean> {
   if (!ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED) return false
 
   const { error } = await supabase.rpc(ASSISTANT_IDEMPOTENCY_RPC.complete, {
+    p_user_id: identity.userId,
     p_request_id: identity.requestId,
     p_attempt_token: identity.attemptToken,
     p_assistant_message_id: assistantMessageId,

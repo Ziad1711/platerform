@@ -38,7 +38,7 @@ create or replace function public.rpc_assistant_begin_request(
 returns table (state text, attempt_token uuid, assistant_message_id uuid, credit_status text)
 language plpgsql security definer set search_path = public, pg_temp
 as $$
-declare v_user uuid := auth.uid(); v_row public.assistant_requests;
+declare v_user uuid := auth.uid(); v_row public.assistant_requests; v_inserted boolean := false;
 begin
   if v_user is null then raise exception 'UNAUTHORIZED' using errcode = 'P0001'; end if;
   if not public.assistant_can_read_thread(p_store_id) then
@@ -47,7 +47,8 @@ begin
 
   insert into public.assistant_requests (user_id, request_id, store_id, thread_id, fingerprint)
   values (v_user, p_request_id, p_store_id, p_thread_id, p_fingerprint)
-  on conflict (user_id, request_id) do nothing;
+  on conflict (user_id, request_id) do nothing
+  returning true into v_inserted;
 
   select * into v_row from public.assistant_requests r
    where r.user_id = v_user and r.request_id = p_request_id for update;
@@ -59,6 +60,12 @@ begin
 
   if v_row.state = 'completed' then
     return query select 'completed'::text, v_row.attempt_token, v_row.assistant_message_id, v_row.credit_status;
+    return;
+  end if;
+
+  -- Première insertion : le demandeur possède déjà le jeton et peut poursuivre.
+  if v_inserted then
+    return query select 'in_progress'::text, v_row.attempt_token, null::uuid, v_row.credit_status;
     return;
   end if;
 
@@ -76,14 +83,37 @@ begin
 end;
 $$;
 
-create or replace function public.rpc_assistant_complete_request(
-  p_request_id text, p_attempt_token uuid, p_assistant_message_id uuid, p_credit_status text
+-- Liaison du thread créé APRÈS acquisition : fencing + bail + périmètre.
+create or replace function public.rpc_assistant_bind_request_thread(
+  p_request_id text, p_attempt_token uuid, p_thread_id uuid
 )
 returns void
 language plpgsql security definer set search_path = public, pg_temp
 as $$
 begin
   if auth.uid() is null then raise exception 'UNAUTHORIZED' using errcode = 'P0001'; end if;
+
+  update public.assistant_requests r
+     set thread_id = p_thread_id, updated_at = now()
+   where r.user_id = auth.uid() and r.request_id = p_request_id
+     and r.attempt_token = p_attempt_token
+     and r.state = 'in_progress' and r.lease_until > now()
+     and (r.thread_id is null or r.thread_id = p_thread_id);
+
+  if not found then raise exception 'IDEMPOTENCY_TOKEN_MISMATCH' using errcode = 'P0001'; end if;
+end;
+$$;
+
+create or replace function public.rpc_assistant_complete_request(
+  p_user_id uuid, p_request_id text, p_attempt_token uuid,
+  p_assistant_message_id uuid, p_credit_status text
+)
+returns void
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+  -- Backend service_role : l'identité est explicite, jamais auth.uid().
+  if p_user_id is null then raise exception 'UNAUTHORIZED' using errcode = 'P0001'; end if;
   if p_credit_status not in ('charged','insufficient','failed','not_charged') then
     raise exception 'INVALID_CREDIT_STATUS' using errcode = 'P0001';
   end if;
@@ -93,7 +123,7 @@ begin
          credit_status = p_credit_status,
          credits_charged = case when p_credit_status = 'charged' then r.credits_reserved else 0 end,
          lease_until = now(), updated_at = now()
-   where r.user_id = auth.uid() and r.request_id = p_request_id
+   where r.user_id = p_user_id and r.request_id = p_request_id
      and r.attempt_token = p_attempt_token and r.state = 'in_progress';
 
   if not found then raise exception 'IDEMPOTENCY_TOKEN_MISMATCH' using errcode = 'P0001'; end if;
@@ -158,10 +188,12 @@ grant execute on function public.rpc_assistant_reserve_credits(text, uuid, integ
 grant execute on function public.rpc_assistant_release_credits(text, uuid) to authenticated;
 
 revoke all on function public.rpc_assistant_begin_request(text, uuid, uuid, text) from public, anon;
-revoke all on function public.rpc_assistant_complete_request(text, uuid, uuid, text) from public, anon, authenticated;
+revoke all on function public.rpc_assistant_bind_request_thread(text, uuid, uuid) from public, anon;
+revoke all on function public.rpc_assistant_complete_request(uuid, text, uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.rpc_assistant_fail_request(text, uuid, text) from public, anon;
 grant execute on function public.rpc_assistant_begin_request(text, uuid, uuid, text) to authenticated;
-grant execute on function public.rpc_assistant_complete_request(text, uuid, uuid, text) to service_role;
+grant execute on function public.rpc_assistant_bind_request_thread(text, uuid, uuid) to authenticated;
+grant execute on function public.rpc_assistant_complete_request(uuid, text, uuid, uuid, text) to service_role;
 grant execute on function public.rpc_assistant_fail_request(text, uuid, text) to authenticated;
 
 commit;

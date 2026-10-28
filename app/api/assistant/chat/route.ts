@@ -15,7 +15,14 @@ import {
   reserveCreditsForRequest,
   toWalletSnapshot,
 } from '@/lib/assistant/credits'
-import { beginAssistantRequest, canonicalRequestPayload, computeRequestFingerprint } from '@/lib/assistant/idempotency'
+import {
+  ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED,
+  beginAssistantRequest,
+  bindAssistantRequestThread,
+  canonicalRequestPayload,
+  computeRequestFingerprint,
+  failAssistantRequest,
+} from '@/lib/assistant/idempotency'
 import { finalizeAssistantTurn } from '@/lib/assistant/finalization'
 import { asksForOtherStore, extractComparisonRanges, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
 import { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
@@ -128,12 +135,15 @@ function resolveAiThreadTitle(raw?: string | null) {
 export async function POST(request: Request) {
   const startedAt = Date.now()
   let slotKey: string | null = null
+  let registryAttempt: { requestId: string; attemptToken: string } | null = null
+  let requestSupabase: Awaited<ReturnType<typeof requireAuthenticatedUser>>['supabase'] | null = null
 
   try {
     assertTrustedOrigin(request)
     assertAssistantRuntimeFlags()
 
     const { supabase, user } = await requireAuthenticatedUser()
+    requestSupabase = supabase
 
     const contentLength = Number(request.headers.get('content-length') || 0)
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
@@ -184,20 +194,6 @@ export async function POST(request: Request) {
     const preferredCurrency = (profileMeta as { preferred_currency?: string | null } | null)?.preferred_currency
     const userMainCurrency = String(preferredCurrency || resolvedStoreCurrency)
 
-    // Toute conversation est désormais liée à la boutique analysée.
-    let threadId = body.threadId || null
-    if (!threadId) {
-      const created = await createThread(supabase, user.id, selectedStoreId, body.message.slice(0, 60))
-      threadId = created.id
-    } else {
-      await getThread(supabase, threadId, user.id, selectedStoreId)
-    }
-
-    if (!threadId) {
-      throw new Error('THREAD_CREATE_FAILED')
-    }
-
-    const ensuredThreadId = threadId
     const requestId = body.requestId
     const fingerprint = await computeRequestFingerprint(
       canonicalRequestPayload({
@@ -217,15 +213,17 @@ export async function POST(request: Request) {
 
     if (registry.status === 'conflict') throw new Error('IDEMPOTENCY_CONFLICT')
     if (registry.status === 'in_progress') throw new Error('IDEMPOTENCY_IN_PROGRESS')
-    const attemptToken = registry.status === 'proceed' ? registry.attemptToken : null
     if (registry.status === 'replay') {
+      const replayThreadId = registry.threadId || body.threadId
+      if (!replayThreadId) throw new Error('THREAD_NOT_FOUND')
+      await getThread(supabase, replayThreadId, user.id, selectedStoreId)
       const replayedMessage = registry.assistantMessageId
-        ? await getMessageById(supabase, ensuredThreadId, registry.assistantMessageId)
+        ? await getMessageById(supabase, replayThreadId, registry.assistantMessageId)
         : null
       if (replayedMessage) {
         const replayMetadata = (replayedMessage.metadata || null) as Record<string, unknown> | null
         return NextResponse.json({
-          threadId: ensuredThreadId,
+          threadId: replayThreadId,
           assistantMessage: replayedMessage,
           structured_response: replayMetadata?.structured_response,
           replayed: true,
@@ -242,6 +240,27 @@ export async function POST(request: Request) {
         })
       }
     }
+
+    const attemptToken = registry.status === 'proceed' ? registry.attemptToken : null
+    if (ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED && !attemptToken) {
+      throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
+    }
+    if (attemptToken) registryAttempt = { requestId, attemptToken }
+
+    // Création APRÈS acquisition : deux instances portant la même clé ne
+    // peuvent plus créer deux conversations.
+    let threadId = body.threadId || null
+    if (!threadId) {
+      const created = await createThread(supabase, user.id, selectedStoreId, body.message.slice(0, 60))
+      threadId = String(created.id)
+      if (attemptToken) {
+        await bindAssistantRequestThread(supabase, { requestId, attemptToken, threadId })
+      }
+    } else {
+      await getThread(supabase, threadId, user.id, selectedStoreId)
+    }
+    if (!threadId) throw new Error('THREAD_CREATE_FAILED')
+    const ensuredThreadId = threadId
 
     // Repli sans registre : rejeu local via les métadonnées du message. Une
     // même clé avec un contenu ou un périmètre différent n'est jamais rejouée.
@@ -524,6 +543,10 @@ export async function POST(request: Request) {
       },
     })
   } catch (error) {
+    if (registryAttempt && requestSupabase) {
+      await failAssistantRequest(requestSupabase, registryAttempt, error instanceof Error ? error.message : 'UNKNOWN_ERROR')
+        .catch(() => false)
+    }
     const publicError = toPublicError(error)
     if (publicError.status >= 500) {
       console.error('[assistant] request_failed', { code: publicError.code })
