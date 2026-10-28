@@ -117,6 +117,46 @@ begin
 end;
 $$;
 
+-- Réservation INFORMATIVE (jamais un verrou de portefeuille) : jeton + bail exigés.
+create or replace function public.rpc_assistant_reserve_credits(
+  p_request_id text, p_attempt_token uuid, p_credits integer
+)
+returns void
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+  if auth.uid() is null then raise exception 'UNAUTHORIZED' using errcode = 'P0001'; end if;
+
+  update public.assistant_requests r
+     set credits_reserved = greatest(0, coalesce(p_credits, 0)), updated_at = now()
+   where r.user_id = auth.uid() and r.request_id = p_request_id
+     and r.attempt_token = p_attempt_token
+     and r.state = 'in_progress'
+     and r.lease_until > now();
+
+  if not found then raise exception 'IDEMPOTENCY_TOKEN_MISMATCH' using errcode = 'P0001'; end if;
+end;
+$$;
+
+create or replace function public.rpc_assistant_release_credits(p_request_id text, p_attempt_token uuid)
+returns void
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+  if auth.uid() is null then raise exception 'UNAUTHORIZED' using errcode = 'P0001'; end if;
+
+  update public.assistant_requests r
+     set credits_reserved = 0, updated_at = now()
+   where r.user_id = auth.uid() and r.request_id = p_request_id
+     and r.attempt_token = p_attempt_token;
+end;
+$$;
+
+revoke all on function public.rpc_assistant_reserve_credits(text, uuid, integer) from public, anon;
+revoke all on function public.rpc_assistant_release_credits(text, uuid) from public, anon;
+grant execute on function public.rpc_assistant_reserve_credits(text, uuid, integer) to authenticated;
+grant execute on function public.rpc_assistant_release_credits(text, uuid) to authenticated;
+
 revoke all on function public.rpc_assistant_begin_request(text, uuid, uuid, text) from public, anon;
 revoke all on function public.rpc_assistant_complete_request(text, uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.rpc_assistant_fail_request(text, uuid, text) from public, anon;

@@ -114,17 +114,27 @@ export type CreditReservationStatus = 'reserved' | 'unavailable'
  * `unavailable` : le pré-contrôle existant reste la seule protection, et
  * l'absence de garantie inter-instances est explicite.
  */
+/**
+ * Réservation de crédits — INFORMATIVE, jamais un verrou financier.
+ *
+ * Elle exige le jeton de tentative du registre (identité + bail vérifiés en
+ * base) et n'immobilise aucun solde : seule la finalisation atomique débite.
+ * Sans jeton, la réservation est refusée (`unavailable`) : aucun chemin ne peut
+ * présenter un solde « réservé » comme garantie.
+ */
 export async function reserveCreditsForRequest(
   supabase: SupabaseServerClient,
   credits: number,
-  requestId: string
+  identity: { requestId: string; attemptToken: string | null }
 ): Promise<{ status: CreditReservationStatus }> {
   const amount = Math.max(0, Math.round(Number(credits || 0)))
   if (!ASSISTANT_CREDIT_RESERVATION_ENABLED || amount === 0) return { status: 'unavailable' }
+  if (!identity.attemptToken) return { status: 'unavailable' }
 
   const { error } = await supabase.rpc(ASSISTANT_CREDIT_RPC.reserve, {
+    p_request_id: identity.requestId,
+    p_attempt_token: identity.attemptToken,
     p_credits: amount,
-    p_request_id: requestId,
   })
 
   return error ? { status: 'unavailable' } : { status: 'reserved' }
@@ -133,11 +143,14 @@ export async function reserveCreditsForRequest(
 /** Libère une réservation lorsque la requête n'a pas produit de réponse facturable. */
 export async function releaseCreditReservation(
   supabase: SupabaseServerClient,
-  requestId: string
+  identity: { requestId: string; attemptToken: string | null }
 ): Promise<boolean> {
-  if (!ASSISTANT_CREDIT_RESERVATION_ENABLED) return false
+  if (!ASSISTANT_CREDIT_RESERVATION_ENABLED || !identity.attemptToken) return false
 
-  const { error } = await supabase.rpc(ASSISTANT_CREDIT_RPC.release, { p_request_id: requestId })
+  const { error } = await supabase.rpc(ASSISTANT_CREDIT_RPC.release, {
+    p_request_id: identity.requestId,
+    p_attempt_token: identity.attemptToken,
+  })
   return !error
 }
 

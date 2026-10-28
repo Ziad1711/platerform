@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import {
-  addMessage,
   createThread,
   findAssistantReplyByRequestId,
   getMessageById,
   getThread,
   listMessages,
-  touchThread,
 } from '@/lib/assistant/chat'
 import {
   computeCreditsUsed,
@@ -331,34 +329,43 @@ export async function POST(request: Request) {
     }
 
     if (smallResponse) {
-      await addMessage(
+      // Même chemin fiable que les réponses analytiques : écriture backend,
+      // registre clôturé, aucune écriture `assistant` par le client.
+      const smallFinalization = await finalizeAssistantTurn({
         supabase,
-        ensuredThreadId,
-        'user',
-        body.message,
-        0,
-        { request_id: requestId, request_fingerprint: fingerprint }
-      )
-      const assistantMessage = await addMessage(
-        supabase,
-        ensuredThreadId,
-        'assistant',
-        smallResponse.message_text,
-        0,
-        {
+        threadId: ensuredThreadId,
+        userId: user.id,
+        storeId: selectedStoreId,
+        requestId,
+        fingerprint,
+        attemptToken,
+        intent,
+        userMessage: body.message,
+        assistantContent: smallResponse.message_text,
+        assistantMetadata: {
           structured_response: smallResponse,
           request_id: requestId,
           request_fingerprint: fingerprint,
-        }
-      )
-      const nextTitle = isFirstExchange ? resolveAiThreadTitle(smallResponse.conversation_title) : undefined
-      await touchThread(supabase, ensuredThreadId, nextTitle)
+        },
+        creditsUsed: 0,
+        provider: {
+          text: smallResponse.message_text,
+          inputTokens: 0,
+          outputTokens: 0,
+          providerName: 'none',
+          modelName: 'none',
+          providerCostUsd: 0,
+        },
+        nextTitle: isFirstExchange ? resolveAiThreadTitle(smallResponse.conversation_title) : undefined,
+      })
 
       return NextResponse.json({
         threadId: ensuredThreadId,
-        assistantMessage,
+        assistantMessage: smallFinalization.assistantMessage,
         structured_response: smallResponse,
-        credit_status: 'not_charged',
+        credit_status: smallFinalization.creditStatus,
+        finalization_atomic: smallFinalization.atomic,
+        warning: smallFinalization.warning,
         usage: {
           creditsUsed: 0,
           inputTokens: 0,
@@ -379,7 +386,10 @@ export async function POST(request: Request) {
     })
 
     const { wallet } = await ensureCreditsAvailable(supabase, estimatedCredits)
-    const creditReservation = await reserveCreditsForRequest(supabase, estimatedCredits, requestId)
+    const creditReservation = await reserveCreditsForRequest(supabase, estimatedCredits, {
+      requestId,
+      attemptToken,
+    })
 
     const model = getAssistantModelName()
 
@@ -416,7 +426,7 @@ export async function POST(request: Request) {
       const rawCode = agentError instanceof Error ? agentError.message : ''
 
       if (creditReservation.status === 'reserved') {
-        await releaseCreditReservation(supabase, requestId).catch(() => false)
+        await releaseCreditReservation(supabase, { requestId, attemptToken }).catch(() => false)
       }
 
       if (deadlineReached || rawCode.endsWith('_ABORTED')) {
