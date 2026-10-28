@@ -75,6 +75,21 @@ commit;
 --    where table_schema='public' and table_name like 'chat_%' or table_name='ai_usage';
 --   select tablename, policyname, cmd, roles from pg_policies where schemaname='public';
 
+-- NOTE v2 : l'insertion directe d'un message `assistant` ou `system` par
+-- `authenticated` est INTERDITE ci-dessous ; les réponses de confiance passent
+-- par le backend (service_role) et par 05b. À appliquer APRÈS déploiement du
+-- code backend (sinon les réponses échouent volontairement, fail-closed).
+drop policy if exists chat_messages_insert_own_thread on public.chat_messages;
+create policy chat_messages_insert_own_thread on public.chat_messages
+  for insert to authenticated
+  with check (
+    role = 'user'
+    and exists (
+      select 1 from public.chat_threads ct
+       where ct.id = chat_messages.thread_id and ct.user_id = auth.uid()
+    )
+  );
+
 -- Rollback (ne jamais réaccorder ALL à anon) :
 --   grant select, insert, update, delete on public.chat_threads, public.chat_messages, public.ai_usage to authenticated;
 --   puis recréer les policies d'origine (prédicats identiques).
