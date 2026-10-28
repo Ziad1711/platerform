@@ -158,6 +158,25 @@ export async function findAssistantReplyByRequestId(
   return data?.[0] || null
 }
 
+/** Message d'une conversation, par identifiant (rejeu du registre d'idempotence). */
+export async function getMessageById(
+  supabase: SupabaseServerClient,
+  threadId: string,
+  messageId: string
+) {
+  if (!isUuid(threadId) || !isUuid(messageId)) return null
+
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('id, thread_id, role, content, credits_used, metadata, created_at')
+    .eq('thread_id', threadId)
+    .eq('id', messageId)
+    .maybeSingle()
+
+  if (error) throw new Error('MESSAGES_LIST_FAILED')
+  return data || null
+}
+
 export async function addMessage(
   supabase: SupabaseServerClient,
   threadId: string,

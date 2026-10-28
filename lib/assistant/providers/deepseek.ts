@@ -18,9 +18,11 @@ export class DeepSeekProvider implements AssistantProvider {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: input.signal,
       body: JSON.stringify({
         model: input.model,
         temperature: 0.2,
+        ...(input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
         messages: [
           { role: 'system', content: input.systemPrompt },
           ...input.messages.map((message) => ({
@@ -29,6 +31,9 @@ export class DeepSeekProvider implements AssistantProvider {
           })),
         ],
       }),
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.name === 'AbortError') throw new Error('DEEPSEEK_ABORTED')
+      throw new Error('DEEPSEEK_CALL_FAILED')
     })
 
     if (!response.ok) {

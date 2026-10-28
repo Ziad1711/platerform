@@ -235,6 +235,8 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     model: providerModel,
     systemPrompt,
     messages: [...conversationHistory, { role: 'user', content: userPrompt }],
+    signal: input.signal,
+    maxOutputTokens: input.maxOutputTokens,
   })
 
   const parsed = parseProviderStructuredOutput(providerResult.text)

@@ -2,6 +2,11 @@
 -- PROPOSITION — REVUE DE DONNÉES (LECTURE SEULE)
 -- Objet : conversations de l'assistant sans boutique (`store_id IS NULL`).
 --
+-- Depuis 02_, ces conversations sont en QUARANTAINE : elles ne sont plus lisibles
+-- via PostgREST (la fonction d'accès renvoie false pour store_id NULL). Elles
+-- restent supprimables par leur propriétaire. Aucune suppression n'est exécutée
+-- ici : la décision produit est requise.
+--
 -- Constat en production : 13 conversations sur 26 n'ont aucune boutique.
 -- Cause probable : `chat_threads.store_id` est nullable avec
 -- `ON DELETE SET NULL` ; la suppression d'une boutique détache ses

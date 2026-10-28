@@ -13,6 +13,7 @@ interface Params {
 }
 
 function readPageNumber(value: string | null, fallback: number) {
+  if (value === null || value.trim() === '') return fallback
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return fallback
   return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(numeric)))

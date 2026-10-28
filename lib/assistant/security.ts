@@ -316,6 +316,10 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   NO_STORE_SELECTED: 'Sélectionnez une boutique.',
   INVALID_REQUEST: 'Requête invalide.',
   INVALID_STORE_ID: 'Identifiant de boutique invalide.',
+  IDEMPOTENCY_KEY_REQUIRED: 'Identifiant de requête obligatoire. Rechargez la page et réessayez.',
+  IDEMPOTENCY_CONFLICT: 'Cette requête a déjà été utilisée avec un contenu différent.',
+  IDEMPOTENCY_IN_PROGRESS: 'Cette demande est déjà en cours de traitement.',
+  REQUEST_ABORTED: 'Demande interrompue (changement de périmètre ou délai dépassé).',
   EMPTY_MESSAGE: 'Votre message est vide.',
   MESSAGE_TOO_LONG: 'Votre message dépasse la longueur autorisée.',
   STORE_ACCESS_CHECK_FAILED: 'Vérification des accès impossible pour le moment.',
@@ -360,6 +364,10 @@ export function getErrorStatus(error: unknown) {
   if (message === 'MESSAGE_TOO_LONG') return 413
   if (message === 'INVALID_THREAD_ACTION') return 400
   if (message === 'INVALID_THREAD_TITLE') return 400
+  if (message === 'IDEMPOTENCY_KEY_REQUIRED') return 400
+  if (message === 'IDEMPOTENCY_CONFLICT') return 409
+  if (message === 'IDEMPOTENCY_IN_PROGRESS') return 409
+  if (message === 'REQUEST_ABORTED') return 408
   if (message === 'THREAD_NOT_FOUND') return 404
   if (message === 'THREAD_STORE_MISMATCH') return 409
   if (message === 'RATE_LIMITED') return 429

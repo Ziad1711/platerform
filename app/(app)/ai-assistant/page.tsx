@@ -177,7 +177,7 @@ function readApiError(payload: unknown, fallback: string) {
 
 export default function AssistantIAPage() {
   const queryClient = useQueryClient()
-  const { currentStoreId } = useStore()
+  const { currentStoreId, userId } = useStore()
 
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [input, setInput] = useState('')
@@ -193,8 +193,10 @@ export default function AssistantIAPage() {
   const hasStore = Boolean(currentStoreId)
   const canLoad = hasStore
 
+  // Les caches sont liés au compte ET à la boutique : un changement de compte
+  // ne peut jamais réafficher les conversations d'un autre utilisateur.
   const threadsQuery = useQuery<{ threads: ThreadItem[] }>({
-    queryKey: ['assistant-threads', currentStoreId],
+    queryKey: ['assistant-threads', userId, currentStoreId],
     enabled: canLoad,
     queryFn: async () => {
       const res = await fetch(`/api/assistant/threads?storeId=${encodeURIComponent(String(currentStoreId))}`)
@@ -205,7 +207,7 @@ export default function AssistantIAPage() {
   })
 
   const walletQuery = useQuery<{ wallet: WalletResponse }>({
-    queryKey: ['assistant-wallet'],
+    queryKey: ['assistant-wallet', userId],
     queryFn: async () => {
       const res = await fetch('/api/assistant/wallet')
       const data = await res.json().catch(() => null)
@@ -232,12 +234,14 @@ export default function AssistantIAPage() {
       ? optimisticUserMessage.content
       : null
 
-  const messagesQuery = useQuery<{ messages: ChatMessage[] }>({
-    queryKey: ['assistant-messages', currentStoreId, selectedThreadId],
+  const [messagePageSize, setMessagePageSize] = useState(50)
+
+  const messagesQuery = useQuery<{ messages: ChatMessage[]; hasMore?: boolean }>({
+    queryKey: ['assistant-messages', userId, currentStoreId, selectedThreadId, messagePageSize],
     enabled: canLoad && Boolean(selectedThreadId),
     queryFn: async () => {
       const res = await fetch(
-        `/api/assistant/threads/${selectedThreadId}/messages?storeId=${encodeURIComponent(String(currentStoreId))}`
+        `/api/assistant/threads/${selectedThreadId}/messages?storeId=${encodeURIComponent(String(currentStoreId))}&limit=${messagePageSize}`
       )
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger les messages'))
@@ -270,24 +274,26 @@ export default function AssistantIAPage() {
     },
   })
 
-  const sendMessageMutation = useMutation({
-    mutationFn: async (payload: { message: string; threadId: string | null }) => {
-      if (!currentStoreId) throw new Error('Sélectionnez une boutique avant d’envoyer un message.')
+  const sendAbortRef = useRef<AbortController | null>(null)
 
-      // Clé d'idempotence : un retry réseau ne relance ni l'appel IA ni le débit.
-      const requestId =
-        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : null
+  const sendMessageMutation = useMutation({
+    mutationFn: async (payload: { message: string; threadId: string | null; requestId: string; storeId: string }) => {
+      if (!payload.storeId) throw new Error('Sélectionnez une boutique avant d’envoyer un message.')
+
+      // Une seule requête en vol : la précédente est annulée (serveur + fournisseur).
+      sendAbortRef.current?.abort()
+      const controller = new AbortController()
+      sendAbortRef.current = controller
 
       const res = await fetch('/api/assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
-          storeId: currentStoreId,
+          storeId: payload.storeId,
           threadId: payload.threadId,
           message: payload.message,
-          requestId,
+          requestId: payload.requestId,
         }),
       })
 
@@ -295,7 +301,10 @@ export default function AssistantIAPage() {
       if (!res.ok) throw new Error(readApiError(data, 'Erreur Assistant IA'))
       return data
     },
-    onSuccess: async (data) => {
+    onSuccess: async (data, variables) => {
+      // Réponse tardive d'un autre périmètre : jamais appliquée à la boutique courante.
+      if (variables.storeId !== currentStoreId) return
+
       if (data?.threadId) {
         setActiveThreadId(data.threadId)
       }
@@ -309,12 +318,27 @@ export default function AssistantIAPage() {
       setWarning(typeof data?.warning === 'string' && data.warning ? data.warning : null)
       setOptimisticUserMessage(null)
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (variables.storeId !== currentStoreId) return
+      if (error instanceof DOMException && error.name === 'AbortError') return
+
       setServerError(error instanceof Error ? error.message : 'Erreur d’envoi')
       setWarning(null)
       setOptimisticUserMessage(null)
     },
+    onSettled: () => {
+      sendAbortRef.current = null
+    },
   })
+
+  // Changement de boutique ou de compte : annule la requête en vol pour empêcher
+  // toute réponse affichée hors du périmètre courant.
+  useEffect(() => {
+    return () => {
+      sendAbortRef.current?.abort()
+      sendAbortRef.current = null
+    }
+  }, [currentStoreId, userId])
 
   const updateThreadMutation = useMutation({
     mutationFn: async (payload: { threadId: string; action: 'rename' | 'toggle_pin'; title?: string; isPinned?: boolean }) => {
@@ -391,15 +415,41 @@ export default function AssistantIAPage() {
     }
   }
 
+  const pendingRequestRef = useRef<{ text: string; requestId: string } | null>(null)
+
   const handleSend = async (message: string) => {
     const clean = message.trim()
-    if (!clean || !hasStore) return
+    if (!clean || !hasStore || !currentStoreId) return
     setServerError(null)
     setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
     setInput('')
 
+    // Même texte relancé après un échec = même clé : le serveur rejoue la
+    // réponse déjà produite au lieu de rappeler le fournisseur ou de débiter.
+    const requestId =
+      pendingRequestRef.current && pendingRequestRef.current.text === clean
+        ? pendingRequestRef.current.requestId
+        : typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : null
+
+    if (!requestId) {
+      setInput(clean)
+      setOptimisticUserMessage(null)
+      setServerError('Navigateur incompatible : identifiant de requête indisponible.')
+      return
+    }
+
+    pendingRequestRef.current = { text: clean, requestId }
+
     try {
-      await sendMessageMutation.mutateAsync({ message: clean, threadId: selectedThreadId })
+      await sendMessageMutation.mutateAsync({
+        message: clean,
+        threadId: selectedThreadId,
+        requestId,
+        storeId: currentStoreId,
+      })
+      pendingRequestRef.current = null
     } catch {
       setInput(clean)
     }
@@ -571,6 +621,18 @@ export default function AssistantIAPage() {
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-secondary/40">
           {serverError ? (
             <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">{serverError}</div>
+          ) : null}
+
+          {messagesQuery.data?.hasMore ? (
+            <div className="flex justify-center">
+              <button
+                onClick={() => setMessagePageSize((prev) => Math.min(prev + 50, 100))}
+                disabled={messagesQuery.isFetching}
+                className="text-[11px] px-3 py-1.5 rounded-full border bg-card hover:bg-secondary disabled:opacity-50"
+              >
+                Charger les messages plus anciens
+              </button>
+            </div>
           ) : null}
 
           {!selectedThreadId && !pendingUserMessage ? (

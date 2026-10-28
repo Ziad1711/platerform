@@ -10,6 +10,7 @@ import {
 const MAX_TITLE_LENGTH = 120
 
 function readNumericParam(value: string | null) {
+  if (value === null || value.trim() === '') return undefined
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : undefined
 }

@@ -40,6 +40,10 @@ export interface RunSecureAgentInput {
   userMessage: string
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
   providerModel: string
+  /** Annulation transmise jusqu'au fournisseur IA. */
+  signal?: AbortSignal
+  /** Plafond de tokens de sortie appliqué par le fournisseur. */
+  maxOutputTokens?: number
 }
 
 export interface RunSecureAgentOutput {

@@ -4,17 +4,21 @@ import {
   addMessage,
   createThread,
   findAssistantReplyByRequestId,
+  getMessageById,
   getThread,
   listMessages,
   touchThread,
 } from '@/lib/assistant/chat'
 import {
-  chargeCredits,
   computeCreditsUsed,
   ensureCreditsAvailable,
   estimateCreditsForRequest,
+  releaseCreditReservation,
+  reserveCreditsForRequest,
   toWalletSnapshot,
 } from '@/lib/assistant/credits'
+import { beginAssistantRequest, canonicalRequestPayload, computeRequestFingerprint } from '@/lib/assistant/idempotency'
+import { finalizeAssistantTurn } from '@/lib/assistant/finalization'
 import { asksForOtherStore, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
 import { getAssistantModelName } from '@/lib/assistant/providers'
 import { buildGreetingResponse, buildSmallTalkResponse, buildStructuredResponseFromContext } from '@/lib/assistant/response'
@@ -23,7 +27,6 @@ import {
   requireAssistantStoreAccess,
   requireAuthenticatedUser,
   toPublicError,
-  withTimeout,
 } from '@/lib/assistant/security'
 import { acquireAssistantSlot, releaseAssistantSlot } from '@/lib/assistant/rate-limit'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
@@ -38,6 +41,11 @@ const ASSISTANT_REQUEST_TIMEOUT_MS = Math.max(
   5_000,
   Number(process.env.ASSISTANT_REQUEST_TIMEOUT_MS || 45_000)
 )
+/** Plafond de tokens de sortie appliqué côté fournisseur. */
+const ASSISTANT_MAX_OUTPUT_TOKENS = Math.max(
+  64,
+  Number(process.env.ASSISTANT_MAX_OUTPUT_TOKENS || 800)
+)
 /** Nombre de messages d'historique transmis au modèle. */
 const CONVERSATION_HISTORY_LIMIT = 8
 /** Fenêtre d'historique relue pour la mémoire analytique et le contexte. */
@@ -46,7 +54,7 @@ const MESSAGE_CONTEXT_WINDOW = 50
 const ChatRequestSchema = z.object({
   storeId: z.string().uuid().nullish(),
   threadId: z.string().uuid().nullish(),
-  requestId: z.string().uuid().nullish(),
+  requestId: z.string().uuid(),
   message: z.string().min(1).max(MAX_MESSAGE_LENGTH),
 })
 
@@ -67,10 +75,14 @@ function readChatRequest(raw: unknown): ChatRequestInput {
   if (!rawMessage) throw new Error('EMPTY_MESSAGE')
   if (rawMessage.length > MAX_MESSAGE_LENGTH) throw new Error('MESSAGE_TOO_LONG')
 
+  // Clé d'idempotence obligatoire : sans elle, aucun rejeu fiable n'est possible.
+  const requestId = normalizeId(source.requestId)
+  if (!requestId) throw new Error('IDEMPOTENCY_KEY_REQUIRED')
+
   const parsed = ChatRequestSchema.safeParse({
     storeId: normalizeId(source.storeId),
     threadId: normalizeId(source.threadId),
-    requestId: normalizeId(source.requestId),
+    requestId,
     message: rawMessage,
   })
 
@@ -185,20 +197,65 @@ export async function POST(request: Request) {
     }
 
     const ensuredThreadId = threadId
+    const requestId = body.requestId
+    const fingerprint = await computeRequestFingerprint(
+      canonicalRequestPayload({
+        storeId: selectedStoreId,
+        threadId: body.threadId ?? null,
+        message: body.message,
+      })
+    )
 
-    // Rejeu idempotent : une même requête ne produit ni second appel IA ni
-    // second débit, après un double clic ou un retry réseau. Une conversation
-    // créée à l'instant ne peut pas contenir de requête déjà traitée.
-    if (body.requestId && body.threadId) {
-      const replayed = await findAssistantReplyByRequestId(supabase, ensuredThreadId, body.requestId)
+    // Registre persistant : inactif tant que la migration n'est pas appliquée.
+    const registry = await beginAssistantRequest(supabase, {
+      requestId,
+      fingerprint,
+      storeId: selectedStoreId,
+      threadId: body.threadId ?? null,
+    })
+
+    if (registry.status === 'conflict') throw new Error('IDEMPOTENCY_CONFLICT')
+    if (registry.status === 'in_progress') throw new Error('IDEMPOTENCY_IN_PROGRESS')
+    if (registry.status === 'replay') {
+      const replayedMessage = await getMessageById(supabase, ensuredThreadId, registry.assistantMessageId)
+      if (replayedMessage) {
+        const replayMetadata = (replayedMessage.metadata || null) as Record<string, unknown> | null
+        return NextResponse.json({
+          threadId: ensuredThreadId,
+          assistantMessage: replayedMessage,
+          structured_response: replayMetadata?.structured_response,
+          replayed: true,
+          credit_status: 'not_charged',
+          finalization_atomic: true,
+          usage: {
+            creditsUsed: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            providerName: 'replay',
+            modelName: 'replay',
+            providerCostUsd: 0,
+          },
+        })
+      }
+    }
+
+    // Repli sans registre : rejeu local via les métadonnées du message. Une
+    // même clé avec un contenu ou un périmètre différent n'est jamais rejouée.
+    if (body.threadId) {
+      const replayed = await findAssistantReplyByRequestId(supabase, ensuredThreadId, requestId)
       if (replayed) {
         const replayMetadata = (replayed.metadata || null) as Record<string, unknown> | null
+        const storedFingerprint =
+          typeof replayMetadata?.request_fingerprint === 'string' ? replayMetadata.request_fingerprint : null
+        if (storedFingerprint && storedFingerprint !== fingerprint) throw new Error('IDEMPOTENCY_CONFLICT')
+
         return NextResponse.json({
           threadId: ensuredThreadId,
           assistantMessage: replayed,
           structured_response: replayMetadata?.structured_response,
           replayed: true,
           credit_status: 'not_charged',
+          finalization_atomic: false,
           usage: {
             creditsUsed: 0,
             inputTokens: 0,
@@ -255,7 +312,7 @@ export async function POST(request: Request) {
         'user',
         body.message,
         0,
-        body.requestId ? { request_id: body.requestId } : null
+        { request_id: requestId, request_fingerprint: fingerprint }
       )
       const assistantMessage = await addMessage(
         supabase,
@@ -265,7 +322,8 @@ export async function POST(request: Request) {
         0,
         {
           structured_response: smallResponse,
-          ...(body.requestId ? { request_id: body.requestId } : {}),
+          request_id: requestId,
+          request_fingerprint: fingerprint,
         }
       )
       const nextTitle = isFirstExchange ? resolveAiThreadTitle(smallResponse.conversation_title) : undefined
@@ -296,40 +354,63 @@ export async function POST(request: Request) {
     })
 
     const { wallet } = await ensureCreditsAvailable(supabase, estimatedCredits)
+    const creditReservation = await reserveCreditsForRequest(supabase, estimatedCredits, requestId)
 
     const model = getAssistantModelName()
 
+    // Budget d'exécution : l'annulation est propagée jusqu'au fournisseur HTTP.
+    const controller = new AbortController()
+    let deadlineReached = false
+    const deadlineTimer = setTimeout(() => {
+      deadlineReached = true
+      controller.abort()
+    }, ASSISTANT_REQUEST_TIMEOUT_MS)
+
     let agentResult: Awaited<ReturnType<typeof runSecureAssistantAgent>>
     try {
-      agentResult = await withTimeout(
-        runSecureAssistantAgent({
-          supabase,
+      agentResult = await runSecureAssistantAgent({
+        supabase,
+        scopeStoreIds: targetStoreIds,
+        scopeContext: {
           scopeStoreIds: targetStoreIds,
-          scopeContext: {
-            scopeStoreIds: targetStoreIds,
-            displayStoreId: selectedStoreId,
-            displayStoreName: String(storeMeta.name || 'Store'),
-            displayCurrency: resolvedStoreCurrency,
-            userMainCurrency,
-          },
-          intent,
-          range,
-          userMessage: body.message,
-          conversationHistory: conversationalHistory,
-          providerModel: model,
-        }),
-        ASSISTANT_REQUEST_TIMEOUT_MS
-      )
+          displayStoreId: selectedStoreId,
+          displayStoreName: String(storeMeta.name || 'Store'),
+          displayCurrency: resolvedStoreCurrency,
+          userMainCurrency,
+        },
+        intent,
+        range,
+        userMessage: body.message,
+        conversationHistory: conversationalHistory,
+        providerModel: model,
+        signal: controller.signal,
+        maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
+      })
     } catch (agentError) {
-      const controlled = toControlledAgentError(agentError)
-      if (controlled.message !== 'ASSISTANT_TIMEOUT') {
-        console.error('[assistant] agent_failed', {
-          code: controlled.message,
+      const rawCode = agentError instanceof Error ? agentError.message : ''
+
+      if (creditReservation.status === 'reserved') {
+        await releaseCreditReservation(supabase, requestId).catch(() => false)
+      }
+
+      if (deadlineReached || rawCode.endsWith('_ABORTED')) {
+        console.warn('[assistant] request_aborted', {
           storeId: selectedStoreId,
+          deadline: deadlineReached,
           durationMs: Date.now() - startedAt,
         })
+        throw new Error(deadlineReached ? 'ASSISTANT_TIMEOUT' : 'REQUEST_ABORTED')
       }
+
+      const controlled = toControlledAgentError(agentError)
+      console.error('[assistant] agent_failed', {
+        code: controlled.message,
+        storeId: selectedStoreId,
+        durationMs: Date.now() - startedAt,
+      })
       throw controlled
+    } finally {
+      clearTimeout(deadlineTimer)
     }
 
     const providerResult = agentResult.providerUsage
@@ -344,75 +425,49 @@ export async function POST(request: Request) {
 
     // Mettre à jour la mémoire analytique et la persister dans les métadonnées
     const updatedMemory = updateMemoryFromAnalysis(threadMemory, body.message, range, intent)
-
-    await addMessage(
-      supabase,
-      ensuredThreadId,
-      'user',
-      body.message,
-      0,
-      body.requestId ? { request_id: body.requestId } : null
-    )
-    const assistantMessage = await addMessage(
-      supabase,
-      ensuredThreadId,
-      'assistant',
-      structuredResponse.message_text,
-      creditsUsed,
-      {
-        structured_response: structuredResponse,
-        analytic_memory: updatedMemory,
-        ...(body.requestId ? { request_id: body.requestId } : {}),
-      }
-    )
     const nextTitle = isFirstExchange
       ? resolveAiThreadTitle(structuredResponse.conversation_title) || buildAutoThreadTitle(body.message, structuredResponse.message_text)
       : undefined
-    await touchThread(supabase, ensuredThreadId, nextTitle)
 
-    let warning: string | null = null
-
-    const { error: usageError } = await supabase.from('ai_usage').insert({
-      user_id: user.id,
-      store_id: selectedStoreId,
-      thread_id: ensuredThreadId,
-      feature: 'chatbot',
-      credits_used: creditsUsed,
-      input_tokens: providerResult.inputTokens,
-      output_tokens: providerResult.outputTokens,
-      provider_name: providerResult.providerName,
-      model_name: providerResult.modelName,
-      provider_cost_usd: providerResult.providerCostUsd,
+    // Finalisation : atomique UNIQUEMENT si la RPC dédiée est appliquée et activée.
+    // Par défaut, chemin séquentiel : réponse sans débit possible, jamais l'inverse.
+    const finalization = await finalizeAssistantTurn({
+      supabase,
+      threadId: ensuredThreadId,
+      userId: user.id,
+      storeId: selectedStoreId,
+      requestId,
+      fingerprint,
+      intent,
+      userMessage: body.message,
+      assistantContent: structuredResponse.message_text,
+      assistantMetadata: {
+        structured_response: structuredResponse,
+        analytic_memory: updatedMemory,
+        request_id: requestId,
+        request_fingerprint: fingerprint,
+      },
+      creditsUsed,
+      provider: providerResult,
+      nextTitle,
     })
 
-    if (usageError) {
-      warning = 'Le journal d’usage IA n’a pas pu être enregistré.'
-      console.error('[assistant] usage_log_failed', { code: usageError.code || 'unknown' })
-    }
-
-    // Débit après persistance : une erreur de facturation ne crée jamais de
-    // message fantôme, et le statut réel est exposé au client.
-    const charge = await chargeCredits(supabase, creditsUsed)
-    if (charge.status !== 'charged') {
-      warning = warning || 'La consommation de crédits n’a pas pu être confirmée.'
-      console.error('[assistant] credit_charge_failed', { status: charge.status })
-    }
-
-    const chargedCredits = charge.status === 'charged' ? creditsUsed : 0
+    const chargedCredits = finalization.creditStatus === 'charged' ? creditsUsed : 0
 
     console.info('[assistant] request_done', {
       intent,
       storeId: selectedStoreId,
       durationMs: Date.now() - startedAt,
       creditsUsed,
-      charge: charge.status,
+      charge: finalization.creditStatus,
+      atomic: finalization.atomic,
       provider: providerResult.providerName,
       model: providerResult.modelName,
     })
 
     return NextResponse.json({
       threadId: ensuredThreadId,
-      assistantMessage,
+      assistantMessage: finalization.assistantMessage,
       usage: {
         creditsUsed,
         inputTokens: providerResult.inputTokens,
@@ -422,8 +477,9 @@ export async function POST(request: Request) {
         providerCostUsd: providerResult.providerCostUsd,
       },
       structured_response: structuredResponse,
-      warning,
-      credit_status: charge.status,
+      warning: finalization.warning,
+      credit_status: finalization.creditStatus,
+      finalization_atomic: finalization.atomic,
       wallet: {
         monthlyCredits: walletSnapshot.monthlyCredits,
         creditsUsed: walletSnapshot.creditsUsed + chargedCredits,
