@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import type { AnalyticsRange } from '@/lib/assistant/types'
+import { readAssistantKpis, resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
@@ -104,6 +105,8 @@ function resolveDateRange(range: AnalyticsRange) {
 }
 
 export async function getDashboardKPIs(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  return readAssistantKpis(supabase, storeIds, resolveAssistantBusinessRange(range))
+  /* Ancien calcul non exhaustif désactivé : le lecteur V5 est la seule source des KPI.
   const { start, end } = resolveDateRange(range)
 
   const [ordersRes, adSpendRes] = await Promise.all([
@@ -165,6 +168,7 @@ export async function getDashboardKPIs(supabase: SupabaseServerClient, storeIds:
     deliveryCost,
     confirmationCost,
   }
+  */
 }
 
 export async function getTopProducts(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
@@ -265,6 +269,8 @@ export async function getAdsSpend(supabase: SupabaseServerClient, storeIds: stri
 }
 
 export async function getProfitSummary(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
+  return readAssistantKpis(supabase, storeIds, resolveAssistantBusinessRange(range))
+  /* Ancien calcul financier non autorisé/non exhaustif désactivé.
   const { start, end } = resolveDateRange(range)
 
   const [ordersRes, adsRes, expensesRes] = await Promise.all([
@@ -343,6 +349,7 @@ export async function getProfitSummary(supabase: SupabaseServerClient, storeIds:
     profit,
     marginRate: revenue > 0 ? Number(((profit / revenue) * 100).toFixed(2)) : 0,
   }
+  */
 }
 
 export async function getRecentOrders(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
@@ -364,6 +371,11 @@ export async function getRecentOrders(supabase: SupabaseServerClient, storeIds: 
 }
 
 export async function getStockSummary(supabase: SupabaseServerClient, storeIds: string[]) {
+  // Pas de somme sur les mouvements : elle ignore le stock des variantes et les réservations.
+  // Une RPC de snapshot autorisée et bornée par store est nécessaire.
+  void supabase; void storeIds
+  return { state: 'unavailable' as const, reason: 'Snapshot stock par variante non disponible pour l’assistant.' }
+  /* Ancien calcul double-compté désactivé.
   const query = supabase
     .from('inventory_movements')
     .select('product_id, movement_type, quantity, products(name)')
@@ -402,6 +414,7 @@ export async function getStockSummary(supabase: SupabaseServerClient, storeIds: 
     lowStock,
     items: rows.sort((a, b) => a.stock - b.stock).slice(0, 10),
   }
+  */
 }
 
 export async function getSupplierSummary(supabase: SupabaseServerClient, storeIds: string[]) {
