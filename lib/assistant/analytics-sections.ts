@@ -23,7 +23,7 @@ import {
   type SectionRequest,
   type SectionResult,
 } from '@/lib/assistant/analytics-contract'
-import { percentOfCounts, sumDecimals, compareDecimals } from '@/lib/assistant/analytics-decimal'
+import { compareDecimals, decimalFromRpc, percentOfCounts, sumDecimals } from '@/lib/assistant/analytics-decimal'
 import {
   assertBusinessRange,
   exclusiveEndAsInclusiveMicrosecond,
@@ -331,6 +331,7 @@ export async function readCitySection({ supabase, kpis }: SectionRequest): Promi
 
   const mapped: CityPerformanceRow[] = []
   let malformed = 0
+  let inexactAmounts = 0
   for (const row of rawRows) {
     const totalOrders = toNumber(row.total_orders)
     const confirmedOrders = toNumber(row.confirmed_orders)
@@ -346,6 +347,9 @@ export async function readCitySection({ supabase, kpis }: SectionRequest): Promi
       continue
     }
 
+    const revenue = decimalFromRpc(row.total_revenue)
+    if (!revenue.exact && revenue.value !== null) inexactAmounts += 1
+
     mapped.push({
       city: row.city ?? 'Ville non renseignée',
       totalOrders,
@@ -353,7 +357,7 @@ export async function readCitySection({ supabase, kpis }: SectionRequest): Promi
       deliveredOrders,
       returnedOrders,
       cancelledOrders,
-      revenue: toDecimalText(row.total_revenue),
+      revenue: revenue.value,
       confirmationRate: percentOfCounts(confirmedOrders, totalOrders),
       deliveryRate: percentOfCounts(deliveredOrders, totalOrders),
     })
@@ -366,6 +370,12 @@ export async function readCitySection({ supabase, kpis }: SectionRequest): Promi
     if (meta.state === 'complete') meta.state = 'partial'
     meta.issues.push(`CITY_ROWS_UNPARSABLE:${malformed}`)
     meta.notices.push(`${malformed} ligne(s) de ville illisible(s) exclue(s) : totaux partiels.`)
+  }
+  if (inexactAmounts > 0) {
+    if (meta.state === 'complete') meta.state = 'partial'
+    meta.notices.push(
+      `${inexactAmounts} montant(s) reçu(s) avec une précision de transport non garantie : exactitude non revendiquée.`,
+    )
   }
   if (mapped.some((row) => row.city === 'Ville non renseignée')) {
     meta.notices.push('Des commandes sans ville sont regroupées à part.')

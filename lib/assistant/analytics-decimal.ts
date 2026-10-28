@@ -81,22 +81,54 @@ function render(signedDigits: bigint, scale: number): string {
  * accepté que comme repli : la valeur a déjà été arrondie par le transport.
  */
 export function toDecimalText(value: unknown): string | null {
+  const read = decimalFromRpc(value)
+  return read.exact ? read.value : null
+}
+
+/** Nombre maximal de chiffres significatifs transportables sans perte. */
+const MAX_EXACT_SIGNIFICANT_DIGITS = 15
+
+function significantDigits(text: string): number {
+  const digits = text.replace(/[-+.]/g, '').replace(/^0+/, '')
+  return digits.length
+}
+
+export interface DecimalRead {
+  /** Texte canonique, `null` si la valeur n'est pas un décimal exploitable. */
+  value: string | null
+  /** `false` = précision potentiellement perdue par le transport JSON. */
+  exact: boolean
+}
+
+/**
+ * Lit un montant provenant d'une RPC.
+ *
+ * - chaîne décimale et `bigint` : exacts ;
+ * - nombre JavaScript : exact seulement s'il est représentable sans perte
+ *   (entier sûr ou ≤ 15 chiffres significatifs). Au-delà, la valeur est
+ *   conservée **mais marquée inexacte** : aucun arrondi n'est revendiqué.
+ */
+export function decimalFromRpc(value: unknown): DecimalRead {
   if (typeof value === 'string') {
     const parsed = parseDecimal(value)
-    if (!parsed) return null
-    return render(parsed.negative ? -parsed.digits : parsed.digits, parsed.scale)
+    if (!parsed) return { value: null, exact: false }
+    return { value: render(parsed.negative ? -parsed.digits : parsed.digits, parsed.scale), exact: true }
   }
 
-  if (typeof value === 'bigint') return render(value, 0)
+  if (typeof value === 'bigint') {
+    return { value: render(value, 0), exact: true }
+  }
 
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return null
-    const parsed = parseDecimal(String(value))
-    if (!parsed) return null
-    return render(parsed.negative ? -parsed.digits : parsed.digits, parsed.scale)
+    if (!Number.isFinite(value)) return { value: null, exact: false }
+    const text = String(value)
+    const parsed = parseDecimal(text)
+    if (!parsed) return { value: null, exact: false }
+    const exact = Number.isSafeInteger(value) || significantDigits(text) <= MAX_EXACT_SIGNIFICANT_DIGITS
+    return { value: render(parsed.negative ? -parsed.digits : parsed.digits, parsed.scale), exact }
   }
 
-  return null
+  return { value: null, exact: false }
 }
 
 export function addDecimals(a: string | null, b: string | null): string | null {

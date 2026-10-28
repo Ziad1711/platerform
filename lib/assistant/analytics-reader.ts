@@ -16,7 +16,7 @@ import {
   type KpiReaderStore,
 } from '@/lib/dashboard/kpi-reader'
 import { previousBusinessRange, type BusinessRange } from '@/lib/dashboard/business-time'
-import { percentOfCounts, subtractDecimals, sumDecimals, toDecimalText } from '@/lib/assistant/analytics-decimal'
+import { decimalFromRpc, percentOfCounts, subtractDecimals, sumDecimals, type DecimalRead } from '@/lib/assistant/analytics-decimal'
 import {
   ANALYTICS_CONTRACT_VERSION,
   COMPARABLE_METRICS,
@@ -29,6 +29,7 @@ import {
   type AnalyticsStoreResult,
   type AssistantAnalyticsSession,
   type ComparableMetric,
+  type ComparisonFreshness,
   type KpiEnvelope,
   type KpiMetricAlias,
   type MetricDelta,
@@ -62,13 +63,23 @@ function countMetric(value: number | null, state: AnalyticsState, definition: st
   }
 }
 
-function decimalMetric(value: string | null, state: AnalyticsState, definition: string): AnalyticsMetric {
+function decimalMetric(read: DecimalRead, state: AnalyticsState, definition: string): AnalyticsMetric {
+  const value = read.value
+  const effective: AnalyticsState = value === null
+    ? 'missing'
+    : read.exact
+      ? state
+      : state === 'complete' || state === 'empty'
+        ? 'partial'
+        : state
+
   return {
     value,
     count: null,
     unit: 'decimal',
-    state: value === null ? 'missing' : state,
-    definition,
+    state: effective,
+    // Une précision non garantie par le transport n'est jamais revendiquée.
+    definition: read.exact ? definition : `${definition} (précision de transport non garantie)`,
     numerator: null,
     denominator: null,
   }
@@ -95,9 +106,9 @@ function storeResult(store: KpiReaderStore): AnalyticsStoreResult {
     delivered: countMetric(totals.delivered_count, state, 'V5 : commandes livrées (axe commande)'),
     returned: countMetric(totals.returned_count, state, 'V5 : retours (statuts canoniques)'),
     cancelled: countMetric(totals.cancelled_count, state, 'V5 : annulations (statuts canoniques)'),
-    revenue: decimalMetric(toDecimalText(totals.revenue), state, 'V5 : CA réalisé (lignes des commandes livrées)'),
-    revenueEstimated: decimalMetric(toDecimalText(totals.revenue_estimated), state, 'V5 : CA estimé, distinct du CA réalisé'),
-    adSpend: decimalMetric(toDecimalText(totals.ad_spend_contract), state, 'V5 : publicité (couverture journalière + fallback)'),
+    revenue: decimalMetric(decimalFromRpc(totals.revenue), state, 'V5 : CA réalisé (lignes des commandes livrées)'),
+    revenueEstimated: decimalMetric(decimalFromRpc(totals.revenue_estimated), state, 'V5 : CA estimé, distinct du CA réalisé'),
+    adSpend: decimalMetric(decimalFromRpc(totals.ad_spend_contract), state, 'V5 : publicité (couverture journalière + fallback)'),
   }
 
   const deliveryRate = percentOfCounts(totals.delivered_count, totals.orders_count)
@@ -112,11 +123,11 @@ function storeResult(store: KpiReaderStore): AnalyticsStoreResult {
   }
 
   if (hasFinancialTotals(store)) {
-    metrics.purchaseCost = decimalMetric(toDecimalText(store.totals.purchase_cost), state, 'V5 : coût d’achat des commandes livrées')
-    metrics.deliveryCost = decimalMetric(toDecimalText(store.totals.delivery_fee_cost), state, 'V5 : coût de livraison (axe commande)')
-    metrics.confirmationCost = decimalMetric(toDecimalText(store.totals.confirmation_cost), state, 'V5 : coût de confirmation')
+    metrics.purchaseCost = decimalMetric(decimalFromRpc(store.totals.purchase_cost), state, 'V5 : coût d’achat des commandes livrées')
+    metrics.deliveryCost = decimalMetric(decimalFromRpc(store.totals.delivery_fee_cost), state, 'V5 : coût de livraison (axe commande)')
+    metrics.confirmationCost = decimalMetric(decimalFromRpc(store.totals.confirmation_cost), state, 'V5 : coût de confirmation')
     metrics.contributionMargin = decimalMetric(
-      toDecimalText(store.totals.contribution_margin),
+      decimalFromRpc(store.totals.contribution_margin),
       state,
       'V5 : marge contributive — PAS le résultat opérationnel',
     )
@@ -144,8 +155,8 @@ function storeResult(store: KpiReaderStore): AnalyticsStoreResult {
       state: point.state === 'aggregate' || point.state === 'direct' ? 'complete' : 'partial',
       orders: Number.isSafeInteger(point.orders_count) ? point.orders_count : null,
       delivered: Number.isSafeInteger(point.delivered_count) ? point.delivered_count : null,
-      revenue: toDecimalText(point.revenue),
-      ads: toDecimalText(point.ads),
+      revenue: decimalFromRpc(point.revenue).value,
+      ads: decimalFromRpc(point.ads).value,
       partial: point.partial,
     })),
   }
@@ -330,6 +341,69 @@ function sameScopeAndCurrency(a: AnalyticsReaderResult, b: AnalyticsReaderResult
   })
 }
 
+const STALE_AFTER_HOURS = 48
+
+/**
+ * Compatibilité structurelle des deux lectures : périmètre, devise, **accès
+ * courant**, version de définition et signature de couverture, boutique par
+ * boutique. Une simple égalité d'ensembles de versions ne suffit pas.
+ */
+function structuralCompatibility(
+  a: AnalyticsReaderResult,
+  b: AnalyticsReaderResult,
+): { compatible: boolean; reasons: string[] } {
+  const reasons: string[] = []
+
+  if (!sameScopeAndCurrency(a, b)) {
+    reasons.push('périmètre ou devise différents')
+    return { compatible: false, reasons }
+  }
+
+  for (let index = 0; index < a.stores.length; index += 1) {
+    const left = a.stores[index]
+    const right = b.stores[index]
+
+    if (left.access !== right.access) reasons.push(`accès différents (${left.storeId})`)
+    if (left.definitionVersion !== right.definitionVersion) reasons.push(`définitions différentes (${left.storeId})`)
+    if (!left.revision || !right.revision) reasons.push(`révision absente (${left.storeId})`)
+
+    const signature = (store: AnalyticsStoreResult): string => [
+      store.coverage.days_total,
+      store.coverage.days_aggregate + store.coverage.days_direct,
+      store.coverage.days_dirty,
+      store.coverage.days_incompatible,
+      store.coverage.days_partial,
+    ].join('/')
+
+    if (signature(left) !== signature(right)) reasons.push(`couverture différente (${left.storeId})`)
+  }
+
+  return { compatible: reasons.length === 0, reasons }
+}
+
+function freshnessOf(...results: AnalyticsReaderResult[]): ComparisonFreshness {
+  const generated = results
+    .map((result) => result.generatedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+  const rebuilds = results
+    .flatMap((result) => result.stores.map((store) => store.lastRebuildAt))
+    .filter((value): value is string => Boolean(value))
+    .sort()
+
+  const oldest = generated[0] ?? null
+  const ageHours = oldest && Number.isFinite(Date.parse(oldest))
+    ? Math.max(0, Math.round((Date.now() - Date.parse(oldest)) / 3_600_000))
+    : null
+
+  return {
+    generatedAt: oldest,
+    oldestRebuildAt: rebuilds[0] ?? null,
+    ageHours,
+    stale: ageHours !== null && ageHours > STALE_AFTER_HOURS,
+  }
+}
+
 /**
  * Comparaison de deux périodes réelles pour le même périmètre.
  *
@@ -355,17 +429,20 @@ export async function compareAssistantPeriods(
   const issues: string[] = []
   const deltas: MetricDelta[] = []
 
-  const sameScope = sameScopeAndCurrency(currentResult, baselineResult)
-  const sameDefinitions =
-    JSON.stringify(definitionsOf(currentResult)) === JSON.stringify(definitionsOf(baselineResult))
+  const structure = structuralCompatibility(currentResult, baselineResult)
   const covered = fullyCovered(currentResult) && fullyCovered(baselineResult)
   const accessible = currentResult.state !== 'forbidden' && baselineResult.state !== 'forbidden'
-  const comparable = sameScope && sameDefinitions && covered && accessible
+  const comparable = structure.compatible && covered && accessible
+  const freshness = freshnessOf(currentResult, baselineResult)
 
   if (!accessible) notices.push('Périodes non comparables : accès refusé sur au moins une période.')
-  if (!sameScope) notices.push('Périodes non comparables : périmètre ou devise différents.')
-  if (!sameDefinitions) notices.push('Périodes non comparables : versions de définition KPI différentes.')
+  for (const reason of structure.reasons) notices.push(`Périodes non comparables : ${reason}.`)
   if (!covered) notices.push('Périodes non comparables : couverture incomplète ou journée sale.')
+  if (freshness.stale) {
+    notices.push(
+      `Fraîcheur des données : lecture la plus ancienne il y a ${freshness.ageHours} h (seuil ${STALE_AFTER_HOURS} h).`,
+    )
+  }
 
   for (const metric of COMPARABLE_METRICS) {
     const currentValue = sumMetricText(currentResult, metric)
@@ -426,6 +503,7 @@ export async function compareAssistantPeriods(
     })(),
     definitions: { current: definitionsOf(currentResult), baseline: definitionsOf(baselineResult) },
     deltas,
+    freshness,
     notices,
     issues,
   }

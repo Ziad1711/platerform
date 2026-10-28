@@ -1,5 +1,5 @@
 import type { AnalyticsRange, AssistantIntent, ComparisonRange } from '@/lib/assistant/types'
-import { businessRangeToInstants, businessTodayIso } from '@/lib/dashboard/business-time'
+import { addBusinessDays, businessRange, businessRangeToInstants, businessTodayIso } from '@/lib/dashboard/business-time'
 
 const GREETINGS = ['bonjour', 'salut', 'bonsoir', 'hello', 'coucou']
 
@@ -90,14 +90,12 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
     }
   }
 
-  // "février 2026", "janvier 2025"
-  for (const [name, monthNum] of Object.entries(MONTH_NAMES)) {
-    const namePattern = new RegExp(`${name}\\s*(\\d{4})?`)
-    const nameMatch = text.match(namePattern)
-    if (nameMatch) {
-      const year = nameMatch[1] ? parseInt(nameMatch[1], 10) : currentBusinessYear()
-      if (isSupportedYear(year)) return businessMonthRange(year, monthNum)
-    }
+  // Noms de mois : on retient la **première occurrence dans le texte**, pas la
+  // première entrée du dictionnaire (sinon « mars … janvier » renverrait janvier).
+  const found = findMonthCandidates(text)
+  if (found.length > 0) {
+    const first = found[0]
+    return businessMonthRange(first.year, first.month)
   }
 
   // "02/2026", "02-2026"
@@ -113,6 +111,31 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
 
   return null
 }
+
+interface MonthCandidate {
+  index: number
+  month: number
+  year: number
+}
+
+/** Occurrences de mois nommés, triées par position dans le texte. */
+function findMonthCandidates(text: string): MonthCandidate[] {
+  const candidates: MonthCandidate[] = []
+  for (const [name, monthNum] of Object.entries(MONTH_NAMES)) {
+    const pattern = new RegExp(`${name}\\s*(\\d{4})?`, 'g')
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
+      const year = match[1] ? parseInt(match[1], 10) : currentBusinessYear()
+      if (!isSupportedYear(year)) continue
+      // Une correspondance déjà couverte par un nom plus long (ex. « juil » dans
+      // « juillet ») est ignorée.
+      if (candidates.some((candidate) => Math.abs(candidate.index - match!.index) < name.length)) continue
+      candidates.push({ index: match.index, month: monthNum, year })
+    }
+  }
+  return candidates.sort((a, b) => a.index - b.index)
+}
+
 
 /**
  * Vérifie si le message contient une période explicite.
@@ -280,6 +303,119 @@ function buildComparisonRange(
     labelB: `${monthNames[b.month - 1]} ${b.year}`,
   }
 }
+
+export interface ComparisonPeriods {
+  /** Période citée en premier par l'utilisateur : c'est la période courante. */
+  current: { from: string; to: string }
+  /** Période de référence citée ensuite. */
+  baseline: { from: string; to: string }
+  labels: { current: string; baseline: string }
+}
+
+const RELATIVE_PERIOD_PATTERNS: Array<{ pattern: RegExp; key: string }> = [
+  { pattern: /(?:ce mois(?:-ci)?|mois en cours)/, key: 'month' },
+  { pattern: /(?:mois dernier|mois précédent|le mois d['’]avant)/, key: 'last_month' },
+  { pattern: /(?:cette semaine|semaine en cours)/, key: 'week' },
+  { pattern: /(?:semaine dernière|semaine passée)/, key: 'last_week' },
+  { pattern: /(?:7 derniers jours|sept derniers jours)/, key: '7d' },
+  { pattern: /(?:30 derniers jours|trente derniers jours)/, key: '30d' },
+  { pattern: /(?:hier)/, key: 'yesterday' },
+  { pattern: /(?:aujourd['’]hui)/, key: 'today' },
+]
+
+const RELATIVE_LABELS: Record<string, string> = {
+  month: 'ce mois',
+  last_month: 'le mois dernier',
+  week: 'cette semaine',
+  last_week: 'la semaine dernière',
+  '7d': 'les 7 derniers jours',
+  '30d': 'les 30 derniers jours',
+  yesterday: 'hier',
+  today: "aujourd'hui",
+}
+
+function relativeBusinessRange(key: string, now: Date): { from: string; to: string } | null {
+  if (key === 'last_week') {
+    const week = businessRange('week', null, null, now)
+    return { from: addBusinessDays(week.from, -7), to: week.from }
+  }
+  if (key === '7d' || key === '30d') {
+    const today = businessTodayIso(now)
+    const days = key === '7d' ? 7 : 30
+    return { from: addBusinessDays(today, 1 - days), to: addBusinessDays(today, 1) }
+  }
+  const supported = ['month', 'last_month', 'week', 'yesterday', 'today'] as const
+  if (!(supported as readonly string[]).includes(key)) return null
+  const range = businessRange(key as (typeof supported)[number], null, null, now)
+  return { from: range.from, to: range.to }
+}
+
+/**
+ * Périodes de comparaison explicites, dans l'ordre où l'utilisateur les cite.
+ *
+ * - mois nommés ou numériques : au moins deux mois distincts ;
+ * - périodes relatives : deux expressions distinctes (« ce mois et le mois dernier »).
+ *
+ * `null` si la paire n'est pas déterminable : aucune période n'est alors inventée.
+ */
+export function resolveComparisonPeriods(message: string, now: Date = new Date()): ComparisonPeriods | null {
+  const text = message.toLowerCase()
+
+  // 1. Mois nommés : la position dans le texte fixe l'ordre.
+  const months = findMonthCandidates(text)
+  if (months.length >= 2) {
+    const first = months[0]
+    const second = months.find((candidate) => candidate.month !== first.month || candidate.year !== first.year)
+    if (second) {
+      const currentRange = businessMonthRange(first.year, first.month)
+      const baselineRange = businessMonthRange(second.year, second.month)
+      const monthNames = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+      return {
+        current: { from: toBusinessDay(currentRange.start), to: toBusinessDay(currentRange.end) },
+        baseline: { from: toBusinessDay(baselineRange.start), to: toBusinessDay(baselineRange.end) },
+        labels: {
+          current: `${monthNames[first.month - 1]} ${first.year}`,
+          baseline: `${monthNames[second.month - 1]} ${second.year}`,
+        },
+      }
+    }
+  }
+
+  // 2. Périodes relatives : occurrences ordonnées, deux clés distinctes.
+  const matches: Array<{ index: number; key: string }> = []
+  for (const { pattern, key } of RELATIVE_PERIOD_PATTERNS) {
+    const found = pattern.exec(text)
+    if (found) matches.push({ index: found.index, key })
+  }
+  matches.sort((a, b) => a.index - b.index)
+
+  if (matches.length >= 2) {
+    const first = matches[0]
+    const second = matches.find((candidate) => candidate.key !== first.key)
+    if (second) {
+      const current = relativeBusinessRange(first.key, now)
+      const baseline = relativeBusinessRange(second.key, now)
+      if (current && baseline) {
+        return {
+          current,
+          baseline,
+          labels: {
+            current: RELATIVE_LABELS[first.key] ?? first.key,
+            baseline: RELATIVE_LABELS[second.key] ?? second.key,
+          },
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+/** Journée métier d'un instant UTC (jamais la journée du serveur). */
+function toBusinessDay(instant: string): string {
+  return businessTodayIso(new Date(instant))
+}
+
 
 export function resolveIntent(message: string): AssistantIntent {
   const text = message.toLowerCase()
