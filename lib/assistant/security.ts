@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { ASSISTANT_BACKEND_WRITES_ENABLED, getAssistantBackendClient } from '@/lib/assistant/backend'
 import { hasPermission, ROLE_PERMISSIONS, type Permission, type Role } from '@/lib/auth/permissions'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
@@ -284,6 +285,34 @@ export async function assertThreadScopeAccess(
   return permitted
 }
 
+/**
+ * Combinaisons de drapeaux : une configuration incohérente est bloquée avant
+ * toute écriture, jamais corrigée silencieusement en cours de route.
+ *
+ * | Registre | Réservation | Finalisation atomique | Backend | Verdict |
+ * |---|---|---|---|---|
+ * | off | off | off | requis | séquentiel toléré (écritures assistant via backend) |
+ * | on  | off | off | requis | idempotent, finalisation séquentielle |
+ * | on  | on  | off | requis | incohérent : la réservation exige la finalisation atomique |
+ * | on  | any | on  | requis | cible recommandée |
+ * | off | any | on  | requis | incohérent : la finalisation atomique exige le registre |
+ * | any | any | any | absent | bloqué (écriture fiable impossible) |
+ */
+export function assertAssistantRuntimeFlags() {
+  const registry =
+    (process.env.ASSISTANT_IDEMPOTENCY_REGISTRY || '').trim().toLowerCase() === 'enabled'
+  const reservation =
+    (process.env.ASSISTANT_CREDIT_RESERVATION || '').trim().toLowerCase() === 'enabled'
+  const atomic = (process.env.ASSISTANT_FINALIZE_ATOMIC || '').trim().toLowerCase() === 'enabled'
+
+  if (atomic && !registry) throw new Error('ASSISTANT_FLAGS_INCOHERENT')
+  if (reservation && !atomic) throw new Error('ASSISTANT_FLAGS_INCOHERENT')
+
+  if (ASSISTANT_BACKEND_WRITES_ENABLED && !getAssistantBackendClient()) {
+    throw new Error('ASSISTANT_BACKEND_UNAVAILABLE')
+  }
+}
+
 /** Borne une opération asynchrone (aucune promesse pendante au-delà du budget). */
 export function withTimeout<T>(
   operation: Promise<T>,
@@ -319,6 +348,11 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   IDEMPOTENCY_KEY_REQUIRED: 'Identifiant de requête obligatoire. Rechargez la page et réessayez.',
   IDEMPOTENCY_CONFLICT: 'Cette requête a déjà été utilisée avec un contenu différent.',
   IDEMPOTENCY_IN_PROGRESS: 'Cette demande est déjà en cours de traitement.',
+  IDEMPOTENCY_LEASE_LOST: 'Cette tentative a expiré. Relancez la demande.',
+  IDEMPOTENCY_TOKEN_MISMATCH: 'Tentative invalide : jeton de réservation absent ou obsolète.',
+  ASSISTANT_BACKEND_UNAVAILABLE: 'Écriture fiable indisponible : le service est momentanément bloqué.',
+  ASSISTANT_FLAGS_INCOHERENT: 'Configuration assistant incohérente : action bloquée.',
+  FINALIZE_RPC_FAILED: 'La finalisation de la réponse a échoué. Aucun débit n’a été confirmé.',
   REQUEST_ABORTED: 'Demande interrompue (changement de périmètre ou délai dépassé).',
   EMPTY_MESSAGE: 'Votre message est vide.',
   MESSAGE_TOO_LONG: 'Votre message dépasse la longueur autorisée.',
@@ -367,6 +401,11 @@ export function getErrorStatus(error: unknown) {
   if (message === 'IDEMPOTENCY_KEY_REQUIRED') return 400
   if (message === 'IDEMPOTENCY_CONFLICT') return 409
   if (message === 'IDEMPOTENCY_IN_PROGRESS') return 409
+  if (message === 'IDEMPOTENCY_LEASE_LOST') return 409
+  if (message === 'IDEMPOTENCY_TOKEN_MISMATCH') return 409
+  if (message === 'ASSISTANT_BACKEND_UNAVAILABLE') return 503
+  if (message === 'ASSISTANT_FLAGS_INCOHERENT') return 503
+  if (message === 'FINALIZE_RPC_FAILED') return 502
   if (message === 'REQUEST_ABORTED') return 408
   if (message === 'THREAD_NOT_FOUND') return 404
   if (message === 'THREAD_STORE_MISMATCH') return 409

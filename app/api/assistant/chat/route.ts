@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import {
-  addMessage,
   createThread,
   findAssistantReplyByRequestId,
   getMessageById,
   getThread,
   listMessages,
-  touchThread,
 } from '@/lib/assistant/chat'
 import {
   computeCreditsUsed,
@@ -24,6 +22,7 @@ import { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
 import { getAssistantModelName } from '@/lib/assistant/providers'
 import { buildGreetingResponse, buildSmallTalkResponse, buildStructuredResponseFromContext } from '@/lib/assistant/response'
 import {
+  assertAssistantRuntimeFlags,
   assertTrustedOrigin,
   requireAssistantStoreAccess,
   requireAuthenticatedUser,
@@ -132,6 +131,7 @@ export async function POST(request: Request) {
 
   try {
     assertTrustedOrigin(request)
+    assertAssistantRuntimeFlags()
 
     const { supabase, user } = await requireAuthenticatedUser()
 
@@ -217,8 +217,11 @@ export async function POST(request: Request) {
 
     if (registry.status === 'conflict') throw new Error('IDEMPOTENCY_CONFLICT')
     if (registry.status === 'in_progress') throw new Error('IDEMPOTENCY_IN_PROGRESS')
+    const attemptToken = registry.status === 'proceed' ? registry.attemptToken : null
     if (registry.status === 'replay') {
-      const replayedMessage = await getMessageById(supabase, ensuredThreadId, registry.assistantMessageId)
+      const replayedMessage = registry.assistantMessageId
+        ? await getMessageById(supabase, ensuredThreadId, registry.assistantMessageId)
+        : null
       if (replayedMessage) {
         const replayMetadata = (replayedMessage.metadata || null) as Record<string, unknown> | null
         return NextResponse.json({
@@ -226,7 +229,7 @@ export async function POST(request: Request) {
           assistantMessage: replayedMessage,
           structured_response: replayMetadata?.structured_response,
           replayed: true,
-          credit_status: 'not_charged',
+          credit_status: registry.creditStatus,
           finalization_atomic: true,
           usage: {
             creditsUsed: 0,
@@ -326,34 +329,43 @@ export async function POST(request: Request) {
     }
 
     if (smallResponse) {
-      await addMessage(
+      // Même chemin fiable que les réponses analytiques : écriture backend,
+      // registre clôturé, aucune écriture `assistant` par le client.
+      const smallFinalization = await finalizeAssistantTurn({
         supabase,
-        ensuredThreadId,
-        'user',
-        body.message,
-        0,
-        { request_id: requestId, request_fingerprint: fingerprint }
-      )
-      const assistantMessage = await addMessage(
-        supabase,
-        ensuredThreadId,
-        'assistant',
-        smallResponse.message_text,
-        0,
-        {
+        threadId: ensuredThreadId,
+        userId: user.id,
+        storeId: selectedStoreId,
+        requestId,
+        fingerprint,
+        attemptToken,
+        intent,
+        userMessage: body.message,
+        assistantContent: smallResponse.message_text,
+        assistantMetadata: {
           structured_response: smallResponse,
           request_id: requestId,
           request_fingerprint: fingerprint,
-        }
-      )
-      const nextTitle = isFirstExchange ? resolveAiThreadTitle(smallResponse.conversation_title) : undefined
-      await touchThread(supabase, ensuredThreadId, nextTitle)
+        },
+        creditsUsed: 0,
+        provider: {
+          text: smallResponse.message_text,
+          inputTokens: 0,
+          outputTokens: 0,
+          providerName: 'none',
+          modelName: 'none',
+          providerCostUsd: 0,
+        },
+        nextTitle: isFirstExchange ? resolveAiThreadTitle(smallResponse.conversation_title) : undefined,
+      })
 
       return NextResponse.json({
         threadId: ensuredThreadId,
-        assistantMessage,
+        assistantMessage: smallFinalization.assistantMessage,
         structured_response: smallResponse,
-        credit_status: 'not_charged',
+        credit_status: smallFinalization.creditStatus,
+        finalization_atomic: smallFinalization.atomic,
+        warning: smallFinalization.warning,
         usage: {
           creditsUsed: 0,
           inputTokens: 0,
@@ -374,7 +386,10 @@ export async function POST(request: Request) {
     })
 
     const { wallet } = await ensureCreditsAvailable(supabase, estimatedCredits)
-    const creditReservation = await reserveCreditsForRequest(supabase, estimatedCredits, requestId)
+    const creditReservation = await reserveCreditsForRequest(supabase, estimatedCredits, {
+      requestId,
+      attemptToken,
+    })
 
     const model = getAssistantModelName()
 
@@ -411,7 +426,7 @@ export async function POST(request: Request) {
       const rawCode = agentError instanceof Error ? agentError.message : ''
 
       if (creditReservation.status === 'reserved') {
-        await releaseCreditReservation(supabase, requestId).catch(() => false)
+        await releaseCreditReservation(supabase, { requestId, attemptToken }).catch(() => false)
       }
 
       if (deadlineReached || rawCode.endsWith('_ABORTED')) {
@@ -459,6 +474,7 @@ export async function POST(request: Request) {
       storeId: selectedStoreId,
       requestId,
       fingerprint,
+      attemptToken,
       intent,
       userMessage: body.message,
       assistantContent: structuredResponse.message_text,

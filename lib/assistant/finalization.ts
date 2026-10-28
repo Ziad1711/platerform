@@ -15,7 +15,11 @@
  */
 import { addMessage, touchThread } from '@/lib/assistant/chat'
 import { chargeCredits, type CreditChargeStatus } from '@/lib/assistant/credits'
-import { completeAssistantRequest } from '@/lib/assistant/idempotency'
+import {
+  ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED,
+  completeAssistantRequest,
+} from '@/lib/assistant/idempotency'
+import { requireAssistantBackendClient } from '@/lib/assistant/backend'
 import type { AssistantProviderOutput } from '@/lib/assistant/providers/types'
 import type { createClient } from '@/lib/supabase/server'
 
@@ -33,6 +37,8 @@ export interface FinalizeTurnInput {
   storeId: string
   requestId: string
   fingerprint: string
+  /** Jeton de tentative (fencing) retourné par le registre, si activé. */
+  attemptToken?: string | null
   intent: string
   userMessage: string
   assistantContent: string
@@ -67,10 +73,19 @@ function buildUsageRow(input: FinalizeTurnInput) {
 
 export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<FinalizeTurnResult> {
   if (ASSISTANT_FINALIZE_ATOMIC_ENABLED) {
-    const { data, error } = await input.supabase.rpc(ASSISTANT_FINALIZE_RPC, {
+    // Écriture fiable : client backend dédié, jamais le client utilisateur.
+    const backend = requireAssistantBackendClient()
+
+    if (ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED && !input.attemptToken) {
+      throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
+    }
+
+    const { data, error } = await backend.rpc(ASSISTANT_FINALIZE_RPC, {
+      p_user_id: input.userId,
       p_thread_id: input.threadId,
       p_request_id: input.requestId,
       p_request_fingerprint: input.fingerprint,
+      p_attempt_token: input.attemptToken ?? null,
       p_store_id: input.storeId,
       p_intent: input.intent,
       p_user_message: input.userMessage,
@@ -81,29 +96,33 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
       p_next_title: input.nextTitle ?? null,
     })
 
-    if (!error) {
-      const row = (Array.isArray(data) ? data[0] : data) as
-        | { assistant_message?: unknown; credit_status?: string }
-        | null
-        | undefined
-
-      const creditStatus =
-        row?.credit_status === 'charged' || row?.credit_status === 'insufficient' || row?.credit_status === 'failed'
-          ? row.credit_status
-          : 'charged'
-
-      await completeAssistantRequest(input.supabase, { requestId: input.requestId }, row?.assistant_message)
-
-      return {
-        atomic: true,
-        assistantMessage: row?.assistant_message ?? null,
-        creditStatus,
-        warning: creditStatus === 'charged' ? null : 'La consommation de crédits n’a pas pu être confirmée.',
-      }
+    if (error) {
+      // Aucune reprise séquentielle : une atomicité exigée ne se dégrade pas.
+      console.error('[assistant] finalize_rpc_failed', { code: error.code || 'unknown' })
+      throw new Error('FINALIZE_RPC_FAILED')
     }
 
-    // RPC absente ou en échec : on ne simule pas l'atomicité.
-    console.error('[assistant] finalize_rpc_failed', { code: error.code || 'unknown' })
+    const row = (Array.isArray(data) ? data[0] : data) as
+      | { assistant_message?: unknown; credit_status?: string; replayed?: boolean }
+      | null
+      | undefined
+
+    if (!row || (row.assistant_message === undefined && !row.replayed)) {
+      console.error('[assistant] finalize_rpc_empty')
+      throw new Error('FINALIZE_RPC_FAILED')
+    }
+
+    const creditStatus =
+      row?.credit_status === 'charged' || row?.credit_status === 'insufficient' || row?.credit_status === 'failed'
+        ? row.credit_status
+        : 'not_charged'
+
+    return {
+      atomic: true,
+      assistantMessage: row?.assistant_message ?? null,
+      creditStatus,
+      warning: creditStatus === 'charged' ? null : 'La consommation de crédits n’a pas pu être confirmée.',
+    }
   }
 
   let warning: string | null = null
@@ -117,14 +136,23 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
     { request_id: input.requestId, request_fingerprint: input.fingerprint }
   )
 
-  const assistantMessage = await addMessage(
-    input.supabase,
-    input.threadId,
-    'assistant',
-    input.assistantContent,
-    input.creditsUsed,
-    input.assistantMetadata
-  )
+  // P0-01 : le message assistant est écrit par le backend, jamais par le client
+  // utilisateur (PostgREST ne doit pas permettre cette falsification).
+  const backend = requireAssistantBackendClient()
+  const { data: assistantRow, error: assistantError } = await backend
+    .from('chat_messages')
+    .insert({
+      thread_id: input.threadId,
+      role: 'assistant',
+      content: input.assistantContent,
+      credits_used: input.creditsUsed,
+      metadata: input.assistantMetadata,
+    })
+    .select('id, thread_id, role, content, credits_used, metadata, created_at')
+    .single()
+
+  if (assistantError || !assistantRow) throw new Error('MESSAGE_CREATE_FAILED')
+  const assistantMessage = assistantRow
 
   if (input.nextTitle) {
     await touchThread(input.supabase, input.threadId, input.nextTitle)
@@ -142,6 +170,15 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
   if (charge.status !== 'charged') {
     warning = warning || 'La consommation de crédits n’a pas pu être confirmée.'
     console.error('[assistant] credit_charge_failed', { status: charge.status })
+  }
+
+  if (ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED && input.attemptToken) {
+    await completeAssistantRequest(
+      backend,
+      { requestId: input.requestId, attemptToken: input.attemptToken },
+      assistantRow.id as string,
+      charge.status
+    )
   }
 
   return {
