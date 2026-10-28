@@ -1,44 +1,48 @@
 -- ============================================================================
--- JISRA — Lot 2 assistant analytique : PROPOSITIONS SQL NON EXÉCUTÉES
+-- JISRA — Assistant analytique : PROPOSITIONS SQL NON EXÉCUTÉES (révision 2)
 -- ============================================================================
--- Statut : proposition de conception. Aucune de ces instructions n'a été
--- exécutée, ni sur Production ni sur un autre environnement. Aucune migration
--- n'a été créée dans `supabase/migrations/`.
+-- Statut : conception uniquement. Aucune instruction n'a été exécutée, ni sur
+-- Production ni ailleurs. Aucune migration n'a été créée dans
+-- `supabase/migrations/`. Rien ne doit être appliqué sans validation explicite
+-- (les migrations de sécurité appartiennent à l'Agent 1).
 --
--- Prérequis avant toute exécution :
---   1. accord explicite du propriétaire (l'Agent 1 détient les migrations de sécurité) ;
---   2. revue des plans d'exécution (`EXPLAIN (ANALYZE, BUFFERS)`) hors production ;
---   3. vérification des index réellement présents sur `orders`, `order_items`,
---      `inventory_movements`, `product_variants` ;
---   4. exécution hors heures de pointe, sans reconstruction d'agrégats KPI.
+-- Prérequis avant exécution :
+--   1. accord écrit du propriétaire ;
+--   2. `EXPLAIN (ANALYZE, BUFFERS)` sur un environnement non productif ;
+--   3. vérification des index `(store_id, order_date)` sur `orders` et
+--      `(store_id, product_id, product_variant_id)` sur `inventory_movements` ;
+--   4. mesure de l'impact sur les triggers métier existants.
 --
--- Dépendances réutilisées (déjà en base, non modifiées ici) :
---   public.dashboard_kpi_access_level(uuid)     -> 'full' | 'commercial' | null
+-- Dépendances réutilisées (existantes, non modifiées ici) :
+--   public.dashboard_kpi_access_level(uuid) -> 'full' | 'commercial' | 'none' | null
 --   public.order_counts_as_confirmed(text, timestamptz)
+--   public.can_manage_store_stock(uuid)      -- owner/admin/stock_manager
 --   public.store_members(status, role)
 --   public.delivery_companies(id, name, store_id)
 --
--- Contraintes de conception communes :
---   * bornes métier `[p_from, p_to[` (jamais de `<=` sur la borne haute) ;
---   * plage maximale 400 jours et 5 boutiques par appel ;
---   * aucune donnée monétaire dans les fonctions destinées aux profils
---     `commercial` (aucun coût, aucune marge, aucun profit) ;
---   * aucune ligne inventée : une période sans commande produit des zéros réels,
---     une absence de mesure produit une absence de ligne ;
---   * `security definer` + `search_path = public, pg_temp` + revoke/grant explicites.
+-- Règles communes :
+--   * `security definer` + `search_path = public, pg_temp` + grants explicites ;
+--   * `dashboard_kpi_access_level` doit valoir `full` ou `commercial` : `none`
+--     et `null` sont refusés, jamais assimilés à un accès par défaut ;
+--   * bornes de travail fixées DANS la fonction (périmètre, période,
+--     `statement_timeout`) ;
+--   * aucune donnée monétaire (coût, marge, profit) dans ces fonctions ;
+--   * aucune ligne inventée : une absence de mouvement n'est pas un stock 0 ;
+--   * `limit` appliqué après une sélection bornée, jamais après l'agrégat
+--     complet d'un historique entier.
 -- ============================================================================
 
 -- ============================================================================
 -- PROPOSITION 1 — Performance livraison par transporteur
--- Motif : aucune RPC agrégée n'existe ; l'ancien code lisait `delivery_company`
---         (colonne inexistante : le schéma porte `delivery_company_id`) sur une
---         liste plafonnée par PostgREST, puis additionnait côté Node.
--- Coût attendu : un parcours d'index `(store_id, order_date)` par boutique.
+-- Motif : aucune RPC agrégée n'existe ; les anciennes lectures visaient une
+--         colonne inexistante (`delivery_company` au lieu de `delivery_company_id`)
+--         sur une liste plafonnée, puis additionnaient côté Node.
 -- ============================================================================
 -- create or replace function public.rpc_assistant_delivery_performance(
 --   p_store_ids uuid[],
 --   p_from timestamptz,
---   p_to timestamptz
+--   p_to timestamptz,
+--   p_max_companies integer default 50
 -- )
 -- returns table (
 --   store_id uuid,
@@ -57,79 +61,248 @@
 -- stable
 -- security definer
 -- set search_path = public, pg_temp
+-- set statement_timeout = '5s'
 -- as $function$
+-- declare
+--   v_scope uuid[];
 -- begin
---   if p_store_ids is null or cardinality(p_store_ids) = 0 or cardinality(p_store_ids) > 5 then
+--   if p_store_ids is null
+--      or cardinality(p_store_ids) = 0
+--      or cardinality(p_store_ids) > 5 then
 --     raise exception 'ASSISTANT_BAD_SCOPE';
 --   end if;
---   if p_from is null or p_to is null or p_to <= p_from
---      or p_to - p_from > interval '400 days' then
+--
+--   if p_from is null or p_to is null
+--      or p_to <= p_from
+--      or p_to - p_from > interval '90 days' then
 --     raise exception 'ASSISTANT_BAD_RANGE';
 --   end if;
---   if exists (
---     select 1 from unnest(p_store_ids) as s(id)
---      where public.dashboard_kpi_access_level(s.id) is null
---   ) then
+--
+--   select array_agg(distinct ids.id)
+--     into v_scope
+--     from unnest(p_store_ids) as ids(id)
+--    where public.dashboard_kpi_access_level(ids.id) in ('full', 'commercial');
+--
+--   if coalesce(cardinality(v_scope), 0)
+--      <> (select count(distinct ids.id) from unnest(p_store_ids) as ids(id)) then
 --     raise exception 'ASSISTANT_NO_ACCESS';
 --   end if;
---
+
+
 --   return query
 --   with scoped as (
 --     select o.id, o.store_id, o.status, o.confirmed_at, o.delivery_status,
 --            o.delivery_company_id, o.sent_at, o.delivered_at
 --       from public.orders o
---      where o.store_id = any (p_store_ids)
+--      where o.store_id = any (v_scope)
 --        and o.order_date >= p_from
 --        and o.order_date <  p_to
+--   ),
+--   grouped as (
+--     select s.store_id,
+--            s.delivery_company_id,
+--            coalesce(dc.name, 'Transporteur non renseigné') as company_name,
+--            count(*)::bigint as total_orders,
+--            count(*) filter (
+--              where public.order_counts_as_confirmed(s.status, s.confirmed_at)
+--            )::bigint as confirmed_orders,
+--            count(*) filter (
+--              where s.status = 'sent'
+--                 or s.status = 'dl_out_for_delivery'
+--                 or s.delivery_status = 'in_transit'
+--            )::bigint as in_transit_orders,
+--            count(*) filter (where s.status = 'delivered')::bigint as delivered_orders,
+--            count(*) filter (
+--              where s.status in ('returned_stocked', 'returned_not_stocked')
+--            )::bigint as returned_orders,
+--            count(*) filter (where s.status = 'cancelled')::bigint as cancelled_orders,
+--            count(*) filter (
+--              where s.status = 'delivered'
+--                and s.sent_at is not null
+--                and s.delivered_at is not null
+--            )::bigint as delivered_with_handover_dates,
+--            avg(extract(epoch from (s.delivered_at - s.sent_at)) / 86400.0) filter (
+--              where s.status = 'delivered'
+--                and s.sent_at is not null
+--                and s.delivered_at is not null
+--            ) as avg_days
+--       from scoped s
+--       left join public.delivery_companies dc
+--              on dc.id = s.delivery_company_id
+--             and dc.store_id = s.store_id
+--      group by s.store_id, s.delivery_company_id,
+--               coalesce(dc.name, 'Transporteur non renseigné')
 --   )
---   select s.store_id,
---          s.delivery_company_id,
---          coalesce(dc.name, 'Transporteur non renseigné') as delivery_company_name,
---          count(*)::bigint,
---          count(*) filter (
---            where public.order_counts_as_confirmed(s.status, s.confirmed_at)
---          )::bigint,
---          count(*) filter (
---            where s.status = 'sent'
---               or s.status = 'dl_out_for_delivery'
---               or s.delivery_status = 'in_transit'
---          )::bigint,
---          count(*) filter (where s.status = 'delivered')::bigint,
---          count(*) filter (
---            where s.status in ('returned_stocked', 'returned_not_stocked')
---          )::bigint,
---          count(*) filter (where s.status = 'cancelled')::bigint,
---          count(*) filter (
---            where s.status = 'delivered' and s.sent_at is not null and s.delivered_at is not null
---          )::bigint,
---          round(avg(
---            extract(epoch from (s.delivered_at - s.sent_at)) / 86400.0
---          ) filter (
---            where s.status = 'delivered' and s.sent_at is not null and s.delivered_at is not null
---          ), 2)
---     from scoped s
---     left join public.delivery_companies dc
---            on dc.id = s.delivery_company_id
---           and dc.store_id = s.store_id
---    group by s.store_id, s.delivery_company_id, coalesce(dc.name, 'Transporteur non renseigné')
---    order by 4 desc;
+--   select g.store_id, g.delivery_company_id, g.company_name,
+--          g.total_orders, g.confirmed_orders, g.in_transit_orders,
+--          g.delivered_orders, g.returned_orders, g.cancelled_orders,
+--          g.delivered_with_handover_dates, round(g.avg_days, 2)
+--     from grouped g
+--    order by g.total_orders desc
+--    limit least(greatest(coalesce(p_max_companies, 50), 1), 200);
 -- end;
 -- $function$;
 --
--- comment on function public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz) is
---   'Livraison agrégée par transporteur pour l assistant. Aucune donnée monétaire ; délai calculé uniquement si sent_at et delivered_at sont renseignés.';
+-- comment on function public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz, integer) is
+--   'Livraison agrégée par transporteur pour l assistant. Aucun montant ; délai calculé uniquement si sent_at et delivered_at existent.';
 --
--- revoke all on function public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz)
+-- revoke all on function public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz, integer)
 --   from public, anon;
--- grant execute on function public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz)
+-- grant execute on function public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz, integer)
 --   to authenticated, service_role;
+--
+-- Rollback 1 :
+--   drop function if exists public.rpc_assistant_delivery_performance(uuid[], timestamptz, timestamptz, integer);
 
 
 -- ============================================================================
--- PROPOSITION 2 — Helper de lecture du stock (aligné sur `stock.view`)
--- Motif : `can_manage_store_stock` exclut `viewer`, qui possède `stock.view`
---         (lib/auth/permissions.ts). Un helper distinct évite d'élargir un
---         privilège d'écriture ou de retirer un accès en lecture.
+-- PROPOSITION 2 — Snapshot de stock par produit ET variante
+--
+-- Motif : aucune fonction autorisée n'expose cet agrégat.
+--   `rpc_public_catalog_stock_snapshot` est prévue pour `service_role`, reste
+--   exécutable par `authenticated` et ne vérifie aucune appartenance : elle ne
+--   doit PAS être réutilisée.
+--
+-- Corrections par rapport à la révision 1 :
+--   1. contrôle explicite de `dashboard_kpi_access_level` : `'none'` et `null`
+--      refusés, en plus de `can_view_store_stock` ;
+--   2. travail d'agrégation borné : produits sélectionnés d'abord (`p_limit`),
+--      l'agrégat des mouvements ne porte que sur ces produits ;
+--   3. variantes sans mouvement incluses (`LEFT JOIN product_variants`) avec
+--      `has_movements = false` : variante jamais mouvementée ≠ stock 0 confirmé ;
+--   4. `limit` appliqué après la sélection bornée, jamais après un balayage
+--      complet de l'historique d'un store ;
+--   5. `statement_timeout` et cardinalité bornée.
+--
+-- Compatibilité de signature : fonction nouvelle, aucune surcharge existante.
+-- ============================================================================
+-- create or replace function public.rpc_assistant_stock_snapshot(
+--   p_store_ids uuid[],
+--   p_limit integer default 50,
+--   p_max_quantity integer default null
+-- )
+-- returns table (
+--   store_id uuid,
+--   product_id uuid,
+--   product_name text,
+--   stock_tracking_mode text,
+--   product_variant_id uuid,
+--   variant_name text,
+--   variant_sku text,
+--   stock_multiplier integer,
+--   variant_quantity bigint,
+--   has_movements boolean,
+--   product_quantity bigint,
+--   sellable_quantity bigint
+-- )
+-- language plpgsql
+-- stable
+-- security definer
+-- set search_path = public, pg_temp
+-- set statement_timeout = '5s'
+-- as $function$
+-- declare
+--   v_scope uuid[];
+--   v_limit integer := least(greatest(coalesce(p_limit, 50), 1), 200);
+-- begin
+--   if p_store_ids is null
+--      or cardinality(p_store_ids) = 0
+--      or cardinality(p_store_ids) > 5 then
+--     raise exception 'ASSISTANT_BAD_SCOPE';
+--   end if;
+--
+--   select array_agg(distinct ids.id)
+--     into v_scope
+--     from unnest(p_store_ids) as ids(id)
+--    where public.dashboard_kpi_access_level(ids.id) in ('full', 'commercial')
+--      and public.can_view_store_stock(ids.id);
+--
+--   if coalesce(cardinality(v_scope), 0)
+--      <> (select count(distinct ids.id) from unnest(p_store_ids) as ids(id)) then
+--     raise exception 'ASSISTANT_NO_ACCESS';
+--   end if;
+
+
+--   return query
+--   with selected_products as (
+--     -- Sélection bornée AVANT l'agrégat : le coût ne dépend pas de l'historique.
+--     select p.store_id, p.id, p.name, p.stock_tracking_mode
+--       from public.products p
+--      where p.store_id = any (v_scope)
+--      order by p.name
+--      limit v_limit
+--   ),
+--   deltas as (
+--     select im.store_id, im.product_id, im.product_variant_id,
+--            sum(
+--              case
+--                when im.movement_type = 'in' then im.quantity
+--                when im.movement_type = 'out' then -im.quantity
+--                when im.movement_type = 'adjustment'
+--                     and im.adjustment_direction = 'out' then -im.quantity
+--                when im.movement_type = 'adjustment' then im.quantity
+--                else 0
+--              end
+--            )::bigint as delta
+--       from public.inventory_movements im
+--       join selected_products sp
+--         on sp.store_id = im.store_id and sp.id = im.product_id
+--      group by im.store_id, im.product_id, im.product_variant_id
+--   ),
+--   product_totals as (
+--     select sp.store_id, sp.id as product_id, coalesce(sum(d.delta), 0)::bigint as quantity
+--       from selected_products sp
+--       left join deltas d on d.store_id = sp.store_id and d.product_id = sp.id
+--      group by sp.store_id, sp.id
+--   )
+--   select sp.store_id,
+--          sp.id as product_id,
+--          sp.name::text as product_name,
+--          sp.stock_tracking_mode::text,
+--          pv.id as product_variant_id,
+--          pv.name::text as variant_name,
+--          pv.sku::text as variant_sku,
+--          greatest(coalesce(pv.stock_multiplier, 1), 1) as stock_multiplier,
+--          coalesce(d.delta, 0)::bigint as variant_quantity,
+--          (d.product_variant_id is not null) as has_movements,
+--          pt.quantity as product_quantity,
+--          case
+--            when sp.stock_tracking_mode = 'shared'
+--              then floor(pt.quantity::numeric
+--                         / greatest(coalesce(pv.stock_multiplier, 1), 1))::bigint
+--            else coalesce(d.delta, 0)::bigint
+--          end as sellable_quantity
+--     from selected_products sp
+--     join product_totals pt
+--       on pt.store_id = sp.store_id and pt.product_id = sp.id
+--     -- Toutes les variantes, y compris celles sans aucun mouvement.
+--     left join public.product_variants pv
+--       on pv.store_id = sp.store_id and pv.product_id = sp.id
+--     left join deltas d
+--       on d.store_id = sp.store_id
+--      and d.product_id = sp.id
+--      and d.product_variant_id is not distinct from pv.id
+--    where p_max_quantity is null or pt.quantity <= p_max_quantity
+--    order by sp.name, pv.sort_order nulls last, pv.name
+--    limit v_limit * 20;
+-- end;
+-- $function$;
+--
+-- comment on function public.rpc_assistant_stock_snapshot(uuid[], integer, integer) is
+--   'Stock physique par produit et variante pour l assistant : mouvements signes, aucune donnee monetaire, variantes sans mouvement signalees (has_movements = false).';
+--
+-- revoke all on function public.rpc_assistant_stock_snapshot(uuid[], integer, integer)
+--   from public, anon;
+-- grant execute on function public.rpc_assistant_stock_snapshot(uuid[], integer, integer)
+--   to authenticated, service_role;
+--
+-- Rollback 2 :
+--   drop function if exists public.rpc_assistant_stock_snapshot(uuid[], integer, integer);
+
+
+-- ============================================================================
+-- PROPOSITION 3 — Helper de lecture du stock (aligné sur `stock.view`)
+-- Motif : `can_manage_store_stock` exclut `viewer`, qui possède `stock.view`.
 -- ============================================================================
 -- create or replace function public.can_view_store_stock(p_store_id uuid)
 -- returns boolean
@@ -152,122 +325,29 @@
 --
 -- revoke all on function public.can_view_store_stock(uuid) from public, anon;
 -- grant execute on function public.can_view_store_stock(uuid) to authenticated, service_role;
-
-
--- ============================================================================
--- PROPOSITION 3 — Snapshot de stock par produit ET variante
--- Motif : aucune fonction autorisée n'expose cet agrégat.
---         `rpc_public_catalog_stock_snapshot` est prévue pour service_role et ne
---         vérifie aucune appartenance : elle ne doit pas être réutilisée ici.
--- Sémantique : identique à `components/dashboard/stock/stock-levels.tsx` et à la
---         RPC catalogue — entrée +qty, sortie -qty, ajustement selon son sens.
--- Coût : `p_limit` borne les lignes renvoyées (max 200) ; l'agrégat est en base.
--- ============================================================================
--- create or replace function public.rpc_assistant_stock_snapshot(
---   p_store_ids uuid[],
---   p_limit integer default 50,
---   p_max_quantity integer default null
--- )
--- returns table (
---   store_id uuid,
---   product_id uuid,
---   product_name text,
---   stock_tracking_mode text,
---   product_quantity bigint,
---   product_variant_id uuid,
---   variant_name text,
---   variant_sku text,
---   stock_multiplier integer,
---   variant_quantity bigint,
---   sellable_quantity bigint
--- )
--- language plpgsql
--- stable
--- security definer
--- set search_path = public, pg_temp
--- as $function$
--- begin
---   if p_store_ids is null or cardinality(p_store_ids) = 0 or cardinality(p_store_ids) > 5 then
---     raise exception 'ASSISTANT_BAD_SCOPE';
---   end if;
---   if exists (
---     select 1 from unnest(p_store_ids) as s(id)
---      where public.can_view_store_stock(s.id) = false
---   ) then
---     raise exception 'ASSISTANT_NO_ACCESS';
---   end if;
 --
---   return query
---   with deltas as (
---     select im.store_id, im.product_id, im.product_variant_id,
---            sum(
---              case
---                when im.movement_type = 'in' then im.quantity
---                when im.movement_type = 'out' then -im.quantity
---                when im.movement_type = 'adjustment' and im.adjustment_direction = 'out' then -im.quantity
---                when im.movement_type = 'adjustment' then im.quantity
---                else 0
---              end
---            )::bigint as delta
---       from public.inventory_movements im
---      where im.store_id = any (p_store_ids)
---      group by im.store_id, im.product_id, im.product_variant_id
---   ),
---   product_totals as (
---     select d.store_id, d.product_id, sum(d.delta)::bigint as product_quantity
---       from deltas d
---      group by d.store_id, d.product_id
---   )
---   select pt.store_id,
---          pt.product_id,
---          p.name::text as product_name,
---          p.stock_tracking_mode::text,
---          pt.product_quantity,
---          d.product_variant_id,
---          pv.name::text as variant_name,
---          pv.sku::text as variant_sku,
---          greatest(coalesce(pv.stock_multiplier, 1), 1) as stock_multiplier,
---          d.delta as variant_quantity,
---          case
---            when p.stock_tracking_mode = 'shared'
---              then floor(pt.product_quantity::numeric / greatest(coalesce(pv.stock_multiplier, 1), 1))::bigint
---            else d.delta
---          end as sellable_quantity
---     from product_totals pt
---     join public.products p on p.id = pt.product_id and p.store_id = pt.store_id
---     left join deltas d on d.store_id = pt.store_id and d.product_id = pt.product_id
---     left join public.product_variants pv on pv.id = d.product_variant_id
---    where p_max_quantity is null or pt.product_quantity <= p_max_quantity
---    order by pt.product_quantity asc, p.name asc
---    limit least(greatest(coalesce(p_limit, 50), 1), 200);
--- end;
--- $function$;
---
--- comment on function public.rpc_assistant_stock_snapshot(uuid[], integer, integer) is
---   'Stock physique par produit et variante pour l assistant. Entrées/sorties/ajustements signés, aucun prix, aucune ligne inventée.';
---
--- revoke all on function public.rpc_assistant_stock_snapshot(uuid[], integer, integer)
---   from public, anon;
--- grant execute on function public.rpc_assistant_stock_snapshot(uuid[], integer, integer)
---   to authenticated, service_role;
+-- Rollback 3 :
+--   drop function if exists public.can_view_store_stock(uuid);
 
 
 
 -- ============================================================================
--- PROPOSITION 4 — Durcissements à décider (hors périmètre Agent 2)
+-- PROPOSITION 4 — Durcissements hors périmètre Agent 2 (à arbitrer)
 -- ============================================================================
--- 4.1 `rpc_dashboard_confirmation_performance` expose `potential_commission`,
---     `earned_commission` et `paid_commission` à tout membre rejoignant le store,
---     sans contrôle d'accès financier et sans filtre `store_members.status`.
---     L'assistant masque ces champs hors accès `full`, mais l'appel direct
---     PostgREST reste possible. Options :
---       (a) ajouter `public.can_view_store_finances(ca.store_id)` et `sm.status = 'active'` ;
---       (b) scinder en deux fonctions : compteurs sans argent / commissions `full`.
--- 4.2 `rpc_public_catalog_stock_snapshot` est exécutable par `authenticated`
---     (mesuré : has_function_privilege = true) alors qu'elle est prévue pour
---     `service_role` et ne vérifie aucune appartenance. Action proposée :
---     `revoke execute ... from authenticated`.
--- 4.3 `rpc_dashboard_confirmation_performance` filtre `o.order_date <= p_end_date`
---     (borne inclusive) alors que les lecteurs V5 utilisent `[from, to[` :
---     l'assistant compense (`end - 1 ms`) ; la normalisation en base reste à faire.
+-- 4.1 `rpc_dashboard_confirmation_performance` publie `potential_commission`,
+--     `earned_commission`, `paid_commission` à tout membre actif, sans contrôle
+--     financier. L'assistant masque ces champs hors `full`, mais l'appel direct
+--     PostgREST reste possible. Options : ajouter
+--     `public.can_view_store_finances(ca.store_id)` et `sm.status = 'active'`,
+--     ou scinder en deux fonctions (compteurs / commissions `full`).
+-- 4.2 `rpc_dashboard_confirmation_performance` filtre `o.order_date <= p_end_date`
+--     (borne inclusive) alors que le moteur analytique utilise `[from, to[`.
+--     L'assistant compense avec la dernière microseconde (`...999999Z`), vérifié
+--     côté base : `'…23:59:59.999999Z' + 1 µs = borne haute exclue`. Normaliser
+--     la borne en base supprimerait cette compensation.
+-- 4.3 `rpc_public_catalog_stock_snapshot` est exécutable par `authenticated`
+--     (mesuré) alors qu'elle est prévue pour `service_role` et ne contrôle
+--     aucune appartenance. Action proposée : `revoke execute … from authenticated`.
+-- 4.4 Ne pas modifier `rpc_dashboard_kpi_reader(_v2)` ni les lecteurs Dashboard :
+--     les besoins assistant sont couverts par des fonctions dédiées ci-dessus.
 -- ============================================================================

@@ -1,231 +1,568 @@
-/** Contrat analytique V5 : aucun chiffre ne provient d'un scan PostgREST. */
+/**
+ * Lecteur KPI V5 du chatbot (contrat versionné `ANALYTICS_CONTRACT_VERSION`).
+ *
+ * Règles :
+ * - aucune valeur ne provient d'un scan PostgREST : seule la RPC V5 est lue ;
+ * - payload validé à l'exécution (zod) avant toute interprétation ;
+ * - montants conservés en décimal exact, jamais convertis en `number` ;
+ * - états explicites, zéro réel distingué de l'absence de donnée ;
+ * - une seule lecture V5 par session, partageable entre outils.
+ */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AnalyticsRange } from '@/lib/assistant/types'
-import { addBusinessDays, businessDayStartUtc, businessRange, businessTodayIso, previousBusinessRange, type BusinessRange } from '@/lib/dashboard/business-time'
-import { fetchDashboardKpiReader, hasFinancialTotals, KPI_READER_RPC_V2, type KpiReaderStore, type KpiReaderPayload } from '@/lib/dashboard/kpi-reader'
+import {
+  fetchDashboardKpiReader,
+  hasFinancialTotals,
+  KPI_READER_RPC_V2,
+  type KpiReaderStore,
+} from '@/lib/dashboard/kpi-reader'
+import { previousBusinessRange, type BusinessRange } from '@/lib/dashboard/business-time'
+import { percentOfCounts, subtractDecimals, sumDecimals, toDecimalText } from '@/lib/assistant/analytics-decimal'
+import {
+  ANALYTICS_CONTRACT_VERSION,
+  COMPARABLE_METRICS,
+  KPI_METRIC_ALIASES,
+  aggregateMetric,
+  type AnalyticsCoverage,
+  type AnalyticsMetric,
+  type AnalyticsReaderResult,
+  type AnalyticsState,
+  type AnalyticsStoreResult,
+  type AssistantAnalyticsSession,
+  type ComparableMetric,
+  type KpiEnvelope,
+  type KpiMetricAlias,
+  type MetricDelta,
+  type PeriodComparison,
+  type StoreComparison,
+  type StoreComparisonEntry,
+} from '@/lib/assistant/analytics-contract'
+import { assertBusinessRange, MAX_SCOPE_STORES } from '@/lib/assistant/analytics-range'
+import { validateKpiPayload } from '@/lib/assistant/analytics-rpc-validation'
 
-export type AnalyticsState = 'complete' | 'partial' | 'missing' | 'forbidden' | 'unavailable'
-export type AnalyticsMetric = { value: string | number | null; state: AnalyticsState; numerator?: number; denominator?: number; definition: string; limit?: string }
-export interface AnalyticsStoreResult {
-  storeId: string
-  currency: string
-  timeZone: string
-  access: 'full' | 'commercial'
-  definitionVersion: number
-  coverage: KpiReaderStore['coverage']
-  revision: string
-  lastRebuildAt: string | null
-  metrics: Record<string, AnalyticsMetric>
-  /** Journées métier publiées ; aucune journée n'est inventée. */
-  days: Array<{
-    date: string
-    orders: number
-    delivered: number
-    revenue: string | null
-    ads: string | null
-    partial: boolean
-  }>
-}
-export interface AnalyticsReaderResult {
-  state: AnalyticsState
-  range: BusinessRange
-  source: 'rpc_dashboard_kpi_reader_v2'
-  generatedAt: string | null
-  stores: AnalyticsStoreResult[]
-  limits: string[]
+export type { AnalyticsReaderResult, AssistantAnalyticsSession } from '@/lib/assistant/analytics-contract'
+export { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-range'
+
+function scopedState(store: KpiReaderStore): AnalyticsState {
+  const covered = store.coverage.days_aggregate + store.coverage.days_direct
+  if (covered === 0) return 'missing'
+  if (store.incomplete || store.coverage.days_partial > 0) return 'partial'
+  if (store.totals.orders_count === 0) return 'empty'
+  return 'complete'
 }
 
-const DAY_MS = 86_400_000
-function validDay(day: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false
-  const parsed = new Date(`${day}T00:00:00.000Z`)
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day
-}
-
-/** Les plages absolues legacy sont des instants [start,end[ : conversion autorisée uniquement à minuit métier. */
-export function resolveAssistantBusinessRange(range: AnalyticsRange, now = new Date()): BusinessRange {
-  const today = businessTodayIso(now)
-  if (typeof range === 'object') {
-    if (validDay(range.start) && validDay(range.end)) return checked({ from: range.start, to: range.end })
-    const start = new Date(range.start)
-    const end = new Date(range.end)
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) throw new Error('ANALYTICS_BAD_RANGE')
-    // Les appels existants fournissent des ISO instantanés ; refuser toute borne ambiguë.
-    const from = businessTodayIso(start)
-    const to = businessTodayIso(end)
-    if (businessDayStartUtc(from).getTime() !== start.getTime() || businessDayStartUtc(to).getTime() !== end.getTime()) {
-      throw new Error('ANALYTICS_BAD_RANGE')
-    }
-    return checked({ from, to })
+function countMetric(value: number | null, state: AnalyticsState, definition: string): AnalyticsMetric {
+  return {
+    value: value === null ? null : String(value),
+    count: value,
+    unit: 'count',
+    state: value === null ? 'missing' : state,
+    definition,
+    numerator: null,
+    denominator: null,
   }
-  if (range === 'yesterday') return checked(businessRange('yesterday', null, null, now))
-  if (range === 'month' || range === 'last_month') return checked(businessRange(range, null, null, now))
-  const days = range === '7d' ? 7 : 30
-  return checked({ from: addBusinessDays(today, 1 - days), to: addBusinessDays(today, 1) })
 }
 
-function checked(range: BusinessRange): BusinessRange {
-  if (!validDay(range.from) || !validDay(range.to) || range.from >= range.to ||
-      (Date.parse(range.to) - Date.parse(range.from)) / DAY_MS > 400) throw new Error('ANALYTICS_BAD_RANGE')
-  return range
+function decimalMetric(value: string | null, state: AnalyticsState, definition: string): AnalyticsMetric {
+  return {
+    value,
+    count: null,
+    unit: 'decimal',
+    state: value === null ? 'missing' : state,
+    definition,
+    numerator: null,
+    denominator: null,
+  }
 }
 
-const metric = (value: string | number | null, state: AnalyticsState, definition: string, limit?: string): AnalyticsMetric => ({ value, state, definition, ...(limit ? { limit } : {}) })
+function forbiddenMetric(definition: string): AnalyticsMetric {
+  return {
+    value: null,
+    count: null,
+    unit: 'decimal',
+    state: 'forbidden',
+    definition,
+    numerator: null,
+    denominator: null,
+  }
+}
 
 function storeResult(store: KpiReaderStore): AnalyticsStoreResult {
-  const state: AnalyticsState = store.incomplete || store.coverage.days_partial > 0 ? 'partial' : 'complete'
+  const state = scopedState(store)
   const totals = store.totals
+
   const metrics: Record<string, AnalyticsMetric> = {
-    orders: metric(totals.orders_count, state, 'V5: commandes sur la période métier (axe commande)'),
-    delivered: metric(totals.delivered_count, state, 'V5: commandes livrées (axe commande)'),
-    revenue: metric(totals.revenue, state, 'V5: CA réalisé, montant décimal exact'),
-    revenueEstimated: metric(totals.revenue_estimated, state, 'V5: CA estimé, distinct du CA réalisé'),
-    adSpend: metric(totals.ad_spend_contract, state, 'V5: publicité, couverture journalière + fallback contractuel'),
-    returned: metric(totals.returned_count, state, 'V5: retours selon statuts canoniques'),
-    cancelled: metric(totals.cancelled_count, state, 'V5: annulations selon statuts canoniques'),
+    orders: countMetric(totals.orders_count, state, 'V5 : commandes sur la période métier (axe commande)'),
+    delivered: countMetric(totals.delivered_count, state, 'V5 : commandes livrées (axe commande)'),
+    returned: countMetric(totals.returned_count, state, 'V5 : retours (statuts canoniques)'),
+    cancelled: countMetric(totals.cancelled_count, state, 'V5 : annulations (statuts canoniques)'),
+    revenue: decimalMetric(toDecimalText(totals.revenue), state, 'V5 : CA réalisé (lignes des commandes livrées)'),
+    revenueEstimated: decimalMetric(toDecimalText(totals.revenue_estimated), state, 'V5 : CA estimé, distinct du CA réalisé'),
+    adSpend: decimalMetric(toDecimalText(totals.ad_spend_contract), state, 'V5 : publicité (couverture journalière + fallback)'),
   }
+
+  const deliveryRate = percentOfCounts(totals.delivered_count, totals.orders_count)
   metrics.deliveryRate = {
-    ...metric(totals.orders_count ? totals.delivery_rate : null, totals.orders_count ? state : 'missing', 'V5: livrées / commandes (ceci n’est pas un taux de confirmation)'),
-    numerator: totals.delivered_count, denominator: totals.orders_count,
+    value: deliveryRate,
+    count: null,
+    unit: 'percent',
+    state: deliveryRate === null ? 'missing' : state,
+    definition: 'V5 : livrées / commandes — ce n’est pas un taux de confirmation',
+    numerator: totals.delivered_count,
+    denominator: totals.orders_count,
   }
+
   if (hasFinancialTotals(store)) {
-    metrics.purchaseCost = metric(store.totals.purchase_cost, state, 'V5: coût d’achat des commandes livrées')
-    metrics.deliveryCost = metric(store.totals.delivery_fee_cost, state, 'V5: coût de livraison, axe commande')
-    metrics.confirmationCost = metric(store.totals.confirmation_cost, state, 'V5: coût de confirmation')
-    metrics.contributionMargin = metric(store.totals.contribution_margin, state, 'V5: marge contributive ; PAS résultat opérationnel')
+    metrics.purchaseCost = decimalMetric(toDecimalText(store.totals.purchase_cost), state, 'V5 : coût d’achat des commandes livrées')
+    metrics.deliveryCost = decimalMetric(toDecimalText(store.totals.delivery_fee_cost), state, 'V5 : coût de livraison (axe commande)')
+    metrics.confirmationCost = decimalMetric(toDecimalText(store.totals.confirmation_cost), state, 'V5 : coût de confirmation')
+    metrics.contributionMargin = decimalMetric(
+      toDecimalText(store.totals.contribution_margin),
+      state,
+      'V5 : marge contributive — PAS le résultat opérationnel',
+    )
   } else {
     for (const name of ['purchaseCost', 'deliveryCost', 'confirmationCost', 'contributionMargin']) {
-      metrics[name] = metric(null, 'forbidden', 'V5: accès financier full requis')
+      metrics[name] = forbiddenMetric('V5 : accès financier `full` requis')
     }
   }
-  if (store.coverage.days_aggregate + store.coverage.days_direct === 0) {
-    for (const item of Object.values(metrics)) if (item.state !== 'forbidden') { item.state = 'missing'; item.value = null }
-  }
-  const days = store.points.map((point) => ({
-    date: point.date,
-    orders: point.orders_count,
-    delivered: point.delivered_count,
-    revenue: point.revenue,
-    ads: point.ads,
-    partial: point.partial,
-  }))
-  return { storeId: store.store_id, currency: store.currency, timeZone: store.tz, access: store.access,
-    definitionVersion: store.definition_version, coverage: store.coverage, revision: store.revision,
-    lastRebuildAt: store.last_rebuild_at, metrics, days }
-}
 
-export async function readAssistantKpis(supabase: SupabaseClient, storeIds: string[], range: BusinessRange): Promise<AnalyticsReaderResult> {
-  checked(range)
-  if (!storeIds.length || storeIds.length > 5 || new Set(storeIds).size !== storeIds.length) throw new Error('ANALYTICS_BAD_SCOPE')
-  try {
-    const payload: KpiReaderPayload = await fetchDashboardKpiReader(supabase, {
-      storeIds, from: range.from, to: range.to, includeDirect: false, rpc: KPI_READER_RPC_V2,
-    })
-    if (!payload || !Array.isArray(payload.stores) || payload.stores.length !== storeIds.length ||
-        storeIds.some(id => !payload.stores.some(store => store.store_id === id))) throw new Error('ANALYTICS_INCOMPLETE_SCOPE')
-    const stores = payload.stores.map(storeResult)
-    const states = stores.flatMap(s => Object.values(s.metrics).map(m => m.state)).filter(s => s !== 'forbidden')
-    return { state: states.every(s => s === 'missing') ? 'missing' : states.some(s => s === 'partial' || s === 'missing') ? 'partial' : 'complete',
-      range, source: 'rpc_dashboard_kpi_reader_v2', generatedAt: payload.generated_at, stores,
-      limits: ['Montants non additionnés entre devises.', 'Couverture absente/sale : pas de scan direct de secours.', 'Le résultat opérationnel requiert une RPC financière dédiée.'] }
-  } catch (error) {
-    if (error instanceof Error && (error.message.includes('KPI_NO_ACCESS') || error.message.includes('KPI_UNAUTHENTICATED'))) {
-      return { state: 'forbidden', range, source: 'rpc_dashboard_kpi_reader_v2', generatedAt: null, stores: [], limits: ['Accès refusé par le lecteur V5.'] }
-    }
-    throw error
+  const coverage: AnalyticsCoverage = { ...store.coverage }
+
+  return {
+    storeId: store.store_id,
+    currency: store.currency,
+    timeZone: store.tz,
+    access: store.access,
+    definitionVersion: store.definition_version,
+    coverage,
+    revision: store.revision,
+    lastRebuildAt: store.last_rebuild_at ?? null,
+    state,
+    metrics,
+    days: store.points.map((point) => ({
+      date: point.date,
+      state: point.state === 'aggregate' || point.state === 'direct' ? 'complete' : 'partial',
+      orders: Number.isSafeInteger(point.orders_count) ? point.orders_count : null,
+      delivered: Number.isSafeInteger(point.delivered_count) ? point.delivered_count : null,
+      revenue: toDecimalText(point.revenue),
+      ads: toDecimalText(point.ads),
+      partial: point.partial,
+    })),
   }
 }
 
-export async function compareAssistantKpis(supabase: SupabaseClient, storeIds: string[], range: BusinessRange) {
-  checked(range)
-  const previous = checked(previousBusinessRange(range))
-  const [current, baseline] = await Promise.all([
-    readAssistantKpis(supabase, storeIds, range), readAssistantKpis(supabase, storeIds, previous),
-  ])
-  return { current, previous: baseline, limits: ['Comparaison : deux lectures V5 indépendantes ; aucune différence calculée si couverture ou devise incompatible.'] }
+function globalState(stores: AnalyticsStoreResult[]): AnalyticsState {
+  if (stores.length === 0) return 'missing'
+  if (stores.every((store) => store.state === 'forbidden')) return 'forbidden'
+  if (stores.some((store) => store.state === 'missing')) return 'missing'
+  if (stores.some((store) => store.state === 'partial')) return 'partial'
+  if (stores.every((store) => store.state === 'empty')) return 'empty'
+  return 'complete'
 }
+
 
 /**
- * Session analytique d'une requête : la lecture KPI V5 est mémorisée, donc
- * plusieurs outils partagent une seule lecture par période. Une session porte
- * un périmètre et une période immuables.
+ * Lecture KPI d'un périmètre et d'une période.
+ *
+ * Aucune exception de validation n'est transformée en chiffre : un payload
+ * invalide produit `missing` avec la liste des anomalies.
  */
-export interface AssistantAnalyticsSession {
-  supabase: SupabaseClient
-  storeIds: string[]
-  range: BusinessRange
-  kpis: () => Promise<AnalyticsReaderResult>
+export async function readAssistantKpis(
+  supabase: SupabaseClient,
+  storeIds: string[],
+  range: BusinessRange,
+): Promise<AnalyticsReaderResult> {
+  assertBusinessRange(range)
+  const unique = Array.from(new Set(storeIds))
+  if (unique.length !== storeIds.length || unique.length === 0 || unique.length > MAX_SCOPE_STORES) {
+    return {
+      contractVersion: ANALYTICS_CONTRACT_VERSION,
+      state: 'missing',
+      range,
+      source: 'rpc_dashboard_kpi_reader_v2',
+      generatedAt: null,
+      stores: [],
+      limits: ['Périmètre invalide : aucune lecture effectuée.'],
+      issues: ['ANALYTICS_BAD_SCOPE'],
+    }
+  }
+
+  try {
+    const raw = await fetchDashboardKpiReader(supabase, {
+      storeIds: unique,
+      from: range.from,
+      to: range.to,
+      includeDirect: false,
+      rpc: KPI_READER_RPC_V2,
+    })
+
+    const validation = validateKpiPayload(raw)
+    if (!validation.ok) {
+      return {
+        contractVersion: ANALYTICS_CONTRACT_VERSION,
+        state: 'missing',
+        range,
+        source: 'rpc_dashboard_kpi_reader_v2',
+        generatedAt: null,
+        stores: [],
+        limits: ['Payload V5 invalide : aucune valeur publiée.'],
+        issues: validation.issues,
+      }
+    }
+
+    const payload = validation.payload
+    const missingStores = unique.filter((id) => !payload.stores.some((store) => store.store_id === id))
+    if (missingStores.length > 0) {
+      return {
+        contractVersion: ANALYTICS_CONTRACT_VERSION,
+        state: 'missing',
+        range,
+        source: 'rpc_dashboard_kpi_reader_v2',
+        generatedAt: payload.generated_at,
+        stores: [],
+        limits: ['Périmètre incomplet : le lecteur n’a pas retourné toutes les boutiques demandées.'],
+        issues: [`ANALYTICS_INCOMPLETE_SCOPE:${missingStores.join(',')}`],
+      }
+    }
+
+    const stores = payload.stores.map(storeResult)
+    return {
+      contractVersion: ANALYTICS_CONTRACT_VERSION,
+      state: globalState(stores),
+      range,
+      source: 'rpc_dashboard_kpi_reader_v2',
+      generatedAt: payload.generated_at,
+      stores,
+      limits: [
+        'Montants non additionnés entre devises distinctes.',
+        'Couverture absente ou sale : aucun scan direct de secours.',
+        'Le résultat opérationnel (après dépenses) requiert une RPC financière dédiée.',
+      ],
+      issues: [],
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'ANALYTICS_UNKNOWN'
+    if (message.includes('KPI_NO_ACCESS') || message.includes('KPI_UNAUTHENTICATED')) {
+      return {
+        contractVersion: ANALYTICS_CONTRACT_VERSION,
+        state: 'forbidden',
+        range,
+        source: 'rpc_dashboard_kpi_reader_v2',
+        generatedAt: null,
+        stores: [],
+        limits: ['Accès refusé par le lecteur V5 : aucune donnée retournée.'],
+        issues: [message],
+      }
+    }
+    return {
+      contractVersion: ANALYTICS_CONTRACT_VERSION,
+      state: 'missing',
+      range,
+      source: 'rpc_dashboard_kpi_reader_v2',
+      generatedAt: null,
+      stores: [],
+      limits: ['Lecture V5 indisponible : aucune valeur publiée.'],
+      issues: [message],
+    }
+  }
 }
 
+
+/**
+ * Session analytique : périmètre et période immuables, lecture V5 mémorisée.
+ * Le consommateur peut injecter n'importe quel `AnalyticsKpiSource` pour
+ * partager la même lecture entre plusieurs outils.
+ */
 export function createAssistantAnalyticsSession(
   supabase: SupabaseClient,
   storeIds: string[],
   range: BusinessRange,
 ): AssistantAnalyticsSession {
-  checked(range)
+  assertBusinessRange(range)
+  const frozenStores = Object.freeze([...storeIds])
+  const frozenRange = Object.freeze({ ...range })
   let pending: Promise<AnalyticsReaderResult> | null = null
+
   return {
     supabase,
-    storeIds: [...storeIds],
-    range,
+    storeIds: frozenStores,
+    range: frozenRange,
     kpis: () => {
-      if (!pending) pending = readAssistantKpis(supabase, storeIds, range)
+      if (!pending) pending = readAssistantKpis(supabase, [...frozenStores], frozenRange)
       return pending
     },
   }
 }
 
+function sumMetricText(result: AnalyticsReaderResult, name: string): string | null {
+  if (result.stores.length === 0) return null
+  const currencies = new Set(result.stores.map((store) => store.currency))
+  if (currencies.size !== 1) return null
+
+  const values: Array<string | null> = []
+  for (const store of result.stores) {
+    const metric = store.metrics[name]
+    if (!metric || metric.state === 'forbidden' || metric.state === 'missing') return null
+    values.push(metric.value)
+  }
+  return sumDecimals(values)
+}
+
+
+
+function fullyCovered(result: AnalyticsReaderResult): boolean {
+  return result.stores.length > 0 && result.stores.every(
+    (store) => store.coverage.days_aggregate + store.coverage.days_direct === store.coverage.days_total
+      && store.coverage.days_dirty === 0
+      && store.coverage.days_incompatible === 0,
+  )
+}
+
+function definitionsOf(result: AnalyticsReaderResult): number[] {
+  return Array.from(new Set(result.stores.map((store) => store.definitionVersion))).sort((a, b) => a - b)
+}
+
+function sameScopeAndCurrency(a: AnalyticsReaderResult, b: AnalyticsReaderResult): boolean {
+  if (a.stores.length === 0 || a.stores.length !== b.stores.length) return false
+  return a.stores.every((store, index) => {
+    const other = b.stores[index]
+    return Boolean(other) && other.storeId === store.storeId && other.currency === store.currency
+  })
+}
+
 /**
- * Comparaison de deux périodes. Les deux lectures V5 sont indépendantes ; les
- * écarts ne sont calculés que si devise, couverture et accès sont compatibles.
+ * Comparaison de deux périodes réelles pour le même périmètre.
+ *
+ * `baseline` est explicite : à défaut, la période précédente de même durée est
+ * utilisée. Aucun écart n'est publié si les définitions, devises, couvertures
+ * ou niveaux d'accès diffèrent.
  */
 export async function compareAssistantPeriods(
   supabase: SupabaseClient,
   storeIds: string[],
-  range: BusinessRange,
-): Promise<{
-  current: AnalyticsReaderResult
-  previous: AnalyticsReaderResult
-  deltas: Record<string, number | null>
-  notices: string[]
-}> {
-  checked(range)
-  const previousRange = checked(previousBusinessRange(range))
-  const [current, previous] = await Promise.all([
-    readAssistantKpis(supabase, storeIds, range),
+  current: BusinessRange,
+  baseline?: BusinessRange,
+): Promise<PeriodComparison> {
+  assertBusinessRange(current)
+  const previousRange = baseline ? assertBusinessRange(baseline) : assertBusinessRange(previousBusinessRange(current))
+
+  const [currentResult, baselineResult] = await Promise.all([
+    readAssistantKpis(supabase, storeIds, current),
     readAssistantKpis(supabase, storeIds, previousRange),
   ])
 
   const notices: string[] = []
-  const deltas: Record<string, number | null> = {}
-  const comparable =
-    current.state !== 'forbidden' &&
-    previous.state !== 'forbidden' &&
-    current.stores.length === previous.stores.length &&
-    new Set(current.stores.map((store) => store.currency)).size === 1 &&
-    current.stores.every((store, index) => store.currency === previous.stores[index]?.currency)
+  const issues: string[] = []
+  const deltas: MetricDelta[] = []
 
-  const sumOf = (result: AnalyticsReaderResult, name: string): number | null => {
-    const values = result.stores.map((store) => store.metrics[name]?.value ?? null)
-    if (values.length === 0 || values.some((value) => value === null)) return null
-    return values.reduce<number>((acc, value) => acc + Number(value), 0)
+  const sameScope = sameScopeAndCurrency(currentResult, baselineResult)
+  const sameDefinitions =
+    JSON.stringify(definitionsOf(currentResult)) === JSON.stringify(definitionsOf(baselineResult))
+  const covered = fullyCovered(currentResult) && fullyCovered(baselineResult)
+  const accessible = currentResult.state !== 'forbidden' && baselineResult.state !== 'forbidden'
+  const comparable = sameScope && sameDefinitions && covered && accessible
+
+  if (!accessible) notices.push('Périodes non comparables : accès refusé sur au moins une période.')
+  if (!sameScope) notices.push('Périodes non comparables : périmètre ou devise différents.')
+  if (!sameDefinitions) notices.push('Périodes non comparables : versions de définition KPI différentes.')
+  if (!covered) notices.push('Périodes non comparables : couverture incomplète ou journée sale.')
+
+  for (const metric of COMPARABLE_METRICS) {
+    const currentValue = sumMetricText(currentResult, metric)
+    const baselineValue = sumMetricText(baselineResult, metric)
+
+    if (!comparable) {
+      deltas.push({
+        metric,
+        current: currentValue,
+        baseline: baselineValue,
+        delta: null,
+        state: accessible ? 'partial' : 'forbidden',
+        reason: accessible ? 'NOT_COMPARABLE' : 'FORBIDDEN',
+      })
+      continue
+    }
+
+    if (currentValue === null || baselineValue === null) {
+      deltas.push({
+        metric,
+        current: currentValue,
+        baseline: baselineValue,
+        delta: null,
+        state: 'missing',
+        reason: 'METRIC_UNAVAILABLE',
+      })
+      continue
+    }
+
+    deltas.push({
+      metric,
+      current: currentValue,
+      baseline: baselineValue,
+      delta: subtractDecimals(currentValue, baselineValue),
+      state: 'complete',
+      reason: null,
+    })
   }
 
-  if (!comparable) {
-    notices.push('Périodes non comparables : périmètre, devise ou autorisation incompatibles. Aucun écart calculé.')
-    for (const name of ['orders', 'delivered', 'revenue', 'adSpend', 'contributionMargin']) {
-      deltas[name] = null
-    }
-  } else {
-    for (const name of ['orders', 'delivered', 'adSpend', 'revenue', 'contributionMargin']) {
-      const now = sumOf(current, name)
-      const before = sumOf(previous, name)
-      deltas[name] = now !== null && before !== null ? now - before : null
-    }
-    if (deltas.contributionMargin === null) {
-      notices.push('Écart de marge non calculé : accès financier ou couverture insuffisants.')
+  const state: AnalyticsState = !accessible
+    ? 'forbidden'
+    : deltas.every((delta) => delta.state === 'complete')
+      ? 'complete'
+      : deltas.every((delta) => delta.state === 'missing')
+        ? 'missing'
+        : 'partial'
+
+  if (state !== 'complete') issues.push('COMPARISON_NOT_FULLY_COMPUTABLE')
+
+  return {
+    contractVersion: ANALYTICS_CONTRACT_VERSION,
+    kind: 'periods',
+    state,
+    ranges: { current, baseline: previousRange },
+    currency: (() => {
+      const currencies = new Set(currentResult.stores.map((store) => store.currency))
+      return currencies.size === 1 ? Array.from(currencies)[0] : null
+    })(),
+    definitions: { current: definitionsOf(currentResult), baseline: definitionsOf(baselineResult) },
+    deltas,
+    notices,
+    issues,
+  }
+}
+
+
+function storeEntry(store: AnalyticsStoreResult): StoreComparisonEntry {
+  const metrics = {} as Record<ComparableMetric, string | null>
+  for (const metric of COMPARABLE_METRICS) {
+    const value = store.metrics[metric]
+    metrics[metric] = value && value.state !== 'forbidden' && value.state !== 'missing' ? value.value : null
+  }
+  return {
+    storeId: store.storeId,
+    currency: store.currency,
+    state: store.state,
+    coverage: store.coverage,
+    metrics,
+  }
+}
+
+/**
+ * Comparaison entre boutiques (jamais une comparaison de périodes).
+ *
+ * Aucun total inter-boutiques n'est produit : les écarts sont calculés deux à
+ * deux, uniquement entre boutiques de même devise, complètes et de même
+ * version de définition.
+ */
+export async function compareAssistantStores(
+  supabase: SupabaseClient,
+  storeIds: string[],
+  range: BusinessRange,
+): Promise<StoreComparison> {
+  assertBusinessRange(range)
+  const result = await readAssistantKpis(supabase, storeIds, range)
+
+  const notices: string[] = []
+  const issues: string[] = [...result.issues]
+  const entries = result.stores.map(storeEntry)
+
+  if (storeIds.length < 2) {
+    notices.push('Comparaison entre boutiques impossible : au moins deux boutiques sont requises.')
+  }
+
+  const deltas: StoreComparison['deltas'] = []
+  const comparableStores = result.stores.filter(
+    (store) => store.state === 'complete' || store.state === 'empty',
+  )
+
+  for (let i = 0; i < comparableStores.length; i += 1) {
+    for (let j = i + 1; j < comparableStores.length; j += 1) {
+      const from = comparableStores[i]
+      const to = comparableStores[j]
+      const compatible = from.currency === to.currency && from.definitionVersion === to.definitionVersion
+
+      for (const metric of COMPARABLE_METRICS) {
+        if (!compatible) {
+          deltas.push({ from: from.storeId, to: to.storeId, metric, delta: null, state: 'partial' })
+          continue
+        }
+        const left = from.metrics[metric]?.value ?? null
+        const right = to.metrics[metric]?.value ?? null
+        deltas.push({
+          from: from.storeId,
+          to: to.storeId,
+          metric,
+          delta: left !== null && right !== null ? subtractDecimals(left, right) : null,
+          state: left !== null && right !== null ? 'complete' : 'missing',
+        })
+      }
     }
   }
 
-  return { current, previous, deltas, notices }
+  if (entries.some((entry) => entry.state === 'partial' || entry.state === 'missing')) {
+    notices.push('Au moins une boutique n’est pas complète : ses écarts ne sont pas calculés.')
+  }
+  const currencies = new Set(entries.map((entry) => entry.currency))
+  if (currencies.size > 1) {
+    notices.push('Devises multiples : aucun total inter-boutiques, seuls les écarts de même devise sont calculés.')
+  }
+
+  const state: AnalyticsState = result.state === 'forbidden'
+    ? 'forbidden'
+    : entries.length < 2
+      ? 'unavailable'
+      : entries.some((entry) => entry.state === 'partial')
+        ? 'partial'
+        : entries.some((entry) => entry.state === 'missing')
+          ? 'missing'
+          : 'complete'
+
+  return {
+    contractVersion: ANALYTICS_CONTRACT_VERSION,
+    kind: 'stores',
+    state,
+    range,
+    stores: entries,
+    deltas,
+    notices,
+    issues,
+  }
+}
+
+
+
+/**
+ * Construit l'enveloppe KPI consommable : alias stables, états conservés,
+ * détail par boutique. Aucun alias n'est rempli par défaut.
+ */
+export function buildKpiEnvelope(kpis: AnalyticsReaderResult): KpiEnvelope {
+  const metrics: KpiEnvelope['metrics'] = {}
+  for (const [alias, metricName] of Object.entries(KPI_METRIC_ALIASES) as Array<[KpiMetricAlias, string]>) {
+    metrics[alias] = aggregateMetric(kpis, metricName)
+  }
+
+  const currencies = Array.from(new Set(kpis.stores.map((store) => store.currency)))
+  const access: Record<string, 'full' | 'commercial'> = {}
+  for (const store of kpis.stores) access[store.storeId] = store.access
+
+  const limits = [...kpis.limits]
+  if (currencies.length > 1) {
+    limits.push('Devises multiples : les montants agrégés ne sont pas publiés.')
+  }
+
+  return {
+    contractVersion: ANALYTICS_CONTRACT_VERSION,
+    kind: 'kpis',
+    state: kpis.state,
+    range: kpis.range,
+    timeZone: kpis.stores[0]?.timeZone ?? null,
+    currency: currencies.length === 1 ? currencies[0] : null,
+    definitionVersions: Array.from(new Set(kpis.stores.map((store) => store.definitionVersion))).sort((a, b) => a - b),
+    access,
+    coverage: kpis.stores.map((store) => ({ storeId: store.storeId, state: store.state, coverage: store.coverage })),
+    metrics,
+    stores: kpis.stores,
+    limits,
+    issues: kpis.issues,
+  }
 }

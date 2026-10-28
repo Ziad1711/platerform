@@ -1,17 +1,17 @@
 import type { AnalyticsRange, AssistantIntent } from '@/lib/assistant/types'
 import type { AgentStoreContext, SupabaseServerClient } from '@/lib/assistant/agent/types'
+import type { BusinessRange } from '@/lib/dashboard/business-time'
+import { ANALYTICS_CONTRACT_VERSION } from '@/lib/assistant/analytics-contract'
 import {
+  buildKpiEnvelope,
   compareAssistantPeriods,
+  compareAssistantStores,
   createAssistantAnalyticsSession,
   resolveAssistantBusinessRange,
-  type AssistantAnalyticsSession,
   type AnalyticsReaderResult,
+  type AssistantAnalyticsSession,
 } from '@/lib/assistant/analytics-reader'
-import {
-  readAgentSection,
-  readCitySection,
-  readConfirmationSection,
-} from '@/lib/assistant/analytics-sections'
+import { readAgentSection, readCitySection, readConfirmationSection } from '@/lib/assistant/analytics-sections'
 import {
   readDeliverySection,
   readProductSection,
@@ -131,110 +131,175 @@ export function buildToolPlan(intent: AssistantIntent, userMessage: string): Pla
   }))
 }
 
-export async function executeAgentTool(input: {
+export interface ExecuteAgentToolInput {
   supabase: SupabaseServerClient
   storeIds: string[]
   storeContext: AgentStoreContext
   range: AnalyticsRange
   toolName: AgentToolName
   userMessage: string
-  /** Session partagée : évite de relire les KPI V5 pour chaque outil. */
+  /** Session injectable : partage la lecture V5 entre tous les outils d'une requête. */
   session?: AssistantAnalyticsSession
-}) {
-  const { storeContext, toolName } = input
-  const businessRange = resolveAssistantBusinessRange(input.range)
-  const session =
-    input.session ??
-    createAssistantAnalyticsSession(input.supabase, input.storeIds, businessRange)
+  /**
+   * Période de référence explicite pour `getStoreComparison` :
+   * fournie ⇒ comparaison **de périodes** ; absente ⇒ comparaison **de boutiques**.
+   */
+  comparisonBaseline?: BusinessRange
+}
 
-  const result = async (data: unknown, currency?: string) =>
-    ({ toolName, data, meta: { storeId: storeContext.storeId, currency: currency ?? storeContext.storeCurrency } }) satisfies AgentToolResult
+/**
+ * Exécute un outil analytique.
+ *
+ * Aucun outil ne renvoie un chiffre sans état : le résultat est une enveloppe
+ * versionnée (`KpiEnvelope`, `PeriodComparison`, `StoreComparison`) ou une
+ * `SectionResult`. Le consommateur doit lire l'état avant toute valeur.
+ */
+export async function executeAgentTool(input: ExecuteAgentToolInput) {
+  const { storeContext, toolName } = input
+
+  // La résolution de période est une garde : une plage non exploitable produit
+  // un résultat explicite, jamais une exception générique côté route.
+  let session = input.session
+  if (!session) {
+    try {
+      session = createAssistantAnalyticsSession(
+        input.supabase,
+        input.storeIds,
+        resolveAssistantBusinessRange(input.range),
+      )
+    } catch (error) {
+      return {
+        toolName,
+        data: invalidRangeEnvelope(error),
+        meta: { storeId: storeContext.storeId, currency: storeContext.storeCurrency },
+      }
+    }
+  }
+
+  const result = (data: unknown, currency?: string) => ({
+    toolName,
+    data,
+    meta: { storeId: storeContext.storeId, currency: currency ?? storeContext.storeCurrency },
+  }) satisfies AgentToolResult
 
   if (toolName === 'getStoreComparison') {
-    const comparison = await compareAssistantPeriods(session.supabase, session.storeIds, session.range)
-    return result(comparison)
+    // Deux comparaisons strictement distinctes.
+    try {
+      if (input.comparisonBaseline) {
+        const comparison = await compareAssistantPeriods(
+          session.supabase,
+          [...session.storeIds],
+          session.range,
+          input.comparisonBaseline,
+        )
+        return result(comparison)
+      }
+      const comparison = await compareAssistantStores(session.supabase, [...session.storeIds], session.range)
+      return result(comparison)
+    } catch (error) {
+      return result(comparisonFailure(error))
+    }
   }
 
   const kpis = await session.kpis()
-  const currency = kpis.stores.length === 1 ? kpis.stores[0].currency : 'MULTI'
+  const envelope = buildKpiEnvelope(kpis)
   const request = { supabase: session.supabase, kpis }
 
   switch (toolName) {
     case 'getDashboardKPIs':
-      return result(kpis, currency)
     case 'getProfitSummary':
-      return result(selectMetrics(kpis, ['revenue', 'revenueEstimated', 'purchaseCost', 'deliveryCost', 'confirmationCost', 'contributionMargin']), currency)
     case 'getAdsSpend':
-      return result(selectMetrics(kpis, ['adSpend']), currency)
     case 'getOrdersByStatus':
-      return result(selectMetrics(kpis, ['orders', 'delivered', 'returned', 'cancelled']), currency)
+      // Une seule enveloppe, toutes les métriques étiquetées : le consommateur
+      // choisit les alias à afficher, sans jamais recevoir un zéro par défaut.
+      return result(envelope, envelope.currency ?? 'MULTI')
     case 'getDailyRevenueTrend':
-      return result(dailyTrend(kpis), currency)
+      return result(dailyTrend(kpis), envelope.currency ?? 'MULTI')
     case 'getCityPerformance':
-      return result(await readCitySection(request), currency)
+      return result(await readCitySection(request))
     case 'getConfirmationPerformance': {
-      const [funnel, agents] = await Promise.all([readConfirmationSection(request), readAgentSection(request)])
-      return result({ funnel, agents }, currency)
+      const [confirmation, agents] = await Promise.all([
+        readConfirmationSection(request),
+        readAgentSection(request),
+      ])
+      return result({ confirmation, agents })
     }
     case 'getTopProducts':
-      return result(await readProductSection(request, 5), currency)
+      return result(await readProductSection(request, 5))
     case 'getProductPerformance':
-      return result(await readProductSection(request, 10), currency)
+      return result(await readProductSection(request, 10))
     case 'getRecentOrders':
-      return result(await readRecentOrdersSection(request, 8), currency)
+      return result(await readRecentOrdersSection(request, 8))
     case 'getDeliveryPerformance':
-      return result(readDeliverySection(request), currency)
+      return result(readDeliverySection(request))
     case 'getStockSummary':
-      return result(readStockSection(request), currency)
-    // Indicateurs sans agrégat autorisé : l'absence est explicite, jamais un zéro.
+      return result(readStockSection(request))
     case 'getSupplierSummary':
     case 'getExpensesByCategory':
     case 'getAdsPerformanceByCampaign':
     case 'getOrderSearch':
     case 'getCustomerOrderHistory':
     case 'webSearch':
-      return result({
-        meta: { section: toolName, state: 'unavailable' as const, source: 'none' },
-        rows: [],
-        totals: {},
-        notices: ['Aucune agrégation bornée et autorisée pour cet indicateur dans ce lot.'],
-      })
+      return result(unavailableSection(toolName))
     default:
-      return result({
-        meta: { section: String(toolName), state: 'unavailable' as const, source: 'none' },
-        rows: [],
-        totals: {},
-        notices: ['Outil inconnu : aucune lecture effectuée.'],
-      })
+      return result(unavailableSection(String(toolName)))
   }
 }
 
-/** Sous-ensemble explicite de métriques : aucun chiffre recalculé. */
-function selectMetrics(kpis: AnalyticsReaderResult, names: string[]) {
+/** Section non disponible : forme identique à `SectionResult`, aucun chiffre. */
+function unavailableSection(section: string) {
   return {
-    ...kpis,
-    stores: kpis.stores.map((store) => ({
-      ...store,
-      metrics: Object.fromEntries(Object.entries(store.metrics).filter(([name]) => names.includes(name))),
-    })),
-    selectedMetrics: names,
+    contractVersion: ANALYTICS_CONTRACT_VERSION,
+    meta: { section, state: 'unavailable' as const, source: 'none', issues: [] },
+    rows: [],
+    totals: {},
+    notices: ['Aucune agrégation bornée et autorisée pour cet indicateur.'],
+  }
+}
+
+function issueMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'ANALYTICS_UNKNOWN'
+}
+
+/** Période non exploitable : état `missing`, aucune valeur, anomalie exposée. */
+function invalidRangeEnvelope(error: unknown) {
+  return {
+    contractVersion: ANALYTICS_CONTRACT_VERSION,
+    kind: 'kpis' as const,
+    state: 'missing' as const,
+    range: null,
+    currency: null,
+    metrics: {},
+    stores: [],
+    limits: [],
+    issues: [issueMessage(error)],
+  }
+}
+
+/** Échec de comparaison (période de référence invalide, lecture impossible). */
+function comparisonFailure(error: unknown) {
+  return {
+    contractVersion: ANALYTICS_CONTRACT_VERSION,
+    kind: 'unavailable' as const,
+    state: 'missing' as const,
+    deltas: [],
+    notices: ['Comparaison non réalisée : période ou lecture invalide.'],
+    issues: [issueMessage(error)],
   }
 }
 
 /** Tendance quotidienne publiée par le lecteur V5, sans interpolation. */
 function dailyTrend(kpis: AnalyticsReaderResult) {
-  const days = kpis.stores.flatMap((store) =>
-    store.days.map((day) => ({ ...day, storeId: store.storeId, currency: store.currency })),
-  )
   return {
-    meta: {
-      section: 'daily_trend',
-      state: kpis.state,
-      range: kpis.range,
-      timeZone: kpis.stores[0]?.timeZone ?? 'Africa/Casablanca',
-      currencies: Array.from(new Set(kpis.stores.map((store) => store.currency))),
-    },
-    rows: days,
+    contractVersion: kpis.contractVersion,
+    kind: 'daily' as const,
+    state: kpis.state,
+    range: kpis.range,
+    timeZone: kpis.stores[0]?.timeZone ?? null,
+    days: kpis.stores.flatMap((store) =>
+      store.days.map((day) => ({ ...day, storeId: store.storeId, currency: store.currency })),
+    ),
+    issues: kpis.issues,
     notices: ['Les journées absentes ne sont pas interpolées et ne valent pas zéro.'],
   }
 }

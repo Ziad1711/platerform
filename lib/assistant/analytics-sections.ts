@@ -1,9 +1,11 @@
 /**
- * Sections analytiques détaillées : confirmation, agents, villes.
+ * Sections confirmation, agents et villes.
  *
- * Règles : lecture KPI V5 unique pour le périmètre et les devises, agrégats
- * exécutés en base, états explicites, contrôles de cohérence avec V5, aucun
- * montant additionné entre devises distinctes et aucun zéro inventé.
+ * Règles :
+ * - réponses RPC validées à l'exécution (aucune ligne supposée conforme) ;
+ * - agrégats exécutés en base, jamais recomposés depuis une liste plafonnée ;
+ * - troncature détectée (nombre de groupes) ⇒ `partial`, jamais silencieuse ;
+ * - montants en décimal exact, taux exacts, `null` à la place de tout faux zéro.
  */
 import {
   allStoresFull,
@@ -12,26 +14,29 @@ import {
   baseMeta,
   check,
   forbidden,
-  instants,
+  invalidPayload,
   singleCurrency,
   toDecimalText,
   toNumber,
   unavailable,
-  v5Metric,
+  v5Value,
   type SectionRequest,
   type SectionResult,
 } from '@/lib/assistant/analytics-contract'
-
-interface FunnelRow {
-  total_orders: number | string | null
-  confirmed_orders: number | string | null
-  sent_orders: number | string | null
-  waiting_pickup_orders: number | string | null
-  delivered_orders: number | string | null
-  returned_orders: number | string | null
-  cancelled_orders: number | string | null
-  pending_orders: number | string | null
-}
+import { percentOfCounts, sumDecimals, compareDecimals } from '@/lib/assistant/analytics-decimal'
+import {
+  assertBusinessRange,
+  exclusiveEndAsInclusiveMicrosecond,
+  MAX_DETAIL_GROUPS,
+  rangeInstants,
+  SECTION_MAX_DAYS,
+} from '@/lib/assistant/analytics-range'
+import {
+  AgentPerformanceRowSchema,
+  CityPerformanceRowSchema,
+  ConfirmationFunnelRowSchema,
+  validateRows,
+} from '@/lib/assistant/analytics-rpc-validation'
 
 export interface ConfirmationRow {
   totalOrders: number
@@ -42,26 +47,40 @@ export interface ConfirmationRow {
   returnedOrders: number
   cancelledOrders: number
   pendingOrders: number
-  confirmationRate: number | null
+  confirmationRate: string | null
+}
+
+/** Erreur de garde traduite en résultat explicite (jamais une exception nue). */
+function guardFailure<Row>(
+  section: string,
+  source: string,
+  kpis: SectionRequest['kpis'],
+  error: unknown,
+): SectionResult<Row> {
+  const message = error instanceof Error ? error.message : 'ANALYTICS_UNKNOWN'
+  if (message === 'ANALYTICS_RANGE_TOO_LARGE') {
+    return unavailable(section, source, kpis, `Période trop large pour une analyse détaillée (maximum ${SECTION_MAX_DAYS} jours).`)
+  }
+  return unavailable(section, source, kpis, 'Période invalide : aucune lecture effectuée.')
 }
 
 /**
- * Tunnel de confirmation : `rpc_dashboard_confirmation_counters` applique la
- * définition métier unique `order_counts_as_confirmed` (progression logistique).
- * Une période sans commande renvoie une ligne de zéros réels, pas une absence.
+ * Tunnel de confirmation (`order_counts_as_confirmed`), bornes `[from, to[`.
+ * Une période sans commande renvoie des zéros réels, pas une absence.
  */
-export async function readConfirmationSection({
-  supabase,
-  kpis,
-}: SectionRequest): Promise<SectionResult<ConfirmationRow>> {
+export async function readConfirmationSection({ supabase, kpis }: SectionRequest): Promise<SectionResult<ConfirmationRow>> {
   const source = 'rpc_dashboard_confirmation_counters'
   if (kpis.state === 'forbidden') return forbidden('confirmation', source, kpis)
   const storeIds = authorizedStoreIds(kpis)
-  if (storeIds.length === 0) {
-    return unavailable('confirmation', source, kpis, 'Aucune boutique autorisée dans le périmètre.')
+  if (storeIds.length === 0) return unavailable('confirmation', source, kpis, 'Aucune boutique autorisée.')
+
+  try {
+    assertBusinessRange(kpis.range, SECTION_MAX_DAYS)
+  } catch (error) {
+    return guardFailure('confirmation', source, kpis, error)
   }
 
-  const { startUtc, endUtc } = instants(kpis.range)
+  const { startUtc, endUtc } = rangeInstants(kpis.range)
   const { data, error } = await supabase.rpc(source, {
     p_store_ids: storeIds,
     p_start_date: startUtc,
@@ -72,56 +91,66 @@ export async function readConfirmationSection({
     return unavailable('confirmation', source, kpis, 'Lecture du tunnel de confirmation indisponible.')
   }
 
-  const raw = (Array.isArray(data) ? data[0] : data) as FunnelRow | null | undefined
-  if (!raw) {
+  const validated = validateRows(ConfirmationFunnelRowSchema, Array.isArray(data) ? data : [data].filter(Boolean))
+  if (!validated.ok) return invalidPayload('confirmation', source, kpis, validated.issues)
+  if (validated.rows.length === 0) {
     return unavailable('confirmation', source, kpis, 'Aucune ligne retournée par la RPC de confirmation.')
   }
 
-  const totalOrders = toNumber(raw.total_orders)
-  const confirmedOrders = toNumber(raw.confirmed_orders)
-  if (totalOrders === null || confirmedOrders === null) {
-    return unavailable('confirmation', source, kpis, 'Compteurs de confirmation illisibles.')
+  const raw = validated.rows[0]
+  const counts = {
+    totalOrders: toNumber(raw.total_orders),
+    confirmedOrders: toNumber(raw.confirmed_orders),
+    sentOrders: toNumber(raw.sent_orders),
+    waitingPickupOrders: toNumber(raw.waiting_pickup_orders),
+    deliveredOrders: toNumber(raw.delivered_orders),
+    returnedOrders: toNumber(raw.returned_orders),
+    cancelledOrders: toNumber(raw.cancelled_orders),
+    pendingOrders: toNumber(raw.pending_orders),
   }
+
+  const unconvertible = Object.entries(counts)
+    .filter(([, value]) => value === null)
+    .map(([name]) => name)
+  if (unconvertible.length > 0) {
+    return invalidPayload('confirmation', source, kpis, [
+      `Compteurs non entiers ou illisibles : ${unconvertible.join(', ')}.`,
+    ])
+  }
+
+  const totalOrders = counts.totalOrders as number
+  const confirmedOrders = counts.confirmedOrders as number
 
   const row: ConfirmationRow = {
     totalOrders,
     confirmedOrders,
-    sentOrders: toNumber(raw.sent_orders) ?? 0,
-    waitingPickupOrders: toNumber(raw.waiting_pickup_orders) ?? 0,
-    deliveredOrders: toNumber(raw.delivered_orders) ?? 0,
-    returnedOrders: toNumber(raw.returned_orders) ?? 0,
-    cancelledOrders: toNumber(raw.cancelled_orders) ?? 0,
-    pendingOrders: toNumber(raw.pending_orders) ?? 0,
-    confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : null,
+    sentOrders: counts.sentOrders as number,
+    waitingPickupOrders: counts.waitingPickupOrders as number,
+    deliveredOrders: counts.deliveredOrders as number,
+    returnedOrders: counts.returnedOrders as number,
+    cancelledOrders: counts.cancelledOrders as number,
+    pendingOrders: counts.pendingOrders as number,
+    confirmationRate: percentOfCounts(confirmedOrders, totalOrders),
   }
 
   const meta = baseMeta('confirmation', source, kpis, totalOrders === 0 ? 'empty' : 'complete')
-  meta.limits.push('Confirmation ≠ livraison : le taux porte sur les commandes confirmées, non livrées.')
+  meta.limits.push('Confirmation ≠ livraison : le taux porte sur les commandes confirmées.')
   applyConsistency(meta, [
-    check('orders', v5Metric(kpis, 'orders'), row.totalOrders),
-    check('delivered', v5Metric(kpis, 'delivered'), row.deliveredOrders),
-    check('returned', v5Metric(kpis, 'returned'), row.returnedOrders),
-    check('cancelled', v5Metric(kpis, 'cancelled'), row.cancelledOrders),
+    check('orders', v5Value(kpis, 'orders'), String(row.totalOrders)),
+    check('delivered', v5Value(kpis, 'delivered'), String(row.deliveredOrders)),
+    check('returned', v5Value(kpis, 'returned'), String(row.returnedOrders)),
+    check('cancelled', v5Value(kpis, 'cancelled'), String(row.cancelledOrders)),
   ])
 
   return {
     meta,
     rows: [row],
-    totals: { totalOrders, confirmedOrders, confirmationRate: row.confirmationRate },
+    totals: {
+      totalOrders: row.totalOrders,
+      confirmedOrders: row.confirmedOrders,
+      confirmationRate: row.confirmationRate,
+    },
   }
-}
-
-
-interface AgentRow {
-  agent_id: string | null
-  agent_name: string | null
-  total_orders: number | string | null
-  confirmed_orders: number | string | null
-  delivered_orders: number | string | null
-  rejected_orders: number | string | null
-  potential_commission: string | number | null
-  earned_commission: string | number | null
-  paid_commission: string | number | null
 }
 
 export interface AgentPerformanceRow {
@@ -131,49 +160,70 @@ export interface AgentPerformanceRow {
   confirmedOrders: number
   deliveredOrders: number
   rejectedOrders: number
-  confirmationRate: number | null
-  /** Absent pour un accès `commercial` : jamais renvoyé à un profil non financier. */
+  confirmationRate: string | null
+  /** Absent hors accès financier `full` : jamais renvoyé à un profil commercial. */
   commission?: { potential: string | null; earned: string | null; paid: string | null }
 }
 
 /**
- * Performance par agent. La RPC historique expose aussi des commissions : elles
- * ne sont conservées que si toutes les boutiques du périmètre sont en accès
- * `full`, sinon le champ est supprimé avant réponse. La borne haute de cette
- * RPC est inclusive (`<=`) : elle reçoit `endUtc - 1 ms` pour respecter
- * le contrat métier `[from, to[`.
+ * Performance par agent.
+ *
+ * - borne haute historique inclusive (`<=`) : on passe la dernière microseconde
+ *   de la période `[from, to[` (`exclusiveEndAsInclusiveMicrosecond`) ;
+ * - troncature détectée par une lecture de `MAX_DETAIL_GROUPS + 1` lignes ;
+ * - commissions publiées uniquement si toutes les boutiques sont `full`.
  */
 export async function readAgentSection({ supabase, kpis }: SectionRequest): Promise<SectionResult<AgentPerformanceRow>> {
   const source = 'rpc_dashboard_confirmation_performance'
   if (kpis.state === 'forbidden') return forbidden('agents', source, kpis)
   const storeIds = authorizedStoreIds(kpis)
-  if (storeIds.length === 0) return unavailable('agents', source, kpis, 'Aucune boutique autorisée dans le périmètre.')
+  if (storeIds.length === 0) return unavailable('agents', source, kpis, 'Aucune boutique autorisée.')
 
-  const { startUtc, endUtc } = instants(kpis.range)
-  const inclusiveEnd = new Date(new Date(endUtc).getTime() - 1).toISOString()
-  const { data, error } = await supabase.rpc(source, {
-    p_store_ids: storeIds,
-    p_start_date: startUtc,
-    p_end_date: inclusiveEnd,
-  })
+  try {
+    assertBusinessRange(kpis.range, SECTION_MAX_DAYS)
+  } catch (error) {
+    return guardFailure('agents', source, kpis, error)
+  }
+
+  const { startUtc, endUtc } = rangeInstants(kpis.range)
+  const inclusiveEnd = exclusiveEndAsInclusiveMicrosecond(endUtc)
+
+  const { data, error } = await supabase
+    .rpc(source, { p_store_ids: storeIds, p_start_date: startUtc, p_end_date: inclusiveEnd })
+    .limit(MAX_DETAIL_GROUPS + 1)
   if (error) {
     if (error.message?.includes('NO_ACCESS')) return forbidden('agents', source, kpis)
     return unavailable('agents', source, kpis, 'Lecture de la performance agent indisponible.')
   }
 
-  const rows = (Array.isArray(data) ? data : []) as AgentRow[]
+  const validated = validateRows(AgentPerformanceRowSchema, data)
+  if (!validated.ok) return invalidPayload('agents', source, kpis, validated.issues)
+
+  const truncated = validated.rows.length > MAX_DETAIL_GROUPS
+  const rawRows = truncated ? validated.rows.slice(0, MAX_DETAIL_GROUPS) : validated.rows
   const canSeeMoney = allStoresFull(kpis)
-  const mapped: AgentPerformanceRow[] = rows.map((row) => {
-    const totalOrders = toNumber(row.total_orders) ?? 0
-    const confirmedOrders = toNumber(row.confirmed_orders) ?? 0
+
+  const mapped: AgentPerformanceRow[] = []
+  let malformed = 0
+  for (const row of rawRows) {
+    const totalOrders = toNumber(row.total_orders)
+    const confirmedOrders = toNumber(row.confirmed_orders)
+    const deliveredOrders = toNumber(row.delivered_orders)
+    const rejectedOrders = toNumber(row.rejected_orders)
+
+    if (totalOrders === null || confirmedOrders === null || deliveredOrders === null || rejectedOrders === null) {
+      malformed += 1
+      continue
+    }
+
     const entry: AgentPerformanceRow = {
-      agentId: row.agent_id ?? null,
-      agentName: row.agent_name ?? 'Agent non nommé',
+      agentId: row.agent_id,
+      agentName: row.agent_name ?? 'Agent sans nom',
       totalOrders,
       confirmedOrders,
-      deliveredOrders: toNumber(row.delivered_orders) ?? 0,
-      rejectedOrders: toNumber(row.rejected_orders) ?? 0,
-      confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : null,
+      deliveredOrders,
+      rejectedOrders,
+      confirmationRate: percentOfCounts(confirmedOrders, totalOrders),
     }
     if (canSeeMoney) {
       entry.commission = {
@@ -182,41 +232,54 @@ export async function readAgentSection({ supabase, kpis }: SectionRequest): Prom
         paid: toDecimalText(row.paid_commission),
       }
     }
-    return entry
-  })
+    mapped.push(entry)
+  }
 
-  const meta = baseMeta('agents', source, kpis, mapped.length === 0 ? 'empty' : 'complete')
-  meta.limits.push('Regroupement par identifiant d’agent ; les commandes sans agent affecté sont exclues.')
+  const meta = baseMeta('agents', source, kpis, mapped.length === 0 ? 'empty' : truncated ? 'partial' : 'complete')
+  meta.limits.push('Regroupement par identifiant d’agent ; commandes sans agent exclues.')
+  if (truncated) meta.notices.push(`Plus de ${MAX_DETAIL_GROUPS} agents : liste tronquée, totaux non représentatifs.`)
+  if (malformed > 0) {
+    if (meta.state === 'complete') meta.state = 'partial'
+    meta.issues.push(`AGENT_ROWS_UNPARSABLE:${malformed}`)
+    meta.notices.push(`${malformed} ligne(s) d’agent illisible(s) exclue(s) : totaux partiels.`)
+  }
   if (!canSeeMoney) meta.notices.push('Commissions masquées : accès financier `full` requis sur toutes les boutiques.')
   meta.notices.push('Une baisse concentrée sur un agent est une association observée, pas une preuve de causalité.')
-  const totals = mapped.reduce(
-    (sum, row) => ({
-      totalOrders: sum.totalOrders + row.totalOrders,
-      confirmedOrders: sum.confirmedOrders + row.confirmedOrders,
-    }),
-    { totalOrders: 0, confirmedOrders: 0 },
-  )
+
+  const totalOrders = mapped.reduce((sum, row) => sum + row.totalOrders, 0)
+  const confirmedOrders = mapped.reduce((sum, row) => sum + row.confirmedOrders, 0)
+  const v5Orders = v5Value(kpis, 'orders')
+
+  if (!truncated) {
+    // Les agents ne couvrent qu'un sous-ensemble du périmètre : une égalité
+    // n'est pas attendue, seule une supériorité est incohérente.
+    const excess = v5Orders !== null && compareDecimals(String(totalOrders), v5Orders) === 1
+    meta.consistency = [
+      {
+        metric: 'agents.assigned_orders',
+        v5: v5Orders,
+        section: String(totalOrders),
+        match: excess ? false : null,
+        reason: excess ? 'EXCEEDS_SCOPE' : 'SUBSET_EXPECTED',
+      },
+    ]
+    if (excess) {
+      if (meta.state === 'complete') meta.state = 'partial'
+      meta.notices.push('Les agents totalisent plus de commandes que le périmètre V5 : incohérence signalée.')
+    }
+  }
 
   return {
     meta,
     rows: mapped,
     totals: {
-      ...totals,
-      confirmationRate: totals.totalOrders > 0 ? (totals.confirmedOrders / totals.totalOrders) * 100 : null,
+      totalOrders,
+      confirmedOrders,
+      confirmationRate: percentOfCounts(confirmedOrders, totalOrders),
     },
   }
 }
 
-
-interface CityRow {
-  city: string | null
-  total_orders: number | string | null
-  confirmed_orders: number | string | null
-  delivered_orders: number | string | null
-  returned_orders: number | string | null
-  cancelled_orders: number | string | null
-  total_revenue: string | number | null
-}
 
 export interface CityPerformanceRow {
   city: string
@@ -225,75 +288,112 @@ export interface CityPerformanceRow {
   deliveredOrders: number
   returnedOrders: number
   cancelledOrders: number
+  /** CA exact des lignes livrées ; jamais additionné entre boutiques devises. */
   revenue: string | null
-  confirmationRate: number | null
-  deliveryRate: number | null
+  confirmationRate: string | null
+  deliveryRate: string | null
 }
 
 /**
- * Villes : `rpc_dashboard_city_performance` agrège déjà les lignes des commandes
- * livrées et applique `order_counts_as_confirmed`. La RPC ne renvoie pas le
- * `store_id` : le résultat n'est exposé que si le périmètre est mono-devise.
+ * Performance par ville : RPC agrégée en base, bornes `[from, to[`, une seule
+ * devise exigée (la RPC ne renvoie pas `store_id`, donc aucune fusion
+ * inter-boutiques devises ne peut être garantie).
  */
 export async function readCitySection({ supabase, kpis }: SectionRequest): Promise<SectionResult<CityPerformanceRow>> {
   const source = 'rpc_dashboard_city_performance'
   if (kpis.state === 'forbidden') return forbidden('cities', source, kpis)
   const storeIds = authorizedStoreIds(kpis)
-  if (storeIds.length === 0) return unavailable('cities', source, kpis, 'Aucune boutique autorisée dans le périmètre.')
-  const currency = singleCurrency(kpis)
-  if (!currency) {
-    return unavailable('cities', source, kpis, 'Périmètre multidevise : aucune somme de CA par ville n’est présentée.')
+  if (storeIds.length === 0) return unavailable('cities', source, kpis, 'Aucune boutique autorisée.')
+  if (!singleCurrency(kpis)) {
+    return unavailable('cities', source, kpis, 'Périmètre multidevise : aucune agrégation de CA par ville.')
   }
 
-  const { startUtc, endUtc } = instants(kpis.range)
-  const { data, error } = await supabase.rpc(source, {
-    p_store_ids: storeIds,
-    p_start_date: startUtc,
-    p_end_date: endUtc,
-  })
+  try {
+    assertBusinessRange(kpis.range, SECTION_MAX_DAYS)
+  } catch (error) {
+    return guardFailure('cities', source, kpis, error)
+  }
+
+  const { startUtc, endUtc } = rangeInstants(kpis.range)
+  const { data, error } = await supabase
+    .rpc(source, { p_store_ids: storeIds, p_start_date: startUtc, p_end_date: endUtc })
+    .limit(MAX_DETAIL_GROUPS + 1)
   if (error) {
     if (error.message?.includes('NO_ACCESS')) return forbidden('cities', source, kpis)
     return unavailable('cities', source, kpis, 'Lecture de la performance par ville indisponible.')
   }
 
-  const rows = (Array.isArray(data) ? data : []) as CityRow[]
-  const mapped: CityPerformanceRow[] = rows.map((row) => {
-    const totalOrders = toNumber(row.total_orders) ?? 0
-    const confirmedOrders = toNumber(row.confirmed_orders) ?? 0
-    const deliveredOrders = toNumber(row.delivered_orders) ?? 0
-    return {
+  const validated = validateRows(CityPerformanceRowSchema, data)
+  if (!validated.ok) return invalidPayload('cities', source, kpis, validated.issues)
+
+  const truncated = validated.rows.length > MAX_DETAIL_GROUPS
+  const rawRows = truncated ? validated.rows.slice(0, MAX_DETAIL_GROUPS) : validated.rows
+
+  const mapped: CityPerformanceRow[] = []
+  let malformed = 0
+  for (const row of rawRows) {
+    const totalOrders = toNumber(row.total_orders)
+    const confirmedOrders = toNumber(row.confirmed_orders)
+    const deliveredOrders = toNumber(row.delivered_orders)
+    const returnedOrders = toNumber(row.returned_orders)
+    const cancelledOrders = toNumber(row.cancelled_orders)
+
+    if (
+      totalOrders === null || confirmedOrders === null || deliveredOrders === null ||
+      returnedOrders === null || cancelledOrders === null
+    ) {
+      malformed += 1
+      continue
+    }
+
+    mapped.push({
       city: row.city ?? 'Ville non renseignée',
       totalOrders,
       confirmedOrders,
       deliveredOrders,
-      returnedOrders: toNumber(row.returned_orders) ?? 0,
-      cancelledOrders: toNumber(row.cancelled_orders) ?? 0,
+      returnedOrders,
+      cancelledOrders,
       revenue: toDecimalText(row.total_revenue),
-      confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : null,
-      deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : null,
-    }
-  })
+      confirmationRate: percentOfCounts(confirmedOrders, totalOrders),
+      deliveryRate: percentOfCounts(deliveredOrders, totalOrders),
+    })
+  }
 
-  const meta = baseMeta('cities', source, kpis, mapped.length === 0 ? 'empty' : 'complete')
-  meta.limits.push('CA par ville = lignes des commandes livrées ; aucune marge ni coût n’est calculé ici.')
-  applyConsistency(meta, [
-    check(
-      'cities.orders',
-      v5Metric(kpis, 'orders'),
-      mapped.reduce((sum, row) => sum + row.totalOrders, 0),
-    ),
-  ])
+  const meta = baseMeta('cities', source, kpis, mapped.length === 0 ? 'empty' : truncated ? 'partial' : 'complete')
+  meta.limits.push('CA par ville = lignes des commandes livrées ; aucune marge ni coût.')
+  if (truncated) meta.notices.push(`Plus de ${MAX_DETAIL_GROUPS} villes : liste tronquée, totaux non représentatifs.`)
+  if (malformed > 0) {
+    if (meta.state === 'complete') meta.state = 'partial'
+    meta.issues.push(`CITY_ROWS_UNPARSABLE:${malformed}`)
+    meta.notices.push(`${malformed} ligne(s) de ville illisible(s) exclue(s) : totaux partiels.`)
+  }
   if (mapped.some((row) => row.city === 'Ville non renseignée')) {
-    meta.notices.push('Des commandes sans ville sont regroupées à part, jamais réparties arbitrairement.')
+    meta.notices.push('Des commandes sans ville sont regroupées à part.')
+  }
+
+  const orders = mapped.reduce((sum, row) => sum + row.totalOrders, 0)
+  const delivered = mapped.reduce((sum, row) => sum + row.deliveredOrders, 0)
+  const revenue = truncated ? null : sumDecimals(mapped.map((row) => row.revenue))
+
+  if (!truncated) {
+    applyConsistency(meta, [
+      check('cities.orders', v5Value(kpis, 'orders'), String(orders)),
+      check('cities.delivered', v5Value(kpis, 'delivered'), String(delivered)),
+      check('cities.revenue', v5Value(kpis, 'revenue'), revenue),
+    ])
   }
 
   return {
     meta,
     rows: mapped,
     totals: {
-      orders: mapped.reduce((sum, row) => sum + row.totalOrders, 0),
-      delivered: mapped.reduce((sum, row) => sum + row.deliveredOrders, 0),
-      currency,
+      orders,
+      delivered,
+      revenue,
+      confirmationRate: percentOfCounts(
+        mapped.reduce((sum, row) => sum + row.confirmedOrders, 0),
+        orders,
+      ),
     },
   }
 }
