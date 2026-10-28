@@ -24,6 +24,7 @@ import { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
 import { getAssistantModelName } from '@/lib/assistant/providers'
 import { buildGreetingResponse, buildSmallTalkResponse, buildStructuredResponseFromContext } from '@/lib/assistant/response'
 import {
+  assertAssistantRuntimeFlags,
   assertTrustedOrigin,
   requireAssistantStoreAccess,
   requireAuthenticatedUser,
@@ -132,6 +133,7 @@ export async function POST(request: Request) {
 
   try {
     assertTrustedOrigin(request)
+    assertAssistantRuntimeFlags()
 
     const { supabase, user } = await requireAuthenticatedUser()
 
@@ -217,8 +219,11 @@ export async function POST(request: Request) {
 
     if (registry.status === 'conflict') throw new Error('IDEMPOTENCY_CONFLICT')
     if (registry.status === 'in_progress') throw new Error('IDEMPOTENCY_IN_PROGRESS')
+    const attemptToken = registry.status === 'proceed' ? registry.attemptToken : null
     if (registry.status === 'replay') {
-      const replayedMessage = await getMessageById(supabase, ensuredThreadId, registry.assistantMessageId)
+      const replayedMessage = registry.assistantMessageId
+        ? await getMessageById(supabase, ensuredThreadId, registry.assistantMessageId)
+        : null
       if (replayedMessage) {
         const replayMetadata = (replayedMessage.metadata || null) as Record<string, unknown> | null
         return NextResponse.json({
@@ -226,7 +231,7 @@ export async function POST(request: Request) {
           assistantMessage: replayedMessage,
           structured_response: replayMetadata?.structured_response,
           replayed: true,
-          credit_status: 'not_charged',
+          credit_status: registry.creditStatus,
           finalization_atomic: true,
           usage: {
             creditsUsed: 0,
@@ -459,6 +464,7 @@ export async function POST(request: Request) {
       storeId: selectedStoreId,
       requestId,
       fingerprint,
+      attemptToken,
       intent,
       userMessage: body.message,
       assistantContent: structuredResponse.message_text,

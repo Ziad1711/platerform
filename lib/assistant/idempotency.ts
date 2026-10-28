@@ -61,12 +61,18 @@ export async function computeRequestFingerprint(payload: string): Promise<string
     .join('')
 }
 
+export type AssistantCreditStatus = 'charged' | 'insufficient' | 'failed' | 'not_charged'
+
 export type BeginRequestOutcome =
-  | { status: 'proceed' }
-  | { status: 'replay'; assistantMessageId: string }
+  | { status: 'proceed'; attemptToken: string | null }
+  | { status: 'replay'; assistantMessageId: string | null; creditStatus: AssistantCreditStatus }
   | { status: 'conflict' }
   | { status: 'in_progress' }
   | { status: 'registry_unavailable' }
+
+function toCreditStatus(value: unknown): AssistantCreditStatus {
+  return value === 'charged' || value === 'insufficient' || value === 'failed' ? value : 'not_charged'
+}
 
 /**
  * Réservation d'une requête dans le registre persistant.
@@ -98,36 +104,40 @@ export async function beginAssistantRequest(
   }
 
   const row = (Array.isArray(data) ? data[0] : data) as
-    | { state?: string; assistant_message_id?: string | null }
+    | { state?: string; assistant_message_id?: string | null; attempt_token?: string | null; credit_status?: string | null }
     | null
     | undefined
 
-  if (!row) return { status: 'proceed' }
+  if (!row) return { status: 'proceed', attemptToken: null }
 
-  // Réponse déjà finalisée : on rejoue l'identifiant du message, jamais un
-  // contenu fourni par le client. Un message supprimé interdit le rejeu.
+  // Réponse déjà finalisée : rejeu du message + statut de débit réel (jamais
+  // « non facturé » par défaut, qui masquerait une facturation antérieure).
   if (row.state === 'completed') {
-    return row.assistant_message_id
-      ? { status: 'replay', assistantMessageId: String(row.assistant_message_id) }
-      : { status: 'proceed' }
+    return {
+      status: 'replay',
+      assistantMessageId: row.assistant_message_id ? String(row.assistant_message_id) : null,
+      creditStatus: toCreditStatus(row.credit_status),
+    }
   }
 
-  // 'in_progress' renvoyé sans erreur = bail détenu par CET appelant : on poursuit.
-  // Un bail détenu par une autre instance lève IDEMPOTENCY_IN_PROGRESS (ci-dessus).
-  return { status: 'proceed' }
+  // 'in_progress' renvoyé sans erreur = bail détenu par CET appelant.
+  return { status: 'proceed', attemptToken: row.attempt_token ? String(row.attempt_token) : null }
 }
 
 /** Clôture nominale du registre (après finalisation fiable des écritures). */
 export async function completeAssistantRequest(
   supabase: SupabaseServerClient,
-  identity: Pick<AssistantRequestIdentity, 'requestId'>,
-  assistantMessage: unknown
+  identity: { requestId: string; attemptToken: string },
+  assistantMessageId: string | null,
+  creditStatus: AssistantCreditStatus
 ): Promise<boolean> {
   if (!ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED) return false
 
   const { error } = await supabase.rpc(ASSISTANT_IDEMPOTENCY_RPC.complete, {
     p_request_id: identity.requestId,
-    p_assistant_message: assistantMessage ?? null,
+    p_attempt_token: identity.attemptToken,
+    p_assistant_message_id: assistantMessageId,
+    p_credit_status: creditStatus,
   })
 
   return !error
@@ -136,13 +146,15 @@ export async function completeAssistantRequest(
 /** Clôture en échec : libère le bail pour permettre une reprise contrôlée. */
 export async function failAssistantRequest(
   supabase: SupabaseServerClient,
-  identity: Pick<AssistantRequestIdentity, 'requestId'>,
+  identity: { requestId: string; attemptToken?: string | null },
   reason: string
 ): Promise<boolean> {
   if (!ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED) return false
+  if (!identity.attemptToken) return false
 
   const { error } = await supabase.rpc(ASSISTANT_IDEMPOTENCY_RPC.fail, {
     p_request_id: identity.requestId,
+    p_attempt_token: identity.attemptToken,
     p_reason: reason.slice(0, 200),
   })
 
