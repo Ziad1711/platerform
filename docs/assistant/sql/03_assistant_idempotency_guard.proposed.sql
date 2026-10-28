@@ -1,4 +1,6 @@
 -- ============================================================================
+-- OBSOLÈTE — NE PAS APPLIQUER. Remplacé par 03b_assistant_idempotency_registry_v2
+-- (attempt_token, credit_status, on conflict). Conservé pour historique seulement.
 -- PROPOSITION — NE PAS EXÉCUTER SANS VALIDATION EXPLICITE
 -- Objet : registre persistant d'idempotence des requêtes de l'assistant.
 --

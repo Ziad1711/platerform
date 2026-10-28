@@ -1,4 +1,6 @@
 -- ============================================================================
+-- OBSOLÈTE — NE PAS APPLIQUER. Remplacé par 05b_assistant_finalization_v2
+-- (p_user_id, p_attempt_token, retour credit_status/replayed). Historique seulement.
 -- PROPOSITION — NE PAS EXÉCUTER SANS VALIDATION EXPLICITE
 -- Objet : finalisation transactionnelle d'un tour (messages + journal + débit).
 --
