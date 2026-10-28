@@ -1,28 +1,29 @@
+/**
+ * Ancien module analytique du chatbot (compatibilité d'import).
+ *
+ * Les chemins de conversation doivent passer par `analytics-reader.ts` (KPI V5)
+ * et `analytics-sections.ts` (sections détaillées agrégées en base). Les
+ * fonctions de détail conservées ici lisent des listes plafonnées par PostgREST :
+ * elles ne doivent jamais servir de source à un chiffre présenté comme total.
+ */
 import { createClient } from '@/lib/supabase/server'
 import type { AnalyticsRange } from '@/lib/assistant/types'
+import { readAssistantKpis, resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
+import { countsAsConfirmed, isInTransit, isReturned } from '@/lib/assistant/order-statuses'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
-type OrderRow = {
-  id: string
-  store_id?: string
-  order_date?: string
-  created_at?: string
-  status: string | null
-  total_selling_price?: number | string | null
-  ads_cost_allocated?: number | string | null
-  delivery_fee?: number | string | null
-  confirmation_cost_allocated?: number | string | null
-}
-
-type SpendRow = { spend_converted?: number | string | null }
-type AmountRow = { amount?: number | string | null }
-
-function applyStoreFilter<T extends { eq: Function; in: Function }>(query: T, storeIds: string[]) {
-  if (storeIds.length === 1) {
-    return query.eq('store_id', storeIds[0])
+/**
+ * Applique le périmètre boutique sans élargir les droits (RLS inchangée).
+ * Les méthodes sont lues via un cast local : le type du builder Supabase n'est
+ * jamais réinstancié récursivement (TS2589).
+ */
+function applyStoreFilter<T>(query: T, storeIds: string[]): T {
+  const scoped = query as unknown as {
+    eq: (column: string, value: string) => T
+    in: (column: string, values: string[]) => T
   }
-  return query.in('store_id', storeIds)
+  return storeIds.length === 1 ? scoped.eq('store_id', storeIds[0]) : scoped.in('store_id', storeIds)
 }
 
 function resolveDateRange(range: AnalyticsRange) {
@@ -104,67 +105,7 @@ function resolveDateRange(range: AnalyticsRange) {
 }
 
 export async function getDashboardKPIs(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
-  const { start, end } = resolveDateRange(range)
-
-  const [ordersRes, adSpendRes] = await Promise.all([
-    applyStoreFilter(
-      supabase
-        .from('orders')
-        .select('id, store_id, order_date, created_at, status, total_selling_price, ads_cost_allocated, delivery_fee, confirmation_cost_allocated')
-        .gte('order_date', start)
-        .lt('order_date', end),
-      storeIds
-    ),
-    applyStoreFilter(
-      supabase
-        .from('ad_spend_daily')
-        .select('spend_converted')
-        .gte('spend_date', start)
-        .lt('spend_date', end),
-      storeIds
-    ),
-  ])
-
-  if (ordersRes.error || adSpendRes.error) throw new Error('ANALYTICS_KPI_FAILED')
-
-  const orders = ((ordersRes.data || []) as OrderRow[])
-  const adSpendRows = ((adSpendRes.data || []) as SpendRow[])
-  const adSpendTotal = adSpendRows.reduce((sum: number, row: SpendRow) => sum + Number(row.spend_converted || 0), 0)
-
-  const totalOrders = orders.length
-  const delivered = orders.filter((o: OrderRow) => o.status === 'delivered')
-  const deliveredOrders = delivered.length
-  const revenue = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.total_selling_price || 0), 0)
-  const allocatedAdCost = orders.reduce((sum: number, o: OrderRow) => sum + Number(o.ads_cost_allocated || 0), 0)
-  const adCost = adSpendTotal > 0 ? adSpendTotal : allocatedAdCost
-  const deliveryCost = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.delivery_fee || 0), 0)
-  const confirmationCost = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.confirmation_cost_allocated || 0), 0)
-
-  if (range === 'yesterday') {
-    console.info('[assistant:yesterday:orders_rows]', {
-      start,
-      end,
-      rows: orders.map((o: OrderRow) => ({
-        id: o.id,
-        order_date: (o as any).order_date,
-        created_at: (o as any).created_at,
-        status: o.status,
-        total_selling_price: o.total_selling_price,
-        store_id: (o as any).store_id,
-      })),
-    })
-  }
-
-  return {
-    range,
-    totalOrders,
-    deliveredOrders,
-    deliveredRate: totalOrders > 0 ? Number(((deliveredOrders / totalOrders) * 100).toFixed(2)) : 0,
-    revenue,
-    adCost,
-    deliveryCost,
-    confirmationCost,
-  }
+  return readAssistantKpis(supabase, storeIds, resolveAssistantBusinessRange(range))
 }
 
 export async function getTopProducts(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
@@ -265,84 +206,7 @@ export async function getAdsSpend(supabase: SupabaseServerClient, storeIds: stri
 }
 
 export async function getProfitSummary(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
-  const { start, end } = resolveDateRange(range)
-
-  const [ordersRes, adsRes, expensesRes] = await Promise.all([
-    applyStoreFilter(
-      supabase
-        .from('orders')
-        .select('id, status, total_selling_price, delivery_fee, confirmation_cost_allocated, ads_cost_allocated')
-        .gte('order_date', start)
-        .lt('order_date', end),
-      storeIds
-    ),
-    applyStoreFilter(
-      supabase
-        .from('ad_spend_daily')
-        .select('spend_converted')
-        .gte('spend_date', start)
-        .lt('spend_date', end),
-      storeIds
-    ),
-    applyStoreFilter(
-      supabase
-        .from('expenses')
-        .select('amount')
-        .gte('expense_date', start)
-        .lt('expense_date', end),
-      storeIds
-    ),
-  ])
-
-  if (ordersRes.error || adsRes.error || expensesRes.error) {
-    throw new Error('ANALYTICS_PROFIT_FAILED')
-  }
-
-  const ordersRows = ((ordersRes.data || []) as OrderRow[])
-  const adsRows = ((adsRes.data || []) as SpendRow[])
-  const expensesRows = ((expensesRes.data || []) as AmountRow[])
-
-  const delivered = ordersRows.filter((o: OrderRow) => o.status === 'delivered')
-  const deliveredOrderIds = delivered.map((o) => o.id)
-
-  let purchaseCost = 0
-  if (deliveredOrderIds.length > 0) {
-    let orderItemsQuery = supabase
-      .from('order_items')
-      .select('quantity, unit_purchase_cost_snapshot')
-      .in('order_id', deliveredOrderIds)
-
-    orderItemsQuery = applyStoreFilter(orderItemsQuery, storeIds)
-
-    const { data: orderItems, error: orderItemsError } = await orderItemsQuery
-    if (orderItemsError) throw new Error('ANALYTICS_PROFIT_FAILED')
-
-    purchaseCost = (orderItems || []).reduce(
-      (sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_purchase_cost_snapshot || 0),
-      0
-    )
-  }
-
-  const revenue = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.total_selling_price || 0), 0)
-  const adSpendDaily = adsRows.reduce((sum: number, row: SpendRow) => sum + Number(row.spend_converted || 0), 0)
-  const allocatedAdCost = ordersRows.reduce((sum: number, o: OrderRow) => sum + Number(o.ads_cost_allocated || 0), 0)
-  const adSpend = adSpendDaily > 0 ? adSpendDaily : allocatedAdCost
-  const extraExpenses = expensesRows.reduce((sum: number, row: AmountRow) => sum + Number(row.amount || 0), 0)
-  const deliveryCost = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.delivery_fee || 0), 0)
-  const confirmationCost = delivered.reduce((sum: number, o: OrderRow) => sum + Number(o.confirmation_cost_allocated || 0), 0)
-
-  const profit = revenue - purchaseCost - adSpend - extraExpenses - deliveryCost - confirmationCost
-
-  return {
-    revenue,
-    purchaseCost,
-    adSpend,
-    extraExpenses,
-    deliveryCost,
-    confirmationCost,
-    profit,
-    marginRate: revenue > 0 ? Number(((profit / revenue) * 100).toFixed(2)) : 0,
-  }
+  return readAssistantKpis(supabase, storeIds, resolveAssistantBusinessRange(range))
 }
 
 export async function getRecentOrders(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
@@ -364,44 +228,10 @@ export async function getRecentOrders(supabase: SupabaseServerClient, storeIds: 
 }
 
 export async function getStockSummary(supabase: SupabaseServerClient, storeIds: string[]) {
-  const query = supabase
-    .from('inventory_movements')
-    .select('product_id, movement_type, quantity, products(name)')
-
-  const { data, error } = await applyStoreFilter(query, storeIds)
-
-  if (error) throw new Error('ANALYTICS_STOCK_FAILED')
-
-  const map = new Map<string, { productName: string; inQty: number; outQty: number; stock: number }>()
-
-  for (const row of data || []) {
-    const productId = String(row.product_id)
-    const qty = Number(row.quantity || 0)
-    const entry = map.get(productId) || {
-      productName: (row.products as { name?: string } | null)?.name || 'Produit',
-      inQty: 0,
-      outQty: 0,
-      stock: 0,
-    }
-
-    if (row.movement_type === 'in') entry.inQty += qty
-    if (row.movement_type === 'out') entry.outQty += qty
-    if (row.movement_type === 'adjustment') {
-      entry.stock += qty
-    }
-
-    entry.stock = entry.inQty - entry.outQty + entry.stock
-    map.set(productId, entry)
-  }
-
-  const rows = Array.from(map.entries()).map(([productId, item]) => ({ productId, ...item }))
-  const lowStock = rows.filter((r) => r.stock <= 5).length
-
-  return {
-    totalProducts: rows.length,
-    lowStock,
-    items: rows.sort((a, b) => a.stock - b.stock).slice(0, 10),
-  }
+  // Pas de somme sur les mouvements : elle ignore le stock des variantes et les réservations.
+  // Une RPC de snapshot autorisée et bornée par store est nécessaire.
+  void supabase; void storeIds
+  return { state: 'unavailable' as const, reason: 'Snapshot stock par variante non disponible pour l’assistant.' }
 }
 
 export async function getSupplierSummary(supabase: SupabaseServerClient, storeIds: string[]) {
@@ -556,10 +386,9 @@ export async function getCityPerformance(supabase: SupabaseServerClient, storeId
 export async function getConfirmationPerformance(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
   const { start, end } = resolveDateRange(range)
 
-  // Utiliser le vrai schéma : confirmation_agents + orders.confirmation_agent_id
   const query = supabase
     .from('orders')
-    .select('confirmation_agent_id, status, total_selling_price, confirmation_agents!inner(name)')
+    .select('confirmation_agent_id, status, confirmed_at, total_selling_price, confirmation_agents!inner(name)')
     .gte('order_date', start)
     .lt('order_date', end)
     .not('confirmation_agent_id', 'is', null)
@@ -570,29 +399,38 @@ export async function getConfirmationPerformance(supabase: SupabaseServerClient,
   const rows = (data || []) as Array<{
     confirmation_agent_id?: string | null
     status?: string | null
+    confirmed_at?: string | null
     total_selling_price?: number | string | null
     confirmation_agents?: { name?: string | null } | null
   }>
 
-  const byAgent: Record<string, { totalOrders: number; confirmedOrders: number; revenue: number }> = {}
+  // Régroupement par identifiant : deux agents homonymes ne sont jamais fusionnés.
+  const byAgent = new Map<string, { agentId: string; agent: string; totalOrders: number; confirmedOrders: number; deliveredOrders: number; revenue: number }>()
 
   for (const row of rows) {
-    const agent = row.confirmation_agents?.name || 'Inconnu'
-    if (!byAgent[agent]) {
-      byAgent[agent] = { totalOrders: 0, confirmedOrders: 0, revenue: 0 }
+    const agentId = String(row.confirmation_agent_id ?? '')
+    if (!agentId) continue
+    const entry = byAgent.get(agentId) ?? {
+      agentId,
+      agent: row.confirmation_agents?.name || 'Agent sans nom',
+      totalOrders: 0,
+      confirmedOrders: 0,
+      deliveredOrders: 0,
+      revenue: 0,
     }
-    byAgent[agent].totalOrders++
+    entry.totalOrders++
+    if (countsAsConfirmed(row.status ?? null, row.confirmed_at ?? null)) entry.confirmedOrders++
     if (row.status === 'delivered') {
-      byAgent[agent].confirmedOrders++
-      byAgent[agent].revenue += Number(row.total_selling_price || 0)
+      entry.deliveredOrders++
+      entry.revenue += Number(row.total_selling_price || 0)
     }
+    byAgent.set(agentId, entry)
   }
 
-  return Object.entries(byAgent)
-    .map(([agent, data]) => ({
-      agent,
+  return Array.from(byAgent.values())
+    .map((data) => ({
       ...data,
-      confirmationRate: data.totalOrders > 0 ? Number(((data.confirmedOrders / data.totalOrders) * 100).toFixed(2)) : 0,
+      confirmationRate: data.totalOrders > 0 ? Number(((data.confirmedOrders / data.totalOrders) * 100).toFixed(2)) : null,
     }))
     .sort((a, b) => b.confirmedOrders - a.confirmedOrders)
 }
@@ -600,9 +438,12 @@ export async function getConfirmationPerformance(supabase: SupabaseServerClient,
 export async function getDeliveryPerformance(supabase: SupabaseServerClient, storeIds: string[], range: AnalyticsRange) {
   const { start, end } = resolveDateRange(range)
 
+  // Le schéma expose `delivery_company_id` (pas `delivery_company`).
+  // Aucune agrégation par transporteur ici : chemin legacy à liste plafonnée,
+  // remplacé côté assistant par une RPC dédiée (voir propositions SQL).
   const query = supabase
     .from('orders')
-    .select('status, delivery_status, delivery_company, city')
+    .select('status, delivery_status, delivery_company_id, city')
     .gte('order_date', start)
     .lt('order_date', end)
 
@@ -612,16 +453,16 @@ export async function getDeliveryPerformance(supabase: SupabaseServerClient, sto
   const rows = (data || []) as Array<{
     status?: string | null
     delivery_status?: string | null
-    delivery_company?: string | null
+    delivery_company_id?: string | null
     city?: string | null
   }>
 
   const total = rows.length
   const delivered = rows.filter(r => r.status === 'delivered').length
-  const pending = rows.filter(r => r.status === 'pending' || r.delivery_status === 'pending').length
   const cancelled = rows.filter(r => r.status === 'cancelled').length
-  const returned = rows.filter(r => r.status === 'returned').length
-  const inTransit = rows.filter(r => r.delivery_status === 'in_transit').length
+  const returned = rows.filter(r => isReturned(r.status ?? null)).length
+  const inTransit = rows.filter(r => isInTransit(r.status ?? null, r.delivery_status ?? null)).length
+  const pending = rows.filter(r => r.status !== null && r.status !== undefined && countsAsConfirmed(r.status, null) === false && r.status !== 'cancelled' && !isReturned(r.status)).length
 
   return {
     total,
@@ -630,8 +471,10 @@ export async function getDeliveryPerformance(supabase: SupabaseServerClient, sto
     cancelled,
     returned,
     inTransit,
-    deliveryRate: total > 0 ? Number(((delivered / total) * 100).toFixed(2)) : 0,
-    cancellationRate: total > 0 ? Number(((cancelled / total) * 100).toFixed(2)) : 0,
+    sampleTruncated: total >= 1000,
+    deliveryRate: total > 0 ? Number(((delivered / total) * 100).toFixed(2)) : null,
+    cancellationRate: total > 0 ? Number(((cancelled / total) * 100).toFixed(2)) : null,
+    companiesObserved: new Set(rows.map(r => r.delivery_company_id).filter(Boolean)).size,
   }
 }
 
@@ -753,7 +596,11 @@ export async function getStoreComparison(supabase: SupabaseServerClient, storeId
     return { error: 'Au moins 2 stores requis pour une comparaison' }
   }
 
-  const results: Array<{ storeId: string; kpis: any; profit: any }> = []
+  const results: Array<{
+    storeId: string
+    kpis: Awaited<ReturnType<typeof getDashboardKPIs>>
+    profit: Awaited<ReturnType<typeof getProfitSummary>>
+  }> = []
 
   for (const storeId of storeIds) {
     const [kpis, profit] = await Promise.all([

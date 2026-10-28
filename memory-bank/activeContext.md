@@ -1,5 +1,7 @@
 # Active Context
 
+- 🧪 **Assistant analytique — Lot 2 (branche `feat/assistant-analytics`, non fusionnée)** : moteur rebâti sur le lecteur KPI V5 (`analytics-reader.ts`), sections détaillées sur RPC existantes (`analytics-sections.ts` : confirmation via `rpc_dashboard_confirmation_counters`, agents via `rpc_dashboard_confirmation_performance` avec commissions masquées hors `full`, villes via `rpc_dashboard_city_performance`) et produits (`analytics-products.ts` via `rpc_dashboard_top_products`, profit masqué hors `full`). États explicites `complete/empty/partial/missing/forbidden/unavailable` : aucun zéro inventé, aucune somme inter-devises, aucune agrégation JS sur liste plafonnée. **Livraison et stock restent `unavailable`** : propositions SQL non exécutées dans `docs/assistant-analytics-lot2-rpc-proposals.sql`. Parité vérifiée en lecture seule sur `e2b600fd` (2026-09-01→09-08) : V5 = compteurs directs = CA villes (101 commandes, 66 livrées, 8 annulées, 3 retours, 92 confirmées, 24 107,00). `tsc` et ESLint du périmètre PASS ; build non exécuté (disque plein). Aucune route, aucun composant Dashboard/Sales, aucun fichier de l'Agent 1 modifié.
+
 ## Current Status
 Project is in **Phase 1 (MVP)** with basic infrastructure complete.
 
