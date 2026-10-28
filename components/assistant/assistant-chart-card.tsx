@@ -39,11 +39,16 @@ function getPrimaryValueKey(data: Array<Record<string, string | number>>) {
   return Object.keys(first).find((k) => typeof first[k] === 'number') ?? null
 }
 
-/** Infobulle : libellé exact fourni par le serveur, jamais un arrondi local. */
-function renderTooltipValue(entry: { valueLabel?: unknown; value?: unknown; currency?: unknown }): string {
-  if (typeof entry.valueLabel === 'string' && entry.valueLabel) return entry.valueLabel
-  if (typeof entry.value === 'number' && Number.isFinite(entry.value)) {
-    return typeof entry.currency === 'string' ? `${entry.value} ${entry.currency}` : String(entry.value)
+/** Infobulle Recharts : le libellé exact vit dans `item.payload.valueLabel`. */
+function renderTooltipValue(
+  value: unknown,
+  _name: unknown,
+  item: { payload?: { valueLabel?: unknown; currency?: unknown } } | undefined,
+): string {
+  const payload = item?.payload
+  if (typeof payload?.valueLabel === 'string' && payload.valueLabel) return payload.valueLabel
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return typeof payload?.currency === 'string' ? `${value} ${payload.currency}` : String(value)
   }
   return '—'
 }
@@ -72,7 +77,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} />
               <YAxis />
-              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
+              <Tooltip formatter={renderTooltipValue} />
               <Line type="monotone" dataKey={valueKey} stroke="#2563eb" strokeWidth={2} dot={false} />
             </LineChart>
           ) : response.chart_type === 'area' ? (
@@ -80,7 +85,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} />
               <YAxis />
-              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
+              <Tooltip formatter={renderTooltipValue} />
               <Area type="monotone" dataKey={valueKey} stroke="#2563eb" fill="#93c5fd" />
             </AreaChart>
           ) : response.chart_type === 'pie' ? (
@@ -90,7 +95,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
                   <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
+              <Tooltip formatter={renderTooltipValue} />
               <Legend />
             </PieChart>
           ) : (
@@ -98,7 +103,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} />
               <YAxis />
-              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
+              <Tooltip formatter={renderTooltipValue} />
               <Bar dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]} />
             </BarChart>
           )}

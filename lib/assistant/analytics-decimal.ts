@@ -85,14 +85,6 @@ export function toDecimalText(value: unknown): string | null {
   return read.exact ? read.value : null
 }
 
-/** Nombre maximal de chiffres significatifs transportables sans perte. */
-const MAX_EXACT_SIGNIFICANT_DIGITS = 15
-
-function significantDigits(text: string): number {
-  const digits = text.replace(/[-+.]/g, '').replace(/^0+/, '')
-  return digits.length
-}
-
 export interface DecimalRead {
   /** Texte canonique, `null` si la valeur n'est pas un décimal exploitable. */
   value: string | null
@@ -104,9 +96,10 @@ export interface DecimalRead {
  * Lit un montant provenant d'une RPC.
  *
  * - chaîne décimale et `bigint` : exacts ;
- * - nombre JavaScript : exact seulement s'il est représentable sans perte
- *   (entier sûr ou ≤ 15 chiffres significatifs). Au-delà, la valeur est
- *   conservée **mais marquée inexacte** : aucun arrondi n'est revendiqué.
+ * - nombre JavaScript : jamais déclaré exact. Même une valeur apparemment
+ *   simple peut provenir d'un `numeric` déjà arrondi par le transport JSON.
+ *   La valeur canonique est conservée pour diagnostic, mais toute métrique qui
+ *   l'utilise devient `partial` et porte une limite de précision.
  */
 export function decimalFromRpc(value: unknown): DecimalRead {
   if (typeof value === 'string') {
@@ -124,8 +117,10 @@ export function decimalFromRpc(value: unknown): DecimalRead {
     const text = String(value)
     const parsed = parseDecimal(text)
     if (!parsed) return { value: null, exact: false }
-    const exact = Number.isSafeInteger(value) || significantDigits(text) <= MAX_EXACT_SIGNIFICANT_DIGITS
-    return { value: render(parsed.negative ? -parsed.digits : parsed.digits, parsed.scale), exact }
+    return {
+      value: render(parsed.negative ? -parsed.digits : parsed.digits, parsed.scale),
+      exact: false,
+    }
   }
 
   return { value: null, exact: false }

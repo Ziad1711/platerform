@@ -677,6 +677,79 @@ async function main() {
 /* Rapport                                                                     */
 /* -------------------------------------------------------------------------- */
 
+  check('A01', '100.00 n’autorise jamais 10000 MAD', () => {
+    const clean = responseModule.sanitizeNarrative('Le CA est 10000 MAD.')
+    assert(!clean.text.includes('10000'), clean.text)
+    return clean.rejectedAmounts.join('|')
+  })
+
+  check('A02', 'Un compteur ne peut pas devenir un montant', () => {
+    const clean = responseModule.sanitizeNarrative('Le CA est 3 MAD.')
+    assert(!clean.text.includes('3 MAD'), clean.text)
+    return 'association retirée'
+  })
+
+  check('A03', 'Les nombres en lettres sont retirés sans données', () => {
+    const clean = responseModule.sanitizeNarrative('Le stock vaut mille dirhams.')
+    assertEqual(clean.text, '', 'narratif chiffré supprimé')
+    return clean.rejectedAmounts.join('|')
+  })
+
+  check('A04', 'Comparaison relative classée period_comparison', () => {
+    assertEqual(intents.resolveIntent('compare ce mois et le mois dernier'), 'period_comparison', 'intent relatif')
+    return 'period_comparison'
+  })
+
+  check('A05', 'Comparaison MM/YYYY résolue dans l’ordre', () => {
+    const pair = intents.resolveComparisonPeriods('compare 03/2026 et 01/2026')
+    assert(pair, 'paire numérique attendue')
+    assertEqual(pair.current.from, '2026-03-01', 'courante mars')
+    assertEqual(pair.baseline.from, '2026-01-01', 'référence janvier')
+    return `${pair.labels.current} vs ${pair.labels.baseline}`
+  })
+
+  check('A06', 'Tooltip exact lu depuis item.payload.valueLabel', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'components/assistant/assistant-chart-card.tsx'), 'utf8')
+    assert(source.includes('item?.payload'), 'payload Recharts non lu')
+    assert(source.includes('<Tooltip formatter={renderTooltipValue}'), 'formatter non raccordé')
+    return 'payload.valueLabel'
+  })
+
+  check('A07', 'Fraîcheur fondée sur last_rebuild_at, pas generated_at', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/analytics-reader.ts'), 'utf8')
+    assert(source.includes('Date.parse(oldestRebuildAt)'), 'âge de reconstruction absent')
+    assert(source.includes('COMPARISON_AGGREGATES_STALE'), 'stale ne bloque pas la comparaison')
+    return 'aggregate freshness'
+  })
+
+  check('A08', 'days_partial et métriques partial bloquent les deltas complets', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/analytics-reader.ts'), 'utf8')
+    assert(source.includes('store.coverage.days_partial === 0'), 'days_partial non contrôlé')
+    assert(source.includes("metric.state !== 'complete' && metric.state !== 'empty'"), 'métrique partielle sommée')
+    return 'partial blocked'
+  })
+
+  check('A09', 'Aucun number RPC n’est déclaré exact', () => {
+    const read = decimal.decimalFromRpc(0.1)
+    assertEqual(read.exact, false, 'number JavaScript doit rester inexact')
+    assertEqual(decimal.toDecimalText(0.1), null, 'pas de texte exact revendiqué')
+    return JSON.stringify(read)
+  })
+
+  check('A10', 'Stock/livraison inclus dans les avertissements propagés', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/agent/index.ts'), 'utf8')
+    assert(source.includes('toolData.getStockSummary'), 'stock absent')
+    assert(source.includes('toolData.getDeliveryPerformance'), 'livraison absente')
+    return 'sections propagated'
+  })
+
+  check('A11', 'Chaque point graphique conserve storeId et refuse plusieurs boutiques', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/response.ts'), 'utf8')
+    assert(source.includes('storeId: row.storeId'), 'storeId non conservé')
+    assert(source.includes('if (stores.size !== 1) return null'), 'multi-boutiques non refusé')
+    return 'store identity preserved'
+  })
+
   const failed = results.filter((item) => !item.pass)
   const reportLines = []
   const width = Math.max(...results.map((item) => item.name.length), 40)

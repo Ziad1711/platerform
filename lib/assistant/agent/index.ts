@@ -2,7 +2,7 @@ import { getAssistantProvider } from '@/lib/assistant/providers'
 import {
   buildStructuredResponseFromContext,
   parseAssistantLlmOutput,
-  sanitizeExplanation,
+  sanitizeNarrative,
   sectionState,
   sectionWarnings,
 } from '@/lib/assistant/response'
@@ -152,7 +152,7 @@ function buildTruthMessageText(input: {
 
   // Aucune donnée vérifiée : la réponse ne peut porter aucun chiffre.
   if (state === 'none') {
-    const clean = sanitizeExplanation(explanation, [])
+    const clean = sanitizeNarrative(explanation)
     return {
       text: clean.text
         ? `Aucune donnée métier n’a pu être vérifiée pour ${rangeLabel}. ${clean.text}`
@@ -169,7 +169,7 @@ function buildTruthMessageText(input: {
   }
 
   if (state === 'missing' || state === 'unavailable') {
-    const clean = sanitizeExplanation(explanation, [])
+    const clean = sanitizeNarrative(explanation)
     return {
       text: clean.text
         ? `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé. ${clean.text}`
@@ -178,16 +178,14 @@ function buildTruthMessageText(input: {
     }
   }
 
-  const verified = Object.values(truth.metrics)
-    .map((metric) => metric.value)
-    .filter((value): value is string => value !== null)
-
-  const clean = sanitizeExplanation(explanation, verified)
+  // Le texte IA ne porte jamais les chiffres : les faits chiffrés sont
+  // restitués exclusivement depuis les références alias/unité/période ci-dessous.
+  const clean = sanitizeNarrative(explanation)
 
   if (state === 'empty') {
     return {
       text: `Sur la période ${rangeLabel}, aucune commande n’a été enregistrée (zéro réel).${
-        clean.text ? `\n\n${clean.text}` : ''
+        clean.text ? `\n\nInterprétation qualitative : ${clean.text}` : ''
       }`,
       rejectedAmounts: clean.rejectedAmounts,
     }
@@ -209,7 +207,8 @@ function buildTruthMessageText(input: {
     ? '\n\nLa marge contributive n’est pas un bénéfice net : les dépenses opérationnelles ne sont pas déduites.'
     : ''
 
-  const text = [factsText, clean.text].filter(Boolean).join('\n\n')
+  const qualitative = clean.text ? `Interprétation qualitative : ${clean.text}` : ''
+  const text = [factsText, qualitative].filter(Boolean).join('\n\n')
   return { text: `${text}${notice}`, rejectedAmounts: clean.rejectedAmounts }
 }
 
@@ -414,6 +413,12 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     citySection,
     confirmation?.confirmation,
     confirmation?.agents,
+    toolData.getStockSummary,
+    toolData.getDeliveryPerformance,
+    toolData.getSupplierSummary,
+    toolData.getExpensesByCategory,
+    toolData.getAdsPerformanceByCampaign,
+    toolData.getRecentOrders,
   ]
   const sectionNotices = sections.flatMap((section) => sectionWarnings(section))
   const sectionStates = sections
