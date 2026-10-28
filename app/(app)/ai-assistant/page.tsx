@@ -634,9 +634,9 @@ export default function AssistantIAPage() {
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.warnings?.length ? (
                     <div className="mt-2 space-y-1">
-                      {msg.metadata.structured_response.warnings.map((warning, idx) => (
-                        <div key={`${warning}-${idx}`} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                          {warning}
+                      {msg.metadata.structured_response.warnings.map((warningText, idx) => (
+                        <div key={`${warningText}-${idx}`} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                          {warningText}
                         </div>
                       ))}
                     </div>

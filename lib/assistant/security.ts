@@ -325,6 +325,7 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   THREAD_CREATE_FAILED: 'Création de conversation impossible.',
   THREAD_FETCH_FAILED: 'Conversation indisponible.',
   THREAD_UPDATE_FAILED: 'Mise à jour de la conversation impossible.',
+  THREAD_TOUCH_FAILED: 'Mise à jour de la conversation impossible.',
   THREAD_DELETE_FAILED: 'Suppression de la conversation impossible.',
   INVALID_THREAD_ACTION: 'Action de conversation invalide.',
   INVALID_THREAD_TITLE: 'Titre de conversation invalide.',

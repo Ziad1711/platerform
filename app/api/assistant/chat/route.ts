@@ -31,6 +31,8 @@ import { runSecureAssistantAgent } from '@/lib/assistant/agent'
 
 /** Longueur maximale d'un message utilisateur (caractères). */
 const MAX_MESSAGE_LENGTH = 2000
+/** Taille maximale du corps JSON accepté (octets). */
+const MAX_BODY_BYTES = 16 * 1024
 /** Budget d'une analyse complète (lecture des outils + appel IA). */
 const ASSISTANT_REQUEST_TIMEOUT_MS = Math.max(
   5_000,
@@ -120,6 +122,11 @@ export async function POST(request: Request) {
 
     const { supabase, user } = await requireAuthenticatedUser()
 
+    const contentLength = Number(request.headers.get('content-length') || 0)
+    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+      throw new Error('MESSAGE_TOO_LONG')
+    }
+
     let rawBody: unknown
     try {
       rawBody = await request.json()
@@ -151,8 +158,13 @@ export async function POST(request: Request) {
         .maybeSingle(),
     ])
 
-    if (storeMetaError || !storeMeta) {
+    if (storeMetaError) {
       throw new Error('STORE_ACCESS_CHECK_FAILED')
+    }
+
+    // Boutique invisible sous RLS (appartenance révoquée entre-temps) : refus.
+    if (!storeMeta) {
+      throw new Error('FORBIDDEN_STORE')
     }
 
     const resolvedStoreCurrency = String(storeMeta.currency || 'MAD')
@@ -251,7 +263,10 @@ export async function POST(request: Request) {
         'assistant',
         smallResponse.message_text,
         0,
-        { structured_response: smallResponse }
+        {
+          structured_response: smallResponse,
+          ...(body.requestId ? { request_id: body.requestId } : {}),
+        }
       )
       const nextTitle = isFirstExchange ? resolveAiThreadTitle(smallResponse.conversation_title) : undefined
       await touchThread(supabase, ensuredThreadId, nextTitle)
@@ -347,6 +362,7 @@ export async function POST(request: Request) {
       {
         structured_response: structuredResponse,
         analytic_memory: updatedMemory,
+        ...(body.requestId ? { request_id: body.requestId } : {}),
       }
     )
     const nextTitle = isFirstExchange

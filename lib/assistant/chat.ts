@@ -134,7 +134,9 @@ export async function listMessages(
 /**
  * Rejeu idempotent : retrouve la réponse déjà produite pour une requête
  * identifiée par `requestId`. Aucun schéma supplémentaire n'est requis : la clé
- * est stockée dans `chat_messages.metadata.request_id`.
+ * est stockée dans `chat_messages.metadata.request_id` sur le message
+ * utilisateur **et** sur la réponse assistant, ce qui évite d'apparier une
+ * réponse voisine appartenant à une autre question.
  */
 export async function findAssistantReplyByRequestId(
   supabase: SupabaseServerClient,
@@ -143,30 +145,17 @@ export async function findAssistantReplyByRequestId(
 ) {
   if (!isUuid(threadId) || !isUuid(requestId)) return null
 
-  const { data: anchors, error } = await supabase
+  const { data, error } = await supabase
     .from('chat_messages')
-    .select('id, created_at')
+    .select('id, thread_id, role, content, credits_used, metadata, created_at')
     .eq('thread_id', threadId)
-    .eq('role', 'user')
+    .eq('role', 'assistant')
     .contains('metadata', { request_id: requestId })
     .order('created_at', { ascending: true })
     .limit(1)
 
   if (error) throw new Error('MESSAGES_LIST_FAILED')
-  const anchor = anchors?.[0]
-  if (!anchor) return null
-
-  const { data: replies, error: replyError } = await supabase
-    .from('chat_messages')
-    .select('id, thread_id, role, content, credits_used, metadata, created_at')
-    .eq('thread_id', threadId)
-    .eq('role', 'assistant')
-    .gt('created_at', anchor.created_at)
-    .order('created_at', { ascending: true })
-    .limit(1)
-
-  if (replyError) throw new Error('MESSAGES_LIST_FAILED')
-  return replies?.[0] || null
+  return data?.[0] || null
 }
 
 export async function addMessage(

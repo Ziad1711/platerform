@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createThread, listThreads } from '@/lib/assistant/chat'
 import {
   assertTrustedOrigin,
-  requireAssistantPermission,
+  requireAssistantStoreAccess,
   requireAuthenticatedUser,
   toPublicError,
 } from '@/lib/assistant/security'
@@ -24,7 +24,9 @@ export async function GET(request: Request) {
 
     // Périmètre explicite : la boutique demandée doit être autorisée, sinon la
     // première boutique autorisée est retenue (aucune agrégation implicite).
-    const scope = await requireAssistantPermission(supabase, user.id, storeId)
+    // L'assistant reste réservé aux profils financiers `full` : les
+    // conversations contiennent coûts, marges et profits.
+    const scope = await requireAssistantStoreAccess(supabase, user.id, storeId)
 
     const threads = await listThreads(supabase, user.id, scope.storeId, {
       limit: readNumericParam(searchParams.get('limit')),
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     const rawTitle = typeof source.title === 'string' ? source.title.trim() : ''
     const title = rawTitle ? rawTitle.slice(0, MAX_TITLE_LENGTH) : 'Nouvelle conversation'
 
-    const scope = await requireAssistantPermission(supabase, user.id, storeId)
+    const scope = await requireAssistantStoreAccess(supabase, user.id, storeId)
     const thread = await createThread(supabase, user.id, scope.storeId, title)
 
     return NextResponse.json({ thread })

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getThread, listMessages } from '@/lib/assistant/chat'
 import {
-  assertThreadScopeAccess,
+  requireAssistantStoreAccess,
   requireAuthenticatedUser,
   toPublicError,
 } from '@/lib/assistant/security'
@@ -25,11 +25,14 @@ export async function GET(request: Request, { params }: Params) {
     const { searchParams } = new URL(request.url)
     const storeId = (searchParams.get('storeId') || '').trim() || null
 
-    // Propriété de la conversation + cohérence de boutique ; la permission est
-    // ensuite vérifiée sur la boutique de la conversation elle-même, ce qui
-    // couvre la révocation d'accès après création de l'historique.
+    // Propriété de la conversation + cohérence de boutique demandée.
     const thread = await getThread(supabase, threadId, user.id, storeId)
-    await assertThreadScopeAccess(supabase, user.id, thread.store_id as string | null)
+
+    // Lecture = accès analytique complet sur la boutique de la conversation :
+    // un historique contient coûts, marges et profits, donc un profil
+    // `commercial` (viewer/marketer) ne doit pas pouvoir le relire, même après
+    // une rétrogradation de rôle.
+    await requireAssistantStoreAccess(supabase, user.id, thread.store_id as string | null)
 
     const requestedLimit = readPageNumber(searchParams.get('limit'), 100)
     const offsetParam = Number(searchParams.get('offset'))

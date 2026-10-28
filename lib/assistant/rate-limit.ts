@@ -21,7 +21,20 @@ export type AssistantSlotResult =
   | { ok: true }
   | { ok: false; code: 'RATE_LIMITED' | 'CONCURRENT_REQUEST' }
 
-function trimTrackedUsers() {
+function trimTrackedUsers(now: number) {
+  if (slots.size <= MAX_TRACKED_USERS) return
+
+  for (const [key, state] of slots) {
+    if (slots.size <= MAX_TRACKED_USERS) return
+    const expired = state.hits.every((at) => now - at >= ASSISTANT_RATE_LIMIT_WINDOW_MS)
+    // Ne jamais évincer un utilisateur ayant une requête en cours : le verrou
+    // de concurrence serait perdu au milieu d'une facturation.
+    if (state.inFlight === 0 || expired) slots.delete(key)
+  }
+
+  // Dernier recours : la carte reste bornée même si toutes les entrées ont une
+  // requête en cours (situation anormale : plus de requêtes simultanées que la
+  // limite de suivi). Une entrée évincée perd son verrou, pas la sécurité.
   while (slots.size > MAX_TRACKED_USERS) {
     const oldest = slots.keys().next()
     if (oldest.done) return
@@ -29,13 +42,13 @@ function trimTrackedUsers() {
   }
 }
 
-function getState(key: string): AssistantSlotState {
+function getState(key: string, now: number): AssistantSlotState {
   const existing = slots.get(key)
   if (existing) return existing
 
   const created: AssistantSlotState = { hits: [], inFlight: 0 }
   slots.set(key, created)
-  trimTrackedUsers()
+  trimTrackedUsers(now)
   return created
 }
 
@@ -44,7 +57,7 @@ function getState(key: string): AssistantSlotState {
  * du même utilisateur (double facturation) et applique la fenêtre glissante.
  */
 export function acquireAssistantSlot(key: string, now = Date.now()): AssistantSlotResult {
-  const state = getState(key)
+  const state = getState(key, now)
   const windowStart = now - ASSISTANT_RATE_LIMIT_WINDOW_MS
   state.hits = state.hits.filter((at) => at > windowStart)
 
