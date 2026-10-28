@@ -19,7 +19,8 @@ import {
 } from '@/lib/assistant/credits'
 import { beginAssistantRequest, canonicalRequestPayload, computeRequestFingerprint } from '@/lib/assistant/idempotency'
 import { finalizeAssistantTurn } from '@/lib/assistant/finalization'
-import { asksForOtherStore, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
+import { asksForOtherStore, extractComparisonRanges, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
+import { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
 import { getAssistantModelName } from '@/lib/assistant/providers'
 import { buildGreetingResponse, buildSmallTalkResponse, buildStructuredResponseFromContext } from '@/lib/assistant/response'
 import {
@@ -288,6 +289,25 @@ export async function POST(request: Request) {
     const intent = resolveIntent(body.message)
     const range = resolveRangeFromQuestion(body.message, threadMemory)
 
+    // Deux périodes explicitement demandées : la seconde devient la référence.
+    // Sans période explicite, `getStoreComparison` reste une comparaison de boutiques.
+    let comparisonBaseline: { from: string; to: string } | undefined
+    if (intent === 'period_comparison') {
+      const comparison = extractComparisonRanges(body.message)
+      const baselineRange = comparison?.rangeB
+      if (baselineRange && typeof baselineRange === 'object') {
+        try {
+          const baseline = resolveAssistantBusinessRange({
+            start: baselineRange.start,
+            end: baselineRange.end,
+          })
+          comparisonBaseline = { from: baseline.from, to: baseline.to }
+        } catch {
+          comparisonBaseline = undefined
+        }
+      }
+    }
+
     // Réponses conversationnelles et refus multi-tenant : aucun appel IA, aucun
     // débit, mais message tracé avec la clé d'idempotence.
     let smallResponse: AssistantStructuredResponse | null = null
@@ -385,6 +405,7 @@ export async function POST(request: Request) {
         providerModel: model,
         signal: controller.signal,
         maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
+        comparisonBaseline,
       })
     } catch (agentError) {
       const rawCode = agentError instanceof Error ? agentError.message : ''

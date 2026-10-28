@@ -44,6 +44,11 @@ export interface RunSecureAgentInput {
   signal?: AbortSignal
   /** Plafond de tokens de sortie appliqué par le fournisseur. */
   maxOutputTokens?: number
+  /**
+   * Période de référence explicite (bornes métier). Sa présence déclenche une
+   * comparaison temporelle ; son absence laisse la comparaison entre boutiques.
+   */
+  comparisonBaseline?: { from: string; to: string }
 }
 
 export interface RunSecureAgentOutput {

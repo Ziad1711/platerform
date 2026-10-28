@@ -1,39 +1,122 @@
 import { getAssistantProvider } from '@/lib/assistant/providers'
 import { buildStructuredResponseFromContext } from '@/lib/assistant/response'
-import type { AnalyticsRange, AssistantStructuredResponse, ComparisonRange } from '@/lib/assistant/types'
-import { buildAgentSystemPrompt, buildAgentUserPrompt, buildPeriodComparisonUserPrompt } from '@/lib/assistant/prompt'
+import type { AnalyticsRange, AssistantStructuredResponse } from '@/lib/assistant/types'
+import { buildAgentSystemPrompt, buildAgentUserPrompt } from '@/lib/assistant/prompt'
 import { buildToolPlan, executeAgentTool, type AgentToolName } from '@/lib/assistant/agent/tools'
+import {
+  createAssistantAnalyticsSession,
+  resolveAssistantBusinessRange,
+} from '@/lib/assistant/analytics-reader'
+import type {
+  AnalyticsMetric,
+  AnalyticsState,
+  KpiEnvelope,
+  SectionResult,
+} from '@/lib/assistant/analytics-contract'
 import type { AgentStep, RunSecureAgentInput, RunSecureAgentOutput } from '@/lib/assistant/agent/types'
 
-function formatAmount(value: number, currency: string) {
-  const amount = Number(value || 0)
-  return `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`
+interface TruthMetric {
+  value: string | null
+  state: AnalyticsState
+  unit: 'count' | 'decimal' | 'percent'
 }
 
-function formatCount(value: number) {
-  return Number(value || 0).toLocaleString('fr-FR')
+interface ServerTruth {
+  envelopeState: AnalyticsState | 'none'
+  currency: string | null
+  metrics: Record<string, TruthMetric>
+  issues: string[]
+  warnings: string[]
 }
 
-function buildServerTruthMetrics(toolData: Record<string, any>, currency: string) {
-  const kpis = toolData.getDashboardKPIs || null
-  const profit = toolData.getProfitSummary || null
-  const ads = toolData.getAdsSpend || null
-  const topProducts = Array.isArray(toolData.getTopProducts) ? toolData.getTopProducts : []
+/**
+ * Lecture stricte du contrat V2 : une seule enveloppe KPI, chaque valeur porte
+ * son état. Aucune donnée absente, interdite ou indisponible n'est convertie en
+ * zéro ; un zéro n'est accepté que si l'état est `empty` ou `complete`.
+ */
+function readKpiEnvelope(toolData: Record<string, unknown>): KpiEnvelope | null {
+  const candidate =
+    toolData.getDashboardKPIs ??
+    toolData.getProfitSummary ??
+    toolData.getAdsSpend ??
+    toolData.getOrdersByStatus
 
-  // `null` = donnée indisponible (outil non exécuté). Jamais `0` : un zéro
-  // inventé produirait une affirmation fausse (« aucune vente »).
+  if (!candidate || typeof candidate !== 'object') return null
+
+  const envelope = candidate as { kind?: string; metrics?: unknown }
+  if (envelope.kind !== 'kpis' || !envelope.metrics || typeof envelope.metrics !== 'object') return null
+
+  return candidate as KpiEnvelope
+}
+
+function toTruthMetric(metric: AnalyticsMetric | null | undefined): TruthMetric | null {
+  if (!metric) return null
   return {
-    kpiAvailable: Boolean(kpis),
-    totalOrders: kpis ? Number(kpis.totalOrders || 0) : null,
-    deliveredOrders: kpis ? Number(kpis.deliveredOrders || 0) : null,
-    revenue: kpis ? Number(kpis.revenue || 0) : null,
-    deliveredRate: kpis ? Number(kpis.deliveredRate || 0) : null,
-    profit: profit ? Number(profit.profit || 0) : null,
-    adsSpend: ads ? Number(ads.total || 0) : null,
-    currency,
-    topProducts,
+    value: metric.state === 'missing' || metric.state === 'forbidden' || metric.state === 'unavailable'
+      ? null
+      : metric.value,
+    state: metric.state,
+    unit: metric.unit,
   }
 }
+
+function buildServerTruth(toolData: Record<string, unknown>, fallbackCurrency: string): ServerTruth {
+  const envelope = readKpiEnvelope(toolData)
+
+  if (!envelope) {
+    return {
+      envelopeState: 'none',
+      currency: fallbackCurrency,
+      metrics: {},
+      issues: [],
+      warnings: [],
+    }
+  }
+
+  const metrics: Record<string, TruthMetric> = {}
+  for (const [alias, metric] of Object.entries(envelope.metrics)) {
+    const truthMetric = toTruthMetric(metric as AnalyticsMetric | null | undefined)
+    if (truthMetric) metrics[alias] = truthMetric
+  }
+
+  const warnings = [
+    ...(envelope.issues ?? []),
+    ...(envelope.limits ?? []),
+    ...(envelope.state === 'partial' ? ['Couverture partielle : les valeurs sont affichées avec réserve.'] : []),
+    ...(envelope.state === 'forbidden' ? ['Accès financier insuffisant sur le périmètre demandé.'] : []),
+  ]
+
+  return {
+    envelopeState: envelope.state,
+    currency: envelope.currency ?? null,
+    metrics,
+    issues: envelope.issues ?? [],
+    warnings,
+  }
+}
+
+const METRIC_LABELS: Record<string, string> = {
+  totalOrders: 'Commandes',
+  deliveredOrders: 'Commandes livrées',
+  returnedOrders: 'Retours',
+  cancelledOrders: 'Annulations',
+  revenue: 'Chiffre d’affaires réalisé',
+  revenueEstimated: 'Chiffre d’affaires estimé',
+  adSpend: 'Dépenses publicitaires',
+  deliveryRate: 'Taux de livraison',
+  purchaseCost: 'Coût d’achat',
+  deliveryCost: 'Coût de livraison',
+  confirmationCost: 'Coût de confirmation',
+  contributionMargin: 'Marge contributive (hors dépenses opérationnelles)',
+}
+
+function formatTruthMetric(metric: TruthMetric, currency: string | null): string {
+  const value = metric.value ?? '—'
+  const suffix = metric.unit === 'percent' ? ' %' : metric.unit === 'decimal' && currency ? ` ${currency}` : ''
+  const reserve = metric.state === 'partial' ? ' (partiel)' : ''
+  return `${value}${suffix}${reserve}`
+}
+
 
 function formatRangeLabel(range: AnalyticsRange): string {
   if (typeof range === 'object' && 'start' in range && 'end' in range) {
@@ -51,69 +134,46 @@ function formatRangeLabel(range: AnalyticsRange): string {
   }
 }
 
-function buildTruthMessageText(input: {
-  range: AnalyticsRange
-  metrics: ReturnType<typeof buildServerTruthMetrics>
-  llmText?: string
-}) {
-  const { range, metrics, llmText } = input
-  const rangeLabel = formatRangeLabel(range)
+function buildTruthMessageText(input: { rangeLabel: string; truth: ServerTruth; llmText?: string }): string {
+  const { rangeLabel, truth, llmText } = input
   const explanation = String(llmText || '').trim()
+  const state = truth.envelopeState
 
-  // KPI indisponible : aucune affirmation sur les ventes. Inventer « 0 » ferait
-  // dire au serveur une chose que la base n'a jamais dite.
-  if (!metrics.kpiAvailable) return explanation
-
-  if (metrics.totalOrders === 0) {
-    return `Sur la période ${rangeLabel}, vous n'avez réalisé aucune vente.`
+  if (state === 'none') return explanation
+  if (state === 'forbidden') {
+    return `L’accès aux données financières de ce périmètre est refusé. Aucune valeur n’est affichée pour ${rangeLabel}.`
+  }
+  if (state === 'missing' || state === 'unavailable') {
+    return `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé.`
+  }
+  if (state === 'empty') {
+    return `Sur la période ${rangeLabel}, aucune commande n’a été enregistrée (zéro réel).`
   }
 
-  const intro = `Sur la période ${rangeLabel}, vous avez réalisé ${formatAmount(metrics.revenue ?? 0, metrics.currency)} sur ${formatCount(metrics.totalOrders ?? 0)} commande(s), dont ${formatCount(metrics.deliveredOrders ?? 0)} livrée(s).`
-
-  // On sépare clairement : faits validés serveur + interprétation LLM.
-  const facts: string[] = [intro]
-  if (metrics.profit !== null) {
-    facts.push(`Profit estimé: ${formatAmount(metrics.profit, metrics.currency)}.`)
-  }
-  if (metrics.adsSpend !== null) {
-    facts.push(`Dépenses publicitaires: ${formatAmount(metrics.adsSpend, metrics.currency)}.`)
+  const facts: string[] = []
+  for (const alias of ['totalOrders', 'deliveredOrders', 'revenue', 'adSpend', 'contributionMargin']) {
+    const metric = truth.metrics[alias]
+    if (!metric || metric.value === null) continue
+    facts.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency)}`)
   }
 
-  const factsText = facts.join('\n\n')
+  if (facts.length === 0) return explanation
+
+  const header = state === 'partial'
+    ? `Données partielles pour ${rangeLabel} (couverture incomplète) :`
+    : `Faits vérifiés pour ${rangeLabel} :`
+  const factsText = `${header}\n${facts.map((fact) => `- ${fact}`).join('\n')}`
+
   return explanation ? `${factsText}\n\n${explanation}` : factsText
 }
 
-function buildTruthMetricsSummary(metrics: ReturnType<typeof buildServerTruthMetrics>) {
+function buildTruthMetricsSummary(truth: ServerTruth): Array<{ label: string; value: string | number }> {
   const summary: Array<{ label: string; value: string | number }> = []
 
-  if (metrics.revenue !== null) {
-    summary.push({ label: 'Chiffre d\'affaires', value: formatAmount(metrics.revenue, metrics.currency) })
-  }
-  if (metrics.totalOrders !== null) {
-    summary.push({ label: 'Commandes', value: formatCount(metrics.totalOrders) })
-  }
-  if (metrics.deliveredOrders !== null) {
-    summary.push({ label: 'Commandes livrées', value: formatCount(metrics.deliveredOrders) })
-  }
-  if (metrics.deliveredRate !== null) {
-    summary.push({
-      label: 'Taux de livraison',
-      value: `${metrics.deliveredRate.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`,
-    })
-  }
-  if (metrics.profit !== null) {
-    summary.push({ label: 'Profit', value: formatAmount(metrics.profit, metrics.currency) })
-  }
-  if (metrics.adsSpend !== null) {
-    summary.push({ label: 'Dépenses Ads', value: formatAmount(metrics.adsSpend, metrics.currency) })
-  }
-
-  const topProduct = metrics.topProducts[0]
-  if (topProduct) {
-    summary.push({
-      label: 'Top produit',
-      value: `${String(topProduct.productName || 'Produit')} (${formatAmount(Number(topProduct.revenue || 0), metrics.currency)})`,
-    })
+  for (const alias of ['totalOrders', 'deliveredOrders', 'revenue', 'adSpend', 'contributionMargin', 'deliveryRate']) {
+    const metric = truth.metrics[alias]
+    if (!metric || metric.value === null) continue
+    summary.push({ label: METRIC_LABELS[alias] ?? alias, value: formatTruthMetric(metric, truth.currency) })
   }
 
   return summary
@@ -188,23 +248,48 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   const plannedTools = filterAllowedTools(buildToolPlan(intent, userMessage))
   activitySteps.push({ label: 'Planification agent', detail: `${plannedTools.length} outil(s) sélectionné(s)` })
 
+  // Session analytique unique : une seule lecture V5 pour la période, partagée
+  // par tous les outils. Une période inexploitable produit des états explicites.
+  let session: Awaited<ReturnType<typeof createAssistantAnalyticsSession>> | null = null
+  try {
+    session = createAssistantAnalyticsSession(supabase, scopeStoreIds, resolveAssistantBusinessRange(range))
+  } catch (error) {
+    activitySteps.push({
+      label: 'Période non exploitable',
+      detail: error instanceof Error ? error.message : 'ANALYTICS_BAD_RANGE',
+    })
+  }
+
   const toolResults: Record<string, unknown> = {}
 
   for (const planned of plannedTools) {
     activitySteps.push({ label: `Plan: ${getToolLabel(planned.toolName)}`, detail: planned.reason })
-    const result = await executeAgentTool({
-      supabase,
-      storeIds: scopeStoreIds,
-      storeContext: {
-        storeId: scopeContext.displayStoreId,
-        storeName: scopeContext.displayStoreName,
-        storeCurrency: scopeContext.displayCurrency,
-        userMainCurrency: scopeContext.userMainCurrency,
-      },
-      range,
-      toolName: planned.toolName,
-      userMessage,
-    })
+
+    let result: Awaited<ReturnType<typeof executeAgentTool>>
+    try {
+      result = await executeAgentTool({
+        supabase,
+        storeIds: scopeStoreIds,
+        storeContext: {
+          storeId: scopeContext.displayStoreId,
+          storeName: scopeContext.displayStoreName,
+          storeCurrency: scopeContext.displayCurrency,
+          userMainCurrency: scopeContext.userMainCurrency,
+        },
+        range,
+        toolName: planned.toolName,
+        userMessage,
+        session: session ?? undefined,
+        comparisonBaseline: input.comparisonBaseline,
+      })
+    } catch (error) {
+      // Un outil en échec ne fait pas échouer toute l'analyse : absence explicite.
+      activitySteps.push({
+        label: `Échec: ${getToolLabel(planned.toolName)}`,
+        detail: error instanceof Error ? error.message : 'ANALYTICS_UNKNOWN',
+      })
+      continue
+    }
 
     toolResults[planned.toolName] = result
     activitySteps.push({ label: `Exécution: ${getToolLabel(planned.toolName)}`, detail: 'Terminé' })
@@ -241,54 +326,58 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
 
   const parsed = parseProviderStructuredOutput(providerResult.text)
 
-  const toolData: Record<string, any> = {}
+  const toolData: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(toolResults)) {
-    if (value && typeof value === 'object' && 'data' in (value as any)) {
-      toolData[key] = (value as any).data
+    if (value && typeof value === 'object' && 'data' in (value as Record<string, unknown>)) {
+      toolData[key] = (value as { data: unknown }).data
     } else {
       toolData[key] = value
     }
   }
 
+  const dailyResult = toolData.getDailyRevenueTrend as
+    | { kind?: string; state?: string; rows?: unknown[]; days?: unknown[] }
+    | undefined
+  const productSection = toolData.getTopProducts as SectionResult<Record<string, unknown>> | undefined
+  const citySection = toolData.getCityPerformance as SectionResult<Record<string, unknown>> | undefined
+
+  // Le contexte du fallback ne contient QUE des objets V2 : aucune lecture plate.
   const fallbackStructured = buildStructuredResponseFromContext(intent, parsed.message_text || providerResult.text, {
     currency: scopeContext.displayCurrency,
-    data: {
-      ...toolData,
-      kpis: toolData.getDashboardKPIs,
-      topProducts: toolData.getTopProducts,
-      ads: toolData.getAdsSpend,
-      profit: toolData.getProfitSummary,
-      recentOrders: toolData.getRecentOrders,
-      stock: toolData.getStockSummary,
-      suppliers: toolData.getSupplierSummary,
-      ordersStatus: toolData.getOrdersByStatus,
-      expensesByCategory: toolData.getExpensesByCategory,
-    },
+    envelope: toolData.getDashboardKPIs ?? null,
+    daily: dailyResult ?? null,
+    products: productSection ?? null,
+    cities: citySection ?? null,
+    comparison: toolData.getStoreComparison ?? null,
+    agents: toolData.getConfirmationPerformance ?? null,
   })
 
-  const serverTruthMetrics = buildServerTruthMetrics(toolData, scopeContext.displayCurrency)
-  const forcedZeroData = serverTruthMetrics.kpiAvailable && serverTruthMetrics.totalOrders === 0
+  const truth = buildServerTruth(toolData, scopeContext.displayCurrency)
   const forcedMessage = buildTruthMessageText({
-    range,
-    metrics: serverTruthMetrics,
+    rangeLabel: formatRangeLabel(range),
+    truth,
     llmText: parsed.message_text || providerResult.text,
   })
-  const forcedSummary = buildTruthMetricsSummary(serverTruthMetrics)
+  const forcedSummary = buildTruthMetricsSummary(truth)
+  const declaredWarnings = Array.isArray(parsed.warnings) ? parsed.warnings : []
+  const warnings = Array.from(new Set([...declaredWarnings, ...truth.warnings]))
 
   // Journalisation minimale : aucun contenu utilisateur, aucune donnée métier.
   console.info('[assistant] agent_run', {
     intent,
     storeId: scopeContext.displayStoreId,
     tools: Object.keys(toolData),
-    kpiAvailable: serverTruthMetrics.kpiAvailable,
+    envelopeState: truth.envelopeState,
   })
+
+  const figuresAvailable = Object.values(truth.metrics).some((metric) => metric.value !== null)
 
   const structuredResponse: AssistantStructuredResponse = {
     ...fallbackStructured,
     ...parsed,
-    message_text: serverTruthMetrics.kpiAvailable ? forcedMessage : fallbackStructured.message_text,
+    message_text: truth.envelopeState === 'none' ? fallbackStructured.message_text : forcedMessage,
     suggestions: parsed.suggestions?.length ? parsed.suggestions : fallbackStructured.suggestions,
-    warnings: parsed.warnings?.length ? parsed.warnings : fallbackStructured.warnings,
+    warnings: warnings.length ? warnings : fallbackStructured.warnings,
     metrics_summary: forcedSummary.length > 0 ? forcedSummary : fallbackStructured.metrics_summary,
     chart: fallbackStructured.chart,
     chart_type: fallbackStructured.chart_type,
@@ -298,7 +387,14 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     activity_steps: activitySteps,
   }
 
-  if (forcedZeroData) {
+  // Aucun graphique sur une donnée absente ou interdite : un axe vide n'est pas
+  // un résultat métier.
+  if (
+    !figuresAvailable ||
+    truth.envelopeState === 'forbidden' ||
+    truth.envelopeState === 'missing' ||
+    truth.envelopeState === 'unavailable'
+  ) {
     structuredResponse.chart = false
     structuredResponse.chart_type = undefined
     structuredResponse.chart_title = undefined

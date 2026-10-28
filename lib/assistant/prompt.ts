@@ -67,7 +67,13 @@ Tu dois répondre UNIQUEMENT avec un objet JSON valide (sans texte avant ni apr�
 
 Règles pour message_text :
 - Commence par un résumé exécutif percutant
-- Utilise les chiffres exacts fournis par les outils
+- Utilise UNIQUEMENT les valeurs exactes fournies (texte décimal, jamais arrondi)
+- Chaque résultat porte un état : complete, empty, partial, missing, forbidden, unavailable
+- "empty" = zéro réel, tu peux l'affirmer ; "missing"/"forbidden"/"unavailable" = AUCUN chiffre, explique l'absence
+- "partial" = valeur réelle mais incomplète : affiche-la avec la réserve (couverture, troncature)
+- Distingue toujours la marge contributive (ventes − coûts directs, hors dépenses opérationnelles) du bénéfice net : ne nomme jamais l'une « profit net »
+- Ne calcule jamais une marge à partir du seul chiffre d'affaires
+- Ne compare que deux périodes ou boutiques de même devise, même couverture et même définition
 - Structure avec des sections claires (markdown léger)
 - Termine par des recommandations actionnables
 - Ne mets JAMAIS de chiffres que tu n'as pas reçus des outils
