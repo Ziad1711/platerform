@@ -19,7 +19,8 @@ import {
   type SectionRequest,
   type SectionResult,
 } from '@/lib/assistant/analytics-contract'
-import { compareDecimals, sumDecimals } from '@/lib/assistant/analytics-decimal'
+import { compareDecimals, decimalFromRpc, sumDecimals } from '@/lib/assistant/analytics-decimal'
+
 import {
   assertBusinessRange,
   rangeInstants,
@@ -78,18 +79,32 @@ export async function readProductSection(
   if (!validated.ok) return invalidPayload('products', source, kpis, validated.issues)
 
   const canSeeMoney = allStoresFull(kpis)
-  const rows: ProductPerformanceRow[] = validated.rows.map((row) => ({
-    productId: row.product_id,
-    productName: row.product_name ?? 'Produit sans nom',
-    quantity: toNumber(row.total_quantity),
-    revenue: toDecimalText(row.total_revenue),
-    profit: canSeeMoney ? toDecimalText(row.profit) : null,
-  }))
+  let inexactAmounts = 0
+  const rows: ProductPerformanceRow[] = validated.rows.map((row) => {
+    const revenue = decimalFromRpc(row.total_revenue)
+    const profit = canSeeMoney ? decimalFromRpc(row.profit) : null
+    if (!revenue.exact && revenue.value !== null) inexactAmounts += 1
+    if (profit && !profit.exact && profit.value !== null) inexactAmounts += 1
+
+    return {
+      productId: row.product_id,
+      productName: row.product_name ?? 'Produit sans nom',
+      quantity: toNumber(row.total_quantity),
+      revenue: revenue.value,
+      profit: profit ? profit.value : null,
+    }
+  })
 
   const meta = baseMeta('products', source, kpis, rows.length === 0 ? 'empty' : 'complete')
   meta.limits.push(`Classement limité aux ${boundedLimit} premiers produits : la somme n’est pas le CA total.`)
   meta.limits.push('Profit produit = ventes − coût d’achat ; hors publicité, livraison et confirmation.')
   if (!canSeeMoney) meta.notices.push('Profit masqué : accès financier `full` requis sur toutes les boutiques.')
+  if (inexactAmounts > 0) {
+    meta.state = 'partial'
+    meta.notices.push(
+      `${inexactAmounts} montant(s) reçu(s) avec une précision de transport non garantie : exactitude non revendiquée.`,
+    )
+  }
 
   if (canSeeMoney && rows.some((row) => row.profit === null)) {
     meta.state = 'partial'

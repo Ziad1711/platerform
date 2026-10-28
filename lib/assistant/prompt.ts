@@ -34,6 +34,8 @@ export function buildAgentSystemPrompt(
 - Si un outil retourne des données vides ou nulles, dis-le honnêtement
 - Si une donnée n'est pas disponible, dis "Je n'ai pas cette information" plutôt que d'inventer
 - Tu peux reformuler et structurer les chiffres reçus, mais pas les modifier
+- Si l'état global est missing, forbidden ou unavailable, ta réponse ne contient AUCUN chiffre : explique seulement l'absence
+- Tout montant absent des résultats d'outils est retiré automatiquement de ta réponse : n'en produis aucun
 
 ## 3. MÉMOIRE CONVERSATIONNELLE
 - Tu reçois l'historique des messages précédents dans la conversation

@@ -1,5 +1,11 @@
 import { getAssistantProvider } from '@/lib/assistant/providers'
-import { buildStructuredResponseFromContext } from '@/lib/assistant/response'
+import {
+  buildStructuredResponseFromContext,
+  parseAssistantLlmOutput,
+  sanitizeExplanation,
+  sectionState,
+  sectionWarnings,
+} from '@/lib/assistant/response'
 import type { AnalyticsRange, AssistantStructuredResponse } from '@/lib/assistant/types'
 import { buildAgentSystemPrompt, buildAgentUserPrompt } from '@/lib/assistant/prompt'
 import { buildToolPlan, executeAgentTool, type AgentToolName } from '@/lib/assistant/agent/tools'
@@ -7,6 +13,8 @@ import {
   createAssistantAnalyticsSession,
   resolveAssistantBusinessRange,
 } from '@/lib/assistant/analytics-reader'
+import { resolveComparisonPeriods } from '@/lib/assistant/intents'
+import type { BusinessRange } from '@/lib/dashboard/business-time'
 import type {
   AnalyticsMetric,
   AnalyticsState,
@@ -134,20 +142,55 @@ function formatRangeLabel(range: AnalyticsRange): string {
   }
 }
 
-function buildTruthMessageText(input: { rangeLabel: string; truth: ServerTruth; llmText?: string }): string {
-  const { rangeLabel, truth, llmText } = input
-  const explanation = String(llmText || '').trim()
+function buildTruthMessageText(input: {
+  rangeLabel: string
+  truth: ServerTruth
+  explanation: string
+}): { text: string; rejectedAmounts: string[] } {
+  const { rangeLabel, truth, explanation } = input
   const state = truth.envelopeState
 
-  if (state === 'none') return explanation
+  // Aucune donnée vérifiée : la réponse ne peut porter aucun chiffre.
+  if (state === 'none') {
+    const clean = sanitizeExplanation(explanation, [])
+    return {
+      text: clean.text
+        ? `Aucune donnée métier n’a pu être vérifiée pour ${rangeLabel}. ${clean.text}`
+        : `Aucune donnée métier n’a pu être vérifiée pour ${rangeLabel}. Aucun chiffre n’est avancé.`,
+      rejectedAmounts: clean.rejectedAmounts,
+    }
+  }
+
   if (state === 'forbidden') {
-    return `L’accès aux données financières de ce périmètre est refusé. Aucune valeur n’est affichée pour ${rangeLabel}.`
+    return {
+      text: `L’accès aux données de ce périmètre est refusé pour ${rangeLabel}. Aucune valeur n’est affichée.`,
+      rejectedAmounts: [],
+    }
   }
+
   if (state === 'missing' || state === 'unavailable') {
-    return `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé.`
+    const clean = sanitizeExplanation(explanation, [])
+    return {
+      text: clean.text
+        ? `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé. ${clean.text}`
+        : `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé.`,
+      rejectedAmounts: clean.rejectedAmounts,
+    }
   }
+
+  const verified = Object.values(truth.metrics)
+    .map((metric) => metric.value)
+    .filter((value): value is string => value !== null)
+
+  const clean = sanitizeExplanation(explanation, verified)
+
   if (state === 'empty') {
-    return `Sur la période ${rangeLabel}, aucune commande n’a été enregistrée (zéro réel).`
+    return {
+      text: `Sur la période ${rangeLabel}, aucune commande n’a été enregistrée (zéro réel).${
+        clean.text ? `\n\n${clean.text}` : ''
+      }`,
+      rejectedAmounts: clean.rejectedAmounts,
+    }
   }
 
   const facts: string[] = []
@@ -157,14 +200,17 @@ function buildTruthMessageText(input: { rangeLabel: string; truth: ServerTruth; 
     facts.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency)}`)
   }
 
-  if (facts.length === 0) return explanation
-
   const header = state === 'partial'
     ? `Données partielles pour ${rangeLabel} (couverture incomplète) :`
     : `Faits vérifiés pour ${rangeLabel} :`
-  const factsText = `${header}\n${facts.map((fact) => `- ${fact}`).join('\n')}`
 
-  return explanation ? `${factsText}\n\n${explanation}` : factsText
+  const factsText = facts.length > 0 ? `${header}\n${facts.map((fact) => `- ${fact}`).join('\n')}` : ''
+  const notice = truth.metrics.contributionMargin?.value != null
+    ? '\n\nLa marge contributive n’est pas un bénéfice net : les dépenses opérationnelles ne sont pas déduites.'
+    : ''
+
+  const text = [factsText, clean.text].filter(Boolean).join('\n\n')
+  return { text: `${text}${notice}`, rejectedAmounts: clean.rejectedAmounts }
 }
 
 function buildTruthMetricsSummary(truth: ServerTruth): Array<{ label: string; value: string | number }> {
@@ -206,21 +252,12 @@ function getToolLabel(toolName: AgentToolName) {
 }
 
 function parseProviderStructuredOutput(text: string): Partial<AssistantStructuredResponse> {
-  const trimmed = text.trim()
-  const start = trimmed.indexOf('{')
-  const end = trimmed.lastIndexOf('}')
-
-  if (start === -1 || end <= start) {
-    return { message_text: trimmed }
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed.slice(start, end + 1)) as Partial<AssistantStructuredResponse>
-    return parsed
-  } catch {
-    return { message_text: trimmed }
-  }
+  // Compatibilité : la validation stricte vit dans `response.ts`.
+  const parsed = parseAssistantLlmOutput(text)
+  return parsed.output
 }
+
+export { parseProviderStructuredOutput }
 
 /**
  * Outils désactivés côté serveur. La recherche web externe n'est pas activée en
@@ -237,6 +274,17 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   const { supabase, scopeStoreIds, scopeContext, intent, range, userMessage, conversationHistory, providerModel } = input
   const provider = getAssistantProvider()
 
+  // Comparaison de périodes : la paire explicite du message fait foi
+  // (`rangeA` = période courante, `rangeB` = référence). Elle prime sur la
+  // période primaire calculée par la route, qui peut ne retenir qu'un seul mois.
+  const comparisonPair = intent === 'period_comparison' ? resolveComparisonPeriods(userMessage) : null
+  const effectiveRange: AnalyticsRange = comparisonPair
+    ? { start: comparisonPair.current.from, end: comparisonPair.current.to }
+    : range
+  const comparisonBaseline: BusinessRange | undefined = comparisonPair
+    ? comparisonPair.baseline
+    : input.comparisonBaseline
+
   const storeLabel = scopeContext.scopeStoreIds.length > 1
     ? `${scopeContext.scopeStoreIds.length} stores`
     : scopeContext.displayStoreName
@@ -247,12 +295,22 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
 
   const plannedTools = filterAllowedTools(buildToolPlan(intent, userMessage))
   activitySteps.push({ label: 'Planification agent', detail: `${plannedTools.length} outil(s) sélectionné(s)` })
+  if (comparisonPair) {
+    activitySteps.push({
+      label: 'Périodes comparées',
+      detail: `${comparisonPair.labels.current} vs ${comparisonPair.labels.baseline}`,
+    })
+  }
 
   // Session analytique unique : une seule lecture V5 pour la période, partagée
   // par tous les outils. Une période inexploitable produit des états explicites.
   let session: Awaited<ReturnType<typeof createAssistantAnalyticsSession>> | null = null
   try {
-    session = createAssistantAnalyticsSession(supabase, scopeStoreIds, resolveAssistantBusinessRange(range))
+    session = createAssistantAnalyticsSession(
+      supabase,
+      scopeStoreIds,
+      resolveAssistantBusinessRange(effectiveRange),
+    )
   } catch (error) {
     activitySteps.push({
       label: 'Période non exploitable',
@@ -276,11 +334,11 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
           storeCurrency: scopeContext.displayCurrency,
           userMainCurrency: scopeContext.userMainCurrency,
         },
-        range,
+        range: effectiveRange,
         toolName: planned.toolName,
         userMessage,
         session: session ?? undefined,
-        comparisonBaseline: input.comparisonBaseline,
+        comparisonBaseline,
       })
     } catch (error) {
       // Un outil en échec ne fait pas échouer toute l'analyse : absence explicite.
@@ -296,6 +354,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   }
 
   activitySteps.push({ label: 'Génération de la réponse' })
+
 
   const systemPrompt = buildAgentSystemPrompt(intent, {
     storeId: scopeContext.displayStoreId,
@@ -324,7 +383,10 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     maxOutputTokens: input.maxOutputTokens,
   })
 
-  const parsed = parseProviderStructuredOutput(providerResult.text)
+  // Sortie IA validée strictement : JSON invalide neutralisé, champs hors
+  // schéma supprimés, anomalies conservées pour la réponse.
+  const parsedOutput = parseAssistantLlmOutput(providerResult.text)
+  const llmOutput = parsedOutput.output
 
   const toolData: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(toolResults)) {
@@ -340,27 +402,68 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     | undefined
   const productSection = toolData.getTopProducts as SectionResult<Record<string, unknown>> | undefined
   const citySection = toolData.getCityPerformance as SectionResult<Record<string, unknown>> | undefined
+  const confirmation = toolData.getConfirmationPerformance as
+    | { confirmation?: unknown; agents?: unknown }
+    | undefined
+  const comparison = toolData.getStoreComparison as
+    | { state?: string; notices?: string[]; issues?: string[] }
+    | undefined
 
-  // Le contexte du fallback ne contient QUE des objets V2 : aucune lecture plate.
-  const fallbackStructured = buildStructuredResponseFromContext(intent, parsed.message_text || providerResult.text, {
+  const sections = [
+    productSection,
+    citySection,
+    confirmation?.confirmation,
+    confirmation?.agents,
+  ]
+  const sectionNotices = sections.flatMap((section) => sectionWarnings(section))
+  const sectionStates = sections
+    .map((section) => sectionState(section))
+    .filter((state): state is AnalyticsState => Boolean(state))
+  const comparisonNotices = [
+    ...(comparison?.notices ?? []),
+    ...(comparison?.issues ?? []),
+  ].filter((notice): notice is string => typeof notice === 'string')
+
+  const truth = buildServerTruth(toolData, scopeContext.displayCurrency)
+
+  const rangeLabel = comparisonPair
+    ? `${comparisonPair.labels.current} (comparée à ${comparisonPair.labels.baseline})`
+    : formatRangeLabel(effectiveRange)
+
+  const explanation = llmOutput.message_text ?? parsedOutput.rawText
+  const { text: messageText, rejectedAmounts } = buildTruthMessageText({
+    rangeLabel,
+    truth,
+    explanation,
+  })
+
+  const numericWarnings = rejectedAmounts.length > 0
+    ? [
+      'Réponse IA modifiée : un ou plusieurs chiffres n’étaient pas vérifiés par les outils.',
+      ...rejectedAmounts.slice(0, 3).map((amount) => `Chiffre non vérifié retiré : ${amount}`),
+    ]
+    : []
+
+  const warnings = Array.from(new Set([
+    ...truth.warnings,
+    ...sectionNotices,
+    ...comparisonNotices,
+    ...(llmOutput.warnings ?? []),
+    ...parsedOutput.issues,
+    ...numericWarnings,
+    ...(sectionStates.includes('unavailable') ? ['Une section demandée n’est pas disponible : elle n’est pas chiffrée.'] : []),
+  ]))
+
+  const summary = buildTruthMetricsSummary(truth)
+  const figuresAvailable = Object.values(truth.metrics).some((metric) => metric.value !== null)
+
+  const fallbackStructured = buildStructuredResponseFromContext(intent, messageText, {
     currency: scopeContext.displayCurrency,
     envelope: toolData.getDashboardKPIs ?? null,
     daily: dailyResult ?? null,
     products: productSection ?? null,
     cities: citySection ?? null,
-    comparison: toolData.getStoreComparison ?? null,
-    agents: toolData.getConfirmationPerformance ?? null,
   })
-
-  const truth = buildServerTruth(toolData, scopeContext.displayCurrency)
-  const forcedMessage = buildTruthMessageText({
-    rangeLabel: formatRangeLabel(range),
-    truth,
-    llmText: parsed.message_text || providerResult.text,
-  })
-  const forcedSummary = buildTruthMetricsSummary(truth)
-  const declaredWarnings = Array.isArray(parsed.warnings) ? parsed.warnings : []
-  const warnings = Array.from(new Set([...declaredWarnings, ...truth.warnings]))
 
   // Journalisation minimale : aucun contenu utilisateur, aucune donnée métier.
   console.info('[assistant] agent_run', {
@@ -368,33 +471,26 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     storeId: scopeContext.displayStoreId,
     tools: Object.keys(toolData),
     envelopeState: truth.envelopeState,
+    rejectedAmounts: rejectedAmounts.length,
   })
 
-  const figuresAvailable = Object.values(truth.metrics).some((metric) => metric.value !== null)
-
-  const structuredResponse: AssistantStructuredResponse = {
-    ...fallbackStructured,
-    ...parsed,
-    message_text: truth.envelopeState === 'none' ? fallbackStructured.message_text : forcedMessage,
-    suggestions: parsed.suggestions?.length ? parsed.suggestions : fallbackStructured.suggestions,
-    warnings: warnings.length ? warnings : fallbackStructured.warnings,
-    metrics_summary: forcedSummary.length > 0 ? forcedSummary : fallbackStructured.metrics_summary,
-    chart: fallbackStructured.chart,
-    chart_type: fallbackStructured.chart_type,
-    chart_title: fallbackStructured.chart_title,
-    chart_description: fallbackStructured.chart_description,
-    chart_data: fallbackStructured.chart_data,
-    activity_steps: activitySteps,
-  }
-
-  // Aucun graphique sur une donnée absente ou interdite : un axe vide n'est pas
-  // un résultat métier.
-  if (
-    !figuresAvailable ||
+  const blocked =
     truth.envelopeState === 'forbidden' ||
     truth.envelopeState === 'missing' ||
     truth.envelopeState === 'unavailable'
-  ) {
+
+  const structuredResponse: AssistantStructuredResponse = {
+    ...fallbackStructured,
+    conversation_title: llmOutput.conversation_title,
+    message_text: messageText,
+    suggestions: llmOutput.suggestions?.length ? llmOutput.suggestions : fallbackStructured.suggestions,
+    warnings,
+    metrics_summary: summary.length > 0 ? summary : fallbackStructured.metrics_summary ?? [],
+    activity_steps: activitySteps,
+  }
+
+  // Aucun graphique sur une donnée absente, interdite ou sans valeur vérifiée.
+  if (blocked || !figuresAvailable) {
     structuredResponse.chart = false
     structuredResponse.chart_type = undefined
     structuredResponse.chart_title = undefined

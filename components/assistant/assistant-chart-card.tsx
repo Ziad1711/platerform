@@ -25,12 +25,27 @@ function getXAxisKey(data: Array<Record<string, string | number>>) {
   const first = data[0] || {}
   if ('date' in first) return 'date'
   if ('name' in first) return 'name'
-  return Object.keys(first).find((k) => typeof first[k] === 'string') || 'name'
+  return Object.keys(first).find((k) => typeof first[k] === 'string' && k !== 'valueLabel' && k !== 'currency') || 'name'
 }
 
+/**
+ * Clé de valeur : le contrat analytique publie `value` (numérique, pour
+ * l'échelle) et `valueLabel` (décimal exact + devise, pour l'infobulle).
+ * Aucun repli silencieux vers une clé absente.
+ */
 function getPrimaryValueKey(data: Array<Record<string, string | number>>) {
   const first = data[0] || {}
-  return Object.keys(first).find((k) => typeof first[k] === 'number') || 'value'
+  if (typeof first.value === 'number') return 'value'
+  return Object.keys(first).find((k) => typeof first[k] === 'number') ?? null
+}
+
+/** Infobulle : libellé exact fourni par le serveur, jamais un arrondi local. */
+function renderTooltipValue(entry: { valueLabel?: unknown; value?: unknown; currency?: unknown }): string {
+  if (typeof entry.valueLabel === 'string' && entry.valueLabel) return entry.valueLabel
+  if (typeof entry.value === 'number' && Number.isFinite(entry.value)) {
+    return typeof entry.currency === 'string' ? `${entry.value} ${entry.currency}` : String(entry.value)
+  }
+  return '—'
 }
 
 export default function AssistantChartCard({ response }: { response: AssistantStructuredResponse }) {
@@ -40,6 +55,10 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
 
   const xKey = getXAxisKey(response.chart_data)
   const valueKey = getPrimaryValueKey(response.chart_data)
+
+  // Pas de graphique sans clé de valeur exploitable : un axe vide n'est pas un résultat.
+  if (!valueKey) return null
+
 
   return (
     <div className="mt-3 rounded-xl border bg-card p-3">
@@ -53,7 +72,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} />
               <YAxis />
-              <Tooltip />
+              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
               <Line type="monotone" dataKey={valueKey} stroke="#2563eb" strokeWidth={2} dot={false} />
             </LineChart>
           ) : response.chart_type === 'area' ? (
@@ -61,7 +80,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} />
               <YAxis />
-              <Tooltip />
+              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
               <Area type="monotone" dataKey={valueKey} stroke="#2563eb" fill="#93c5fd" />
             </AreaChart>
           ) : response.chart_type === 'pie' ? (
@@ -71,7 +90,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
                   <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
               <Legend />
             </PieChart>
           ) : (
@@ -79,7 +98,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} />
               <YAxis />
-              <Tooltip />
+              <Tooltip formatter={(entry: unknown) => renderTooltipValue((entry ?? {}) as { valueLabel?: unknown; value?: unknown; currency?: unknown })} />
               <Bar dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]} />
             </BarChart>
           )}

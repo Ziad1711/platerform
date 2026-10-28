@@ -191,6 +191,14 @@ export interface MetricDelta {
   reason: string | null
 }
 
+export interface ComparisonFreshness {
+  generatedAt: string | null
+  oldestRebuildAt: string | null
+  /** Âge de la lecture la plus ancienne, en heures (null si non datée). */
+  ageHours: number | null
+  stale: boolean
+}
+
 export interface PeriodComparison {
   contractVersion: number
   kind: 'periods'
@@ -199,6 +207,7 @@ export interface PeriodComparison {
   currency: string | null
   definitions: { current: number[]; baseline: number[] }
   deltas: MetricDelta[]
+  freshness?: ComparisonFreshness
   notices: string[]
   issues: string[]
 }

@@ -11,6 +11,29 @@ import type { KpiReaderPayload } from '@/lib/dashboard/kpi-reader'
 
 const numericLike = z.union([z.number(), z.string()])
 
+/** Entier strictement valide : pas de fraction, pas de négatif, pas de `NaN`. */
+const counterLike = z.union([
+  z.number().int().nonnegative().refine((value) => Number.isSafeInteger(value), {
+    message: 'compteur hors plage sûre',
+  }),
+  z
+    .string()
+    .regex(/^\d+$/)
+    .transform((value) => Number(value))
+    .refine((value) => Number.isSafeInteger(value), { message: 'compteur hors plage sûre' }),
+])
+
+/** Décimal strict : chaîne décimale finie ou nombre JavaScript fini. */
+const decimalLike = z.union([
+  z.string().regex(/^-?\d+(\.\d+)?$/),
+  z.number().finite(),
+])
+
+/** Nombre d'origine non fiable : `NaN`, `Infinity`, booléens, objets. */
+const strictDecimal = decimalLike.refine((value) => typeof value === 'string' || Number.isFinite(value), {
+  message: 'montant non fini',
+})
+
 export const KpiReaderPointSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   state: z.string().min(1),
@@ -106,9 +129,22 @@ export function validateKpiPayload(raw: unknown): KpiValidationResult {
   return { ok: true, payload: parsed.data as unknown as KpiReaderPayload, issues: [] }
 }
 
-/** Valide une liste de lignes RPC ; renvoie `null` si la forme est inattendue. */
-export function validateRows<T>(schema: z.ZodType<T>, raw: unknown): { ok: true; rows: T[] } | { ok: false; issues: string[] } {
-  const parsed = z.array(schema).safeParse(Array.isArray(raw) ? raw : [])
+/**
+ * Valide une **liste** de lignes RPC.
+ *
+ * Un objet non tabulaire (ex. `{ error: 'bad' }`) est un échec de contrat :
+ * il ne doit jamais devenir un tableau vide, qui serait interprété comme
+ * « aucune donnée » et donc comme un zéro réel.
+ */
+export function validateRows<T>(
+  schema: z.ZodType<T>,
+  raw: unknown,
+): { ok: true; rows: T[] } | { ok: false; issues: string[] } {
+  if (!Array.isArray(raw)) {
+    return { ok: false, issues: [`ROW_SET_NOT_TABULAR:${raw === null ? 'null' : typeof raw}`] }
+  }
+
+  const parsed = z.array(schema).safeParse(raw)
   if (!parsed.success) {
     return {
       ok: false,
@@ -119,45 +155,45 @@ export function validateRows<T>(schema: z.ZodType<T>, raw: unknown): { ok: true;
 }
 
 export const ConfirmationFunnelRowSchema = z.object({
-  total_orders: numericLike,
-  confirmed_orders: numericLike,
-  sent_orders: numericLike,
-  waiting_pickup_orders: numericLike,
-  delivered_orders: numericLike,
-  returned_orders: numericLike,
-  cancelled_orders: numericLike,
-  pending_orders: numericLike,
+  total_orders: counterLike,
+  confirmed_orders: counterLike,
+  sent_orders: counterLike,
+  waiting_pickup_orders: counterLike,
+  delivered_orders: counterLike,
+  returned_orders: counterLike,
+  cancelled_orders: counterLike,
+  pending_orders: counterLike,
 })
 
 export const AgentPerformanceRowSchema = z.object({
   agent_id: z.string().uuid().nullable(),
   agent_name: z.string().nullable(),
-  total_orders: numericLike,
-  confirmed_orders: numericLike,
-  delivered_orders: numericLike,
-  rejected_orders: numericLike,
-  potential_commission: numericLike.nullable().optional(),
-  earned_commission: numericLike.nullable().optional(),
-  paid_commission: numericLike.nullable().optional(),
-  confirmation_rate: numericLike.nullable().optional(),
+  total_orders: counterLike,
+  confirmed_orders: counterLike,
+  delivered_orders: counterLike,
+  rejected_orders: counterLike,
+  potential_commission: strictDecimal.nullable().optional(),
+  earned_commission: strictDecimal.nullable().optional(),
+  paid_commission: strictDecimal.nullable().optional(),
+  confirmation_rate: strictDecimal.nullable().optional(),
 })
 
 export const CityPerformanceRowSchema = z.object({
   city: z.string().nullable(),
-  total_orders: numericLike,
-  confirmed_orders: numericLike,
-  delivered_orders: numericLike,
-  returned_orders: numericLike,
-  cancelled_orders: numericLike,
-  total_revenue: numericLike.nullable(),
+  total_orders: counterLike,
+  confirmed_orders: counterLike,
+  delivered_orders: counterLike,
+  returned_orders: counterLike,
+  cancelled_orders: counterLike,
+  total_revenue: strictDecimal.nullable(),
 })
 
 export const TopProductRowSchema = z.object({
   product_id: z.string().uuid().nullable(),
   product_name: z.string().nullable(),
-  total_quantity: numericLike.nullable(),
-  total_revenue: numericLike.nullable(),
-  profit: numericLike.nullable(),
+  total_quantity: counterLike.nullable(),
+  total_revenue: strictDecimal.nullable(),
+  profit: strictDecimal.nullable(),
 })
 
 export type ConfirmationFunnelRow = z.infer<typeof ConfirmationFunnelRowSchema>
