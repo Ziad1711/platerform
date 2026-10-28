@@ -16,6 +16,15 @@ export interface AnalyticsStoreResult {
   revision: string
   lastRebuildAt: string | null
   metrics: Record<string, AnalyticsMetric>
+  /** Journées métier publiées ; aucune journée n'est inventée. */
+  days: Array<{
+    date: string
+    orders: number
+    delivered: number
+    revenue: string | null
+    ads: string | null
+    partial: boolean
+  }>
 }
 export interface AnalyticsReaderResult {
   state: AnalyticsState
@@ -92,9 +101,17 @@ function storeResult(store: KpiReaderStore): AnalyticsStoreResult {
   if (store.coverage.days_aggregate + store.coverage.days_direct === 0) {
     for (const item of Object.values(metrics)) if (item.state !== 'forbidden') { item.state = 'missing'; item.value = null }
   }
+  const days = store.points.map((point) => ({
+    date: point.date,
+    orders: point.orders_count,
+    delivered: point.delivered_count,
+    revenue: point.revenue,
+    ads: point.ads,
+    partial: point.partial,
+  }))
   return { storeId: store.store_id, currency: store.currency, timeZone: store.tz, access: store.access,
     definitionVersion: store.definition_version, coverage: store.coverage, revision: store.revision,
-    lastRebuildAt: store.last_rebuild_at, metrics }
+    lastRebuildAt: store.last_rebuild_at, metrics, days }
 }
 
 export async function readAssistantKpis(supabase: SupabaseClient, storeIds: string[], range: BusinessRange): Promise<AnalyticsReaderResult> {
@@ -126,4 +143,89 @@ export async function compareAssistantKpis(supabase: SupabaseClient, storeIds: s
     readAssistantKpis(supabase, storeIds, range), readAssistantKpis(supabase, storeIds, previous),
   ])
   return { current, previous: baseline, limits: ['Comparaison : deux lectures V5 indépendantes ; aucune différence calculée si couverture ou devise incompatible.'] }
+}
+
+/**
+ * Session analytique d'une requête : la lecture KPI V5 est mémorisée, donc
+ * plusieurs outils partagent une seule lecture par période. Une session porte
+ * un périmètre et une période immuables.
+ */
+export interface AssistantAnalyticsSession {
+  supabase: SupabaseClient
+  storeIds: string[]
+  range: BusinessRange
+  kpis: () => Promise<AnalyticsReaderResult>
+}
+
+export function createAssistantAnalyticsSession(
+  supabase: SupabaseClient,
+  storeIds: string[],
+  range: BusinessRange,
+): AssistantAnalyticsSession {
+  checked(range)
+  let pending: Promise<AnalyticsReaderResult> | null = null
+  return {
+    supabase,
+    storeIds: [...storeIds],
+    range,
+    kpis: () => {
+      if (!pending) pending = readAssistantKpis(supabase, storeIds, range)
+      return pending
+    },
+  }
+}
+
+/**
+ * Comparaison de deux périodes. Les deux lectures V5 sont indépendantes ; les
+ * écarts ne sont calculés que si devise, couverture et accès sont compatibles.
+ */
+export async function compareAssistantPeriods(
+  supabase: SupabaseClient,
+  storeIds: string[],
+  range: BusinessRange,
+): Promise<{
+  current: AnalyticsReaderResult
+  previous: AnalyticsReaderResult
+  deltas: Record<string, number | null>
+  notices: string[]
+}> {
+  checked(range)
+  const previousRange = checked(previousBusinessRange(range))
+  const [current, previous] = await Promise.all([
+    readAssistantKpis(supabase, storeIds, range),
+    readAssistantKpis(supabase, storeIds, previousRange),
+  ])
+
+  const notices: string[] = []
+  const deltas: Record<string, number | null> = {}
+  const comparable =
+    current.state !== 'forbidden' &&
+    previous.state !== 'forbidden' &&
+    current.stores.length === previous.stores.length &&
+    new Set(current.stores.map((store) => store.currency)).size === 1 &&
+    current.stores.every((store, index) => store.currency === previous.stores[index]?.currency)
+
+  const sumOf = (result: AnalyticsReaderResult, name: string): number | null => {
+    const values = result.stores.map((store) => store.metrics[name]?.value ?? null)
+    if (values.length === 0 || values.some((value) => value === null)) return null
+    return values.reduce<number>((acc, value) => acc + Number(value), 0)
+  }
+
+  if (!comparable) {
+    notices.push('Périodes non comparables : périmètre, devise ou autorisation incompatibles. Aucun écart calculé.')
+    for (const name of ['orders', 'delivered', 'revenue', 'adSpend', 'contributionMargin']) {
+      deltas[name] = null
+    }
+  } else {
+    for (const name of ['orders', 'delivered', 'adSpend', 'revenue', 'contributionMargin']) {
+      const now = sumOf(current, name)
+      const before = sumOf(previous, name)
+      deltas[name] = now !== null && before !== null ? now - before : null
+    }
+    if (deltas.contributionMargin === null) {
+      notices.push('Écart de marge non calculé : accès financier ou couverture insuffisants.')
+    }
+  }
+
+  return { current, previous, deltas, notices }
 }
