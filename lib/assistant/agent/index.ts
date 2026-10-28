@@ -15,18 +15,21 @@ function formatCount(value: number) {
 }
 
 function buildServerTruthMetrics(toolData: Record<string, any>, currency: string) {
-  const kpis = toolData.getDashboardKPIs || {}
-  const profit = toolData.getProfitSummary || {}
-  const ads = toolData.getAdsSpend || {}
+  const kpis = toolData.getDashboardKPIs || null
+  const profit = toolData.getProfitSummary || null
+  const ads = toolData.getAdsSpend || null
   const topProducts = Array.isArray(toolData.getTopProducts) ? toolData.getTopProducts : []
 
+  // `null` = donnée indisponible (outil non exécuté). Jamais `0` : un zéro
+  // inventé produirait une affirmation fausse (« aucune vente »).
   return {
-    totalOrders: Number(kpis.totalOrders || 0),
-    deliveredOrders: Number(kpis.deliveredOrders || 0),
-    revenue: Number(kpis.revenue || 0),
-    deliveredRate: Number(kpis.deliveredRate || 0),
-    profit: Number(profit.profit || 0),
-    adsSpend: Number(ads.total || 0),
+    kpiAvailable: Boolean(kpis),
+    totalOrders: kpis ? Number(kpis.totalOrders || 0) : null,
+    deliveredOrders: kpis ? Number(kpis.deliveredOrders || 0) : null,
+    revenue: kpis ? Number(kpis.revenue || 0) : null,
+    deliveredRate: kpis ? Number(kpis.deliveredRate || 0) : null,
+    profit: profit ? Number(profit.profit || 0) : null,
+    adsSpend: ads ? Number(ads.total || 0) : null,
     currency,
     topProducts,
   }
@@ -55,46 +58,65 @@ function buildTruthMessageText(input: {
 }) {
   const { range, metrics, llmText } = input
   const rangeLabel = formatRangeLabel(range)
+  const explanation = String(llmText || '').trim()
+
+  // KPI indisponible : aucune affirmation sur les ventes. Inventer « 0 » ferait
+  // dire au serveur une chose que la base n'a jamais dite.
+  if (!metrics.kpiAvailable) return explanation
 
   if (metrics.totalOrders === 0) {
     return `Sur la période ${rangeLabel}, vous n'avez réalisé aucune vente.`
   }
 
-  const intro = `Sur la période ${rangeLabel}, vous avez réalisé ${formatAmount(metrics.revenue, metrics.currency)} sur ${formatCount(metrics.totalOrders)} commande(s), dont ${formatCount(metrics.deliveredOrders)} livrée(s).`
+  const intro = `Sur la période ${rangeLabel}, vous avez réalisé ${formatAmount(metrics.revenue ?? 0, metrics.currency)} sur ${formatCount(metrics.totalOrders ?? 0)} commande(s), dont ${formatCount(metrics.deliveredOrders ?? 0)} livrée(s).`
 
-  const profitLine = `Profit estimé: ${formatAmount(metrics.profit, metrics.currency)}.`
-  const adsLine = `Dépenses publicitaires: ${formatAmount(metrics.adsSpend, metrics.currency)}.`
-
-  // On ne supprime plus les chiffres du texte LLM
-  // On sépare clairement : faits validés serveur + interprétation LLM
-  const explanation = String(llmText || '').trim()
-
-  if (!explanation) {
-    return `${intro}\n\n${profitLine} ${adsLine}`
+  // On sépare clairement : faits validés serveur + interprétation LLM.
+  const facts: string[] = [intro]
+  if (metrics.profit !== null) {
+    facts.push(`Profit estimé: ${formatAmount(metrics.profit, metrics.currency)}.`)
+  }
+  if (metrics.adsSpend !== null) {
+    facts.push(`Dépenses publicitaires: ${formatAmount(metrics.adsSpend, metrics.currency)}.`)
   }
 
-  return `${intro}\n\n${profitLine} ${adsLine}\n\n${explanation}`
+  const factsText = facts.join('\n\n')
+  return explanation ? `${factsText}\n\n${explanation}` : factsText
 }
 
 function buildTruthMetricsSummary(metrics: ReturnType<typeof buildServerTruthMetrics>) {
-  const topProduct = metrics.topProducts[0]
+  const summary: Array<{ label: string; value: string | number }> = []
 
-  return [
-    { label: 'Chiffre d\'affaires', value: formatAmount(metrics.revenue, metrics.currency) },
-    { label: 'Commandes', value: formatCount(metrics.totalOrders) },
-    { label: 'Commandes livrées', value: formatCount(metrics.deliveredOrders) },
-    { label: 'Taux de livraison', value: `${Number(metrics.deliveredRate || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %` },
-    { label: 'Profit', value: formatAmount(metrics.profit, metrics.currency) },
-    { label: 'Dépenses Ads', value: formatAmount(metrics.adsSpend, metrics.currency) },
-    ...(topProduct
-      ? [
-          {
-            label: 'Top produit',
-            value: `${String(topProduct.productName || 'Produit')} (${formatAmount(Number(topProduct.revenue || 0), metrics.currency)})`,
-          },
-        ]
-      : []),
-  ]
+  if (metrics.revenue !== null) {
+    summary.push({ label: 'Chiffre d\'affaires', value: formatAmount(metrics.revenue, metrics.currency) })
+  }
+  if (metrics.totalOrders !== null) {
+    summary.push({ label: 'Commandes', value: formatCount(metrics.totalOrders) })
+  }
+  if (metrics.deliveredOrders !== null) {
+    summary.push({ label: 'Commandes livrées', value: formatCount(metrics.deliveredOrders) })
+  }
+  if (metrics.deliveredRate !== null) {
+    summary.push({
+      label: 'Taux de livraison',
+      value: `${metrics.deliveredRate.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`,
+    })
+  }
+  if (metrics.profit !== null) {
+    summary.push({ label: 'Profit', value: formatAmount(metrics.profit, metrics.currency) })
+  }
+  if (metrics.adsSpend !== null) {
+    summary.push({ label: 'Dépenses Ads', value: formatAmount(metrics.adsSpend, metrics.currency) })
+  }
+
+  const topProduct = metrics.topProducts[0]
+  if (topProduct) {
+    summary.push({
+      label: 'Top produit',
+      value: `${String(topProduct.productName || 'Produit')} (${formatAmount(Number(topProduct.revenue || 0), metrics.currency)})`,
+    })
+  }
+
+  return summary
 }
 
 function getToolLabel(toolName: AgentToolName) {
@@ -140,6 +162,17 @@ function parseProviderStructuredOutput(text: string): Partial<AssistantStructure
   }
 }
 
+/**
+ * Outils désactivés côté serveur. La recherche web externe n'est pas activée en
+ * V1 : elle transmettrait le message utilisateur (donc des données métier) à un
+ * tiers non contractualisé, sans contrôle de confidentialité.
+ */
+const DISABLED_AGENT_TOOLS: ReadonlySet<AgentToolName> = new Set<AgentToolName>(['webSearch'])
+
+function filterAllowedTools<T extends { toolName: AgentToolName }>(planned: T[]): T[] {
+  return planned.filter((step) => !DISABLED_AGENT_TOOLS.has(step.toolName))
+}
+
 export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promise<RunSecureAgentOutput> {
   const { supabase, scopeStoreIds, scopeContext, intent, range, userMessage, conversationHistory, providerModel } = input
   const provider = getAssistantProvider()
@@ -152,7 +185,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     { label: 'Vérification des accès', detail: `${storeLabel} validé(s)` },
   ]
 
-  const plannedTools = buildToolPlan(intent, userMessage)
+  const plannedTools = filterAllowedTools(buildToolPlan(intent, userMessage))
   activitySteps.push({ label: 'Planification agent', detail: `${plannedTools.length} outil(s) sélectionné(s)` })
 
   const toolResults: Record<string, unknown> = {}
@@ -202,6 +235,8 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     model: providerModel,
     systemPrompt,
     messages: [...conversationHistory, { role: 'user', content: userPrompt }],
+    signal: input.signal,
+    maxOutputTokens: input.maxOutputTokens,
   })
 
   const parsed = parseProviderStructuredOutput(providerResult.text)
@@ -231,16 +266,8 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     },
   })
 
-  const hasSalesToolData = Boolean(
-    toolData.getDashboardKPIs ||
-      toolData.getProfitSummary ||
-      toolData.getTopProducts ||
-      toolData.getAdsSpend ||
-      toolData.getRecentOrders
-  )
-
   const serverTruthMetrics = buildServerTruthMetrics(toolData, scopeContext.displayCurrency)
-  const forcedZeroData = hasSalesToolData && serverTruthMetrics.totalOrders === 0
+  const forcedZeroData = serverTruthMetrics.kpiAvailable && serverTruthMetrics.totalOrders === 0
   const forcedMessage = buildTruthMessageText({
     range,
     metrics: serverTruthMetrics,
@@ -248,30 +275,21 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   })
   const forcedSummary = buildTruthMetricsSummary(serverTruthMetrics)
 
-  console.info('[assistant:debug:tool_results]', {
-    storeId: scopeContext.displayStoreId,
-    scopeStoreIds: scopeContext.scopeStoreIds,
-    range,
+  // Journalisation minimale : aucun contenu utilisateur, aucune donnée métier.
+  console.info('[assistant] agent_run', {
     intent,
+    storeId: scopeContext.displayStoreId,
     tools: Object.keys(toolData),
-    toolData,
-  })
-  console.info('[assistant:debug:final_metrics]', {
-    storeId: scopeContext.displayStoreId,
-    scopeStoreIds: scopeContext.scopeStoreIds,
-    range,
-    intent,
-    forcedZeroData,
-    metrics: serverTruthMetrics,
+    kpiAvailable: serverTruthMetrics.kpiAvailable,
   })
 
   const structuredResponse: AssistantStructuredResponse = {
     ...fallbackStructured,
     ...parsed,
-    message_text: hasSalesToolData ? forcedMessage : fallbackStructured.message_text,
+    message_text: serverTruthMetrics.kpiAvailable ? forcedMessage : fallbackStructured.message_text,
     suggestions: parsed.suggestions?.length ? parsed.suggestions : fallbackStructured.suggestions,
     warnings: parsed.warnings?.length ? parsed.warnings : fallbackStructured.warnings,
-    metrics_summary: hasSalesToolData ? forcedSummary : fallbackStructured.metrics_summary,
+    metrics_summary: forcedSummary.length > 0 ? forcedSummary : fallbackStructured.metrics_summary,
     chart: fallbackStructured.chart,
     chart_type: fallbackStructured.chart_type,
     chart_title: fallbackStructured.chart_title,
@@ -287,14 +305,6 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     structuredResponse.chart_description = undefined
     structuredResponse.chart_data = undefined
   }
-
-  console.info('[assistant:debug:final_response]', {
-    storeId: scopeContext.displayStoreId,
-    scopeStoreIds: scopeContext.scopeStoreIds,
-    range,
-    intent,
-    structuredResponse,
-  })
 
   return {
     structuredResponse,

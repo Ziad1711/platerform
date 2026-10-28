@@ -14,6 +14,28 @@ export function estimateCreditsForPrompt(parts: string[], expectedOutputTokens =
 }
 
 /**
+ * Pré-réservation d'une requête complète : message, historique et réserve pour
+ * le prompt système et les résultats d'outils (non mesurables avant l'appel).
+ * Cette estimation sert uniquement de garde-fou avant l'appel IA ; le débit
+ * final reste calculé sur les tokens réellement consommés.
+ */
+export function estimateCreditsForRequest(input: {
+  message: string
+  history: string[]
+  reserveInputTokens?: number
+  expectedOutputTokens?: number
+}) {
+  const chars =
+    String(input.message || '').length +
+    (input.history || []).reduce((sum, item) => sum + String(item || '').length, 0)
+  const estimatedInputTokens =
+    Math.ceil(chars / 4) + Math.max(0, Math.trunc(input.reserveInputTokens || 0))
+  const expectedOutputTokens = Math.max(1, Math.trunc(input.expectedOutputTokens || 500))
+
+  return computeCreditsUsed(estimatedInputTokens, expectedOutputTokens)
+}
+
+/**
  * Portefeuille de crédits IA : création, recharge mensuelle et débit passent
  * exclusivement par les fonctions serveur (`rpc_ensure_ai_credit_wallet`,
  * `rpc_debit_ai_credits`). Le client n'a plus le droit d'écrire directement dans
@@ -69,5 +91,73 @@ export async function debitCredits(supabase: SupabaseServerClient, creditsUsed: 
 
   if (error) {
     throw new Error(error.message?.includes('INSUFFICIENT_CREDITS') ? 'INSUFFICIENT_CREDITS' : 'WALLET_DEBIT_FAILED')
+  }
+}
+
+export type CreditChargeStatus = 'charged' | 'insufficient' | 'failed'
+
+/** Réservation de crédits persistante — activable uniquement après migration. */
+export const ASSISTANT_CREDIT_RESERVATION_ENABLED =
+  (process.env.ASSISTANT_CREDIT_RESERVATION || '').trim().toLowerCase() === 'enabled'
+
+export const ASSISTANT_CREDIT_RPC = {
+  reserve: 'rpc_assistant_reserve_credits',
+  release: 'rpc_assistant_release_credits',
+} as const
+
+export type CreditReservationStatus = 'reserved' | 'unavailable'
+
+/**
+ * Réserve un montant de crédits pour une requête identifiée.
+ *
+ * Sans la migration correspondante, la fonction ne fait aucun appel et renvoie
+ * `unavailable` : le pré-contrôle existant reste la seule protection, et
+ * l'absence de garantie inter-instances est explicite.
+ */
+export async function reserveCreditsForRequest(
+  supabase: SupabaseServerClient,
+  credits: number,
+  requestId: string
+): Promise<{ status: CreditReservationStatus }> {
+  const amount = Math.max(0, Math.round(Number(credits || 0)))
+  if (!ASSISTANT_CREDIT_RESERVATION_ENABLED || amount === 0) return { status: 'unavailable' }
+
+  const { error } = await supabase.rpc(ASSISTANT_CREDIT_RPC.reserve, {
+    p_credits: amount,
+    p_request_id: requestId,
+  })
+
+  return error ? { status: 'unavailable' } : { status: 'reserved' }
+}
+
+/** Libère une réservation lorsque la requête n'a pas produit de réponse facturable. */
+export async function releaseCreditReservation(
+  supabase: SupabaseServerClient,
+  requestId: string
+): Promise<boolean> {
+  if (!ASSISTANT_CREDIT_RESERVATION_ENABLED) return false
+
+  const { error } = await supabase.rpc(ASSISTANT_CREDIT_RPC.release, { p_request_id: requestId })
+  return !error
+}
+
+/**
+ * Débit non bloquant pour la réponse : le statut réel est remonté au client au
+ * lieu d'être masqué. Le débit reste atomique côté base (`rpc_debit_ai_credits`).
+ */
+export async function chargeCredits(
+  supabase: SupabaseServerClient,
+  creditsUsed: number
+): Promise<{ status: CreditChargeStatus }> {
+  const amount = Math.max(0, Math.round(Number(creditsUsed || 0)))
+  if (amount === 0) return { status: 'charged' }
+
+  try {
+    await debitCredits(supabase, amount)
+    return { status: 'charged' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'INSUFFICIENT_CREDITS') return { status: 'insufficient' }
+    return { status: 'failed' }
   }
 }

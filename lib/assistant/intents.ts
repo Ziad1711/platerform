@@ -1,6 +1,33 @@
 import type { AnalyticsRange, AssistantIntent, ComparisonRange } from '@/lib/assistant/types'
+import { businessRangeToInstants, businessTodayIso } from '@/lib/dashboard/business-time'
 
 const GREETINGS = ['bonjour', 'salut', 'bonsoir', 'hello', 'coucou']
+
+/**
+ * Bornes d'un mois calendaire converties par le calendrier métier existant.
+ *
+ * Un mois demandé est un mois **métier** (`Africa/Casablanca`) : les bornes sont
+ * `[premier jour, premier jour du mois suivant[`, en jours métier, puis
+ * converties en instants UTC par `businessRangeToInstants`. Aucun calcul UTC
+ * direct : la journée métier ne commence pas toujours à 00:00 UTC.
+ */
+function businessMonthRange(year: number, month: number): { start: string; end: string } {
+  const nextYear = month === 12 ? year + 1 : year
+  const nextMonth = month === 12 ? 1 : month + 1
+  const from = `${year}-${String(month).padStart(2, '0')}-01`
+  const to = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
+  const { start, end } = businessRangeToInstants({ from, to })
+  return { start: start.toISOString(), end: end.toISOString() }
+}
+
+/** Année métier courante (jamais l'année UTC du serveur). */
+function currentBusinessYear(): number {
+  return Number(businessTodayIso().slice(0, 4))
+}
+
+function isSupportedYear(year: number): boolean {
+  return Number.isInteger(year) && year >= 2000 && year <= 2100
+}
 
 /**
  * Mapping des noms de mois avec tolérance orthographique.
@@ -57,11 +84,9 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
   const moisMatch = text.match(moisPattern)
   if (moisMatch) {
     const month = parseInt(moisMatch[1], 10)
-    const year = moisMatch[2] ? parseInt(moisMatch[2], 10) : new Date().getFullYear()
-    if (month >= 1 && month <= 12) {
-      const start = new Date(Date.UTC(year, month - 1, 1))
-      const end = new Date(Date.UTC(year, month, 1))
-      return { start: start.toISOString(), end: end.toISOString() }
+    const year = moisMatch[2] ? parseInt(moisMatch[2], 10) : currentBusinessYear()
+    if (month >= 1 && month <= 12 && isSupportedYear(year)) {
+      return businessMonthRange(year, month)
     }
   }
 
@@ -70,10 +95,8 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
     const namePattern = new RegExp(`${name}\\s*(\\d{4})?`)
     const nameMatch = text.match(namePattern)
     if (nameMatch) {
-      const year = nameMatch[1] ? parseInt(nameMatch[1], 10) : new Date().getFullYear()
-      const start = new Date(Date.UTC(year, monthNum - 1, 1))
-      const end = new Date(Date.UTC(year, monthNum, 1))
-      return { start: start.toISOString(), end: end.toISOString() }
+      const year = nameMatch[1] ? parseInt(nameMatch[1], 10) : currentBusinessYear()
+      if (isSupportedYear(year)) return businessMonthRange(year, monthNum)
     }
   }
 
@@ -83,10 +106,8 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
   if (slashMatch) {
     const month = parseInt(slashMatch[1], 10)
     const year = parseInt(slashMatch[2], 10)
-    if (month >= 1 && month <= 12) {
-      const start = new Date(Date.UTC(year, month - 1, 1))
-      const end = new Date(Date.UTC(year, month, 1))
-      return { start: start.toISOString(), end: end.toISOString() }
+    if (month >= 1 && month <= 12 && isSupportedYear(year)) {
+      return businessMonthRange(year, month)
     }
   }
 
@@ -232,12 +253,12 @@ export function extractComparisonRanges(message: string): ComparisonRange | null
       // Chercher une 3e occurrence ou ignorer
       if (monthMatches.length >= 3) {
         const third = monthMatches[2]
-        return buildComparisonRange(first, third, text)
+        return buildComparisonRange(first, third)
       }
       return null
     }
 
-    return buildComparisonRange(first, second, text)
+    return buildComparisonRange(first, second)
   }
 
   return null
@@ -245,19 +266,16 @@ export function extractComparisonRanges(message: string): ComparisonRange | null
 
 function buildComparisonRange(
   a: { month: number; year: number },
-  b: { month: number; year: number },
-  text: string
+  b: { month: number; year: number }
 ): ComparisonRange {
-  const startA = new Date(Date.UTC(a.year, a.month - 1, 1))
-  const endA = new Date(Date.UTC(a.year, a.month, 1))
-  const startB = new Date(Date.UTC(b.year, b.month - 1, 1))
-  const endB = new Date(Date.UTC(b.year, b.month, 1))
+  const rangeA = businessMonthRange(a.year, a.month)
+  const rangeB = businessMonthRange(b.year, b.month)
 
   const monthNames = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
 
   return {
-    rangeA: { start: startA.toISOString(), end: endA.toISOString() },
-    rangeB: { start: startB.toISOString(), end: endB.toISOString() },
+    rangeA,
+    rangeB,
     labelA: `${monthNames[a.month - 1]} ${a.year}`,
     labelB: `${monthNames[b.month - 1]} ${b.year}`,
   }

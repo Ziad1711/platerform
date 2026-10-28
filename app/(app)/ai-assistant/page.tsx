@@ -165,62 +165,103 @@ const SUGGESTIONS = [
   'Compare ce mois au mois dernier',
 ]
 
+function readApiError(payload: unknown, fallback: string) {
+  if (payload && typeof payload === 'object') {
+    const record = payload as { message?: unknown; error?: unknown }
+    if (typeof record.message === 'string' && record.message) return record.message
+    if (typeof record.error === 'string' && record.error) return record.error
+  }
+
+  return fallback
+}
+
 export default function AssistantIAPage() {
   const queryClient = useQueryClient()
-  const { currentStoreId } = useStore()
+  const { currentStoreId, userId } = useStore()
 
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [serverError, setServerError] = useState<string | null>(null)
-  const [optimisticUserMessage, setOptimisticUserMessage] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
+  const [optimisticUserMessage, setOptimisticUserMessage] = useState<{ content: string; storeId: string } | null>(null)
   const [threadMenuOpenId, setThreadMenuOpenId] = useState<string | null>(null)
   const [loadingStepIndex, setLoadingStepIndex] = useState(0)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const canLoad = true
+  const hasStore = Boolean(currentStoreId)
+  const canLoad = hasStore
 
+  // Les caches sont liés au compte ET à la boutique : un changement de compte
+  // ne peut jamais réafficher les conversations d'un autre utilisateur.
   const threadsQuery = useQuery<{ threads: ThreadItem[] }>({
-    queryKey: ['assistant-threads'],
+    queryKey: ['assistant-threads', userId, currentStoreId],
     enabled: canLoad,
     queryFn: async () => {
-      const res = await fetch('/api/assistant/threads')
-      if (!res.ok) throw new Error('Impossible de charger les conversations')
-      return res.json()
+      const res = await fetch(`/api/assistant/threads?storeId=${encodeURIComponent(String(currentStoreId))}`)
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger les conversations'))
+      return data
     },
   })
 
   const walletQuery = useQuery<{ wallet: WalletResponse }>({
-    queryKey: ['assistant-wallet'],
+    queryKey: ['assistant-wallet', userId],
     queryFn: async () => {
       const res = await fetch('/api/assistant/wallet')
-      if (!res.ok) throw new Error('Impossible de charger vos crédits IA')
-      return res.json()
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger vos crédits IA'))
+      return data
     },
   })
 
-  const selectedThreadId = activeThreadId || threadsQuery.data?.threads?.[0]?.id || null
+  const threadList = threadsQuery.data?.threads
 
-  const messagesQuery = useQuery<{ messages: ChatMessage[] }>({
-    queryKey: ['assistant-messages', selectedThreadId],
+  // Le thread actif doit appartenir à la liste de la boutique courante : un
+  // changement de boutique invalide donc naturellement l'ancien identifiant,
+  // sans effet de bord ni remise à zéro manuelle.
+  const selectedThreadId = useMemo(() => {
+    if (!threadList) return null
+    if (activeThreadId && threadList.some((thread) => thread.id === activeThreadId)) {
+      return activeThreadId
+    }
+    return threadList[0]?.id || null
+  }, [threadList, activeThreadId])
+
+  const pendingUserMessage =
+    optimisticUserMessage && optimisticUserMessage.storeId === currentStoreId
+      ? optimisticUserMessage.content
+      : null
+
+  const [messagePageSize, setMessagePageSize] = useState(50)
+
+  const messagesQuery = useQuery<{ messages: ChatMessage[]; hasMore?: boolean }>({
+    queryKey: ['assistant-messages', userId, currentStoreId, selectedThreadId, messagePageSize],
     enabled: canLoad && Boolean(selectedThreadId),
     queryFn: async () => {
-      const res = await fetch(`/api/assistant/threads/${selectedThreadId}/messages`)
-      if (!res.ok) throw new Error('Impossible de charger les messages')
-      return res.json()
+      const res = await fetch(
+        `/api/assistant/threads/${selectedThreadId}/messages?storeId=${encodeURIComponent(String(currentStoreId))}&limit=${messagePageSize}`
+      )
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger les messages'))
+      return data
     },
   })
 
   const createThreadMutation = useMutation({
     mutationFn: async () => {
+      if (!currentStoreId) throw new Error('Sélectionnez une boutique avant de créer une conversation.')
+
       const res = await fetch('/api/assistant/threads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId: currentStoreId, title: 'Nouvelle conversation' }),
       })
-      if (!res.ok) throw new Error('Impossible de créer la conversation')
-      return res.json() as Promise<{ thread: ThreadItem }>
+
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Impossible de créer la conversation'))
+      return data as { thread: ThreadItem }
     },
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ['assistant-threads'] })
@@ -233,40 +274,71 @@ export default function AssistantIAPage() {
     },
   })
 
+  const sendAbortRef = useRef<AbortController | null>(null)
+
   const sendMessageMutation = useMutation({
-    mutationFn: async (payload: { message: string; threadId: string | null }) => {
+    mutationFn: async (payload: { message: string; threadId: string | null; requestId: string; storeId: string }) => {
+      if (!payload.storeId) throw new Error('Sélectionnez une boutique avant d’envoyer un message.')
+
+      // Une seule requête en vol : la précédente est annulée (serveur + fournisseur).
+      sendAbortRef.current?.abort()
+      const controller = new AbortController()
+      sendAbortRef.current = controller
+
       const res = await fetch('/api/assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
-          storeId: currentStoreId,
+          storeId: payload.storeId,
           threadId: payload.threadId,
           message: payload.message,
+          requestId: payload.requestId,
         }),
       })
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Erreur Assistant IA')
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Erreur Assistant IA'))
       return data
     },
-    onSuccess: async (data) => {
-      if (data.threadId) {
+    onSuccess: async (data, variables) => {
+      // Réponse tardive d'un autre périmètre : jamais appliquée à la boutique courante.
+      if (variables.storeId !== currentStoreId) return
+
+      if (data?.threadId) {
         setActiveThreadId(data.threadId)
       }
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['assistant-threads'] }),
-        queryClient.invalidateQueries({ queryKey: ['assistant-messages', data.threadId || selectedThreadId] }),
+        queryClient.invalidateQueries({ queryKey: ['assistant-messages'] }),
         queryClient.invalidateQueries({ queryKey: ['assistant-wallet'] }),
       ])
       setServerError(null)
+      setWarning(typeof data?.warning === 'string' && data.warning ? data.warning : null)
       setOptimisticUserMessage(null)
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (variables.storeId !== currentStoreId) return
+      if (error instanceof DOMException && error.name === 'AbortError') return
+
       setServerError(error instanceof Error ? error.message : 'Erreur d’envoi')
+      setWarning(null)
       setOptimisticUserMessage(null)
+    },
+    onSettled: () => {
+      sendAbortRef.current = null
     },
   })
+
+  // Changement de boutique ou de compte : annule la requête en vol pour empêcher
+  // toute réponse affichée hors du périmètre courant.
+  useEffect(() => {
+    return () => {
+      sendAbortRef.current?.abort()
+      sendAbortRef.current = null
+    }
+  }, [currentStoreId, userId])
 
   const updateThreadMutation = useMutation({
     mutationFn: async (payload: { threadId: string; action: 'rename' | 'toggle_pin'; title?: string; isPinned?: boolean }) => {
@@ -276,8 +348,8 @@ export default function AssistantIAPage() {
         body: JSON.stringify(payload),
       })
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Erreur de mise à jour')
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Erreur de mise à jour'))
       return data
     },
     onSuccess: async () => {
@@ -295,8 +367,8 @@ export default function AssistantIAPage() {
         method: 'DELETE',
       })
 
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Erreur de suppression')
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(readApiError(data, 'Erreur de suppression'))
       return data
     },
     onSuccess: async () => {
@@ -343,15 +415,41 @@ export default function AssistantIAPage() {
     }
   }
 
+  const pendingRequestRef = useRef<{ text: string; requestId: string } | null>(null)
+
   const handleSend = async (message: string) => {
     const clean = message.trim()
-    if (!clean) return
+    if (!clean || !hasStore || !currentStoreId) return
     setServerError(null)
-    setOptimisticUserMessage(clean)
+    setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
     setInput('')
 
+    // Même texte relancé après un échec = même clé : le serveur rejoue la
+    // réponse déjà produite au lieu de rappeler le fournisseur ou de débiter.
+    const requestId =
+      pendingRequestRef.current && pendingRequestRef.current.text === clean
+        ? pendingRequestRef.current.requestId
+        : typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : null
+
+    if (!requestId) {
+      setInput(clean)
+      setOptimisticUserMessage(null)
+      setServerError('Navigateur incompatible : identifiant de requête indisponible.')
+      return
+    }
+
+    pendingRequestRef.current = { text: clean, requestId }
+
     try {
-      await sendMessageMutation.mutateAsync({ message: clean, threadId: selectedThreadId })
+      await sendMessageMutation.mutateAsync({
+        message: clean,
+        threadId: selectedThreadId,
+        requestId,
+        storeId: currentStoreId,
+      })
+      pendingRequestRef.current = null
     } catch {
       setInput(clean)
     }
@@ -359,7 +457,7 @@ export default function AssistantIAPage() {
 
   const messages = useMemo(() => messagesQuery.data?.messages || [], [messagesQuery.data?.messages])
   const displayMessages = useMemo(() => {
-    if (!optimisticUserMessage) return messages
+    if (!pendingUserMessage) return messages
 
     return [
       ...messages,
@@ -367,12 +465,12 @@ export default function AssistantIAPage() {
         id: 'optimistic-user-message',
         thread_id: selectedThreadId || 'pending-thread',
         role: 'user' as const,
-        content: optimisticUserMessage,
+        content: pendingUserMessage,
         credits_used: 0,
         created_at: new Date().toISOString(),
       },
     ]
-  }, [messages, optimisticUserMessage, selectedThreadId])
+  }, [messages, pendingUserMessage, selectedThreadId])
 
   const latestAssistantSuggestions = useMemo(() => {
     const lastAssistant = [...displayMessages]
@@ -383,7 +481,7 @@ export default function AssistantIAPage() {
   }, [displayMessages])
 
   const liveActivitySteps = useMemo(() => {
-    const source = (optimisticUserMessage || input || '').toLowerCase()
+    const source = (pendingUserMessage || input || '').toLowerCase()
     const wantsWeb =
       source.includes('marché') ||
       source.includes('concurrence') ||
@@ -400,7 +498,7 @@ export default function AssistantIAPage() {
     ].filter(Boolean) as string[]
 
     return labels.map((label) => ({ label }))
-  }, [optimisticUserMessage, input])
+  }, [pendingUserMessage, input])
 
   useEffect(() => {
     if (!sendMessageMutation.isPending) {
@@ -525,13 +623,30 @@ export default function AssistantIAPage() {
             <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">{serverError}</div>
           ) : null}
 
-          {!selectedThreadId && !optimisticUserMessage ? (
+          {messagesQuery.data?.hasMore ? (
+            <div className="flex justify-center">
+              <button
+                onClick={() => setMessagePageSize((prev) => Math.min(prev + 50, 100))}
+                disabled={messagesQuery.isFetching}
+                className="text-[11px] px-3 py-1.5 rounded-full border bg-card hover:bg-secondary disabled:opacity-50"
+              >
+                Charger les messages plus anciens
+              </button>
+            </div>
+          ) : null}
+
+          {!selectedThreadId && !pendingUserMessage ? (
             <div className="h-full flex flex-col items-center justify-center text-center text-muted-foreground">
               <Sparkles className="w-8 h-8 mb-3 text-indigo-400" />
               <p className="font-semibold text-foreground">Bonjour, je suis votre assistant IA</p>
               <p className="text-sm mt-1 max-w-xl">
                 Je peux analyser vos ventes, vos dépenses, votre stock et vos performances.
               </p>
+              {!hasStore ? (
+                <p className="text-sm mt-2 text-amber-700">
+                  Sélectionnez une boutique pour lancer une analyse.
+                </p>
+              ) : null}
               <div className="mt-4 flex flex-wrap gap-2 justify-center">
                 {SUGGESTIONS.map((suggestion) => (
                   <button
@@ -581,9 +696,9 @@ export default function AssistantIAPage() {
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.warnings?.length ? (
                     <div className="mt-2 space-y-1">
-                      {msg.metadata.structured_response.warnings.map((warning, idx) => (
-                        <div key={`${warning}-${idx}`} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                          {warning}
+                      {msg.metadata.structured_response.warnings.map((warningText, idx) => (
+                        <div key={`${warningText}-${idx}`} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                          {warningText}
                         </div>
                       ))}
                     </div>
@@ -625,6 +740,12 @@ export default function AssistantIAPage() {
         </div>
 
         <div className="p-3 border-t bg-card">
+          {warning ? (
+            <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              {warning}
+            </div>
+          ) : null}
+
           {isNoCredits ? (
             <div className="mb-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
               Vous n’avez plus de crédits IA.
@@ -647,11 +768,11 @@ export default function AssistantIAPage() {
               placeholder="Posez votre question business..."
               rows={2}
               className="flex-1 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              disabled={isNoCredits || sendMessageMutation.isPending}
+              disabled={isNoCredits || sendMessageMutation.isPending || !hasStore}
             />
             <button
               onClick={() => handleSend(input)}
-              disabled={!input.trim() || isNoCredits || sendMessageMutation.isPending}
+              disabled={!input.trim() || isNoCredits || sendMessageMutation.isPending || !hasStore}
               className="h-10 w-10 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 inline-flex items-center justify-center"
             >
               <Send className="w-4 h-4" />
