@@ -192,9 +192,12 @@ export interface MetricDelta {
 }
 
 export interface ComparisonFreshness {
+  /** Instant de lecture du payload (observabilité, pas fraîcheur métier). */
+  readAt: string | null
+  /** Ancienne clé conservée pour compatibilité ; équivaut à `readAt`. */
   generatedAt: string | null
   oldestRebuildAt: string | null
-  /** Âge de la lecture la plus ancienne, en heures (null si non datée). */
+  /** Âge de l'agrégat le plus ancien, en heures (null si non daté). */
   ageHours: number | null
   stale: boolean
 }

@@ -313,7 +313,7 @@ function sumMetricText(result: AnalyticsReaderResult, name: string): string | nu
   const values: Array<string | null> = []
   for (const store of result.stores) {
     const metric = store.metrics[name]
-    if (!metric || metric.state === 'forbidden' || metric.state === 'missing') return null
+    if (!metric || metric.state !== 'complete' && metric.state !== 'empty') return null
     values.push(metric.value)
   }
   return sumDecimals(values)
@@ -325,7 +325,8 @@ function fullyCovered(result: AnalyticsReaderResult): boolean {
   return result.stores.length > 0 && result.stores.every(
     (store) => store.coverage.days_aggregate + store.coverage.days_direct === store.coverage.days_total
       && store.coverage.days_dirty === 0
-      && store.coverage.days_incompatible === 0,
+      && store.coverage.days_incompatible === 0
+      && store.coverage.days_partial === 0,
   )
 }
 
@@ -391,14 +392,16 @@ function freshnessOf(...results: AnalyticsReaderResult[]): ComparisonFreshness {
     .filter((value): value is string => Boolean(value))
     .sort()
 
-  const oldest = generated[0] ?? null
-  const ageHours = oldest && Number.isFinite(Date.parse(oldest))
-    ? Math.max(0, Math.round((Date.now() - Date.parse(oldest)) / 3_600_000))
+  const readAt = generated[0] ?? null
+  const oldestRebuildAt = rebuilds[0] ?? null
+  const ageHours = oldestRebuildAt && Number.isFinite(Date.parse(oldestRebuildAt))
+    ? Math.max(0, Math.round((Date.now() - Date.parse(oldestRebuildAt)) / 3_600_000))
     : null
 
   return {
-    generatedAt: oldest,
-    oldestRebuildAt: rebuilds[0] ?? null,
+    readAt,
+    generatedAt: readAt,
+    oldestRebuildAt,
     ageHours,
     stale: ageHours !== null && ageHours > STALE_AFTER_HOURS,
   }
@@ -432,8 +435,8 @@ export async function compareAssistantPeriods(
   const structure = structuralCompatibility(currentResult, baselineResult)
   const covered = fullyCovered(currentResult) && fullyCovered(baselineResult)
   const accessible = currentResult.state !== 'forbidden' && baselineResult.state !== 'forbidden'
-  const comparable = structure.compatible && covered && accessible
   const freshness = freshnessOf(currentResult, baselineResult)
+  const comparable = structure.compatible && covered && accessible && !freshness.stale
 
   if (!accessible) notices.push('Périodes non comparables : accès refusé sur au moins une période.')
   for (const reason of structure.reasons) notices.push(`Périodes non comparables : ${reason}.`)
@@ -442,6 +445,7 @@ export async function compareAssistantPeriods(
     notices.push(
       `Fraîcheur des données : lecture la plus ancienne il y a ${freshness.ageHours} h (seuil ${STALE_AFTER_HOURS} h).`,
     )
+    issues.push('COMPARISON_AGGREGATES_STALE')
   }
 
   for (const metric of COMPARABLE_METRICS) {

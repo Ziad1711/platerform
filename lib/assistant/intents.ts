@@ -361,23 +361,31 @@ function relativeBusinessRange(key: string, now: Date): { from: string; to: stri
 export function resolveComparisonPeriods(message: string, now: Date = new Date()): ComparisonPeriods | null {
   const text = message.toLowerCase()
 
+  // Mois numériques MM/YYYY ou MM-YYYY, dans l'ordre du message.
+  const numericMonths: MonthCandidate[] = []
+  const numericPattern = /(\d{1,2})\s*[/-]\s*(\d{4})/g
+  let numericMatch: RegExpExecArray | null
+  while ((numericMatch = numericPattern.exec(text)) !== null) {
+    const month = parseInt(numericMatch[1], 10)
+    const year = parseInt(numericMatch[2], 10)
+    if (month >= 1 && month <= 12 && isSupportedYear(year)) {
+      numericMonths.push({ index: numericMatch.index, month, year })
+    }
+  }
+
+  if (numericMonths.length >= 2) {
+    const first = numericMonths[0]
+    const second = numericMonths.find((candidate) => candidate.month !== first.month || candidate.year !== first.year)
+    if (second) return comparisonFromMonths(first, second)
+  }
+
   // 1. Mois nommés : la position dans le texte fixe l'ordre.
   const months = findMonthCandidates(text)
   if (months.length >= 2) {
     const first = months[0]
     const second = months.find((candidate) => candidate.month !== first.month || candidate.year !== first.year)
     if (second) {
-      const currentRange = businessMonthRange(first.year, first.month)
-      const baselineRange = businessMonthRange(second.year, second.month)
-      const monthNames = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
-      return {
-        current: { from: toBusinessDay(currentRange.start), to: toBusinessDay(currentRange.end) },
-        baseline: { from: toBusinessDay(baselineRange.start), to: toBusinessDay(baselineRange.end) },
-        labels: {
-          current: `${monthNames[first.month - 1]} ${first.year}`,
-          baseline: `${monthNames[second.month - 1]} ${second.year}`,
-        },
-      }
+      return comparisonFromMonths(first, second)
     }
   }
 
@@ -411,6 +419,20 @@ export function resolveComparisonPeriods(message: string, now: Date = new Date()
   return null
 }
 
+function comparisonFromMonths(first: MonthCandidate, second: MonthCandidate): ComparisonPeriods {
+  const currentRange = businessMonthRange(first.year, first.month)
+  const baselineRange = businessMonthRange(second.year, second.month)
+  const monthNames = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  return {
+    current: { from: toBusinessDay(currentRange.start), to: toBusinessDay(currentRange.end) },
+    baseline: { from: toBusinessDay(baselineRange.start), to: toBusinessDay(baselineRange.end) },
+    labels: {
+      current: `${monthNames[first.month - 1]} ${first.year}`,
+      baseline: `${monthNames[second.month - 1]} ${second.year}`,
+    },
+  }
+}
+
 /** Journée métier d'un instant UTC (jamais la journée du serveur). */
 function toBusinessDay(instant: string): string {
   return businessTodayIso(new Date(instant))
@@ -431,8 +453,8 @@ export function resolveIntent(message: string): AssistantIntent {
 
   // Détection de comparaison de périodes (2 dates distinctes)
   if (text.includes('compar') || text.includes('vs') || text.includes('versus')) {
-    const comparisonRanges = extractComparisonRanges(message)
-    if (comparisonRanges) {
+    const comparisonPeriods = resolveComparisonPeriods(message)
+    if (comparisonPeriods) {
       return 'period_comparison'
     }
     return 'comparison_request'

@@ -190,6 +190,38 @@ export interface SanitizedExplanation {
 }
 
 /**
+ * Une explication LLM ne peut pas servir de source de chiffres. Le moteur
+ * conserve uniquement les phrases sans expression numérique, sans symbole de
+ * devise et sans nombre écrit en lettres. Les faits chiffrés sont ensuite
+ * reconstruits exclusivement depuis les références métriques V2.
+ */
+const NUMBER_WORDS = /\b(?:zéro|zero|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt|trente|quarante|cinquante|soixante|cent|cents|mille|million|millions|milliard|milliards)\b/iu
+const CURRENCY_WORDS = /\b(?:mad|dh|dhs|dirham|dirhams|euro|euros|eur|usd|dollar|dollars)\b/iu
+
+export function sanitizeNarrative(text: string): SanitizedExplanation {
+  const source = String(text || '').trim()
+  if (!source) return { text: '', rejectedAmounts: [] }
+
+  const rejectedAmounts: string[] = []
+  const sentences = source.split(/(?<=[!?;\n])|(?<=\.)(?=\s|$)/u)
+  const kept: string[] = []
+
+  for (const sentence of sentences) {
+    const tokens = sentence.match(AMOUNT_PATTERN) ?? []
+    const hasWords = NUMBER_WORDS.test(sentence)
+    const hasCurrency = CURRENCY_WORDS.test(sentence)
+    if (tokens.length > 0 || hasWords || hasCurrency) {
+      rejectedAmounts.push(...tokens.map((token) => token.trim()))
+      if (hasWords || hasCurrency) rejectedAmounts.push('[expression numérique non vérifiable]')
+      continue
+    }
+    kept.push(sentence)
+  }
+
+  return { text: kept.join('').trim(), rejectedAmounts }
+}
+
+/**
  * Supprime du texte IA tout montant absent des valeurs validées par les outils.
  *
  * Un chiffre non fourni par une source serveur ne peut pas être vérifié : plutôt
@@ -252,6 +284,8 @@ export interface ChartSeriesPoint {
   /** Libellé exact (décimal non arrondi + devise) pour l'infobulle. */
   valueLabel: string
   currency: string
+  /** Identité conservée même en mono-boutique ; aucune fusion implicite. */
+  storeId: string
 }
 
 export interface ChartResult {
@@ -283,6 +317,7 @@ function singleCurrencyOf(values: Array<string | null>): string | null {
 export function buildDailyChart(
   daily: unknown,
   envelopeCurrency: string | null,
+  envelopeStoreId: string | null = '__single_scope__',
 ): ChartResult | null {
   const record = asRecord(daily)
   if (!record) return null
@@ -303,9 +338,14 @@ export function buildDailyChart(
         dropped += 1
         return null
       }
-      return { date: String(row.date ?? ''), revenue, currency }
+      const storeId = typeof row.storeId === 'string' ? row.storeId : envelopeStoreId
+      if (!storeId) {
+        dropped += 1
+        return null
+      }
+      return { date: String(row.date ?? ''), revenue, currency, storeId }
     })
-    .filter((row): row is { date: string; revenue: string; currency: string } => Boolean(row))
+    .filter((row): row is { date: string; revenue: string; currency: string; storeId: string } => Boolean(row))
     .filter((row) => row.date !== '')
 
   if (dropped > 0) warnings.push(`Graphique : ${dropped} point(s) non traçable(s) écarté(s).`)
@@ -316,10 +356,13 @@ export function buildDailyChart(
     return null
   }
 
+  const stores = new Set(candidates.map((row) => row.storeId))
+  if (stores.size !== 1) return null
+
   const points: ChartSeriesPoint[] = candidates.slice(-14).flatMap((row) => {
     const value = toScaleValue(row.revenue)
     if (value === null) return []
-    return [{ label: row.date, value, valueLabel: exactLabel(row.revenue, currency), currency }]
+    return [{ label: row.date, value, valueLabel: exactLabel(row.revenue, currency), currency, storeId: row.storeId }]
   })
 
   if (points.length < 2) return null
@@ -333,17 +376,20 @@ export function buildDailyChart(
   }
 }
 
-function sectionRecord(section: unknown): { rows: Record<string, unknown>[]; currency: string | null; state: string } | null {
+function sectionRecord(section: unknown): { rows: Record<string, unknown>[]; currency: string | null; state: string; storeId: string | null } | null {
   const record = asRecord(section)
   if (!record) return null
   const meta = asRecord(record.meta)
   const state = typeof meta?.state === 'string' ? meta.state : 'missing'
   const currencies = Array.isArray(meta?.currencies) ? meta.currencies.filter((item): item is string => typeof item === 'string') : []
   const currency = currencies.length === 1 ? currencies[0] : null
+  const access = asRecord(meta?.access)
+  const storeIds = access ? Object.keys(access) : []
+  const storeId = storeIds.length === 1 ? storeIds[0] : storeIds.length === 0 ? '__single_scope__' : null
   const rows = Array.isArray(record.rows)
     ? (record.rows.map((row) => asRecord(row)).filter((row): row is Record<string, unknown> => Boolean(row)))
     : []
-  return { rows, currency, state }
+  return { rows, currency, state, storeId }
 }
 
 function buildSectionChart(
@@ -353,7 +399,7 @@ function buildSectionChart(
   const parsed = sectionRecord(section)
   if (!parsed) return null
   if (!PLOTTABLE_STATES.has(parsed.state)) return null
-  if (!parsed.currency) return null
+  if (!parsed.currency || !parsed.storeId) return null
 
   const points: ChartSeriesPoint[] = []
   for (const row of parsed.rows.slice(0, 10)) {
@@ -363,7 +409,13 @@ function buildSectionChart(
     const label = options.labelField === 'productName'
       ? String(row.productName ?? 'Produit')
       : String(row.city ?? 'Ville non renseignée')
-    points.push({ label, value, valueLabel: exactLabel(revenue, parsed.currency), currency: parsed.currency })
+    points.push({
+      label,
+      value,
+      valueLabel: exactLabel(revenue, parsed.currency),
+      currency: parsed.currency,
+      storeId: parsed.storeId,
+    })
   }
 
   if (points.length === 0) return null
@@ -384,6 +436,7 @@ function chartToResponse(chart: ChartResult, currency: string | null): Assistant
       value: point.value,
       valueLabel: point.valueLabel,
       currency: point.currency,
+      storeId: point.storeId,
     })),
     warnings: chart.warnings,
   }
@@ -473,12 +526,15 @@ export function buildStructuredResponseFromContext(
     metrics_summary: envelope ? envelopeSummary(envelope) : [],
   }
 
+  const envelopeStoreIds = envelope ? Object.keys(envelope.access ?? {}) : []
+  const envelopeStoreId = envelopeStoreIds.length === 1 ? envelopeStoreIds[0] : null
+
   // Aucun graphique sur une donnée absente ou interdite.
   if (envelope && BLOCKED_STATES.has(envelope.state)) return base
 
   const daily =
     intent === 'chart_request' || intent === 'dashboard_summary' || intent === 'performance_request'
-      ? buildDailyChart(record.daily, envelope?.currency ?? null)
+      ? buildDailyChart(record.daily, envelope?.currency ?? null, envelopeStoreId)
       : null
 
   const products = intent === 'top_products' ? buildSectionChart(record.products, {
