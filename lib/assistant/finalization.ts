@@ -175,7 +175,7 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
   if (ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED && input.attemptToken) {
     await completeAssistantRequest(
       backend,
-      { requestId: input.requestId, attemptToken: input.attemptToken },
+      { userId: input.userId, requestId: input.requestId, attemptToken: input.attemptToken },
       assistantRow.id as string,
       charge.status
     )

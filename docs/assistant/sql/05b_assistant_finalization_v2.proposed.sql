@@ -56,11 +56,31 @@ begin
     return;
   end if;
 
+  if v_row.state <> 'in_progress' then
+    raise exception 'IDEMPOTENCY_LEASE_LOST' using errcode = 'P0001';
+  end if;
+  if p_attempt_token is null then
+    raise exception 'IDEMPOTENCY_TOKEN_MISMATCH' using errcode = 'P0001';
+  end if;
   if v_row.attempt_token <> p_attempt_token then
     raise exception 'IDEMPOTENCY_TOKEN_MISMATCH' using errcode = 'P0001';
   end if;
   if v_row.lease_until < now() then
     raise exception 'IDEMPOTENCY_LEASE_LOST' using errcode = 'P0001';
+  end if;
+  -- Permission courante : la suppression/rétrogradation pendant l'appel ferme
+  -- la finalisation, même avec un jeton encore valide.
+  if not public.can_view_store_finances(p_store_id) then
+    -- Appel service_role : vérifier le user explicite, pas auth.uid().
+    if not exists (
+      select 1 from public.stores s where s.id = p_store_id and s.owner_user_id = p_user_id
+    ) and not exists (
+      select 1 from public.store_members sm
+       where sm.store_id = p_store_id and sm.user_id = p_user_id
+         and sm.status = 'active' and sm.role in ('owner','admin','accountant')
+    ) then
+      raise exception 'FORBIDDEN_STORE' using errcode = 'P0001';
+    end if;
   end if;
 
   insert into public.chat_messages (thread_id, role, content, credits_used, metadata)
