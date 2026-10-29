@@ -29,8 +29,9 @@ inadvertance.
 | Élément | État |
 |---|---|
 | `scripts/assistant-tx-contract.synthetic-tests.cjs` | exécuté — 28/28 PASS (contrats TS + invariants SQL statiques) |
-| `docs/assistant/sql/postgres-two-connection-tests.sql` | **NON EXÉCUTÉ** — scénarios PostgreSQL à deux connexions |
-| Validation transactionnelle réelle | **NON PRONONCÉE** |
+| `docs/assistant/sql/postgres-two-connection-tests.sql` | **remplacé** par `neon-audit/scenarios/` — conservé pour historique |
+| `docs/assistant/sql/neon-audit/` | **paquet d'exécution réel** : prévol, harnais, fixtures, scénarios A/B, assertions, nettoyage ([README](./neon-audit/README.md)) |
+| Validation transactionnelle réelle | **NON PRONONCÉE** — exécution à autoriser (voir `neon-audit/PROTOCOL.md §7`) |
 
 Un audit statique n'est pas une preuve transactionnelle : voir `RUNBOOK.md`
 §Risques nécessitant une validation PostgreSQL.

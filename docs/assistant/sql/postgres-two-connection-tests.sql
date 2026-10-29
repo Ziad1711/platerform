@@ -1,4 +1,12 @@
 -- ============================================================================
+-- OBSOLÈTE — NE PAS EXÉCUTER. Remplacé par docs/assistant/sql/neon-audit/ :
+--   * orchestration A/B par barrières advisory + preuve de contention 55P03 ;
+--   * timeouts compatibles (lock_timeout court, bail 130 s isolé) ;
+--   * fixtures synthétiques explicites et SQLSTATE capturé ;
+--   * R9/R10/R12 corrigés, R13 (échec tardif après débit) ajouté.
+-- Conservé pour historique.
+-- ============================================================================
+-- ============================================================================
 -- SCÉNARIOS POSTGRESQL À DEUX CONNEXIONS — **NON EXÉCUTÉ**
 --
 -- Ce fichier n'a jamais été exécuté. Il ne doit l'être que dans une base

@@ -314,22 +314,28 @@ autorisé, avec preuves archivées.
 
 ## 6. Tests PostgreSQL à deux connexions
 
-Fichier : `postgres-two-connection-tests.sql` (**NON EXÉCUTÉ**).
+Paquet d'exécution : **`neon-audit/`** (voir `neon-audit/PROTOCOL.md`).
+
+Ancien fichier `postgres-two-connection-tests.sql` : **remplacé** (orchestration
+manuelle, timeouts incompatibles, fixtures incomplètes, R9/R10/R12 non
+concluants). Conservé pour historique, ne pas exécuter.
 
 | # | Scénario | Résultat attendu |
 |---|---|---|
 | R1 | Première acquisition commitée | une ligne, jeton non nul |
-| R2 | Même clé concurrente (A verrouille, B attend) | B : `IDEMPOTENCY_IN_PROGRESS`, aucun second titulaire |
+| R2 | Même clé concurrente (A verrouille, B attend) | B : `55P03` puis `IDEMPOTENCY_IN_PROGRESS`, un seul titulaire |
 | R3 | Empreinte différente, même clé | `IDEMPOTENCY_CONFLICT`, aucune mutation |
-| R4 | Expiration du bail puis reprise B | nouveau jeton ; ancien refusé sur `bind`/`finalize`/`complete`/`reserve` |
-| R5 | Bail expirant pendant l'attente d'un verrou | `IDEMPOTENCY_LEASE_LOST` (horloge réelle) |
+| R4 | Expiration du bail puis reprise B | nouveau jeton ; ancien refusé |
+| R5 | Bail expirant pendant l'attente d'un verrou | reprise réelle (horloge `clock_timestamp`) |
 | R6 | Finalisation concurrente identique | un seul débit ; second appel `replayed` |
 | R7 | Rejeu d'une première question sans `thread_id` | conversation retrouvée via `begin` |
 | R8 | Crash (transaction interrompue) | aucun effet partiel |
 | R9 | Révocation avant finalisation | `FORBIDDEN_STORE` |
 | R10 | Journal d'usage invalide | `INVALID_USAGE` + rollback complet |
-| R11 | Écriture `ai_usage` depuis `authenticated` | refusée par privilège |
-| R12 | Suppression de conversation concurrente | aucune fuite ; deadlock journalisé |
+| R11 | Écriture `ai_usage` depuis `authenticated` | `42501` |
+| R12 | Suppression de conversation concurrente | aucune fuite ; débit conservé |
+| R13 | **Échec tardif après débit** | rollback complet, puis reprise = un seul débit |
+| R14 | Changement d'offre | plafond resynchronisé, débit nul |
 | S1 | Insuffisant : deux requêtes, même portefeuille | aucun dépassement, `credits_charged = 0` |
 
 Chaque scénario exige `SQLSTATE`, message et compteurs avant/après
