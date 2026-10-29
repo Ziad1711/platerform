@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server'
 import { getOrCreateWallet, toWalletSnapshot } from '@/lib/assistant/credits'
+import { assertAssistantAccess } from '@/lib/assistant/access'
 import { requireAssistantPermission, requireAuthenticatedUser, toPublicError } from '@/lib/assistant/security'
 
 export async function GET(request: Request) {
   try {
     const { supabase, user } = await requireAuthenticatedUser()
+    // Pilote privé : verrou global + allowlist AVANT toute lecture de portefeuille.
+    assertAssistantAccess(user.id)
+
     const { searchParams } = new URL(request.url)
     const storeId = (searchParams.get('storeId') || '').trim() || null
 

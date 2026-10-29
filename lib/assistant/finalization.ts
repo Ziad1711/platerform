@@ -18,6 +18,10 @@
  * est insuffisant, la réponse et le journal sont conservés, le débit est nul et
  * le statut vaut `insufficient`. Ce n'est pas une garantie « tout ou rien »
  * financière ; elle doit être réarbitrée avec la facturation.
+ *
+ * Mode pilote (verrou ouvert + allowlist non vide) : le chemin `fallback`
+ * séquentiel est refusé (`assertAtomicFinalizationRequired`), quel que soit
+ * l'état du drapeau `ASSISTANT_FINALIZE_ATOMIC`.
  */
 import { addMessage, touchThread } from '@/lib/assistant/chat'
 import { chargeCredits, type CreditChargeStatus } from '@/lib/assistant/credits'
@@ -26,6 +30,7 @@ import {
   completeAssistantRequest,
 } from '@/lib/assistant/idempotency'
 import { validateFinalizeCounters } from '@/lib/assistant/credit-invariants'
+import { assertAtomicFinalizationRequired } from '@/lib/assistant/access'
 import { requireAssistantBackendClient } from '@/lib/assistant/backend'
 import type { AssistantProviderOutput } from '@/lib/assistant/providers/types'
 import type { createClient } from '@/lib/supabase/server'
@@ -86,6 +91,10 @@ function buildUsageRow(input: FinalizeTurnInput) {
 }
 
 export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<FinalizeTurnResult> {
+  // Mode pilote : la finalisation séquentielle (non atomique) est interdite.
+  // Aucun repli ne peut donc facturer hors de la transaction unique.
+  assertAtomicFinalizationRequired(ASSISTANT_FINALIZE_ATOMIC_ENABLED)
+
   if (ASSISTANT_FINALIZE_ATOMIC_ENABLED) {
     // Écriture fiable : client backend dédié, jamais le client utilisateur.
     const backend = requireAssistantBackendClient()

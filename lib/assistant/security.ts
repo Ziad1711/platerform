@@ -350,6 +350,10 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   IDEMPOTENCY_IN_PROGRESS: 'Cette demande est déjà en cours de traitement.',
   IDEMPOTENCY_LEASE_LOST: 'Cette tentative a expiré. Relancez la demande.',
   IDEMPOTENCY_TOKEN_MISMATCH: 'Tentative invalide : jeton de réservation absent ou obsolète.',
+  ASSISTANT_DISABLED: 'L’assistant IA est temporairement indisponible.',
+  ASSISTANT_NOT_ALLOWED: 'L’assistant IA n’est pas encore ouvert à votre compte.',
+  ASSISTANT_PILOT_CONFIG_INCOMPLETE:
+    'L’assistant IA est temporairement indisponible (configuration en cours de validation).',
   ASSISTANT_BACKEND_UNAVAILABLE: 'Écriture fiable indisponible : le service est momentanément bloqué.',
   ASSISTANT_FLAGS_INCOHERENT: 'Configuration assistant incohérente : action bloquée.',
   FINALIZE_RPC_FAILED: 'La finalisation de la réponse a échoué. Aucun débit n’a été confirmé.',
@@ -403,6 +407,9 @@ export function getErrorStatus(error: unknown) {
   if (message === 'IDEMPOTENCY_IN_PROGRESS') return 409
   if (message === 'IDEMPOTENCY_LEASE_LOST') return 409
   if (message === 'IDEMPOTENCY_TOKEN_MISMATCH') return 409
+  if (message === 'ASSISTANT_DISABLED') return 503
+  if (message === 'ASSISTANT_NOT_ALLOWED') return 403
+  if (message === 'ASSISTANT_PILOT_CONFIG_INCOMPLETE') return 503
   if (message === 'ASSISTANT_BACKEND_UNAVAILABLE') return 503
   if (message === 'ASSISTANT_FLAGS_INCOHERENT') return 503
   if (message === 'FINALIZE_RPC_FAILED') return 502

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { deleteThread, getThread, updateThread } from '@/lib/assistant/chat'
+import { assertAssistantAccess } from '@/lib/assistant/access'
 import {
   assertThreadScopeAccess,
   assertTrustedOrigin,
@@ -19,6 +20,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const { threadId } = await params
     const { supabase, user } = await requireAuthenticatedUser()
+    assertAssistantAccess(user.id)
 
     let rawBody: unknown
     try {
@@ -64,6 +66,7 @@ export async function DELETE(request: Request, { params }: Params) {
 
     const { threadId } = await params
     const { supabase, user } = await requireAuthenticatedUser()
+    assertAssistantAccess(user.id)
 
     const thread = await getThread(supabase, threadId, user.id)
     await assertThreadScopeAccess(supabase, user.id, thread.store_id as string | null)

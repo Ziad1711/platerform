@@ -7,6 +7,7 @@
 process.env.ASSISTANT_IDEMPOTENCY_REGISTRY = 'enabled'
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const ROOT = path.resolve(__dirname, '..')
@@ -131,6 +132,157 @@ async function main() {
   })
   await check('K09 générateur indisponible => null', () => {
     assert.equal(retry.resolveRetryRequestId(null, base, () => null), null)
+  })
+
+  // ---------------------------------------------------------------------------
+  // Lot A/B — verrou serveur global et allowlist du pilote privé
+  // ---------------------------------------------------------------------------
+  const access = await import(pathToFileURL(path.join(ROOT, 'lib/assistant/access.ts')).href)
+
+  const ENV_KEYS = [
+    'ASSISTANT_ENABLED',
+    'ASSISTANT_ALLOWED_USER_IDS',
+    'ASSISTANT_IDEMPOTENCY_REGISTRY',
+    'ASSISTANT_FINALIZE_ATOMIC',
+  ]
+  const withEnv = async (overrides, fn) => {
+    const saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    try {
+      return await fn()
+    } finally {
+      for (const key of ENV_KEYS) {
+        if (saved[key] === undefined) delete process.env[key]
+        else process.env[key] = saved[key]
+      }
+    }
+  }
+
+  const PILOT_USER = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+  const OTHER_USER = '11111111-2222-4333-8444-555555555555'
+  const READY_ENV = {
+    ASSISTANT_ENABLED: 'enabled',
+    ASSISTANT_ALLOWED_USER_IDS: PILOT_USER,
+    ASSISTANT_IDEMPOTENCY_REGISTRY: 'enabled',
+    ASSISTANT_FINALIZE_ATOMIC: 'enabled',
+  }
+
+  await check('G01 verrou absent => chatbot fermé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ENABLED: undefined }, () =>
+      assert.rejects(async () => access.assertAssistantEnabled(), /ASSISTANT_DISABLED/)
+    )
+  )
+  await check('G02 verrou non explicite (true) => fermé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ENABLED: 'true' }, () =>
+      assert.rejects(async () => access.assertAssistantAccess(PILOT_USER), /ASSISTANT_DISABLED/)
+    )
+  )
+  await check('G03 allowlist absente => aucun UUID autorisé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ALLOWED_USER_IDS: undefined }, async () => {
+      assert.equal(access.getAllowedAssistantUserIds().length, 0)
+      await assert.rejects(async () => access.assertAssistantAccess(PILOT_USER), /ASSISTANT_NOT_ALLOWED/)
+    })
+  )
+  await check('G04 allowlist email/joker ignorée', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ALLOWED_USER_IDS: 'moi@example.com,*,' }, async () => {
+      const parsed = access.parseAssistantAllowedUserIds(process.env.ASSISTANT_ALLOWED_USER_IDS)
+      assert.equal(parsed.ids.length, 0)
+      assert.equal(parsed.invalid, 2)
+      await assert.rejects(async () => access.assertAssistantAccess(PILOT_USER), /ASSISTANT_NOT_ALLOWED/)
+    })
+  )
+  await check('G05 pilote complet => accès autorisé', () =>
+    withEnv(READY_ENV, async () => {
+      assert.equal(access.isAssistantPilotReady(), true)
+      access.assertAssistantAccess(PILOT_USER)
+    })
+  )
+  await check('G06 registre désactivé => chatbot fermé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_IDEMPOTENCY_REGISTRY: undefined }, () =>
+      assert.rejects(async () => access.assertAssistantAccess(PILOT_USER), /ASSISTANT_PILOT_CONFIG_INCOMPLETE/)
+    )
+  )
+  await check('G07 finalisation atomique désactivée => chatbot fermé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_FINALIZE_ATOMIC: 'off' }, () =>
+      assert.rejects(async () => access.assertAssistantAccess(PILOT_USER), /ASSISTANT_PILOT_CONFIG_INCOMPLETE/)
+    )
+  )
+  await check('G08 UUID non listé => refus', () =>
+    withEnv(READY_ENV, () =>
+      assert.rejects(async () => access.assertAssistantAccess(OTHER_USER), /ASSISTANT_NOT_ALLOWED/)
+    )
+  )
+  await check('G09 UUID listé en majuscules => autorisé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ALLOWED_USER_IDS: ` ${PILOT_USER.toUpperCase()} , ` }, async () => {
+      assert.equal(access.isAssistantUserAllowed(PILOT_USER), true)
+      access.assertAssistantAccess(PILOT_USER)
+    })
+  )
+  await check('G10 utilisateur anonyme => refus', () =>
+    withEnv(READY_ENV, async () => {
+      await assert.rejects(async () => access.assertAssistantAccess(null), /ASSISTANT_NOT_ALLOWED/)
+      await assert.rejects(async () => access.assertAssistantAccess(''), /ASSISTANT_NOT_ALLOWED/)
+    })
+  )
+  await check('G11 identifiants client ignorés (liste = source unique)', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ALLOWED_USER_IDS: PILOT_USER }, async () => {
+      assert.equal(access.isAssistantUserAllowed(OTHER_USER), false)
+      assert.equal(access.isAssistantUserAllowed(`${PILOT_USER} `), true)
+    })
+  )
+  await check('G12 mode pilote => finalisation séquentielle interdite', () =>
+    withEnv(READY_ENV, async () => {
+      assert.throws(() => access.assertAtomicFinalizationRequired(false), /ASSISTANT_PILOT_CONFIG_INCOMPLETE/)
+      access.assertAtomicFinalizationRequired(true)
+    })
+  )
+  await check('G13 hors pilote => comportement séquentiel inchangé', () =>
+    withEnv({ ...READY_ENV, ASSISTANT_ENABLED: undefined }, async () => {
+      access.assertAtomicFinalizationRequired(false)
+      assert.equal(access.isAssistantPilotEnforced(), false)
+    })
+  )
+  await check('G14 noms de drapeaux financiers verrouillés', async () => {
+    assert.deepEqual([...access.ASSISTANT_PILOT_REQUIRED_FLAGS], [
+      'ASSISTANT_IDEMPOTENCY_REGISTRY',
+      'ASSISTANT_FINALIZE_ATOMIC',
+    ])
+  })
+
+  // ---------------------------------------------------------------------------
+  // Lot C — suppression de boutique vs immuabilité du périmètre (statique)
+  // ---------------------------------------------------------------------------
+  const sql02 = fs.readFileSync(
+    path.join(ROOT, 'docs/assistant/sql/02_assistant_thread_scope_rls.proposed.sql'),
+    'utf8'
+  )
+
+  await check('D01 garde de conversation en security definer', async () => {
+    assert.match(sql02, /create or replace function public\.assistant_thread_guard\(\)[\s\S]{0,300}security definer/)
+  })
+  await check('D02 détachement accepté seulement si la boutique a disparu', async () => {
+    assert.match(
+      sql02,
+      /new\.store_id is null\s+and old\.store_id is not null\s+and not exists \(select 1 from public\.stores/
+    )
+  })
+  await check('D03 rattachement arbitraire (NULL -> uuid) refusé', async () => {
+    assert.doesNotMatch(sql02, /old\.store_id is null/)
+    assert.match(sql02, /raise exception 'THREAD_STORE_IMMUTABLE'/)
+  })
+  await check('D04 immuabilité du propriétaire conservée', async () => {
+    assert.match(sql02, /raise exception 'THREAD_OWNER_IMMUTABLE'/)
+  })
+  await check('D05 aucun historique supprimé par le correctif', async () => {
+    assert.doesNotMatch(sql02, /delete\s+from\s+public\.chat_threads/i)
+    assert.doesNotMatch(sql02, /delete\s+from\s+public\.chat_messages/i)
+  })
+  await check('D06 trigger rejouable sur chat_threads', async () => {
+    assert.match(sql02, /drop trigger if exists trg_assistant_thread_guard on public\.chat_threads/)
+    assert.match(sql02, /before update on public\.chat_threads/)
   })
 
   const failed = results.filter(([, status]) => status !== 'PASS')

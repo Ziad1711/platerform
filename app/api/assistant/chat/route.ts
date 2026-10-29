@@ -24,6 +24,7 @@ import {
   failAssistantRequest,
 } from '@/lib/assistant/idempotency'
 import { finalizeAssistantTurn } from '@/lib/assistant/finalization'
+import { assertAssistantAccess, assertAssistantEnabled } from '@/lib/assistant/access'
 import { asksForOtherStore, extractComparisonRanges, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
 import { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
 import { getAssistantModelName } from '@/lib/assistant/providers'
@@ -140,10 +141,14 @@ export async function POST(request: Request) {
 
   try {
     assertTrustedOrigin(request)
+    assertAssistantEnabled()
     assertAssistantRuntimeFlags()
 
     const { supabase, user } = await requireAuthenticatedUser()
     requestSupabase = supabase
+    // Pilote privé : identité issue de Supabase Auth (`getUser`), jamais d'un
+    // champ client ; allowlist vérifiée AVANT toute réservation, lecture ou IA.
+    assertAssistantAccess(user.id)
 
     const contentLength = Number(request.headers.get('content-length') || 0)
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {

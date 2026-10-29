@@ -176,6 +176,33 @@ function readApiError(payload: unknown, fallback: string) {
   return fallback
 }
 
+/**
+ * Fermeture serveur du pilote (verrou global, allowlist, configuration
+ * incomplète). Le code est conservé pour distinguer une indisponibilité
+ * volontaire d'une erreur métier.
+ */
+const ASSISTANT_CLOSED_CODES = new Set([
+  'ASSISTANT_DISABLED',
+  'ASSISTANT_NOT_ALLOWED',
+  'ASSISTANT_PILOT_CONFIG_INCOMPLETE',
+])
+
+class AssistantApiError extends Error {
+  code: string | null
+
+  constructor(message: string, code: string | null) {
+    super(message)
+    this.name = 'AssistantApiError'
+    this.code = code
+  }
+}
+
+function readApiFailure(payload: unknown, fallback: string) {
+  const record = payload && typeof payload === 'object' ? (payload as { error?: unknown; code?: unknown }) : null
+  const rawCode = typeof record?.error === 'string' ? record.error : typeof record?.code === 'string' ? record.code : null
+  return new AssistantApiError(readApiError(payload, fallback), rawCode)
+}
+
 export default function AssistantIAPage() {
   const queryClient = useQueryClient()
   const { currentStoreId, userId } = useStore()
@@ -202,7 +229,7 @@ export default function AssistantIAPage() {
     queryFn: async () => {
       const res = await fetch(`/api/assistant/threads?storeId=${encodeURIComponent(String(currentStoreId))}`)
       const data = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger les conversations'))
+      if (!res.ok) throw readApiFailure(data, 'Impossible de charger les conversations')
       return data
     },
   })
@@ -212,7 +239,7 @@ export default function AssistantIAPage() {
     queryFn: async () => {
       const res = await fetch('/api/assistant/wallet')
       const data = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger vos crédits IA'))
+      if (!res.ok) throw readApiFailure(data, 'Impossible de charger vos crédits IA')
       return data
     },
   })
@@ -387,6 +414,22 @@ export default function AssistantIAPage() {
   const remainingCredits = walletQuery.data?.wallet?.remainingCredits
   const hasWalletLoaded = typeof remainingCredits === 'number'
   const isNoCredits = hasWalletLoaded && remainingCredits <= 0
+
+  // Indisponibilité volontaire décidée côté serveur (verrou, allowlist,
+  // configuration incomplète) : l'interface affiche le message contrôlé renvoyé
+  // par l'API et bloque l'envoi. Ce n'est jamais un contrôle de sécurité : le
+  // refus réel est appliqué par les routes API.
+  const assistantClosedError = useMemo(() => {
+    const errors = [threadsQuery.error, walletQuery.error]
+    for (const error of errors) {
+      if (error instanceof AssistantApiError && error.code && ASSISTANT_CLOSED_CODES.has(error.code)) {
+        return error.message
+      }
+    }
+    return null
+  }, [threadsQuery.error, walletQuery.error])
+
+  const isAssistantBlocked = isNoCredits || Boolean(assistantClosedError)
 
   const handleRenameThread = async (thread: ThreadItem) => {
     const nextTitle = window.prompt('Nouveau titre de la conversation', thread.title || '')
@@ -627,6 +670,12 @@ export default function AssistantIAPage() {
       <section className="bg-card rounded-xl border shadow-sm flex flex-col overflow-hidden min-h-0">
 
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-secondary/40">
+          {assistantClosedError ? (
+            <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm">
+              {assistantClosedError}
+            </div>
+          ) : null}
+
           {serverError ? (
             <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">{serverError}</div>
           ) : null}
@@ -660,7 +709,7 @@ export default function AssistantIAPage() {
                   <button
                     key={suggestion}
                     onClick={() => handleSend(suggestion)}
-                    disabled={isNoCredits || sendMessageMutation.isPending}
+                    disabled={isAssistantBlocked || sendMessageMutation.isPending}
                     className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-secondary disabled:opacity-50"
                   >
                     {suggestion}
@@ -679,7 +728,7 @@ export default function AssistantIAPage() {
                   <button
                     key={suggestion}
                     onClick={() => handleSend(suggestion)}
-                    disabled={isNoCredits || sendMessageMutation.isPending}
+                    disabled={isAssistantBlocked || sendMessageMutation.isPending}
                     className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-secondary disabled:opacity-50"
                   >
                     {suggestion}
@@ -718,7 +767,7 @@ export default function AssistantIAPage() {
                         <button
                           key={suggestion}
                           onClick={() => handleSend(suggestion)}
-                          disabled={isNoCredits || sendMessageMutation.isPending}
+                          disabled={isAssistantBlocked || sendMessageMutation.isPending}
                           className="text-[11px] px-2.5 py-1 rounded-full border bg-card hover:bg-secondary"
                         >
                           {suggestion}
@@ -768,7 +817,7 @@ export default function AssistantIAPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  if (input.trim() && !isNoCredits && !sendMessageMutation.isPending) {
+                  if (input.trim() && !isAssistantBlocked && !sendMessageMutation.isPending) {
                     handleSend(input)
                   }
                 }
@@ -776,11 +825,11 @@ export default function AssistantIAPage() {
               placeholder="Posez votre question business..."
               rows={2}
               className="flex-1 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              disabled={isNoCredits || sendMessageMutation.isPending || !hasStore}
+              disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
             />
             <button
               onClick={() => handleSend(input)}
-              disabled={!input.trim() || isNoCredits || sendMessageMutation.isPending || !hasStore}
+              disabled={!input.trim() || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className="h-10 w-10 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 inline-flex items-center justify-center"
             >
               <Send className="w-4 h-4" />
@@ -792,7 +841,7 @@ export default function AssistantIAPage() {
               <button
                 key={`bottom-${suggestion}`}
                 onClick={() => handleSend(suggestion)}
-                disabled={isNoCredits || sendMessageMutation.isPending}
+                disabled={isAssistantBlocked || sendMessageMutation.isPending}
                 className="text-[11px] px-2.5 py-1 rounded-full border bg-secondary hover:bg-secondary"
               >
                 {suggestion}

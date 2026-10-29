@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createThread, listThreads } from '@/lib/assistant/chat'
+import { assertAssistantAccess } from '@/lib/assistant/access'
 import {
   assertTrustedOrigin,
   requireAssistantStoreAccess,
@@ -20,6 +21,8 @@ export async function GET(request: Request) {
     assertTrustedOrigin(request)
 
     const { supabase, user } = await requireAuthenticatedUser()
+    assertAssistantAccess(user.id)
+
     const { searchParams } = new URL(request.url)
     const storeId = (searchParams.get('storeId') || '').trim() || null
 
@@ -49,6 +52,7 @@ export async function POST(request: Request) {
     assertTrustedOrigin(request)
 
     const { supabase, user } = await requireAuthenticatedUser()
+    assertAssistantAccess(user.id)
 
     let rawBody: unknown
     try {

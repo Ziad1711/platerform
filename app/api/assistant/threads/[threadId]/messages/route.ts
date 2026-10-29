@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getThread, listMessages } from '@/lib/assistant/chat'
+import { assertAssistantAccess } from '@/lib/assistant/access'
 import {
+  assertTrustedOrigin,
   requireAssistantStoreAccess,
   requireAuthenticatedUser,
   toPublicError,
@@ -22,7 +24,11 @@ function readPageNumber(value: string | null, fallback: number) {
 export async function GET(request: Request, { params }: Params) {
   try {
     const { threadId } = await params
+    assertTrustedOrigin(request)
+
     const { supabase, user } = await requireAuthenticatedUser()
+    assertAssistantAccess(user.id)
+
     const { searchParams } = new URL(request.url)
     const storeId = (searchParams.get('storeId') || '').trim() || null
 
