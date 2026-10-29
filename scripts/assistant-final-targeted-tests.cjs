@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Tests ciblés du candidat final — local, sans réseau ni base.
  * Couvre : compteurs de finalisation, rejets du registre, clé de retry.
