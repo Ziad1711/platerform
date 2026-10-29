@@ -203,6 +203,22 @@ drop policy if exists chat_threads_delete_own on public.chat_threads;
 create policy chat_threads_delete_own on public.chat_threads
   for delete to authenticated using (user_id = auth.uid());
 
+-- ---------------------------------------------------------------------------
+-- 4. Privilèges des helpers — DANS la transaction
+--    Objectif : aucun état intermédiaire où un helper serait encore exécutable
+--    par `anon`/`authenticated` (ou le serait devenu) alors que les policies
+--    l'appellent déjà. Un GRANT/REVOKE hors transaction laisserait une fenêtre
+--    d'exposition entre le COMMIT des policies et l'application des droits.
+-- ---------------------------------------------------------------------------
+revoke all on function public.assistant_role_allows_use(text) from public, anon, authenticated;
+revoke all on function public.assistant_has_full_finances(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.assistant_can_use_store(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.assistant_can_read_thread(uuid) from public, anon;
+grant execute on function public.assistant_can_read_thread(uuid) to authenticated, service_role;
+grant execute on function public.assistant_can_use_store(uuid, uuid) to service_role;
+grant execute on function public.assistant_has_full_finances(uuid, uuid) to service_role;
+grant execute on function public.assistant_role_allows_use(text) to service_role;
+
 commit;
 
 -- ============================================================================
@@ -225,11 +241,3 @@ commit;
 --    03b/05b sont installées : leurs définitions en dépendent.)
 -- ============================================================================
 
-revoke all on function public.assistant_role_allows_use(text) from public, anon, authenticated;
-revoke all on function public.assistant_has_full_finances(uuid, uuid) from public, anon, authenticated;
-revoke all on function public.assistant_can_use_store(uuid, uuid) from public, anon, authenticated;
-revoke all on function public.assistant_can_read_thread(uuid) from public, anon;
-grant execute on function public.assistant_can_read_thread(uuid) to authenticated, service_role;
-grant execute on function public.assistant_can_use_store(uuid, uuid) to service_role;
-grant execute on function public.assistant_has_full_finances(uuid, uuid) to service_role;
-grant execute on function public.assistant_role_allows_use(text) to service_role;

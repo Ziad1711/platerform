@@ -731,6 +731,166 @@ function runTailStaticChecks() {
     assert(route.includes('credit_status: null'), 'repli sans registre invente un statut de débit')
     return 'route alignée'
   })
+  check('S13', 'tous les GRANT/REVOKE sont DANS la transaction', () => {
+    for (const [label, source] of files) {
+      const commitIndex = source.indexOf('\ncommit;')
+      assert(commitIndex > 0, `${label}: commit introuvable`)
+      const statement = /^(grant|revoke) [^\n]*?(?=\n(?!\s)|$)/gm
+      let match
+      while ((match = statement.exec(source)) !== null) {
+        const end = match.index + match[0].length
+        assert(match.index < commitIndex, `${label}: ${match[0].slice(0, 48)}… après le COMMIT`)
+        assert(end > match.index, `${label}: instruction vide`)
+      }
+    }
+    return 'privilèges transactionnels'
+  })
+}
+
+function runAuditPackageChecks() {
+  const base = path.join(SQL_DIR, 'neon-audit')
+  const read = (rel) => fs.readFileSync(path.join(base, rel), 'utf8')
+
+  check('P01', 'paquet neon-audit : tous les fichiers annoncés existent', () => {
+    const expected = [
+      'README.md', 'PROTOCOL.md', 'DEPENDENCIES.md',
+      'sql/00_preflight.sql', 'sql/05_auth_shim.sql', 'sql/10_bootstrap_audit.sql',
+      'sql/20_verify_schema_ready.sql', 'sql/30_fixtures.sql',
+      'sql/90_assertions.sql', 'sql/99_cleanup.sql',
+      'scenarios/sequential.sql', 'scenarios/concurrent_a.sql', 'scenarios/concurrent_b.sql',
+      'scenarios/lease_a.sql', 'scenarios/lease_b.sql',
+      'run/run_audit.sh', 'run/env.example',
+      'connection/env.neon.example', 'connection/check_connection.sh',
+      'connection/PREVALIDATION.md', 'connection/INSTALL_CLIENT.md',
+      'export/EXPORT_PLAN.md', 'export/verify_restore.sql', 'export/RECONSTRUCTION_ASSESSMENT.md',
+    ]
+    for (const rel of expected) {
+      assert(fs.existsSync(path.join(base, rel)), `manquant: ${rel}`)
+    }
+    return `${expected.length} fichiers`
+  })
+
+  check('P02', 'paquet neon-audit : dollar-quotes équilibrés', () => {
+    const files = [
+      'sql/05_auth_shim.sql', 'sql/10_bootstrap_audit.sql', 'sql/20_verify_schema_ready.sql',
+      'sql/30_fixtures.sql', 'sql/90_assertions.sql', 'sql/99_cleanup.sql',
+    ]
+    for (const rel of files) {
+      const count = (read(rel).match(/\$\$/g) || []).length
+      assertEqual(count % 2, 0, `${rel}: ${count} délimiteurs`)
+    }
+    return 'équilibrés'
+  })
+
+  check('P03', 'paquet neon-audit : aucune référence production ou secrète', () => {
+    const secretPatterns = [
+      /db\.[a-z0-9]+\.supabase\.co/i,
+      // Mot de passe littéral dans une URL (les ${VARIABLES} restent autorisés)
+      /postgresql:\/\/(?!\$\{)[^<\s/]*:(?!\$\{)[^<\s@]+@/i,
+      /SUPABASE_SERVICE_ROLE_KEY/i,
+    ]
+    // Motifs interdits dans les fichiers EXÉCUTABLES uniquement : la
+    // documentation doit pouvoir citer les sources exclues (jisra-test,
+    // projet de test Supabase) pour justifier leur rejet.
+    const prodPatterns = [/jisra-test/i, /goqedvcdmgtejtyrawsp/i]
+
+    const docs = ['README.md', 'PROTOCOL.md', 'DEPENDENCIES.md', 'connection/PREVALIDATION.md']
+    const executables = [
+      'sql/00_preflight.sql', 'sql/05_auth_shim.sql', 'sql/10_bootstrap_audit.sql',
+      'sql/20_verify_schema_ready.sql', 'sql/30_fixtures.sql',
+      'sql/90_assertions.sql', 'sql/99_cleanup.sql',
+      'scenarios/sequential.sql', 'scenarios/concurrent_a.sql', 'scenarios/concurrent_b.sql',
+      'scenarios/lease_a.sql', 'scenarios/lease_b.sql', 'run/env.example', 'run/run_audit.sh',
+      'connection/env.neon.example', 'connection/check_connection.sh',
+    ]
+
+    for (const rel of [...docs, ...executables]) {
+      const source = read(rel)
+      for (const pattern of secretPatterns) {
+        assert(!pattern.test(source), `${rel}: motif interdit ${pattern}`)
+      }
+    }
+    for (const rel of executables.filter((item) => item !== 'sql/00_preflight.sql')) {
+      const source = read(rel)
+      for (const pattern of prodPatterns) {
+        assert(!pattern.test(source), `${rel}: référence production ${pattern}`)
+      }
+    }
+
+    // Le prévol contient volontairement la liste de blocage : c'est la garde.
+    const preflight = read('sql/00_preflight.sql')
+    assert(/jisra-test/.test(preflight), 'garde de nom absente du prévol')
+    assert(/goqedvcdmgtejtyrawsp/.test(preflight), 'référence de test non bloquée')
+
+    // Le modèle de connexion ne contient que des placeholders sur les champs
+    // sensibles (hôte, base, rôle, mot de passe, CA).
+    const envTemplate = read('connection/env.neon.example')
+    const sensitive = ['PGHOST', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSSLROOTCERT']
+    let checked = 0
+    for (const rawLine of envTemplate.split('\n')) {
+      const line = rawLine.replace(/\r$/, '')
+      const assignment = line.match(/^export\s+([A-Z_]+)=(.*)$/)
+      if (!assignment) continue
+      const [, name, rawValue] = assignment
+      if (!sensitive.includes(name)) continue
+      checked += 1
+      const isPlaceholder = rawValue.startsWith("'<") || rawValue.includes('${')
+      assert(isPlaceholder, `valeur littérale sur champ sensible : ${name}`)
+    }
+    assert(checked >= 5, `champs sensibles non vérifiés (${checked})`)
+    return 'aucune référence sensible hors garde'
+  })
+
+  check('P04', 'paquet neon-audit : scénarios ancrés sur les fixtures', () => {
+    for (const rel of ['scenarios/sequential.sql', 'scenarios/concurrent_a.sql', 'scenarios/concurrent_b.sql',
+      'scenarios/lease_a.sql', 'scenarios/lease_b.sql']) {
+      const source = read(rel)
+      assert(source.includes('from audit.fx'), `${rel}: fixtures non lues`)
+      assert(source.includes('\\gset'), `${rel}: aucune capture de variables`)
+      assert(!/:owner_id/.test(source) || source.includes(":'owner_id'"), `${rel}: variable mal citée`)
+    }
+    return 'fixtures liées'
+  })
+
+  check('P05', 'paquet neon-audit : le runner ne référence que des fichiers existants', () => {
+    const runner = read('run/run_audit.sh')
+    const pattern = /\$HERE\/((?:sql|scenarios)\/[a-z0-9_]+\.sql)/g
+    let match
+    let count = 0
+    while ((match = pattern.exec(runner)) !== null) {
+      count += 1
+      assert(fs.existsSync(path.join(base, match[1])), `référence absente: ${match[1]}`)
+    }
+    assert(count >= 9, `runner trop pauvre (${count} références)`)
+    assert(runner.includes('AUDIT_URL'), 'runner sans AUDIT_URL')
+    assert(runner.includes('sleep 3'), 'décalage A/B absent')
+    return `${count} références`
+  })
+
+  check('P06', 'paquet neon-audit : rollback après débit réellement prouvé', () => {
+    const sequential = read('scenarios/sequential.sql')
+    assert(sequential.includes('install_late_failure'), 'injection absente')
+    assert(sequential.includes("set_config('audit.fail_after_debit', 'on', true)"), 'trigger non armé')
+    assert(sequential.includes('R13.late_after_debit'), 'cas R13 absent')
+    assert(sequential.includes('R13.wallet_rolled_back'), 'invariant de solde absent')
+    const bootstrap = read('sql/10_bootstrap_audit.sql')
+    assert(/after update on public\.ai_credit_wallets/.test(bootstrap),
+      'l\'erreur doit survenir APRÈS l\'écriture du débit')
+    return 'échec tardif après débit'
+  })
+  check('P07', 'client PostgreSQL documenté (client seul, sans serveur)', () => {
+    const doc = read('connection/INSTALL_CLIENT.md')
+    assert(/18\.1/.test(doc), 'version non documentée')
+    assert(/pg_dump/.test(doc) && /psql/.test(doc), 'outils non documentés')
+    assert(/aucun service/i.test(doc), 'absence de service non documentée')
+    assert(/server_version_num/.test(doc), 'contrôle de compatibilité Supabase absent')
+    assert(/--schema-only/.test(doc) || /schema-only/.test(doc), 'options d\'export absentes')
+    const script = read('connection/check_connection.sh')
+    assert(script.includes('resolve_bin'), 'résolution des binaires absente')
+    assert(script.includes('PGCLIENT_BIN'), 'repli PATH absent')
+    assert(script.includes('ONLINE'), 'mode hors ligne absent')
+    return 'client seul + repli PATH'
+  })
 }
 
 function report() {
@@ -766,6 +926,7 @@ async function entrypoint() {
   runStaticChecks()
   runMoreStaticChecks()
   runTailStaticChecks()
+  runAuditPackageChecks()
   report()
 }
 
