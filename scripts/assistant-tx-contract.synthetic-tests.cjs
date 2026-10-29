@@ -102,7 +102,7 @@ function createFakeBackend() {
             select: () => chain,
             single: async () => ({
               data: {
-                id: 'assistant-message-1',
+                id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
                 thread_id: payload.thread_id,
                 role: payload.role,
                 content: payload.content,
@@ -133,8 +133,8 @@ async function runContractTests() {
           {
             state: 'completed',
             attempt_token: '11111111-1111-4111-8111-111111111111',
-            thread_id: 'thread-created-1',
-            assistant_message_id: 'assistant-message-1',
+            thread_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+            assistant_message_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             credit_status: 'charged',
           },
         ],
@@ -148,7 +148,7 @@ async function runContractTests() {
       threadId: null,
     })
     assertEqual(outcome.status, 'replay', 'statut')
-    assertEqual(outcome.threadId, 'thread-created-1', 'threadId rejoué')
+    assertEqual(outcome.threadId, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'threadId rejoué')
     assertEqual(outcome.creditStatus, 'charged', 'statut de débit réel')
     return outcome.threadId
   })
@@ -193,7 +193,7 @@ async function runContractTests() {
     const ok = await idempotency.completeAssistantRequest(
       supabase,
       { userId: 'user-1', requestId: REQUEST_ID, attemptToken: 'tok-1' },
-      'assistant-message-1',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       'charged',
       7,
       7
@@ -317,7 +317,7 @@ async function runContractTests() {
     const { finalization } = loadAtomicFinalization(async () => ({
       data: [
         {
-          assistant_message: { id: 'assistant-message-1', role: 'assistant' },
+          assistant_message: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', role: 'assistant' },
           credit_status: 'charged',
           replayed: false,
           credits_consumed: 6,
@@ -340,7 +340,7 @@ async function runContractTests() {
     const { finalization } = loadAtomicFinalization(async () => ({
       data: [
         {
-          assistant_message: { id: 'assistant-message-1', role: 'assistant' },
+          assistant_message: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', role: 'assistant' },
           credit_status: 'insufficient',
           replayed: false,
           credits_consumed: 6,
@@ -361,7 +361,7 @@ async function runContractTests() {
     const { finalization } = loadAtomicFinalization(async () => ({
       data: [
         {
-          assistant_message: { id: 'assistant-message-1', role: 'assistant' },
+          assistant_message: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', role: 'assistant' },
           credit_status: 'charged',
           replayed: true,
           credits_consumed: 4,

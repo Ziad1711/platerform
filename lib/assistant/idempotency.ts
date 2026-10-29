@@ -75,6 +75,76 @@ export function toCreditStatus(value: unknown): AssistantCreditStatus {
   return value === 'charged' || value === 'insufficient' || value === 'failed' ? value : 'not_charged'
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const REGISTRY_STATES = new Set(['in_progress', 'completed', 'failed'])
+const CREDIT_STATUSES = new Set(['charged', 'insufficient', 'failed', 'not_charged'])
+
+/** Réponse RPC incohérente : on bloque avant l'appel IA, jamais de repli. */
+function invalidRegistryResponse(reason: string): never {
+  console.error('[assistant] registry_response_invalid', { reason })
+  throw new Error('ASSISTANT_BACKEND_UNAVAILABLE')
+}
+
+function asNullableUuid(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) invalidRegistryResponse(field)
+  return value
+}
+
+function asStrictUuid(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) invalidRegistryResponse(field)
+  return value
+}
+
+function asNonNegativeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) invalidRegistryResponse(field)
+  return value
+}
+
+interface ValidatedBeginRow {
+  state: 'in_progress' | 'completed' | 'failed'
+  threadId: string | null
+  attemptToken: string
+  assistantMessageId: string | null
+  creditStatus: AssistantCreditStatus
+}
+
+/**
+ * Validation runtime stricte de `rpc_assistant_begin_request`.
+ * Toute valeur incohérente (état inconnu, UUID invalide, statut financier
+ * inattendu) bloque la requête : aucun type assertion ne suffit.
+ */
+export function validateBeginRow(raw: unknown): ValidatedBeginRow {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) invalidRegistryResponse('row')
+
+  const row = raw as Record<string, unknown>
+  const state = typeof row.state === 'string' ? row.state : ''
+  if (!REGISTRY_STATES.has(state)) invalidRegistryResponse('state')
+
+  const creditStatus = typeof row.credit_status === 'string' ? row.credit_status : ''
+  if (!CREDIT_STATUSES.has(creditStatus)) invalidRegistryResponse('credit_status')
+
+  return {
+    state: state as ValidatedBeginRow['state'],
+    threadId: asNullableUuid(row.thread_id, 'thread_id'),
+    attemptToken: asStrictUuid(row.attempt_token, 'attempt_token'),
+    assistantMessageId: asNullableUuid(row.assistant_message_id, 'assistant_message_id'),
+    creditStatus: creditStatus as AssistantCreditStatus,
+  }
+}
+
+/** Validation des compteurs de finalisation (consommation/débit). */
+export function validateFinalizeCounters(raw: unknown): { consumed: number; charged: number } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) invalidRegistryResponse('finalize_row')
+
+  const row = raw as Record<string, unknown>
+  const consumed = asNonNegativeInteger(row.credits_consumed, 'credits_consumed')
+  const charged = asNonNegativeInteger(row.credits_charged, 'credits_charged')
+  if (charged > consumed) invalidRegistryResponse('credits_charged_gt_consumed')
+
+  return { consumed, charged }
+}
+
 /**
  * Réservation d'une requête dans le registre persistant.
  *
@@ -104,27 +174,22 @@ export async function beginAssistantRequest(
     throw new Error('ASSISTANT_BACKEND_UNAVAILABLE')
   }
 
-  const row = (Array.isArray(data) ? data[0] : data) as
-    | { state?: string; thread_id?: string | null; assistant_message_id?: string | null; attempt_token?: string | null; credit_status?: string | null }
-    | null
-    | undefined
-
-  if (!row) throw new Error('ASSISTANT_BACKEND_UNAVAILABLE')
+  const rawRow = Array.isArray(data) ? data[0] : data
+  // Validation runtime stricte : état, UUID, jeton et statut financier.
+  const row = validateBeginRow(rawRow)
 
   // Réponse déjà finalisée : rejeu du message + statut de débit réel (jamais
   // « non facturé » par défaut, qui masquerait une facturation antérieure).
   if (row.state === 'completed') {
     return {
       status: 'replay',
-      threadId: row.thread_id ? String(row.thread_id) : '',
-      assistantMessageId: row.assistant_message_id ? String(row.assistant_message_id) : null,
-      creditStatus: toCreditStatus(row.credit_status),
+      threadId: row.threadId ?? '',
+      assistantMessageId: row.assistantMessageId,
+      creditStatus: row.creditStatus,
     }
   }
 
-  // 'in_progress' renvoyé sans erreur = bail détenu par CET appelant.
-  if (!row.attempt_token) throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
-  return { status: 'proceed', attemptToken: String(row.attempt_token) }
+  return { status: 'proceed', attemptToken: row.attemptToken }
 }
 
 /** Lie le thread créé après acquisition au jeton courant (fencing). */

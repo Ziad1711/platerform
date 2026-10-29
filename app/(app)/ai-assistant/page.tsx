@@ -415,7 +415,12 @@ export default function AssistantIAPage() {
     }
   }
 
-  const pendingRequestRef = useRef<{ text: string; requestId: string } | null>(null)
+  const pendingRequestRef = useRef<{ key: string; requestId: string } | null>(null)
+
+  // La clé de retry lie compte, boutique, conversation et contenu : changer de
+  // périmètre ne réutilise jamais l'identifiant d'une requête précédente.
+  const buildRetryKey = (text: string, threadId: string | null) =>
+    [userId ?? '', currentStoreId ?? '', threadId ?? 'new', text].join('\u0000')
 
   const handleSend = async (message: string) => {
     const clean = message.trim()
@@ -424,10 +429,12 @@ export default function AssistantIAPage() {
     setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
     setInput('')
 
-    // Même texte relancé après un échec = même clé : le serveur rejoue la
-    // réponse déjà produite au lieu de rappeler le fournisseur ou de débiter.
+    // Même texte, même compte, même boutique et même conversation relancés
+    // après un échec = même clé ; tout changement de périmètre produit une
+    // nouvelle clé (aucun rejeu inter-périmètre possible).
+    const retryKey = buildRetryKey(clean, selectedThreadId)
     const requestId =
-      pendingRequestRef.current && pendingRequestRef.current.text === clean
+      pendingRequestRef.current && pendingRequestRef.current.key === retryKey
         ? pendingRequestRef.current.requestId
         : typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
@@ -440,7 +447,7 @@ export default function AssistantIAPage() {
       return
     }
 
-    pendingRequestRef.current = { text: clean, requestId }
+    pendingRequestRef.current = { key: retryKey, requestId }
 
     try {
       await sendMessageMutation.mutateAsync({
