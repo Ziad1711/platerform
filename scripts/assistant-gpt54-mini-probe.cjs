@@ -4,9 +4,9 @@
  * `--self-test` pour vérifier les garde-fous. La clé n'est jamais affichée.
  * Limites : 20 appels, 400 tokens de sortie, 0,02 $ par échange.
  */
-const MAX_CALLS = 20
+const HARD_MAX_CALLS = 20
+const HARD_MAX_USD_PER_EXCHANGE = 0.02
 const MAX_OUTPUT_TOKENS = 400
-const MAX_USD_PER_EXCHANGE = 0.02
 const MODEL = 'gpt-5.4-mini'
 const PRICE_INPUT_PER_MILLION = 0.75
 const PRICE_OUTPUT_PER_MILLION = 4.5
@@ -14,6 +14,23 @@ const ENDPOINT = 'https://api.openai.com/v1/chat/completions'
 
 const DRY_RUN = !process.argv.includes('--live')
 const SELF_TEST = process.argv.includes('--self-test')
+
+/** Valeur numérique d'une option `--nom valeur`, bornée par un plafond absolu. */
+function readOption(name, fallback, hardMax) {
+  const index = process.argv.indexOf(name)
+  if (index === -1) return fallback
+  const raw = process.argv[index + 1]
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`OPTION_INVALIDE:${name}`)
+  if (value > hardMax) throw new Error(`OPTION_HORS_PLAFOND:${name}`)
+  return value
+}
+
+// Plafonds effectifs : jamais supérieurs aux limites absolues (20 appels, 0,02 $/échange).
+const MAX_CALLS = Math.floor(readOption('--calls', HARD_MAX_CALLS, HARD_MAX_CALLS))
+const MAX_USD_PER_EXCHANGE = HARD_MAX_USD_PER_EXCHANGE
+const MAX_CUMULATIVE_USD = readOption('--max-usd', MAX_CALLS * MAX_USD_PER_EXCHANGE, MAX_CALLS * MAX_USD_PER_EXCHANGE)
+
 
 function estimateCostUsd(inputTokens, outputTokens) {
   const value =
@@ -46,7 +63,7 @@ function assertBudgetAllowed(callIndex, inputTokens, outputTokens, cumulativeUsd
   if (outputTokens > MAX_OUTPUT_TOKENS) throw new Error('BUDGET_MAX_OUTPUT_TOKENS')
   const cost = estimateCostUsd(inputTokens, outputTokens)
   if (cost > MAX_USD_PER_EXCHANGE) throw new Error('BUDGET_MAX_USD_PER_EXCHANGE')
-  if (cumulativeUsd + cost > MAX_CALLS * MAX_USD_PER_EXCHANGE) throw new Error('BUDGET_CUMULATIVE_REACHED')
+  if (cumulativeUsd + cost > MAX_CUMULATIVE_USD) throw new Error('BUDGET_CUMULATIVE_REACHED')
   return cost
 }
 
@@ -105,9 +122,20 @@ function selfTest() {
     }
   })
   check('G08 budget cumulé refusé', () => {
-    if (!rejects(() => assertBudgetAllowed(0, 100, 100, MAX_CALLS * MAX_USD_PER_EXCHANGE), 'BUDGET_CUMULATIVE_REACHED')) {
+    if (!rejects(() => assertBudgetAllowed(0, 100, 100, MAX_CUMULATIVE_USD), 'BUDGET_CUMULATIVE_REACHED')) {
       throw new Error('plafond cumulé non appliqué')
     }
+  })
+  check('G10 --calls borné par le plafond absolu', () => {
+    if (HARD_MAX_CALLS !== 20) throw new Error('plafond absolu modifié')
+    if (MAX_CALLS > HARD_MAX_CALLS) throw new Error('plafond effectif incohérent')
+    if (readOption('--absent', 7, 20) !== 7) throw new Error('valeur par défaut incorrecte')
+  })
+  check('G11 plafond par échange inchangé', () => {
+    if (MAX_USD_PER_EXCHANGE !== HARD_MAX_USD_PER_EXCHANGE) throw new Error('plafond par échange affaibli')
+  })
+  check('G12 budget cumulé jamais supérieur à appels × 0,02 $', () => {
+    if (MAX_CUMULATIVE_USD > MAX_CALLS * HARD_MAX_USD_PER_EXCHANGE + 1e-9) throw new Error('budget cumulé trop élevé')
   })
   check('G09 aucun appel réseau hors --live', () => {
     if (!DRY_RUN) throw new Error('self-test doit rester en dry-run')
