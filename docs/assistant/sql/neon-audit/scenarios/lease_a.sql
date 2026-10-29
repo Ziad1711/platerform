@@ -27,15 +27,9 @@ select pg_advisory_unlock(900005);
 select pg_sleep(130);
 commit;
 
--- A constate que son jeton a été remplacé par la reprise de B.
-select audit.assert_true('R5A.superseded',
-  (select attempt_token::text from public.assistant_requests
-    where user_id = :'owner_id'::uuid and request_id = :'r5') <> :'a5_attempt_token',
-  'jeton remplacé par la reprise');
-
-select audit.assert_true('R5A.lease_future',
-  (select lease_until > clock_timestamp() from public.assistant_requests
-    where user_id = :'owner_id'::uuid and request_id = :'r5'),
-  'bail de la reprise encore valide');
+-- Le jeton de A est consigné : la rotation sera vérifiée APRÈS la fin de B
+-- (invariant I16), car A ne peut pas observer la reprise de B dans sa propre
+-- fenêtre temporelle.
+select audit.record('R5A.token', 'SKIP', null, :'a5_attempt_token');
 
 \echo 'A: terminé'

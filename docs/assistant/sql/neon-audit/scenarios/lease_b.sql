@@ -25,5 +25,6 @@ commit;
 
 select audit.assert_eq('R5B.takeover', :'b5_state', 'in_progress', 'reprise après expiration');
 select audit.assert_true('R5B.new_token', coalesce(:'b5_attempt_token', '') <> '', 'nouveau jeton émis');
+select audit.record('R5B.token', 'SKIP', null, :'b5_attempt_token');
 
 \echo 'B: terminé'

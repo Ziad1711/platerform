@@ -40,7 +40,7 @@ insert into audit.required_columns (tbl, col) values
 -- Colonnes manquantes
 select
   count(*) as missing_columns,
-  string_agg(rc.tbl || '.' || rc.col, ', ' order by rc.tbl, rc.col) as missing
+  coalesce(string_agg(rc.tbl || '.' || rc.col, ', ' order by rc.tbl, rc.col), '(aucune)') as missing
   from audit.required_columns rc
  where not exists (
    select 1 from information_schema.columns c

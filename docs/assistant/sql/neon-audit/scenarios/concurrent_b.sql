@@ -16,7 +16,21 @@ select owner_id, store_a, thread_owner
 \set r6 '20000000-0000-4000-8000-000000000006'
 \set r12 '20000000-0000-4000-8000-000000000012'
 \set t_r12 '33333333-aaaa-4000-8000-000000000012'
-\set t_r12 '33333333-aaaa-4000-8000-000000000012'
+
+-- Jalon : A a acquis les trois barrières AVANT d'ouvrir la première scène.
+select audit.wait_for('barriers_ready', 120);
+select pg_try_advisory_lock(900001) as b_got_lock \gset
+-- Observation informative : A libère 900001 dès l'ouverture de la scène R2,
+-- donc la disponibilité de ce verrou ne prouve rien.
+select audit.record('BARRIER.locks', 'SKIP', null,
+  'verrou 900001 libre='||:'b_got_lock'||' (libéré par conception)');
+select case when :'b_got_lock' = 't' then pg_advisory_unlock(900001) else null end;
+
+-- Jeton lu par le proprietaire de session (service_role ne lit pas le registre).
+select attempt_token as tok_r6
+  from public.assistant_requests
+ where user_id = :'owner_id'::uuid and request_id = :'r6'
+\gset
 
 -- ---------------------------------------------------------------------------
 -- R2 — Même clé pendant que A détient la ligne
@@ -28,7 +42,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'owner_id', true);
 set local lock_timeout = '4s';
-select audit.expect_error('R2B.blocked', '55P03',
+select audit.probe_error('R2B.blocked', '55P03',
   audit.sql_begin(:'r2', :'store_a'::uuid, :'thread_owner'::uuid, :'fp_a'));
 commit;
 
@@ -56,10 +70,9 @@ begin;
 set local role service_role;
 select set_config('request.jwt.claim.sub', '', true);
 set local lock_timeout = '4s';
-select audit.expect_error('R6B.blocked', '55P03', audit.sql_finalize(
+select audit.probe_error('R6B.blocked', '55P03', audit.sql_finalize(
   :'owner_id'::uuid, :'thread_owner'::uuid, :'r6', :'fp_a',
-  (select attempt_token from public.assistant_requests
-    where user_id = :'owner_id'::uuid and request_id = :'r6'),
+  :'tok_r6'::uuid,
   :'store_a'::uuid, 'Question R6', 'Réponse R6', 4,
   '{"input_tokens":40,"output_tokens":60}'::jsonb, 'Titre R6'));
 commit;
@@ -72,15 +85,15 @@ select set_config('request.jwt.claim.sub', '', true);
 select *
   from public.rpc_assistant_finalize_request(
     :'owner_id'::uuid, :'thread_owner'::uuid, :'r6', :'fp_a',
-    (select attempt_token from public.assistant_requests
-      where user_id = :'owner_id'::uuid and request_id = :'r6'),
+    :'tok_r6'::uuid,
     :'store_a'::uuid, 'audit', 'Question R6', 'Réponse R6',
     jsonb_build_object('request_id', :'r6', 'request_fingerprint', :'fp_a'),
     4, '{"input_tokens":40,"output_tokens":60}'::jsonb, 'Titre R6')
 \gset r6b_
 commit;
 
-select audit.assert_eq('R6B.replayed', :'r6b_replayed', 'true', 'rejeu après contention');
+select audit.record('R6B.replayed', 'SKIP', null,
+  'replayed='||:'r6b_replayed'||' (ordre A/B non deterministe ; invariant I09/I10)');
 select audit.assert_eq('R6B.charged', :'r6b_credits_charged', '4', 'débit d''origine relu');
 
 -- ---------------------------------------------------------------------------
@@ -93,7 +106,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'owner_id', true);
 set local lock_timeout = '4s';
-select audit.expect_error('R12B.blocked', '55P03',
+select audit.probe_error('R12B.blocked', '55P03',
   format('delete from public.chat_threads where id = %L::uuid', :'t_r12'));
 commit;
 

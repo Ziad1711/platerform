@@ -151,9 +151,11 @@ begin
   perform audit.seed_row('profiles', jsonb_build_object('id', c_outsider));
 
   perform audit.seed_row('plans', jsonb_build_object(
-    'id', c_plan_free, 'price', 0, 'ai_credits_monthly', 0));
+    'id', c_plan_free, 'name', 'audit-free',
+    'price', 0, 'ai_credits_monthly', 0));
   perform audit.seed_row('plans', jsonb_build_object(
-    'id', c_plan_paid, 'price', 19, 'ai_credits_monthly', 100));
+    'id', c_plan_paid, 'name', 'audit-paid',
+    'price', 19, 'ai_credits_monthly', 100));
 
   -- Abonnement payant actif pour l'owner : plafond 100 crédits.
   perform audit.seed_row('subscriptions', jsonb_build_object(
@@ -204,7 +206,7 @@ select
   audit.assert_eq('FX01', (select count(*)::text from audit.fx), '1', 'fixtures enregistrées'),
   audit.assert_eq('FX02',
     (select count(*)::text from public.store_members where store_id = (select store_a from audit.fx)),
-    '3', 'trois membres actifs'),
+    '4', 'owner auto-créé par trigger + 3 membres seedés'),
   audit.assert_eq('FX03',
     (select coalesce(sum(monthly_credits - credits_used), 0)::text
        from public.ai_credit_wallets where user_id = (select owner_id from audit.fx)),

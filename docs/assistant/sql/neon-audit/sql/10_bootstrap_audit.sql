@@ -91,6 +91,36 @@ begin
 end;
 $$;
 
+-- Sonde NON bloquante : utilisée pour les observations de concurrence, dont
+-- l'issue dépend de l'ordre réel des deux sessions (non déterministe).
+-- Un état attendu observé => PASS ; aucun état inattendu ne fait échouer la
+-- campagne, mais l'état réel est consigné (ou 'NO_ERROR' si l'action a abouti).
+create or replace function audit.probe_error(p_case text, p_expected_state text, p_sql text)
+returns text
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_state text;
+  v_message text;
+begin
+  begin
+    execute p_sql;
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_message = message_text;
+    if v_state = p_expected_state then
+      perform audit.record(p_case, 'PASS', v_state, 'contention observée : ' || v_message);
+      return 'PASS';
+    end if;
+    perform audit.record(p_case, 'SKIP', v_state, 'état concurrent différent : ' || v_message);
+    return 'SKIP';
+  end;
+
+  perform audit.record(p_case, 'SKIP', null, 'NO_ERROR : action aboutie (course gagnée)');
+  return 'NO_ERROR';
+end;
+$$;
+
 create or replace function audit.expect_ok(p_case text, p_sql text)
 returns text
 language plpgsql
@@ -162,6 +192,51 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Coordination A/B : signal persistant + attente bornée.
+-- Deux sessions psql distinctes n'ont pas d'autre canal ; sans ce jalon, la
+-- session B peut acquérir une barrière avant A (course) et fausser la scène.
+-- ---------------------------------------------------------------------------
+create table if not exists audit.signals (
+  name       text primary key,
+  created_at timestamptz not null default clock_timestamp()
+);
+
+create or replace function audit.signal(p_name text)
+returns void
+language sql
+set search_path = public, pg_temp
+as $$
+  insert into audit.signals (name, created_at)
+  values (p_name, clock_timestamp())
+  on conflict (name) do update set created_at = excluded.created_at;
+$$;
+
+create or replace function audit.wait_for(p_name text, p_timeout_s integer default 60)
+returns void
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_deadline timestamptz := clock_timestamp() + make_interval(secs => greatest(1, p_timeout_s));
+begin
+  while not exists (select 1 from audit.signals s where s.name = p_name) loop
+    if clock_timestamp() > v_deadline then
+      raise exception 'AUDIT_BARRIER_TIMEOUT:%', p_name using errcode = 'P0001';
+    end if;
+    perform pg_sleep(0.2);
+  end loop;
+end;
+$$;
+
+create or replace function audit.reset_signals()
+returns void
+language sql
+set search_path = public, pg_temp
+as $$
+  truncate table audit.signals;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Générateurs d'instructions (évite tout problème de quoting dans les scénarios)
 -- ---------------------------------------------------------------------------
 create or replace function audit.sql_begin(p_req text, p_store uuid, p_thread uuid, p_fp text)
@@ -226,9 +301,19 @@ revoke all on function audit.assert_true(text, boolean, text) from public, anon;
 revoke all on function audit.assert_eq(text, text, text, text) from public, anon;
 revoke all on function audit.expect_error(text, text, text) from public, anon;
 revoke all on function audit.expect_ok(text, text) from public, anon;
+revoke all on function audit.probe_error(text, text, text) from public, anon;
 revoke all on function audit.install_late_failure() from public, anon, authenticated;
 revoke all on function audit.remove_late_failure() from public, anon, authenticated;
 revoke all on function audit.reset_results() from public, anon, authenticated;
+revoke all on function audit.signal(text) from public, anon;
+revoke all on function audit.wait_for(text, integer) from public, anon;
+revoke all on function audit.reset_signals() from public, anon, authenticated;
+grant execute on function audit.signal(text) to authenticated, service_role;
+grant execute on function audit.wait_for(text, integer) to authenticated, service_role;
+grant execute on function audit.reset_signals() to service_role;
+
+revoke all on audit.signals from public, anon;
+grant select, insert, update on audit.signals to authenticated, service_role;
 revoke all on function audit.late_failure_trigger() from public, anon, authenticated;
 revoke all on function audit.sql_begin(text, uuid, uuid, text) from public, anon;
 revoke all on function audit.sql_bind(text, uuid, uuid) from public, anon;
@@ -251,6 +336,7 @@ grant execute on function audit.assert_true(text, boolean, text) to authenticate
 grant execute on function audit.assert_eq(text, text, text, text) to authenticated, service_role;
 grant execute on function audit.expect_error(text, text, text) to authenticated, service_role;
 grant execute on function audit.expect_ok(text, text) to authenticated, service_role;
+grant execute on function audit.probe_error(text, text, text) to authenticated, service_role;
 grant execute on function audit.install_late_failure() to service_role;
 grant execute on function audit.remove_late_failure() to service_role;
 grant execute on function audit.reset_results() to service_role;

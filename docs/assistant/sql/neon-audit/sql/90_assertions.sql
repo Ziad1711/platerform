@@ -68,6 +68,60 @@ select audit.assert_eq('I08.r12_status_preserved',
     where request_id = '20000000-0000-4000-8000-000000000012'),
   'charged', 'statut de débit conservé');
 
+-- ---------------------------------------------------------------------------
+-- Invariants financiers et de cohérence (indépendants de l'ordre A/B)
+-- ---------------------------------------------------------------------------
+select audit.assert_eq('I09.r6_single_completion',
+  (select count(*)::text from public.assistant_requests
+    where request_id = '20000000-0000-4000-8000-000000000006' and state = 'completed'),
+  '1', 'une seule finalisation pour la clé R6');
+
+select audit.assert_eq('I10.r6_single_debit',
+  (select coalesce(sum(credits_charged), 0)::text from public.assistant_requests
+    where request_id = '20000000-0000-4000-8000-000000000006'),
+  '4', 'débit unique de 4 crédits malgré deux tentatives concurrentes');
+
+select audit.assert_eq('I11.r2_single_reservation',
+  (select count(*)::text from public.assistant_requests
+    where request_id = '20000000-0000-4000-8000-000000000002'),
+  '1', 'aucune double réservation sur la même clé');
+
+select audit.assert_eq('I12.s1_policy',
+  (select state||'/'||credit_status||'/'||credits_consumed||'/'||credits_charged
+     from public.assistant_requests
+    where request_id = '10000000-0000-4000-8000-000000000006'),
+  'completed/insufficient/2/0', 'insuffisant : réponse conservée, débit nul');
+
+select audit.assert_eq('I13.r13_single_debit_after_retry',
+  (select credits_consumed||'/'||credits_charged||'/'||state
+     from public.assistant_requests
+    where request_id = '10000000-0000-4000-8000-000000000013'),
+  '3/3/completed', 'reprise après rollback : un seul débit');
+
+select audit.assert_eq('I14.no_negative_wallet',
+  (select count(*)::text from public.ai_credit_wallets
+    where credits_used < 0 or monthly_credits < 0),
+  '0', 'aucun compteur négatif');
+
+select audit.assert_eq('I15.no_orphan_assistant_reply',
+  (select count(*)::text from public.chat_messages m
+    where m.role = 'assistant' and m.metadata ? 'request_id'
+      and not exists (
+        select 1 from public.assistant_requests r
+         where r.request_id = m.metadata->>'request_id' and r.state = 'completed')),
+  '0', 'aucune réponse assistant sans état de registre cohérent');
+
+-- R5 : la rotation du jeton doit être constatée APRÈS la fin des deux sessions.
+select audit.assert_true('I16.r5_token_rotated',
+  (select detail from audit.results where case_name = 'R5A.token')
+    is distinct from (select detail from audit.results where case_name = 'R5B.token'),
+  'jeton de la reprise différent du jeton initial (bail expiré)');
+
+select audit.assert_eq('I17.r5_takeover_state',
+  (select state from public.assistant_requests
+    where request_id = '20000000-0000-4000-8000-000000000005'),
+  'in_progress', 'reprise en cours, non clôturée');
+
 \echo ''
 \echo '== Verdict =='
 select status, count(*) as cases
