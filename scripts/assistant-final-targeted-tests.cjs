@@ -23,6 +23,7 @@ const check = async (name, fn) => {
 async function main() {
   const idem = await import(pathToFileURL(path.join(ROOT, 'lib/assistant/idempotency.ts')).href)
   const retry = await import(pathToFileURL(path.join(ROOT, 'lib/assistant/retry-key.ts')).href)
+  const invariants = await import(pathToFileURL(path.join(ROOT, 'lib/assistant/credit-invariants.ts')).href)
 
   const UUID = '11111111-1111-4111-8111-111111111111'
   const rejects = (fn) => {
@@ -37,22 +38,22 @@ async function main() {
   const identity = { requestId: 'r', storeId: 's', threadId: null, fingerprint: 'f'.repeat(64) }
 
   await check('F01 compteurs valides', () => {
-    assert.deepEqual(idem.validateFinalizeCounters({ credits_consumed: 3, credits_charged: 3 }), { consumed: 3, charged: 3 })
+    assert.deepEqual(invariants.validateFinalizeCounters({ credits_consumed: 3, credits_charged: 3 }), { consumed: 3, charged: 3 })
   })
   await check('F02 débit > consommation rejeté', () => {
-    assert.equal(rejects(() => idem.validateFinalizeCounters({ credits_consumed: 2, credits_charged: 3 })), 'ASSISTANT_BACKEND_UNAVAILABLE')
+    assert.equal(rejects(() => invariants.validateFinalizeCounters({ credits_consumed: 2, credits_charged: 3 })), 'ASSISTANT_BACKEND_UNAVAILABLE')
   })
   await check('F03 compteur négatif rejeté', () => {
-    assert.equal(rejects(() => idem.validateFinalizeCounters({ credits_consumed: -1, credits_charged: 0 })), 'ASSISTANT_BACKEND_UNAVAILABLE')
+    assert.equal(rejects(() => invariants.validateFinalizeCounters({ credits_consumed: -1, credits_charged: 0 })), 'ASSISTANT_BACKEND_UNAVAILABLE')
   })
   await check('F04 compteur flottant rejeté', () => {
-    assert.equal(rejects(() => idem.validateFinalizeCounters({ credits_consumed: 1.5, credits_charged: 1 })), 'ASSISTANT_BACKEND_UNAVAILABLE')
+    assert.equal(rejects(() => invariants.validateFinalizeCounters({ credits_consumed: 1.5, credits_charged: 1 })), 'ASSISTANT_BACKEND_UNAVAILABLE')
   })
   await check('F05 bigint texte accepté', () => {
-    assert.deepEqual(idem.validateFinalizeCounters({ credits_consumed: '4', credits_charged: '0' }), { consumed: 4, charged: 0 })
+    assert.deepEqual(invariants.validateFinalizeCounters({ credits_consumed: '4', credits_charged: '0' }), { consumed: 4, charged: 0 })
   })
   await check('F06 réponse non objet rejetée', () => {
-    assert.equal(rejects(() => idem.validateFinalizeCounters(null)), 'ASSISTANT_BACKEND_UNAVAILABLE')
+    assert.equal(rejects(() => invariants.validateFinalizeCounters(null)), 'ASSISTANT_BACKEND_UNAVAILABLE')
   })
 
   await check('R01 acquisition valide', async () => {

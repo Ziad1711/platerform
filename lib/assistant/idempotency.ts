@@ -128,8 +128,6 @@ export function validateBeginRow(raw: unknown): ValidatedBeginRow {
   }
 }
 
-/** Validation des compteurs de finalisation (implémentation dans credit-invariants). */
-export { validateFinalizeCounters } from '@/lib/assistant/credit-invariants'
 
 /**
  * Réservation d'une requête dans le registre persistant.
