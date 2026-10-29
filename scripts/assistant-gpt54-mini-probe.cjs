@@ -241,6 +241,7 @@ async function runLive() {
 
   let cumulativeUsd = 0
   for (let index = 0; index < MAX_CALLS; index += 1) {
+    const startedAt = Date.now()
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -262,7 +263,8 @@ async function runLive() {
     const outputTokens = Number(payload?.usage?.completion_tokens || 0)
     const cost = assertBudgetAllowed(index, inputTokens, outputTokens, cumulativeUsd)
     cumulativeUsd = Number((cumulativeUsd + cost).toFixed(6))
-    console.log(`PASS  appel ${index + 1} : in=${inputTokens} out=${outputTokens} coût=${cost} cumul=${cumulativeUsd}`)
+    const latencyMs = Date.now() - startedAt
+    console.log(`PASS  appel ${index + 1} : in=${inputTokens} out=${outputTokens} coût=${cost} cumul=${cumulativeUsd} latence=${latencyMs}ms`)
     if (cumulativeUsd >= MAX_CALLS * MAX_USD_PER_EXCHANGE) break
   }
 }
