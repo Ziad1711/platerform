@@ -745,6 +745,24 @@ function runTailStaticChecks() {
     }
     return 'privilèges transactionnels'
   })
+  check('S14', 'aucune fonction créée ne reste exécutable par défaut', () => {
+    for (const [label, source] of files) {
+      const created = [...source.matchAll(/create(?: or replace)? function\s+public\.([a-z0-9_]+)/gi)].map((m) =>
+        m[1].toLowerCase()
+      )
+      const revoked = [...source.matchAll(/revoke\s+all\s+on\s+function\s+public\.([a-z0-9_]+)/gi)].map((m) =>
+        m[1].toLowerCase()
+      )
+      for (const fn of new Set(created)) {
+        assert(revoked.includes(fn), `${label}: ${fn} sans revoke (héritage pg_default_acl)`)
+      }
+    }
+    assert(
+      /revoke all on function public\.assistant_thread_guard\(\) from public, anon, authenticated/.test(files[1][1]),
+      '02 ne révoque pas la fonction trigger'
+    )
+    return 'fonctions toutes révoquées'
+  })
 }
 
 function runAuditPackageChecks() {

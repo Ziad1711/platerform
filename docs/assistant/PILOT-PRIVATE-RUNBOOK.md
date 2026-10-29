@@ -70,7 +70,7 @@ cd docs/assistant/sql && sha256sum -c MANIFEST.sha256   # 4 x OK
 | Fichier | SHA-256 |
 |---|---|
 | `01_assistant_privileges.proposed.sql` | `56739607f8072b7b8b52afb8c119ca2f0d92f38be2430244c7c8c1ee3ef39ae7` |
-| `02_assistant_thread_scope_rls.proposed.sql` | `8bc0b7f4c9f25c3b8c33207782c5381f4326fd43a3ea1f2270e36983d1c9102f` |
+| `02_assistant_thread_scope_rls.proposed.sql` | `fe2815e5aa2b3c600c814fa5d4a4e1f22bff7ee4fc1b237388808a6750c8a252` |
 | `03b_assistant_idempotency_registry_v2.proposed.sql` | `01cea1b88fe559bd58d1c57fcda0f81f2407d84ab361b9d9885a8180c79899f9` |
 | `05b_assistant_finalization_v2.proposed.sql` | `69065b218b143c68237108db787f5584c07d03d78309dc64a2e192340e70a869` |
 

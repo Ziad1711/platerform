@@ -251,6 +251,9 @@ revoke all on function public.assistant_role_allows_use(text) from public, anon,
 revoke all on function public.assistant_has_full_finances(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.assistant_can_use_store(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.assistant_can_read_thread(uuid) from public, anon;
+-- Fonction trigger : aucun EXECUTE par défaut (pg_default_acl accorde EXECUTE à
+-- anon/authenticated sur les nouvelles fonctions ; un trigger n'en a pas besoin).
+revoke all on function public.assistant_thread_guard() from public, anon, authenticated;
 grant execute on function public.assistant_can_read_thread(uuid) to authenticated, service_role;
 grant execute on function public.assistant_can_use_store(uuid, uuid) to service_role;
 grant execute on function public.assistant_has_full_finances(uuid, uuid) to service_role;
