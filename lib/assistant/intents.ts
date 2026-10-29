@@ -443,7 +443,7 @@ export function resolveIntent(message: string): AssistantIntent {
   const text = message.toLowerCase()
   const normalized = normalizeIntentText(message)
 
-  if (GREETINGS.some((g) => normalized === g || normalized.startsWith(`${g} `))) {
+  if (GREETINGS.includes(normalized)) {
     return 'greeting'
   }
 

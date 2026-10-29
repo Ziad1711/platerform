@@ -700,6 +700,21 @@ async function main() {
     return 'period_comparison'
   })
 
+  check('A04b', 'Salutation suivie d’une question n’est pas un simple greeting', () => {
+    assertEqual(intents.resolveIntent('bonsoir'), 'greeting', 'salutation seule')
+    assertEqual(intents.resolveIntent('Bonjour !'), 'greeting', 'salutation ponctuée')
+    assertEqual(
+      intents.resolveIntent('bonsoir, que pensez vous de ma performance'),
+      'performance_request',
+      'question précédée d’une salutation'
+    )
+    assert(
+      intents.resolveIntent('salut, montre-moi mes ventes') !== 'greeting',
+      'salutation + ventes ne doit pas être un greeting'
+    )
+    return 'greeting strict'
+  })
+
   check('A05', 'Comparaison MM/YYYY résolue dans l’ordre', () => {
     const pair = intents.resolveComparisonPeriods('compare 03/2026 et 01/2026')
     assert(pair, 'paire numérique attendue')
