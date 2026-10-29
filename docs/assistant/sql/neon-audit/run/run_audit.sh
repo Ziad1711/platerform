@@ -23,6 +23,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGS="$HERE/run/logs"
 mkdir -p "$LOGS"
 
+# Client PostgreSQL local (installation sans serveur) si absent du PATH.
+PGCLIENT_BIN="${PGCLIENT_BIN:-$HOME/AppData/Local/pgclient/pgsql/bin}"
+if [ -d "$PGCLIENT_BIN" ]; then export PATH="$PGCLIENT_BIN:$PATH"; fi
+if ! command -v psql >/dev/null 2>&1; then
+  echo "psql introuvable — voir connection/INSTALL_CLIENT.md"
+  exit 1
+fi
+
 PSQL=(psql "$AUDIT_URL" --set=ON_ERROR_STOP=1 --no-psqlrc --quiet)
 
 step() { echo; echo "=== $* ==="; }

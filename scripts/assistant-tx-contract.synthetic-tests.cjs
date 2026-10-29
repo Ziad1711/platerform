@@ -761,7 +761,7 @@ function runAuditPackageChecks() {
       'scenarios/lease_a.sql', 'scenarios/lease_b.sql',
       'run/run_audit.sh', 'run/env.example',
       'connection/env.neon.example', 'connection/check_connection.sh',
-      'connection/PREVALIDATION.md',
+      'connection/PREVALIDATION.md', 'connection/INSTALL_CLIENT.md',
     ]
     for (const rel of expected) {
       assert(fs.existsSync(path.join(base, rel)), `manquant: ${rel}`)
@@ -876,6 +876,19 @@ function runAuditPackageChecks() {
     assert(/after update on public\.ai_credit_wallets/.test(bootstrap),
       'l\'erreur doit survenir APRÈS l\'écriture du débit')
     return 'échec tardif après débit'
+  })
+  check('P07', 'client PostgreSQL documenté (client seul, sans serveur)', () => {
+    const doc = read('connection/INSTALL_CLIENT.md')
+    assert(/18\.1/.test(doc), 'version non documentée')
+    assert(/pg_dump/.test(doc) && /psql/.test(doc), 'outils non documentés')
+    assert(/aucun service/i.test(doc), 'absence de service non documentée')
+    assert(/server_version_num/.test(doc), 'contrôle de compatibilité Supabase absent')
+    assert(/--schema-only/.test(doc) || /schema-only/.test(doc), 'options d\'export absentes')
+    const script = read('connection/check_connection.sh')
+    assert(script.includes('resolve_bin'), 'résolution des binaires absente')
+    assert(script.includes('PGCLIENT_BIN'), 'repli PATH absent')
+    assert(script.includes('ONLINE'), 'mode hors ligne absent')
+    return 'client seul + repli PATH'
   })
 }
 
