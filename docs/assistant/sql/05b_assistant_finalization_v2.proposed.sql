@@ -187,7 +187,7 @@ begin
   end if;
 
   if v_row.fingerprint <> p_request_fingerprint
-     or v_row.store_id <> p_store_id
+     or v_row.store_id is distinct from p_store_id
      or (v_row.thread_id is not null and v_row.thread_id <> p_thread_id) then
     raise exception 'IDEMPOTENCY_CONFLICT' using errcode = 'P0001';
   end if;

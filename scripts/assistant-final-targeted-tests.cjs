@@ -285,6 +285,48 @@ async function main() {
     assert.match(sql02, /before update on public\.chat_threads/)
   })
 
+  // ---------------------------------------------------------------------------
+  // Lot E2 — registre : détachement à la suppression de boutique (statique)
+  // ---------------------------------------------------------------------------
+  const sql03b = fs.readFileSync(
+    path.join(ROOT, 'docs/assistant/sql/03b_assistant_idempotency_registry_v2.proposed.sql'),
+    'utf8'
+  )
+  const sql05b = fs.readFileSync(
+    path.join(ROOT, 'docs/assistant/sql/05b_assistant_finalization_v2.proposed.sql'),
+    'utf8'
+  )
+
+  await check('D07 registre : store_id détaché, jamais en cascade', async () => {
+    assert.match(sql03b, /store_id\s+uuid\s+references public\.stores\(id\) on delete set null/)
+    assert.doesNotMatch(sql03b, /store_id\s+uuid\s+not null references public\.stores\(id\)/)
+    assert.doesNotMatch(sql03b, /references public\.stores\(id\) on delete cascade/)
+  })
+  await check('D08 registre : mise à niveau rejouable de la contrainte', async () => {
+    assert.match(sql03b, /alter column store_id drop not null/)
+    assert.match(sql03b, /confdeltype <> 'n'/)
+    assert.match(
+      sql03b,
+      /add constraint assistant_requests_store_id_fkey\s+foreign key \(store_id\) references public\.stores\(id\) on delete set null/
+    )
+  })
+  await check('D09 begin : ligne détachée = conflit, jamais un rejeu', async () => {
+    assert.match(sql03b, /v_row\.store_id is distinct from p_store_id/)
+    assert.doesNotMatch(sql03b, /v_row\.store_id <> p_store_id/)
+  })
+  await check('D10 complete : clôture facturable refusée sans boutique', async () => {
+    assert.match(sql03b, /if v_row\.store_id is null then\s+raise exception 'IDEMPOTENCY_STORE_DETACHED'/)
+  })
+  await check('D11 finalize : périmètre comparé en NULL-safe', async () => {
+    assert.match(sql05b, /v_row\.store_id is distinct from p_store_id/)
+    assert.doesNotMatch(sql05b, /v_row\.store_id <> p_store_id/)
+  })
+  await check('D12 aucun débit possible via une boutique supprimée', async () => {
+    assert.doesNotMatch(sql05b, /references public\.stores\(id\) on delete cascade/)
+    assert.match(sql05b, /if not public\.assistant_can_use_store\(p_store_id, p_user_id\) then\s+raise exception 'FORBIDDEN_STORE'/)
+    assert.match(sql03b, /if not public\.assistant_can_use_store\(v_row\.store_id, p_user_id\) then\s+raise exception 'FORBIDDEN_STORE'/)
+  })
+
   const failed = results.filter(([, status]) => status !== 'PASS')
   for (const [name, status, detail] of results) console.log(`${status}  ${name}${detail ? `  ${detail}` : ''}`)
   console.log(`\nTotal : ${results.length - failed.length}/${results.length} PASS`)

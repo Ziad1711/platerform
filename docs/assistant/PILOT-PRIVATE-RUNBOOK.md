@@ -138,6 +138,42 @@ rollback;
 --    messages et ai_usage intacts
 ```
 
+### 4.1 Preuve de suppression de boutique (registre inclus)
+
+À exécuter en base jetable (Neon) **ou** en transaction annulée, jamais en
+production ouverte. Contrôle préalable des références vers `stores` :
+
+```sql
+-- Toute FK en cascade vers stores détruit des preuves : à vérifier AVANT
+-- la première suppression de boutique réelle.
+select c.conname, c.conrelid::regclass as source, c.confdeltype
+  from pg_constraint c
+ where c.contype = 'f'
+   and c.confrelid = 'public.stores'::regclass
+ order by 2::text;
+-- attendu : 'n' (SET NULL) ou 'r' (RESTRICT) ; 'c' (CASCADE) = preuve détruite
+```
+
+```sql
+begin;
+  -- A. immuabilité : ce détachement doit échouer (THREAD_STORE_IMMUTABLE)
+  savepoint a;
+  update public.chat_threads set store_id = null where store_id = '<store>';
+  rollback to savepoint a;
+
+  -- B. suppression de la boutique
+  delete from public.stores where id = '<store>';
+
+  -- C. invariants attendus
+  select count(*) from public.chat_threads  where id = '<thread>';   -- 1
+  select count(*) from public.chat_messages where thread_id = '<thread>'; -- inchangé
+  select store_id is null, credits_consumed, credits_charged, state
+    from public.assistant_requests where request_id = '<request_id>'; -- 1 ligne conservée
+  select credits_used from public.ai_usage where thread_id = '<thread>';  -- inchangé
+rollback;  -- ou commit en base jetable, puis 99_cleanup
+```
+
+
 
 ---
 
@@ -211,12 +247,88 @@ Durée cible : < 5 minutes. Aucune migration n'est nécessaire pour fermer.
 
 ## 9. Points de vigilance connus
 
-- `assistant_requests.store_id` porte `ON DELETE CASCADE` : supprimer une
-  boutique supprime ses lignes de registre (traçabilité d'idempotence), sans
-  toucher `ai_usage`, `chat_messages` ni les portefeuilles. Décision produit à
-  arbitrer avant un pilote multi-boutiques.
+- `assistant_requests.store_id` est **nullable** et détaché
+  (`ON DELETE SET NULL`) à la suppression d'une boutique : la ligne de registre
+  (clé d'idempotence, empreinte, `credits_consumed/charged`) **survit**.
+  Aucune cascade : la trace n'est pas détruite. Un détachement ne peut jamais
+  produire un débit : `begin` traite la ligne détachée comme un conflit,
+  `reserve`/`complete` refusent une boutique inexistante
+  (`IDEMPOTENCY_STORE_DETACHED`), et `05b` refuse via `FORBIDDEN_STORE`.
+  Vérification avant suppression de boutique :
+  `select confdeltype from pg_constraint where conname='assistant_requests_store_id_fkey';`
+  → attendu `n`.
 - Les conversations détachées (`store_id IS NULL`) sont en quarantaine : non
   lisibles via PostgREST, supprimables par leur propriétaire.
 - Le rate limit reste en mémoire de processus (par instance Vercel).
 - Les tests E2E sur Supabase production exigent une autorisation séparée.
 
+
+---
+
+## 10. Commandes exactes — prochaine intervention (à exécuter sous autorisation)
+
+Aucune de ces commandes n'a été exécutée. `PROD_URL` est saisi dans le shell
+(lecture silencieuse), jamais écrit dans le dépôt.
+
+```bash
+read -rsp 'PROD_URL: ' PROD_URL; export PROD_URL
+export PGAPPNAME='jisra-assistant-pilot'
+cd docs/assistant/sql && sha256sum -c MANIFEST.sha256      # 4 x OK obligatoire
+```
+
+### 10.1 Sauvegardes (§1) puis inventaire
+
+```bash
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -c "select count(*) from public.chat_threads;"
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -c "select count(*) from public.assistant_requests;" 2>/dev/null || true
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -c "select conname, confdeltype from pg_constraint where conrelid in ('public.chat_threads'::regclass) and contype='f';"
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -c "select c.conname, c.conrelid::regclass, c.confdeltype from pg_constraint c where c.contype='f' and c.confrelid='public.stores'::regclass order by 2::text;"
+```
+
+### 10.2 Migrations, une par une (jamais `-1` : les fichiers gèrent leur transaction)
+
+```bash
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -f 01_assistant_privileges.proposed.sql
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -f 02_assistant_thread_scope_rls.proposed.sql
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -f 03b_assistant_idempotency_registry_v2.proposed.sql
+psql "$PROD_URL" -v ON_ERROR_STOP=1 -f 05b_assistant_finalization_v2.proposed.sql
+# après chaque fichier : contrôles RUNBOOK.md §4.1 → §4.4, puis
+psql "$PROD_URL" -c "notify pgrst, 'reload schema';"
+```
+
+### 10.3 Contrôles PostgREST / Auth (lecture seule)
+
+```bash
+APP='https://jisra.io'; ANON="$NEXT_PUBLIC_SUPABASE_ANON_KEY"; TOKEN='<jwt session compte autorisé>'
+curl -s -o /dev/null -w '%{http_code}\n' "$APP/api/assistant/wallet"                       # 401
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" "$APP/api/assistant/wallet"   # 503 ASSISTANT_DISABLED (code fermé)
+curl -s -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN" \
+  "$SUPABASE_URL/rest/v1/chat_threads?select=id&limit=1"                                   # 200, RLS active
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"thread_id":"00000000-0000-4000-8000-000000000000","role":"assistant","content":"x","credits_used":0}' \
+  "$SUPABASE_URL/rest/v1/chat_messages"                                                    # 403/42501 attendu
+```
+
+### 10.4 Déploiement fermé puis activation du pilote (Vercel)
+
+```bash
+vercel --prod                                    # code fermé (aucune variable assistant)
+vercel env add ASSISTANT_BACKEND_WRITES production      # enabled
+vercel env add OPENAI_MODEL production                  # gpt-5.4-mini
+# après §10.3 réussi uniquement :
+vercel env add ASSISTANT_ENABLED production             # enabled
+vercel env add ASSISTANT_ALLOWED_USER_IDS production    # <mon UUID>
+vercel env add ASSISTANT_IDEMPOTENCY_REGISTRY production # enabled
+vercel env add ASSISTANT_FINALIZE_ATOMIC production      # enabled
+vercel --prod
+```
+
+### 10.5 Fermeture / rollback
+
+```bash
+vercel env rm ASSISTANT_ENABLED production --yes && vercel --prod   # fermeture < 5 min
+vercel env rm ASSISTANT_CREDIT_RESERVATION production --yes 2>/dev/null || true
+vercel env rm ASSISTANT_FINALIZE_ATOMIC production --yes
+vercel env rm ASSISTANT_IDEMPOTENCY_REGISTRY production --yes
+# SQL : uniquement si nécessaire, ordre 05b → 03b → 02 → 01 (blocs Rollback)
+```

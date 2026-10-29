@@ -262,6 +262,13 @@ select p.oid::regprocedure, p.proacl
 select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname = 'rpc_assistant_complete_request';
 -- attendu : 1
+
+select conname, confdeltype from pg_constraint
+ where conrelid = 'public.assistant_requests'::regclass and contype = 'f'
+ order by conname;
+-- attendu : assistant_requests_store_id_fkey = 'n' (SET NULL, preuves conservées)
+--            assistant_requests_user_id_fkey = 'c' (suppression de compte acceptée)
+--            thread_id / assistant_message_id = 'n'
 ```
 
 Attendu :

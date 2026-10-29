@@ -44,11 +44,19 @@ begin;
 
 -- ---------------------------------------------------------------------------
 -- 1. Table du registre (+ mise à niveau d'une table issue de 03)
+--
+-- Conservation des preuves : `store_id` est NULLABLE et détaché
+-- (`ON DELETE SET NULL`) à la suppression d'une boutique. Une cascade
+-- supprimerait la mémoire d'idempotence (clé `(user_id, request_id)`) et la
+-- trace des crédits consommés/débités de ces requêtes. Aucun débit
+-- supplémentaire n'est possible en cas de détachement : `begin`, `reserve` et
+-- `complete` refusent toute boutique inexistante (`FORBIDDEN_STORE`) et
+-- `complete` refuse explicitement une ligne détachée.
 -- ---------------------------------------------------------------------------
 create table if not exists public.assistant_requests (
   user_id              uuid        not null references public.profiles(id) on delete cascade,
   request_id           text        not null check (char_length(request_id) between 8 and 100),
-  store_id             uuid        not null references public.stores(id) on delete cascade,
+  store_id             uuid        references public.stores(id) on delete set null,
   thread_id            uuid        references public.chat_threads(id) on delete set null,
   fingerprint          text        not null check (char_length(fingerprint) = 64),
   state                text        not null default 'in_progress'
@@ -118,6 +126,35 @@ create index if not exists assistant_requests_lease_idx
   where state = 'in_progress';
 create index if not exists assistant_requests_thread_idx
   on public.assistant_requests (thread_id);
+
+-- Mise à niveau d'une table déjà créée (03b antérieur ou 03) : le détachement
+-- remplace la cascade, et la colonne devient nullable. Rejouable.
+alter table public.assistant_requests alter column store_id drop not null;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.assistant_requests'::regclass
+       and contype = 'f'
+       and conname = 'assistant_requests_store_id_fkey'
+       and confdeltype <> 'n'
+  ) then
+    alter table public.assistant_requests drop constraint assistant_requests_store_id_fkey;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.assistant_requests'::regclass
+       and contype = 'f'
+       and conname = 'assistant_requests_store_id_fkey'
+  ) then
+    alter table public.assistant_requests
+      add constraint assistant_requests_store_id_fkey
+      foreign key (store_id) references public.stores(id) on delete set null;
+  end if;
+end;
+$$;
 
 alter table public.assistant_requests enable row level security;
 revoke all on public.assistant_requests from public, anon, authenticated;
@@ -285,8 +322,10 @@ begin
   end if;
 
   -- Conflit d'empreinte ou de périmètre : ce n'est pas un rejeu.
+  -- Comparaison NULL-safe : une ligne détachée (boutique supprimée) est un
+  -- conflit explicite, jamais un rejeu silencieux.
   if v_row.fingerprint <> p_fingerprint
-     or v_row.store_id <> p_store_id
+     or v_row.store_id is distinct from p_store_id
      or (v_row.thread_id is not null
          and p_thread_id is not null
          and v_row.thread_id <> p_thread_id) then
@@ -467,6 +506,12 @@ begin
   end if;
   if v_row.thread_id is null then
     raise exception 'THREAD_NOT_FOUND' using errcode = 'P0001';
+  end if;
+
+  -- Ligne détachée (boutique supprimée pendant la requête) : aucune clôture
+  -- facturable n'est écrite sans boutique existante. Fermé, jamais rejoué.
+  if v_row.store_id is null then
+    raise exception 'IDEMPOTENCY_STORE_DETACHED' using errcode = 'P0001';
   end if;
 
   perform public.assistant_lock_identity(p_user_id, v_row.store_id);

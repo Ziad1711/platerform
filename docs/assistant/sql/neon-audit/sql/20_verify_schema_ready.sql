@@ -106,7 +106,7 @@ select (:missing_columns + :missing_functions + :missing_roles + :missing_auth_u
 \endif
 
 \echo 'REVIEW : tables sans RLS (doit être 0) et contraintes FK de chat_messages /'
-\echo 'assistant_requests.thread_id (on delete cascade|set null|restrict) :'
+\echo 'assistant_requests (attendu : store_id = SET NULL, thread_id = SET NULL) :'
 select conrelid::regclass as relation, conname, pg_get_constraintdef(oid) as definition
   from pg_constraint
  where conrelid in (to_regclass('public.chat_messages'), to_regclass('public.assistant_requests'))
