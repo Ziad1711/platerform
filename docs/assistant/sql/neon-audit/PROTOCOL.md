@@ -27,23 +27,29 @@ Exécutés par `sql/00_preflight.sql`, avant toute écriture :
 |---|---|---|
 | Nom de base | = `AUDIT_DB`, et ne contient ni `prod`, ni `jisra-test`, ni `goqedvcdmgtejtyrawsp`, ni `supabase` | NO-GO immédiat |
 | `AUDIT_ENV` | `neon-audit` | NO-GO |
-| TLS | `pg_stat_ssl.ssl = true` pour la session | NO-GO |
-| Version PostgreSQL | `server_version_num >= 130000`, et **même majeure que la source du schéma** | NO-GO |
+| Endpoint **direct** | `PGHOST` renseigné et **sans** `-pooler` | NO-GO (verrous de session non fiables) |
+| Session épinglée | même `pg_backend_pid()` entre deux transactions de la même session | NO-GO (pooler détecté) |
+| TLS | `pg_stat_ssl.ssl = true` **et** `sslmode=verify-full` avec bundle CA lisible | NO-GO |
+| Version PostgreSQL | `server_version_num >= 130000`, **même majeure que la source du schéma** | NO-GO |
 | Rôles | `anon`, `authenticated`, `service_role` présents | NO-GO |
 | `auth.uid()` | une fonction `auth.uid()` | NO-GO |
 | Propriétaire | `rolsuper` ou `rolbypassrls` | NO-GO (SECURITY DEFINER bloqués par RLS) |
 | Base vide | `orders`, `chat_*`, `ai_usage`, `assistant_requests` = 0 ligne | NO-GO (donnée métier présente) |
 
+Les deux derniers contrôles de rôle/`auth.uid()` sont exécutés par
+`20_verify_schema_ready.sql`, après `05_auth_shim.sql` qui les crée.
+
 Aucun credential de production ne doit être présent dans l'environnement
-d'exécution : seuls `AUDIT_URL` / `AUDIT_DB` / `AUDIT_ENV` sont utilisés.
+d'exécution : seuls `AUDIT_URL` / `AUDIT_DB` / `AUDIT_ENV` / `PGHOST` sont utilisés.
 
 ---
 
 ## 3. Séquence d'exécution
 
 ```bash
-# 0. (hors dépôt) variables
-source ./env.local                 # AUDIT_URL, AUDIT_DB, AUDIT_ENV
+# 0. (hors dépôt) variables + prévalidation de connexion, LECTURE SEULE
+source ~/jisra-audit/env.local       # AUDIT_URL, AUDIT_DB, AUDIT_ENV, PGHOST…
+bash docs/assistant/sql/neon-audit/connection/check_connection.sh   # doit finir OK
 
 # 1. prévol + rôles + harnais + vérification du schéma
 psql "$AUDIT_URL" -v ON_ERROR_STOP=1 -f docs/assistant/sql/neon-audit/sql/00_preflight.sql

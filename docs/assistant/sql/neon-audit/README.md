@@ -19,6 +19,9 @@ aucun rôle distant créé ; aucun SQL d'écriture lancé ; aucun push.
 | `scenarios/lease_a.sql` / `_b.sql` | R5 : bail expirant pendant l'attente d'un verrou |
 | `run/run_audit.sh` | orchestrateur (logs + `results.csv`) |
 | `run/env.example` | variables attendues (placeholders uniquement) |
+| `connection/env.neon.example` | modèle de connexion **directe** Neon (hors dépôt une fois renseigné) |
+| `connection/check_connection.sh` | prévalidation hors ligne + premier contact lecture seule |
+| `connection/PREVALIDATION.md` | rapport de prévalidation et informations de connexion requises |
 
 ## Ordre imposé
 

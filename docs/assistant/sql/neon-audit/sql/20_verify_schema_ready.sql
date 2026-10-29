@@ -71,15 +71,31 @@ select count(*) as tables_without_rls
  ), false) is not true
 \gset
 
+-- Rôles émulés et auth.uid() (créés par 05_auth_shim.sql) : bloquants ici.
+select count(*) as missing_roles
+  from (values ('anon'), ('authenticated'), ('service_role')) v(r)
+ where not exists (select 1 from pg_roles g where g.rolname = v.r)
+\gset
+
+select (1 - count(*)) as missing_auth_uid
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'auth' and p.proname = 'uid'
+\gset
+
 commit;
 
 select
   :missing_columns as missing_columns,
   coalesce(:'missing', '(aucune)') as colonnes_manquantes,
   :missing_functions as missing_functions,
+  :missing_roles as missing_roles,
+  :missing_auth_uid as missing_auth_uid,
   :tables_without_rls as tables_without_rls;
 
-select (:missing_columns + :missing_functions) > 0 as schema_incomplete \gset
+select (:missing_columns + :missing_functions + :missing_roles + :missing_auth_uid) > 0
+  as schema_incomplete
+\gset
 
 \echo ''
 \if :schema_incomplete

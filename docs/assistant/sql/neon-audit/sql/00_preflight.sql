@@ -13,6 +13,7 @@
 
 \getenv audit_db AUDIT_DB
 \getenv audit_env AUDIT_ENV
+\getenv audit_host PGHOST
 
 \if :{?audit_db}
 \else
@@ -36,6 +37,23 @@ select
 
 select current_database() as database, current_user as role, version() as version;
 
+-- ---------------------------------------------------------------------------
+-- Garde « connexion directe » (sans pooler PgBouncer)
+--   1. le nom d'hôte ne doit pas contenir `-pooler` (endpoint mutualisé Neon) ;
+--   2. l'identité de session doit rester stable entre deux transactions
+--      (sous pooler en mode transaction, le backend change).
+-- ---------------------------------------------------------------------------
+select (coalesce(:'audit_host', '') <> ''
+        and coalesce(:'audit_host', '') !~* '-pooler') as host_direct_ok
+\gset
+
+select pg_backend_pid() as pid_first \gset
+select pg_backend_pid() as pid_second \gset
+select (:'pid_first' = :'pid_second') as session_pinned \gset
+
+select :'host_direct_ok'::boolean as host_direct_ok,
+       :'session_pinned'::boolean as session_pinned;
+
 \echo ''
 \echo '== Contrôles =='
 
@@ -53,15 +71,26 @@ select
 select
   case
     when not :'identity_ok'::boolean then 'FAIL:identite'
+    when not :'host_direct_ok'::boolean then 'FAIL:connexion-non-directe'
+    when not :'session_pinned'::boolean then 'FAIL:pooler-detecte'
     when coalesce((select ssl from pg_stat_ssl where pid = pg_backend_pid()), false) is not true then 'FAIL:tls'
     when current_setting('server_version_num')::int < 130000 then 'FAIL:version'
-    when (select count(*) from pg_roles where rolname in ('anon','authenticated','service_role')) <> 3 then 'FAIL:roles'
-    when (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'auth' and p.proname = 'uid') <> 1 then 'FAIL:auth.uid'
     when not coalesce((select rolsuper or rolbypassrls from pg_roles where rolname = current_user), false)
       then 'FAIL:owner-sans-bypassrls'
     else 'PASS'
   end as preflight;
+
+-- Informations (rôles et auth.uid sont créés par 05_auth_shim.sql ; leur
+-- présence est contrôlée de façon bloquante par 20_verify_schema_ready.sql)
+select
+  coalesce((select extversion from pg_extension where extname = 'neon'), '(extension neon absente)') as neon_ext,
+  coalesce((select ssl from pg_stat_ssl where pid = pg_backend_pid()), false) as tls_enabled,
+  coalesce((select version from pg_stat_ssl where pid = pg_backend_pid()), '') as tls_version,
+  coalesce((select rolsuper from pg_roles where rolname = current_user), false) as is_superuser,
+  coalesce((select rolbypassrls from pg_roles where rolname = current_user), false) as bypassrls,
+  (select count(*) from pg_roles where rolname in ('anon','authenticated','service_role')) as supabase_roles,
+  (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'auth' and p.proname = 'uid') as auth_uid_functions;
 
 -- Absence de données métier : la base doit être vide avant fixtures.
 -- (to_regclass évite l'échec si une table n'existe pas encore.)
@@ -73,8 +102,9 @@ select
   coalesce((select count(*) from public.assistant_requests), 0) as assistant_requests_rows;
 
 \echo ''
-\echo 'PASS/FAIL attendu : preflight = PASS, TLS:ssl = t, server_version_num >= 130000,'
-\echo 'supabase_roles = 3, auth_uid_functions = 1, owner_bypasses_rls = t,'
+\echo 'PASS/FAIL attendu : preflight = PASS, host_direct_ok = t, session_pinned = t,'
+\echo 'tls_enabled = t, server_version_num >= 130000, bypassrls = t,'
 \echo 'et toutes les colonnes *_rows = 0 (base neuve, aucune donnée métier).'
-\echo 'Si owner_bypasses_rls = f : les SECURITY DEFINER subiront la RLS et les'
-\echo 'tests seront invalides (voir DEPENDENCIES.md §4).'
+\echo 'supabase_roles/auth_uid_functions valent 0 avant 05_auth_shim.sql : normal.'
+\echo 'Si bypassrls = f : les SECURITY DEFINER subiront la RLS et les tests seront'
+\echo 'invalides (voir DEPENDENCIES.md §3).'

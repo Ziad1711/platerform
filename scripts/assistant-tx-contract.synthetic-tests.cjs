@@ -760,6 +760,8 @@ function runAuditPackageChecks() {
       'scenarios/sequential.sql', 'scenarios/concurrent_a.sql', 'scenarios/concurrent_b.sql',
       'scenarios/lease_a.sql', 'scenarios/lease_b.sql',
       'run/run_audit.sh', 'run/env.example',
+      'connection/env.neon.example', 'connection/check_connection.sh',
+      'connection/PREVALIDATION.md',
     ]
     for (const rel of expected) {
       assert(fs.existsSync(path.join(base, rel)), `manquant: ${rel}`)
@@ -782,7 +784,8 @@ function runAuditPackageChecks() {
   check('P03', 'paquet neon-audit : aucune référence production ou secrète', () => {
     const secretPatterns = [
       /db\.[a-z0-9]+\.supabase\.co/i,
-      /postgresql:\/\/[^<\s]*:[^<\s]+@/i,
+      // Mot de passe littéral dans une URL (les ${VARIABLES} restent autorisés)
+      /postgresql:\/\/(?!\$\{)[^<\s/]*:(?!\$\{)[^<\s@]+@/i,
       /SUPABASE_SERVICE_ROLE_KEY/i,
     ]
     // Motifs interdits dans les fichiers EXÉCUTABLES uniquement : la
@@ -790,13 +793,14 @@ function runAuditPackageChecks() {
     // projet de test Supabase) pour justifier leur rejet.
     const prodPatterns = [/jisra-test/i, /goqedvcdmgtejtyrawsp/i]
 
-    const docs = ['README.md', 'PROTOCOL.md', 'DEPENDENCIES.md']
+    const docs = ['README.md', 'PROTOCOL.md', 'DEPENDENCIES.md', 'connection/PREVALIDATION.md']
     const executables = [
       'sql/00_preflight.sql', 'sql/05_auth_shim.sql', 'sql/10_bootstrap_audit.sql',
       'sql/20_verify_schema_ready.sql', 'sql/30_fixtures.sql',
       'sql/90_assertions.sql', 'sql/99_cleanup.sql',
       'scenarios/sequential.sql', 'scenarios/concurrent_a.sql', 'scenarios/concurrent_b.sql',
       'scenarios/lease_a.sql', 'scenarios/lease_b.sql', 'run/env.example', 'run/run_audit.sh',
+      'connection/env.neon.example', 'connection/check_connection.sh',
     ]
 
     for (const rel of [...docs, ...executables]) {
@@ -816,6 +820,23 @@ function runAuditPackageChecks() {
     const preflight = read('sql/00_preflight.sql')
     assert(/jisra-test/.test(preflight), 'garde de nom absente du prévol')
     assert(/goqedvcdmgtejtyrawsp/.test(preflight), 'référence de test non bloquée')
+
+    // Le modèle de connexion ne contient que des placeholders sur les champs
+    // sensibles (hôte, base, rôle, mot de passe, CA).
+    const envTemplate = read('connection/env.neon.example')
+    const sensitive = ['PGHOST', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSSLROOTCERT']
+    let checked = 0
+    for (const rawLine of envTemplate.split('\n')) {
+      const line = rawLine.replace(/\r$/, '')
+      const assignment = line.match(/^export\s+([A-Z_]+)=(.*)$/)
+      if (!assignment) continue
+      const [, name, rawValue] = assignment
+      if (!sensitive.includes(name)) continue
+      checked += 1
+      const isPlaceholder = rawValue.startsWith("'<") || rawValue.includes('${')
+      assert(isPlaceholder, `valeur littérale sur champ sensible : ${name}`)
+    }
+    assert(checked >= 5, `champs sensibles non vérifiés (${checked})`)
     return 'aucune référence sensible hors garde'
   })
 
