@@ -421,13 +421,24 @@ export async function POST(request: Request) {
 
     const model = getAssistantModelName()
 
-    // Budget d'exécution : l'annulation est propagée jusqu'au fournisseur HTTP.
+    // Budget d'exécution : l'annulation vient soit du délai global, soit de la
+    // déconnexion HTTP du client. Les deux sont propagées au fournisseur.
     const controller = new AbortController()
     let deadlineReached = false
+    let clientDisconnected = false
     const deadlineTimer = setTimeout(() => {
       deadlineReached = true
       controller.abort()
     }, ASSISTANT_REQUEST_TIMEOUT_MS)
+    const onClientAbort = () => {
+      clientDisconnected = true
+      controller.abort()
+    }
+    if (request.signal.aborted) {
+      onClientAbort()
+    } else {
+      request.signal.addEventListener('abort', onClientAbort, { once: true })
+    }
 
     let agentResult: Awaited<ReturnType<typeof runSecureAssistantAgent>>
     try {
@@ -457,10 +468,11 @@ export async function POST(request: Request) {
         await releaseCreditReservation(supabase, { requestId, attemptToken }).catch(() => false)
       }
 
-      if (deadlineReached || rawCode.endsWith('_ABORTED')) {
+      if (deadlineReached || clientDisconnected || rawCode.endsWith('_ABORTED')) {
         console.warn('[assistant] request_aborted', {
           storeId: selectedStoreId,
           deadline: deadlineReached,
+          client: clientDisconnected,
           durationMs: Date.now() - startedAt,
         })
         throw new Error(deadlineReached ? 'ASSISTANT_TIMEOUT' : 'REQUEST_ABORTED')
@@ -475,14 +487,24 @@ export async function POST(request: Request) {
       throw controlled
     } finally {
       clearTimeout(deadlineTimer)
+      request.signal.removeEventListener('abort', onClientAbort)
     }
 
     const providerResult = agentResult.providerUsage
 
     const creditsUsed = computeCreditsUsed(providerResult.inputTokens, providerResult.outputTokens)
     const walletSnapshot = toWalletSnapshot(wallet)
-    if (walletSnapshot.remainingCredits < creditsUsed) {
-      throw new Error('INSUFFICIENT_CREDITS')
+
+    // La consommation est réelle : elle doit être finalisée même si le solde a
+    // changé pendant l'appel. La finalisation décide du débit (statut
+    // `insufficient`, montant débité nul) et conserve la trace de consommation.
+    const projectedCharge = walletSnapshot.remainingCredits < creditsUsed ? 'insufficient' : 'charged'
+    if (projectedCharge === 'insufficient') {
+      console.warn('[assistant] credit_projected_insufficient', {
+        storeId: selectedStoreId,
+        required: creditsUsed,
+        remaining: walletSnapshot.remainingCredits,
+      })
     }
 
     const structuredResponse = agentResult.structuredResponse || buildStructuredResponseFromContext(intent, providerResult.text, {})
