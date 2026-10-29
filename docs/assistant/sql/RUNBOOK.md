@@ -168,6 +168,26 @@ Règles d'activation :
 - `01` et `02` sont sûres avec le code en place ; `03b`/`05b` exigent le code
   livré avec ce package.
 
+### 3.1 Verrou global et allowlist du pilote privé
+
+Le code refuse **toutes** les routes API assistant tant que la configuration
+suivante n'est pas explicite (fail-closed, contrôle serveur) :
+
+| Variable | Valeur d'ouverture | Effet si absente/incorrecte |
+|---|---|---|
+| `ASSISTANT_ENABLED` | `enabled` (valeur exacte) | `503 ASSISTANT_DISABLED` |
+| `ASSISTANT_ALLOWED_USER_IDS` | UUID exacts, séparés par virgules | `403 ASSISTANT_NOT_ALLOWED` (aucun UUID par défaut) |
+| `ASSISTANT_IDEMPOTENCY_REGISTRY` | `enabled` | `503 ASSISTANT_PILOT_CONFIG_INCOMPLETE` |
+| `ASSISTANT_FINALIZE_ATOMIC` | `enabled` | `503 ASSISTANT_PILOT_CONFIG_INCOMPLETE` |
+
+- l'identité provient uniquement de `supabase.auth.getUser()` côté serveur ;
+- toutes les routes (`/api/assistant/chat`, `/threads`, `/threads/[id]`,
+  `/threads/[id]/messages`, `/wallet`) appliquent ce contrôle **avant** toute
+  lecture de données, réservation, débit ou appel IA ;
+- le pilote interdit le chemin de finalisation séquentiel
+  (`assertAtomicFinalizationRequired`), même si le drapeau atomique est retiré ;
+- procédure complète : [`../PILOT-PRIVATE-RUNBOOK.md`](../PILOT-PRIVATE-RUNBOOK.md).
+
 ---
 
 ## 4. Contrôles après chaque étape

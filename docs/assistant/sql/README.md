@@ -28,7 +28,11 @@ inadvertance.
 
 | Élément | État |
 |---|---|
-| `scripts/assistant-tx-contract.synthetic-tests.cjs` | exécuté — 28/28 PASS (contrats TS + invariants SQL statiques) |
+| `scripts/assistant-tx-contract.synthetic-tests.cjs` | exécuté — 36/36 PASS (contrats TS + invariants SQL statiques) |
+| `scripts/assistant-analytics-p1.synthetic-tests.cjs` | exécuté — 41/41 PASS |
+| `scripts/assistant-final-targeted-tests.cjs` | exécuté — 41/41 PASS (registre, invariants, verrou global, allowlist, contrat suppression de boutique) |
+| `MANIFEST.sha256` | 4 fichiers SQL autorisés, empreintes vérifiées (`sha256sum -c`) |
+| `../PILOT-PRIVATE-RUNBOOK.md` | pilote privé : sauvegardes, ordre, contrôles, fermeture, rollback (non exécuté) |
 | `docs/assistant/sql/postgres-two-connection-tests.sql` | **remplacé** par `neon-audit/scenarios/` — conservé pour historique |
 | `docs/assistant/sql/neon-audit/` | **paquet d'exécution réel** : prévol, harnais, fixtures, scénarios A/B, assertions, nettoyage ([README](./neon-audit/README.md)) |
 | Validation transactionnelle réelle | **NON PRONONCÉE** — exécution à autoriser (voir `neon-audit/PROTOCOL.md §7`) |

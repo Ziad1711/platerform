@@ -25,6 +25,10 @@
 -- Pré-requis opérationnel : toute reprise de `store_id` sur les conversations
 -- historiques doit être faite AVANT ce fichier (le trigger d'immuabilité
 -- l'interdit ensuite). Voir RUNBOOK.md §Préconditions.
+--
+-- Compatibilité suppression de boutique : le trigger du §2 autorise uniquement
+-- le détachement `store_id → NULL` lorsque la boutique n'existe plus, afin que
+-- `ON DELETE SET NULL` reste fonctionnel (aucune perte d'historique).
 -- ============================================================================
 begin;
 
@@ -119,19 +123,52 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 2. Immuabilité du propriétaire et de la boutique de la conversation
 --    (renommage, épinglage et updated_at restent libres)
+--
+-- Exception unique et étroite : le DÉTACHEMENT provoqué par la suppression de la
+-- boutique. `chat_threads.store_id` porte une clé étrangère `ON DELETE SET NULL`
+-- (schéma d'origine) : supprimer un store exécute donc
+-- `UPDATE chat_threads SET store_id = NULL`, ce qui déclenche ce garde. Sans
+-- exception, la suppression d'une boutique échouerait intégralement
+-- (`THREAD_STORE_IMMUTABLE`) — régression métier inacceptable.
+--
+-- Le détachement n'est accepté QUE si l'ancienne boutique n'existe plus. Le
+-- contrôle est fait en SECURITY DEFINER avec `search_path` figé : un utilisateur
+-- qui perd l'accès à une boutique encore présente (RLS, révocation) ne peut pas
+-- provoquer ce détachement. Aucune autre transition n'est autorisée :
+--   NULL  → uuid : rattachement arbitraire                    → refusé
+--   uuid  → uuid : changement de boutique                     → refusé
+--   uuid  → NULL : boutique encore existante                  → refusé
+--   uuid  → NULL : boutique supprimée (ON DELETE SET NULL)    → autorisé
+--
+-- Aucun historique et aucune écriture financière n'est supprimé : la
+-- conversation entre en quarantaine (`store_id IS NULL`), donc illisible via
+-- PostgREST, et reste supprimable par son propriétaire.
 -- ---------------------------------------------------------------------------
 create or replace function public.assistant_thread_guard()
 returns trigger
 language plpgsql
+security definer
 set search_path = public, pg_temp
 as $$
 begin
   if new.user_id is distinct from old.user_id then
     raise exception 'THREAD_OWNER_IMMUTABLE' using errcode = 'P0001';
   end if;
+
   if new.store_id is distinct from old.store_id then
+    if new.store_id is null
+       and old.store_id is not null
+       and not exists (select 1 from public.stores s where s.id = old.store_id)
+    then
+      -- Détachement consécutif à la suppression de la boutique : seule
+      -- transition acceptée (l'action référentielle s'exécute après la
+      -- suppression de la ligne `stores`).
+      return new;
+    end if;
+
     raise exception 'THREAD_STORE_IMMUTABLE' using errcode = 'P0001';
   end if;
+
   return new;
 end;
 $$;
