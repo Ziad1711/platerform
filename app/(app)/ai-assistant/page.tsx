@@ -8,7 +8,7 @@ import AssistantWarnings from '@/components/assistant/assistant-warnings'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
 import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
-import { decideAutoScroll, mergeDisplayMessages } from '@/lib/assistant/chat-ui'
+import { decideAutoScroll, hasUsableChart, mergeDisplayMessages, sanitizeMetricsSummary } from '@/lib/assistant/chat-ui'
 
 interface ThreadItem {
   id: string
@@ -225,6 +225,9 @@ export default function AssistantIAPage() {
   const handledAssistantIdRef = useRef<string | null>(null)
   const autoScrollAllowedRef = useRef(true)
   const previousThreadRef = useRef<string | null>(null)
+  const programmaticScrollUntilRef = useRef(0)
+  const lastScrollTopRef = useRef(0)
+  const revealUserMessageRef = useRef(false)
 
   const hasStore = Boolean(currentStoreId)
   const canLoad = hasStore
@@ -479,6 +482,7 @@ export default function AssistantIAPage() {
     setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
     setPendingUserMessageCreatedAt(new Date().toISOString())
     autoScrollAllowedRef.current = true
+    revealUserMessageRef.current = true
     setInput('')
 
     // Même texte, même compte, même boutique et même conversation relancés
@@ -544,6 +548,13 @@ export default function AssistantIAPage() {
     return null
   }, [displayMessages])
 
+  const latestUserMessageId = useMemo(() => {
+    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+      if (displayMessages[index].role === 'user') return displayMessages[index].id
+    }
+    return null
+  }, [displayMessages])
+
   const latestAssistantSuggestions = useMemo(() => {
     const lastAssistant = [...displayMessages]
       .reverse()
@@ -588,43 +599,66 @@ export default function AssistantIAPage() {
     return () => clearInterval(timer)
   }, [sendMessageMutation.isPending, liveActivitySteps.length])
 
-  // Suivi du défilement manuel : tant que l'utilisateur reste proche du bas,
-  // les nouveaux contenus peuvent être révélés ; s'il remonte pour lire,
-  // aucun défilement forcé n'a lieu.
+  // Suivi du défilement : un déplacement manuel vers le haut désactive le
+  // positionnement automatique ; les déplacements programmés sont ignorés.
   const handleMessagesScroll = useCallback(() => {
     const container = messagesContainerRef.current
     if (!container) return
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    autoScrollAllowedRef.current = distanceFromBottom <= 96
-  }, [])
 
-  const scrollContainerTo = useCallback((decision: 'bottom' | 'assistant-start', assistantId: string | null) => {
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    const reduceMotion =
-      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-        ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        : false
-    const behavior: ScrollBehavior = reduceMotion ? 'auto' : 'smooth'
-
-    if (decision === 'bottom') {
-      container.scrollTo({ top: container.scrollHeight, behavior })
+    const top = container.scrollTop
+    if (Date.now() < programmaticScrollUntilRef.current) {
+      lastScrollTopRef.current = top
       return
     }
 
-    const node = assistantId ? assistantMessageRefs.current.get(assistantId) : null
-    if (!node) {
-      container.scrollTo({ top: container.scrollHeight, behavior })
-      return
+    if (top < lastScrollTopRef.current - 8) {
+      autoScrollAllowedRef.current = false
+    } else if (container.scrollHeight - top - container.clientHeight <= 96) {
+      autoScrollAllowedRef.current = true
     }
 
-    // Positionnement au début de la réponse, uniquement dans la zone des messages.
-    const offset =
-      node.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 8
-    container.scrollTo({ top: Math.max(0, offset), behavior })
+    lastScrollTopRef.current = top
   }, [])
 
+  /**
+   * Logique de positionnement unique : `thread` (ouverture), `reveal` (message
+   * envoyé), `reply` (début de la réponse). Aucune remontée automatique.
+   */
+  const positionMessages = useCallback(
+    (kind: 'thread' | 'reveal' | 'reply', messageId: string | null) => {
+      const container = messagesContainerRef.current
+      if (!container) return
+
+      const reduceMotion =
+        typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+          ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          : false
+      const behavior: ScrollBehavior = kind === 'thread' || reduceMotion ? 'auto' : 'smooth'
+
+      programmaticScrollUntilRef.current = Date.now() + 800
+
+      if (kind === 'thread') {
+        container.scrollTo({ top: container.scrollHeight, behavior })
+        return
+      }
+
+      if (kind === 'reveal') {
+        container.scrollTo({ top: container.scrollHeight, behavior })
+        return
+      }
+
+      const node = messageId ? assistantMessageRefs.current.get(messageId) : null
+      if (!node) return
+
+      const offset = node.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 8
+      // Jamais de mouvement vers le haut : on ne remonte pas la conversation.
+      const target = Math.max(container.scrollTop, Math.min(offset, container.scrollHeight - container.clientHeight))
+      container.scrollTo({ top: target, behavior })
+    },
+    []
+  )
+
+  // Ouverture d'une conversation ou arrivée d'une réponse : un seul effet.
   useEffect(() => {
     const threadChanged = previousThreadRef.current !== selectedThreadId
     previousThreadRef.current = selectedThreadId
@@ -637,25 +671,30 @@ export default function AssistantIAPage() {
     })
 
     if (decision === 'none') return
-
     handledAssistantIdRef.current = latestAssistantId
 
-    // Deux frames : le message, son graphique et ses avertissements sont rendus.
+    // Deux frames : le message, ses indicateurs, son graphique et ses limites sont rendus.
     const frame = requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollContainerTo(decision, latestAssistantId))
+      requestAnimationFrame(() =>
+        positionMessages(decision === 'bottom' ? 'thread' : 'reply', latestAssistantId)
+      )
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [latestAssistantId, selectedThreadId, scrollContainerTo])
+  }, [latestAssistantId, selectedThreadId, positionMessages])
 
-  // Indicateur de génération : on garde le message envoyé visible, sans saut.
+  // Message envoyé : on garde la bulle utilisateur visible, sans saut vers le haut.
   useEffect(() => {
-    if (!sendMessageMutation.isPending) return
+    if (!revealUserMessageRef.current) return
+    if (!autoScrollAllowedRef.current) return
+
+    revealUserMessageRef.current = false
     const frame = requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollContainerTo('bottom', null))
+      requestAnimationFrame(() => positionMessages('reveal', null))
     })
+
     return () => cancelAnimationFrame(frame)
-  }, [sendMessageMutation.isPending, scrollContainerTo])
+  }, [latestUserMessageId, positionMessages])
 
   return (
     <div className="h-full min-h-0 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 p-4">
@@ -847,7 +886,24 @@ export default function AssistantIAPage() {
                   }`}
                 >
                   <div className="space-y-1">{renderMessageContent(msg.content)}</div>
-                  {msg.role === 'assistant' && msg.metadata?.structured_response ? (
+
+                  {msg.role === 'assistant' && msg.metadata?.structured_response?.metrics_summary?.length ? (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {sanitizeMetricsSummary(msg.metadata.structured_response.metrics_summary).map((metric) => (
+                        <span
+                          key={`${metric.label}-${metric.value}`}
+                          className="inline-flex items-baseline gap-1 rounded-md border border-border bg-secondary/70 px-2 py-1"
+                        >
+                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{metric.label}</span>
+                          <span className="text-[12px] font-semibold text-foreground">{metric.value}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {msg.role === 'assistant' &&
+                  msg.metadata?.structured_response &&
+                  hasUsableChart(msg.metadata.structured_response) ? (
                     <AssistantChartCard response={msg.metadata.structured_response} />
                   ) : null}
 

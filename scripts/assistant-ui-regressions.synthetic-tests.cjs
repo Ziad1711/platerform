@@ -178,25 +178,27 @@ const CRITICAL = [
   'Montant non vérifié exclu du total.',
 ]
 
-check('U10', 'avertissements équivalents fusionnés (casse, accents, espaces, ponctuation)', () => {
+check('U10', 'avertissements équivalents fusionnés et regroupés', () => {
   const summary = ui.summarizeWarnings([
     'Données partielles sur la période.',
     'donnees   partielles sur la periode',
     'DONNÉES PARTIELLES SUR LA PÉRIODE',
   ])
-  assertEqual(summary.details.length, 0, 'détails restants')
+  assertEqual(summary.details.length, 1, 'une seule entrée distincte')
   assert(summary.duplicatesRemoved >= 2, 'doublons comptés')
+  assertEqual(summary.summary, 'Certaines données sont incomplètes.', 'résumé utilisateur')
   return `${summary.duplicatesRemoved} doublons`
 })
 
-check('U11', 'toutes les réserves critiques sont conservées', () => {
+check('U11', 'réserves critiques préservées et catégorisées', () => {
   const summary = ui.summarizeWarnings(CRITICAL)
   const all = [summary.summary, ...summary.details].join(' | ')
-  for (const text of CRITICAL) {
-    assert(all.includes(text.replace(/\.$/, '')), `réserve perdue: ${text}`)
+  for (const fragment of ['partielles', 'manquante', 'interdit', 'indisponible', 'Devises', 'non vérifié']) {
+    assert(all.toLowerCase().includes(fragment.toLowerCase()), `réserve perdue: ${fragment}`)
   }
   assertEqual(summary.criticalCount, CRITICAL.length, 'compteur critiques')
-  return `${summary.criticalCount} critiques`
+  assertEqual(summary.details.length, CRITICAL.length, 'une entrée par réserve distincte')
+  return `${summary.criticalCount} réserves`
 })
 
 check('U12', 'marge contributive et bénéfice net jamais fusionnés', () => {
@@ -207,14 +209,54 @@ check('U12', 'marge contributive et bénéfice net jamais fusionnés', () => {
   return 'distinction conservée'
 })
 
-check('U13', 'résumé compact : une ligne + section dépliable', () => {
+check('U13', 'résumé synthétique unique + section dépliable', () => {
   const summary = ui.summarizeWarnings(CRITICAL)
-  assert(summary.summary && summary.summary.length < 220, 'résumé trop long')
-  assertEqual(summary.details.length, CRITICAL.length - 1, 'section secondaire')
-  assert(WARNINGS_COMPONENT.includes('Voir les limites de l’analyse'), 'libellé dépliable')
+  assert(summary.summary && summary.summary.length < 160, 'résumé trop long')
+  assert(!/encadré|avertissement\s*:/i.test(summary.summary), 'résumé technique')
+  assert(WARNINGS_COMPONENT.includes('Limites de l’analyse'), 'libellé dépliable')
   assert(WARNINGS_COMPONENT.includes('<details'), 'section dépliable')
   assertEqual(ui.summarizeWarnings([]).summary, null, 'aucun encadré si aucun avertissement')
-  return 'compact'
+  return 'une ligne + détails'
+})
+
+check('U17', 'aucun message interne ni montant dans les avertissements rendus', () => {
+  const summary = ui.summarizeWarnings([
+    'RPC partiel : scan de secours utilisé',
+    'Précision de transport : expression numérique non vérifiable',
+    'Montant 1 250 MAD non vérifié',
+  ])
+  const rendered = [summary.summary, ...summary.details].join(' ')
+  for (const forbidden of ['RPC', 'scan de secours', 'précision de transport', 'expression numérique non vérifiable']) {
+    assert(!rendered.toLowerCase().includes(forbidden.toLowerCase()), `jargon visible: ${forbidden}`)
+  }
+  assert(!/\d/.test(rendered), 'chiffre présent dans les avertissements')
+  return 'interface propre'
+})
+
+check('U18', 'indicateurs clés issus uniquement de metrics_summary', () => {
+  const chips = ui.sanitizeMetricsSummary([
+    { label: 'Chiffre d’affaires', value: '12 400 MAD' },
+    { label: 'Commandes', value: 42 },
+    { label: '', value: 'x' },
+    { label: 'Vide', value: '' },
+    { label: 'Objet', value: { a: 1 } },
+  ])
+  assertEqual(chips.length, 2, 'entrées invalides écartées')
+  assertEqual(chips[1].value, '42', 'valeur numérique convertie')
+  return chips.map((chip) => chip.label).join(' + ')
+})
+
+check('U19', 'graphique affiché seulement avec des données structurées suffisantes', () => {
+  assertEqual(ui.hasUsableChart({ chart: false, chart_data: [{ a: 1, b: 2 }, { a: 2, b: 3 }] }), false, 'chart=false')
+  assertEqual(ui.hasUsableChart({ chart: true, chart_data: [{ a: 1, b: 2 }] }), false, 'un seul point')
+  assertEqual(ui.hasUsableChart({ chart: true, chart_data: [{ a: 1 }, { a: 2 }] }), false, 'une seule dimension')
+  assertEqual(
+    ui.hasUsableChart({ chart: true, chart_data: [{ label: 'lun', value: 10 }, { label: 'mar', value: 12 }] }),
+    true,
+    'série exploitable'
+  )
+  assert(PAGE.includes('hasUsableChart'), 'garde graphique non branchée')
+  return 'garde graphique'
 })
 
 check('U14', 'câblage : page branchée sur les helpers et le composant', () => {
@@ -224,9 +266,25 @@ check('U14', 'câblage : page branchée sur les helpers et le composant', () => 
   assert(PAGE.includes('decideAutoScroll'), 'décision de défilement absente')
   assert(PAGE.includes('assistantMessageRefs'), 'référence DOM stable absente')
   assert(PAGE.includes('prefers-reduced-motion'), 'reduced-motion absent')
+  assert(PAGE.includes('sanitizeMetricsSummary'), 'indicateurs clés non branchés')
+  assert(PAGE.includes('positionMessages'), 'positionnement centralisé absent')
   assert(!PAGE.includes('messagesEndRef.current?.scrollIntoView'), 'ancien défilement global encore présent')
   return 'page câblée'
 })
+
+check('U20', 'un seul positionnement, jamais de remontée automatique', () => {
+  const occurrences = (PAGE.match(/container\.scrollTo\(/g) || []).length
+  assert(occurrences >= 1, 'aucun positionnement')
+  assert(PAGE.includes('Math.max(container.scrollTop'), 'garde anti-remontée absente')
+  assertEqual(
+    (PAGE.match(/requestAnimationFrame\(\(\) =>\s*\{?\s*requestAnimationFrame/g) || []).length,
+    2,
+    'deux effets seulement (fil/réponse + révélation du message)'
+  )
+  assert(!/sendMessageMutation\.isPending[\s\S]{0,200}scrollTo/.test(PAGE), 'effet de scroll concurrent sur isPending')
+  return `${occurrences} appels centralisés`
+})
+
 
 check('U15', 'aucune dépendance base, permission ou facturation dans le module UI', () => {
   assert(!/supabase|postgrest|rpc_|ai_credit|credits_charged|billing/i.test(MODULE_SOURCE), 'dépendance interdite')

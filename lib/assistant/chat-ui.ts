@@ -148,6 +148,109 @@ export function isCriticalWarning(text: string): boolean {
   return CRITICAL_MARKERS.some((marker) => normalized.includes(marker))
 }
 
+export type WarningCategory =
+  | 'forbidden'
+  | 'unavailable'
+  | 'currency'
+  | 'partial'
+  | 'missing'
+  | 'unverified'
+  | 'other'
+
+interface CategoryRule {
+  category: WarningCategory
+  label: string
+  headline: string
+  markers: string[]
+}
+
+/**
+ * Catégories ordonnées par gravité : la première correspondance pilote le
+ * résumé visible. Les libellés sont utilisateur, jamais techniques.
+ */
+const CATEGORY_RULES: CategoryRule[] = [
+  {
+    category: 'forbidden',
+    label: 'Accès restreint',
+    headline: 'Une partie des données n’est pas accessible avec vos droits.',
+    markers: ['interdit', 'forbidden', 'non autorise', 'refus'],
+  },
+  {
+    category: 'unavailable',
+    label: 'Source indisponible',
+    headline: 'Certaines sources n’ont pas répondu sur cette période.',
+    markers: ['indisponible', 'unavailable', 'echec', 'erreur'],
+  },
+  {
+    category: 'currency',
+    label: 'Devises différentes',
+    headline: 'Les périodes ne sont pas comparables : devises différentes.',
+    markers: ['devise', 'currency'],
+  },
+  {
+    category: 'partial',
+    label: 'Données partielles',
+    headline: 'Certaines données sont incomplètes.',
+    markers: ['partiel', 'partial', 'couverture'],
+  },
+  {
+    category: 'missing',
+    label: 'Données manquantes',
+    headline: 'Certaines données sont incomplètes.',
+    markers: ['manquant', 'missing', 'absent'],
+  },
+  {
+    category: 'unverified',
+    label: 'Valeurs non vérifiées',
+    headline: 'Certaines valeurs ne sont pas vérifiées et ne sont pas affichées.',
+    markers: ['non verifie', 'unverified', 'non fiable'],
+  },
+]
+
+export function classifyWarning(text: string): WarningCategory {
+  const normalized = normalizeWarning(text)
+  for (const rule of CATEGORY_RULES) {
+    if (rule.markers.some((marker) => normalized.includes(marker))) return rule.category
+  }
+  return 'other'
+}
+
+export function warningCategoryLabel(category: WarningCategory): string {
+  return CATEGORY_RULES.find((rule) => rule.category === category)?.label || 'Précision'
+}
+
+/** Jargon interne qui ne doit jamais apparaître dans l'interface. */
+const TECHNICAL_FRAGMENTS = [
+  /rpc/gi,
+  /scan de secours/gi,
+  /precision de transport/gi,
+  /précision de transport/gi,
+  /expression numerique non verifiable/gi,
+  /expression numérique non vérifiable/gi,
+  /json/gi,
+  /null/gi,
+  /sql/gi,
+]
+
+/**
+ * Nettoie un avertissement : retire le jargon interne, les identifiants et les
+ * montants (jamais réaffichés dans les avertissements), puis normalise.
+ */
+export function humanizeWarning(text: string): string {
+  let cleaned = String(text || '')
+  for (const fragment of TECHNICAL_FRAGMENTS) cleaned = cleaned.replace(fragment, ' ')
+  cleaned = cleaned
+    .replace(/\b\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d+)?\s*(?:mad|eur|usd|dh)?/gi, ' ')
+    .replace(/\d+(?:[.,]\d+)*\s*(?:mad|eur|usd|dh|%)?/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;:])/g, '$1')
+    .replace(/([.,;:])\s*$/g, '')
+    .trim()
+
+  if (!cleaned) cleaned = 'Précision de données'
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
+}
+
 export interface WarningSummary {
   /** Ligne compacte affichée dans la bulle (null si aucun avertissement). */
   summary: string | null
@@ -160,48 +263,111 @@ export interface WarningSummary {
 }
 
 /**
- * Condense les avertissements : doublons exacts et équivalents (casse, accents,
- * ponctuation, espaces) fusionnés ; une réserve critique reste toujours
- * présentée distinctement et n'est jamais absorbée par un texte générique
- * (« marge contributive » et « bénéfice net » restent deux entrées séparées).
+ * Condense les avertissements pour l'interface.
+ *
+ * - doublons exacts et équivalents (casse, accents, ponctuation, espaces)
+ *   fusionnés, puis regroupés par catégorie de gravité ;
+ * - le résumé est une phrase utilisateur (« Certaines données sont
+ *   incomplètes. »), jamais un message interne ;
+ * - les détails sont humanisés (jargon retiré, montants masqués) et conservent
+ *   toutes les catégories distinctes : partial, missing, forbidden,
+ *   unavailable, devises mixtes, valeurs non vérifiées ;
+ * - « marge contributive » et « bénéfice net » restent deux entrées séparées.
  */
 export function summarizeWarnings(warnings: readonly string[] | null | undefined): WarningSummary {
-  const unique: Array<{ text: string; key: string; critical: boolean }> = []
+  const seenKeys = new Set<string>()
+  const groups = new Map<WarningCategory, string[]>()
   let duplicatesRemoved = 0
+  let criticalCount = 0
 
   for (const raw of warnings || []) {
     const text = String(raw || '').trim()
     if (!text) continue
 
-    const key = normalizeWarning(text)
-    const critical = isCriticalWarning(text)
+    const category = classifyWarning(text)
+    const friendly = humanizeWarning(text)
+    const key = `${category}|${normalizeWarning(friendly)}`
 
-    // Deux réserves critiques ne sont fusionnées que si leurs textes normalisés
-    // sont strictement identiques ; un doublon non critique suit la même règle.
-    if (unique.some((entry) => entry.key === key)) {
+    if (seenKeys.has(key)) {
       duplicatesRemoved += 1
       continue
     }
 
-    unique.push({ text, key, critical })
+    seenKeys.add(key)
+    if (category !== 'other') criticalCount += 1
+    groups.set(category, [...(groups.get(category) || []), friendly])
   }
 
-  if (!unique.length) {
+  if (!seenKeys.size) {
     return { summary: null, details: [], duplicatesRemoved, criticalCount: 0 }
   }
 
-  const criticalCount = unique.filter((entry) => entry.critical).length
-  const [first, ...rest] = unique
+  const orderedCategories = CATEGORY_RULES.map((rule) => rule.category).filter((category) => groups.has(category))
+  const primary = orderedCategories[0] || 'other'
+  const primaryRule = CATEGORY_RULES.find((rule) => rule.category === primary)
 
-  const summary =
-    rest.length === 0
-      ? first.text
-      : `${first.text} (+${rest.length} autre${rest.length > 1 ? 's' : ''} limite${rest.length > 1 ? 's' : ''})`
+  const summary = primaryRule ? primaryRule.headline : 'Précisions sur les données disponibles.'
 
-  return {
-    summary,
-    details: rest.map((entry) => entry.text),
-    duplicatesRemoved,
-    criticalCount,
+  const details: string[] = []
+  for (const category of orderedCategories) {
+    const label = warningCategoryLabel(category)
+    for (const item of groups.get(category) || []) {
+      details.push(`${label} · ${item}`)
+    }
   }
+
+  return { summary, details, duplicatesRemoved, criticalCount }
 }
+
+export interface MetricChip {
+  label: string
+  value: string
+}
+
+/**
+ * Indicateurs clés issus **exclusivement** de `metrics_summary` (valeurs
+ * vérifiées par les outils analytiques) : aucun montant n'est calculé ni
+ * déduit ici, seules les entrées vides ou non typées sont écartées.
+ */
+export function sanitizeMetricsSummary(
+  metrics?: Array<{ label?: unknown; value?: unknown }> | null
+): MetricChip[] {
+  const chips: MetricChip[] = []
+
+  for (const entry of metrics || []) {
+    const label = typeof entry?.label === 'string' ? entry.label.trim() : ''
+    const raw = entry?.value
+    const value =
+      typeof raw === 'number' && Number.isFinite(raw)
+        ? String(raw)
+        : typeof raw === 'string'
+          ? raw.trim()
+          : ''
+
+    if (!label || !value) continue
+    chips.push({ label, value })
+    if (chips.length >= 6) break
+  }
+
+  return chips
+}
+
+/**
+ * Un graphique n'est retenu que si les données structurées sont exploitables :
+ * au moins deux points et deux dimensions par point. Aucune série n'est
+ * fabriquée à partir du texte généré.
+ */
+export function hasUsableChart(
+  response?: { chart?: boolean; chart_data?: Array<Record<string, unknown>> } | null
+): boolean {
+  if (!response?.chart) return false
+  const data = response.chart_data
+  if (!Array.isArray(data) || data.length < 2) return false
+  return data.every((row) => Boolean(row) && typeof row === 'object' && Object.keys(row).length >= 2)
+}
+
+/**
+ * Condense les avertissements pour l'interface (implémentation unique : voir
+ * plus haut) — bloc conservé volontairement vide pour éviter toute duplication.
+ */
+
