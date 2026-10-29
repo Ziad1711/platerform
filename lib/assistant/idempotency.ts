@@ -143,14 +143,32 @@ export async function bindAssistantRequestThread(
   if (error) throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
 }
 
-/** Clôture nominale du registre (après finalisation fiable des écritures). */
+/** Clôture nominale du registre (après finalisation fiable des écritures).
+ *
+ * Contrat SQL 03b : `p_credits_consumed` = consommation réelle calculée sur les
+ * tokens, `p_credits_charged` = montant RÉELLEMENT débité (0 si non facturé).
+ * Sans message assistant valide, la clôture est refusée côté base : on renvoie
+ * `false` sans appel.
+ */
 export async function completeAssistantRequest(
   supabase: SupabaseServerClient,
   identity: { userId: string; requestId: string; attemptToken: string },
   assistantMessageId: string | null,
-  creditStatus: AssistantCreditStatus
+  creditStatus: AssistantCreditStatus,
+  creditsConsumed: number,
+  creditsCharged: number
 ): Promise<boolean> {
   if (!ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED) return false
+  if (!assistantMessageId) return false
+
+  const consumed = Math.max(0, Math.trunc(Number(creditsConsumed || 0)))
+  const charged = Math.max(0, Math.trunc(Number(creditsCharged || 0)))
+
+  // Garde-fou local identique aux contraintes SQL (aucun débit > consommation,
+  // aucun montant débité pour un statut non facturé).
+  if (charged > consumed) return false
+  if (creditStatus !== 'charged' && charged !== 0) return false
+  if (creditStatus === 'charged' && charged !== consumed) return false
 
   const { error } = await supabase.rpc(ASSISTANT_IDEMPOTENCY_RPC.complete, {
     p_user_id: identity.userId,
@@ -158,6 +176,8 @@ export async function completeAssistantRequest(
     p_attempt_token: identity.attemptToken,
     p_assistant_message_id: assistantMessageId,
     p_credit_status: creditStatus,
+    p_credits_consumed: consumed,
+    p_credits_charged: charged,
   })
 
   return !error
