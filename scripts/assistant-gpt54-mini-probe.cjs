@@ -15,6 +15,8 @@ const ENDPOINT = 'https://api.openai.com/v1/chat/completions'
 
 const DRY_RUN = !process.argv.includes('--live')
 const SELF_TEST = process.argv.includes('--self-test')
+/** Vérifie le chargement de la clé SANS aucun appel réseau. */
+const CHECK_KEY = process.argv.includes('--check-key')
 
 /** Valeur numérique d'une option `--nom valeur`, bornée par un plafond absolu. */
 function readOption(name, fallback, hardMax) {
@@ -267,6 +269,17 @@ async function runLive() {
 
 if (SELF_TEST) {
   process.exitCode = selfTest() ? 0 : 1
+} else if (CHECK_KEY) {
+  // Diagnostic de chargement : ne révèle jamais la valeur de la clé.
+  const resolved = resolveApiKey()
+  console.log(JSON.stringify({
+    mode: 'check-key',
+    source: resolved.source,
+    loaded: Boolean(resolved.key),
+    fingerprint: keyFingerprint(resolved.key),
+    issue: resolved.issue,
+  }))
+  process.exitCode = resolved.key ? 0 : 2
 } else if (DRY_RUN) {
   console.log(JSON.stringify({ mode: 'dry-run', model: MODEL, maxCalls: MAX_CALLS, maxOutputTokens: MAX_OUTPUT_TOKENS, maxUsdPerExchange: MAX_USD_PER_EXCHANGE, maxInputTokens: maxInputTokensForBudget(), body: buildRequestBody('exemple') }, null, 2))
 } else {
