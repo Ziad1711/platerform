@@ -97,8 +97,13 @@ function asStrictUuid(value: unknown, field: string): string {
 }
 
 function asNonNegativeInteger(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) invalidRegistryResponse(field)
-  return value
+  // PostgreSQL renvoie parfois `bigint`/`numeric` en texte : on accepte la
+  // forme décimale entière, jamais un flottant ni une valeur négative.
+  const numeric = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value
+  if (typeof numeric !== 'number' || !Number.isSafeInteger(numeric) || numeric < 0) {
+    invalidRegistryResponse(field)
+  }
+  return numeric
 }
 
 interface ValidatedBeginRow {

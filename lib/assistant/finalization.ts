@@ -24,6 +24,7 @@ import { chargeCredits, type CreditChargeStatus } from '@/lib/assistant/credits'
 import {
   ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED,
   completeAssistantRequest,
+  validateFinalizeCounters,
 } from '@/lib/assistant/idempotency'
 import { requireAssistantBackendClient } from '@/lib/assistant/backend'
 import type { AssistantProviderOutput } from '@/lib/assistant/providers/types'
@@ -125,31 +126,39 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
       throw new Error('FINALIZE_RPC_FAILED')
     }
 
-    const row = (Array.isArray(data) ? data[0] : data) as
-      | {
-          assistant_message?: unknown
-          credit_status?: string
-          replayed?: boolean
-          credits_consumed?: number | string | null
-          credits_charged?: number | string | null
-        }
-      | null
-      | undefined
+    const rawRow = Array.isArray(data) ? data[0] : data
 
-    if (!row || (row.assistant_message === undefined && !row.replayed)) {
+    if (!rawRow || typeof rawRow !== 'object' || Array.isArray(rawRow)) {
       console.error('[assistant] finalize_rpc_empty')
       throw new Error('FINALIZE_RPC_FAILED')
     }
 
+    const row = rawRow as {
+      assistant_message?: unknown
+      credit_status?: string
+      replayed?: boolean
+      credits_consumed?: number
+      credits_charged?: number
+    }
+
+    if (row.assistant_message === undefined && !row.replayed) {
+      console.error('[assistant] finalize_rpc_empty')
+      throw new Error('FINALIZE_RPC_FAILED')
+    }
+
+    // Validation stricte des compteurs : entiers ≥ 0 et débit ≤ consommation.
+    // Une réponse incohérente est rejetée ICI, sans second débit ni reprise.
+    const counters = validateFinalizeCounters(row)
+
     const creditStatus =
-      row?.credit_status === 'charged' || row?.credit_status === 'insufficient' || row?.credit_status === 'failed'
+      row.credit_status === 'charged' || row.credit_status === 'insufficient' || row.credit_status === 'failed'
         ? row.credit_status
         : 'not_charged'
 
-    // Consommation et débit sont deux mesures distinctes : le repli local ne
-    // sert qu'à l'affichage, jamais à recalculer une facture.
-    const creditsConsumed = toSafeCredits(row?.credits_consumed, input.creditsUsed)
-    const creditsCharged = toSafeCredits(row?.credits_charged, 0)
+    // Consommation et débit proviennent de la RPC validée : aucun repli ne peut
+    // recalculer une facture ni masquer une incohérence.
+    const creditsConsumed = counters.consumed
+    const creditsCharged = counters.charged
 
     return {
       atomic: true,

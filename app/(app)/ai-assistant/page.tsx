@@ -509,11 +509,13 @@ export default function AssistantIAPage() {
 
   useEffect(() => {
     if (!sendMessageMutation.isPending) {
-      setLoadingStepIndex(0)
+      // Remise à zéro hors du corps synchrone de l'effet (règle React) : le
+      // comportement observable reste identique.
+      queueMicrotask(() => setLoadingStepIndex(0))
       return
     }
 
-    setLoadingStepIndex(0)
+    queueMicrotask(() => setLoadingStepIndex(0))
     const timer = setInterval(() => {
       setLoadingStepIndex((prev) => Math.min(prev + 1, Math.max(0, liveActivitySteps.length - 1)))
     }, 1100)
