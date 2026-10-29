@@ -178,3 +178,26 @@ première erreur (`ON_ERROR_STOP`) et le log identifie l'objet fautif.
    sous-ensemble — un sous-ensemble casserait les 52 fonctions `LANGUAGE sql`
    qui référencent des tables non incluses.
 4. Disque local : ~9 Go libres, largement suffisant.
+
+---
+
+## 9. Décision : reconstruction via MCP écartée (NO-GO)
+
+L'option A (reconstruction DDL depuis les catalogues via le canal lecture seule)
+a été **mesurée puis rejetée** :
+
+- volume de DDL à transférer : **581 619 octets** (~568 Kio, ~150 k tokens),
+  non transférable sans troncature par le canal MCP ;
+- la fermeture du périmètre audit atteint le hub `orders` via
+  `confirmation_agents → reassign_orders_on_agent_deactivation`, donc réduire le
+  périmètre exigerait de désactiver des triggers (mock interdit) ;
+- sans DDL complet, ni contrôle objet par objet ni empreinte SHA-256 ne sont
+  possibles.
+
+Détails, écarts de fidélité et alternative retenue :
+[`RECONSTRUCTION_ASSESSMENT.md`](./RECONSTRUCTION_ASSESSMENT.md).
+
+**Seule voie fidèle restante** : rôle d'audit minimal (`LOGIN` + `CONNECT` +
+`USAGE` sur `public`, `VALID UNTIL` court) puis `pg_dump --schema-only`, rôle
+supprimé immédiatement après. La commande d'export du §2 s'applique alors
+telle quelle, suivie de `export/verify_restore.sql`.

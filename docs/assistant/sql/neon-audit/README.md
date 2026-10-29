@@ -24,6 +24,7 @@ aucun rôle distant créé ; aucun SQL d'écriture lancé ; aucun push.
 | `connection/PREVALIDATION.md` | rapport de prévalidation et informations de connexion requises |
 | `export/EXPORT_PLAN.md` | plan d'export structurel production → Neon : commande exacte, exclusions, compatibilité 17.6→18.6, blocages |
 | `export/verify_restore.sql` | conformité post-restauration (volumes d'objets, RLS, extensions, absence de données) |
+| `export/RECONSTRUCTION_ASSESSMENT.md` | évaluation mesurée de la reconstruction DDL via MCP — **verdict NO-GO** + voie fidèle restante |
 
 ## Ordre imposé
 
