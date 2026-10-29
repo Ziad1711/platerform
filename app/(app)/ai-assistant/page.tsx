@@ -6,6 +6,7 @@ import { MessageSquare, MoreVertical, Pin, PinOff, Plus, Send, Sparkles, Trash2,
 import AssistantChartCard from '@/components/assistant/assistant-chart-card'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
+import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
 
 interface ThreadItem {
   id: string
@@ -417,10 +418,6 @@ export default function AssistantIAPage() {
 
   const pendingRequestRef = useRef<{ key: string; requestId: string } | null>(null)
 
-  // La clé de retry lie compte, boutique, conversation et contenu : changer de
-  // périmètre ne réutilise jamais l'identifiant d'une requête précédente.
-  const buildRetryKey = (text: string, threadId: string | null) =>
-    [userId ?? '', currentStoreId ?? '', threadId ?? 'new', text].join('\u0000')
 
   const handleSend = async (message: string) => {
     const clean = message.trim()
@@ -432,22 +429,24 @@ export default function AssistantIAPage() {
     // Même texte, même compte, même boutique et même conversation relancés
     // après un échec = même clé ; tout changement de périmètre produit une
     // nouvelle clé (aucun rejeu inter-périmètre possible).
-    const retryKey = buildRetryKey(clean, selectedThreadId)
-    const requestId =
-      pendingRequestRef.current && pendingRequestRef.current.key === retryKey
-        ? pendingRequestRef.current.requestId
-        : typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    const retry = resolveRetryRequestId(
+      pendingRequestRef.current,
+      { userId, storeId: currentStoreId, threadId: selectedThreadId, message: clean },
+      () =>
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
           : null
+    )
 
-    if (!requestId) {
+    if (!retry) {
       setInput(clean)
       setOptimisticUserMessage(null)
       setServerError('Navigateur incompatible : identifiant de requête indisponible.')
       return
     }
 
-    pendingRequestRef.current = { key: retryKey, requestId }
+    const requestId = retry.requestId
+    pendingRequestRef.current = retry
 
     try {
       await sendMessageMutation.mutateAsync({

@@ -69,16 +69,6 @@ export interface FinalizeTurnResult {
   warning: string | null
 }
 
-/** Convertit une valeur RPC (entier ou texte PostgreSQL) en crédits sûrs. */
-function toSafeCredits(value: unknown, fallback: number) {
-  if (value === null || value === undefined || value === '') {
-    return Math.max(0, Math.trunc(fallback))
-  }
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric) || numeric < 0) return Math.max(0, Math.trunc(fallback))
-  return Math.trunc(numeric)
-}
-
 function buildUsageRow(input: FinalizeTurnInput) {
 
   return {
