@@ -139,6 +139,11 @@ declare
   c_thread_adm uuid := 'ffffffff-ffff-4fff-8fff-ffffffffffff';
   v_month date := date_trunc('month', now())::date;
 begin
+  -- `profiles.id` référence `auth.users(id)` : les identités doivent exister.
+  insert into auth.users (id) values
+    (c_owner), (c_admin), (c_viewer), (c_accountant), (c_outsider)
+  on conflict (id) do nothing;
+
   perform audit.seed_row('profiles', jsonb_build_object('id', c_owner));
   perform audit.seed_row('profiles', jsonb_build_object('id', c_admin));
   perform audit.seed_row('profiles', jsonb_build_object('id', c_viewer));

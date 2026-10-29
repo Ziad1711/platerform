@@ -37,6 +37,17 @@ $$;
 
 create schema if not exists auth;
 
+-- Table minimale `auth.users` : REQUISE par les clés étrangères du schéma
+-- production (`profiles.id → auth.users(id)`, `store_members.invited_by`).
+-- Aucun contenu métier, aucune authentification : simple support référentiel.
+create table if not exists auth.users (
+  id         uuid primary key,
+  email      text,
+  created_at timestamptz not null default now()
+);
+revoke all on auth.users from public, anon, authenticated;
+grant select, insert, update, delete on auth.users to service_role;
+
 create or replace function auth.uid()
 returns uuid
 language sql

@@ -762,6 +762,7 @@ function runAuditPackageChecks() {
       'run/run_audit.sh', 'run/env.example',
       'connection/env.neon.example', 'connection/check_connection.sh',
       'connection/PREVALIDATION.md', 'connection/INSTALL_CLIENT.md',
+      'export/EXPORT_PLAN.md', 'export/verify_restore.sql',
     ]
     for (const rel of expected) {
       assert(fs.existsSync(path.join(base, rel)), `manquant: ${rel}`)

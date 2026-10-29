@@ -22,6 +22,8 @@ aucun rôle distant créé ; aucun SQL d'écriture lancé ; aucun push.
 | `connection/env.neon.example` | modèle de connexion **directe** Neon (hors dépôt une fois renseigné) |
 | `connection/check_connection.sh` | prévalidation hors ligne + premier contact lecture seule |
 | `connection/PREVALIDATION.md` | rapport de prévalidation et informations de connexion requises |
+| `export/EXPORT_PLAN.md` | plan d'export structurel production → Neon : commande exacte, exclusions, compatibilité 17.6→18.6, blocages |
+| `export/verify_restore.sql` | conformité post-restauration (volumes d'objets, RLS, extensions, absence de données) |
 
 ## Ordre imposé
 

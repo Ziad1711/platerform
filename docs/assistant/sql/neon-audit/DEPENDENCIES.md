@@ -56,6 +56,8 @@ le mécanisme utilisé par tous les scénarios.
 | `assistant_requests.thread_id → chat_threads(id)` | `on delete set null` (imposé par `03b`) : R12 vérifie l'absence d'orphelin |
 | `chat_messages.thread_id → chat_threads(id)` | règle réelle inconnue hors base : `cascade` ⇒ messages supprimés ; `restrict` ⇒ suppression refusée. R12 enregistre le résultat réel |
 | `ai_credit_wallets.user_id` | unicité attendue (le code fait `select … for update` puis `insert` si absent) |
+| `profiles.id → auth.users(id)` | **mesuré en production** : la table `auth.users` doit exister avant restauration. `05_auth_shim.sql` en crée un stub minimal (`id uuid primary key`), suffisant pour la FK ; l'authentification reste hors périmètre |
+| `store_members.invited_by → auth.users(id)` | même dépendance (sans cascade) |
 
 `20_verify_schema_ready.sql` affiche ces FK avant toute écriture.
 

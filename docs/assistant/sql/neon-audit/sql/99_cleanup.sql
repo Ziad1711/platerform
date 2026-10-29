@@ -48,6 +48,10 @@ begin
   delete from public.plans  where id in (v_free, v_paid);
   delete from public.profiles
    where id in (v_owner, v_admin, v_viewer, v_accountant, v_outsider);
+
+  -- Identités référentielles du shim (aucune donnée métier).
+  delete from auth.users
+   where id in (v_owner, v_admin, v_viewer, v_accountant, v_outsider);
 end;
 $$;
 
