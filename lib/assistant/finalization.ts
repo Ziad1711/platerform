@@ -12,6 +12,12 @@
  *
  * Aucune garantie d'atomicité ne doit être annoncée tant que la migration n'est
  * pas appliquée et testée.
+ *
+ * Crédits : `creditsConsumed` (tokens réels) et `creditsCharged` (débit réel)
+ * sont deux mesures distinctes. Décision provisoire documentée : si le solde
+ * est insuffisant, la réponse et le journal sont conservés, le débit est nul et
+ * le statut vaut `insufficient`. Ce n'est pas une garantie « tout ou rien »
+ * financière ; elle doit être réarbitrée avec la facturation.
  */
 import { addMessage, touchThread } from '@/lib/assistant/chat'
 import { chargeCredits, type CreditChargeStatus } from '@/lib/assistant/credits'
@@ -51,12 +57,29 @@ export interface FinalizeTurnInput {
 export interface FinalizeTurnResult {
   /** `false` = écritures séquentielles, donc non atomiques. */
   atomic: boolean
+  /** `true` = réponse déjà finalisée relue depuis le registre (aucun débit). */
+  replayed: boolean
   assistantMessage: unknown
   creditStatus: CreditChargeStatus | 'not_charged'
+  /** Consommation réelle calculée sur les tokens (facturable ou non). */
+  creditsConsumed: number
+  /** Montant réellement débité du portefeuille (0 si non facturé). */
+  creditsCharged: number
   warning: string | null
 }
 
+/** Convertit une valeur RPC (entier ou texte PostgreSQL) en crédits sûrs. */
+function toSafeCredits(value: unknown, fallback: number) {
+  if (value === null || value === undefined || value === '') {
+    return Math.max(0, Math.trunc(fallback))
+  }
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0) return Math.max(0, Math.trunc(fallback))
+  return Math.trunc(numeric)
+}
+
 function buildUsageRow(input: FinalizeTurnInput) {
+
   return {
     user_id: input.userId,
     store_id: input.storeId,
@@ -103,7 +126,13 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
     }
 
     const row = (Array.isArray(data) ? data[0] : data) as
-      | { assistant_message?: unknown; credit_status?: string; replayed?: boolean }
+      | {
+          assistant_message?: unknown
+          credit_status?: string
+          replayed?: boolean
+          credits_consumed?: number | string | null
+          credits_charged?: number | string | null
+        }
       | null
       | undefined
 
@@ -117,10 +146,18 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
         ? row.credit_status
         : 'not_charged'
 
+    // Consommation et débit sont deux mesures distinctes : le repli local ne
+    // sert qu'à l'affichage, jamais à recalculer une facture.
+    const creditsConsumed = toSafeCredits(row?.credits_consumed, input.creditsUsed)
+    const creditsCharged = toSafeCredits(row?.credits_charged, 0)
+
     return {
       atomic: true,
+      replayed: row?.replayed === true,
       assistantMessage: row?.assistant_message ?? null,
       creditStatus,
+      creditsConsumed,
+      creditsCharged,
       warning: creditStatus === 'charged' ? null : 'La consommation de crédits n’a pas pu être confirmée.',
     }
   }
@@ -160,7 +197,10 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
     await touchThread(input.supabase, input.threadId)
   }
 
-  const { error: usageError } = await input.supabase.from('ai_usage').insert(buildUsageRow(input))
+  // Journal d'usage : écrit par le backend. `authenticated` n'a plus le droit
+  // d'insérer dans `ai_usage` (01), ce qui interdit la falsification de la
+  // consommation et l'imputation de coûts à une boutique arbitraire.
+  const { error: usageError } = await backend.from('ai_usage').insert(buildUsageRow(input))
   if (usageError) {
     warning = 'Le journal d’usage IA n’a pas pu être enregistré.'
     console.error('[assistant] usage_log_failed', { code: usageError.code || 'unknown' })
@@ -172,19 +212,27 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
     console.error('[assistant] credit_charge_failed', { status: charge.status })
   }
 
+  const creditsConsumed = Math.max(0, Math.trunc(input.creditsUsed))
+  const creditsCharged = charge.status === 'charged' ? creditsConsumed : 0
+
   if (ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED && input.attemptToken) {
     await completeAssistantRequest(
       backend,
       { userId: input.userId, requestId: input.requestId, attemptToken: input.attemptToken },
       assistantRow.id as string,
-      charge.status
+      charge.status,
+      creditsConsumed,
+      creditsCharged
     )
   }
 
   return {
     atomic: false,
+    replayed: false,
     assistantMessage,
     creditStatus: charge.status,
+    creditsConsumed,
+    creditsCharged,
     warning,
   }
 }

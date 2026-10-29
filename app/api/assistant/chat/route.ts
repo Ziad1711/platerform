@@ -228,9 +228,14 @@ export async function POST(request: Request) {
           structured_response: replayMetadata?.structured_response,
           replayed: true,
           credit_status: registry.creditStatus,
-          finalization_atomic: true,
+          // Rejeu du registre : la réponse vient d'une finalisation antérieure,
+          // dont le mode (atomique ou séquentiel) n'est pas stocké. Aucune
+          // affirmation d'atomicité n'est donc faite ici.
+          finalization_atomic: null,
           usage: {
             creditsUsed: 0,
+            creditsConsumed: 0,
+            creditsCharged: 0,
             inputTokens: 0,
             outputTokens: 0,
             providerName: 'replay',
@@ -277,10 +282,14 @@ export async function POST(request: Request) {
           assistantMessage: replayed,
           structured_response: replayMetadata?.structured_response,
           replayed: true,
-          credit_status: 'not_charged',
+          // Repli sans registre : le statut de débit d'origine n'est pas stocké.
+          // Aucune valeur n'est inventée (ni « facturé » ni « non facturé »).
+          credit_status: null,
           finalization_atomic: false,
           usage: {
             creditsUsed: 0,
+            creditsConsumed: 0,
+            creditsCharged: 0,
             inputTokens: 0,
             outputTokens: 0,
             providerName: 'replay',
@@ -508,15 +517,21 @@ export async function POST(request: Request) {
       nextTitle,
     })
 
-    const chargedCredits = finalization.creditStatus === 'charged' ? creditsUsed : 0
+    // Consommation et débit réels : le portefeuille affiché ne bouge que du
+    // montant effectivement débité par cette requête (jamais sur un rejeu).
+    const chargedCredits = finalization.replayed ? 0 : finalization.creditsCharged
+    const consumedCredits = finalization.replayed ? 0 : finalization.creditsConsumed
 
     console.info('[assistant] request_done', {
       intent,
       storeId: selectedStoreId,
       durationMs: Date.now() - startedAt,
       creditsUsed,
-      charge: finalization.creditStatus,
+      creditCharge: finalization.creditStatus,
+      creditsConsumed: consumedCredits,
+      creditsCharged: chargedCredits,
       atomic: finalization.atomic,
+      replayed: finalization.replayed,
       provider: providerResult.providerName,
       model: providerResult.modelName,
     })
@@ -526,6 +541,8 @@ export async function POST(request: Request) {
       assistantMessage: finalization.assistantMessage,
       usage: {
         creditsUsed,
+        creditsConsumed: consumedCredits,
+        creditsCharged: chargedCredits,
         inputTokens: providerResult.inputTokens,
         outputTokens: providerResult.outputTokens,
         providerName: providerResult.providerName,
