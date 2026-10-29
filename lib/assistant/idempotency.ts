@@ -138,17 +138,8 @@ export function validateBeginRow(raw: unknown): ValidatedBeginRow {
   }
 }
 
-/** Validation des compteurs de finalisation (consommation/débit). */
-export function validateFinalizeCounters(raw: unknown): { consumed: number; charged: number } {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) invalidRegistryResponse('finalize_row')
-
-  const row = raw as Record<string, unknown>
-  const consumed = asNonNegativeInteger(row.credits_consumed, 'credits_consumed')
-  const charged = asNonNegativeInteger(row.credits_charged, 'credits_charged')
-  if (charged > consumed) invalidRegistryResponse('credits_charged_gt_consumed')
-
-  return { consumed, charged }
-}
+/** Validation des compteurs de finalisation (implémentation dans credit-invariants). */
+export { validateFinalizeCounters } from '@/lib/assistant/credit-invariants'
 
 /**
  * Réservation d'une requête dans le registre persistant.

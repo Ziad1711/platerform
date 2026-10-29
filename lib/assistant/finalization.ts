@@ -24,8 +24,8 @@ import { chargeCredits, type CreditChargeStatus } from '@/lib/assistant/credits'
 import {
   ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED,
   completeAssistantRequest,
-  validateFinalizeCounters,
 } from '@/lib/assistant/idempotency'
+import { validateFinalizeCounters } from '@/lib/assistant/credit-invariants'
 import { requireAssistantBackendClient } from '@/lib/assistant/backend'
 import type { AssistantProviderOutput } from '@/lib/assistant/providers/types'
 import type { createClient } from '@/lib/supabase/server'
