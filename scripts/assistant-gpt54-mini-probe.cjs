@@ -147,6 +147,18 @@ function selfTest() {
   return failed.length === 0
 }
 
+/** Décrit une erreur réseau sans exposer la clé ni le corps de réponse. */
+function describeFetchError(error) {
+  const cause = error && typeof error === 'object' ? error.cause : undefined
+  return {
+    message: error instanceof Error ? error.message : 'erreur inconnue',
+    causeCode: cause && typeof cause === 'object' ? cause.code ?? null : null,
+    causeErrno: cause && typeof cause === 'object' ? cause.errno ?? null : null,
+    causeHost: cause && typeof cause === 'object' ? cause.hostname ?? null : null,
+    causePort: cause && typeof cause === 'object' ? cause.port ?? null : null,
+  }
+}
+
 async function runLive() {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error('OPENAI_API_KEY absente')
@@ -157,7 +169,13 @@ async function runLive() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(buildRequestBody('Réponds au format demandé.')),
+    }).catch((error) => {
+      // Remonte la cause réseau (code DNS/TCP/TLS) sans réessayer ni fuiter de secret.
+      console.log(`FAIL  appel ${index + 1} : ${JSON.stringify(describeFetchError(error))}`)
+      process.exitCode = 1
+      return null
     })
+    if (!response) return
     if (!response.ok) {
       console.log(`FAIL  appel ${index + 1} : HTTP ${response.status}`)
       process.exitCode = 1
@@ -179,7 +197,7 @@ if (SELF_TEST) {
   console.log(JSON.stringify({ mode: 'dry-run', model: MODEL, maxCalls: MAX_CALLS, maxOutputTokens: MAX_OUTPUT_TOKENS, maxUsdPerExchange: MAX_USD_PER_EXCHANGE, maxInputTokens: maxInputTokensForBudget(), body: buildRequestBody('exemple') }, null, 2))
 } else {
   runLive().catch((error) => {
-    console.error('PROBE FAILED', error instanceof Error ? error.message : 'erreur')
+    console.error('PROBE FAILED', JSON.stringify(describeFetchError(error)))
     process.exitCode = 1
   })
 }
