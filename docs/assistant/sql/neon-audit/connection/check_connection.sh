@@ -83,6 +83,25 @@ else
   else
     ko "PGSSLROOTCERT absent ou illisible : verify-full échouera"
   fi
+
+  # Vérification cryptographique indépendante de libpq.
+  # `pg_stat_ssl` n'est PAS probant chez Neon : l'endpoint termine le TLS au
+  # proxy, la liaison proxy→backend est interne et apparaît sans TLS.
+  if command -v openssl >/dev/null 2>&1 && [ -r "${PGSSLROOTCERT:-/nonexistent}" ]; then
+    TLS_OUT="$(echo | openssl s_client -starttls postgres \
+        -connect "${PGHOST}:${PGPORT:-5432}" -servername "$PGHOST" \
+        -CAfile "$PGSSLROOTCERT" -verify_hostname "$PGHOST" \
+        -verify_return_error 2>&1 || true)"
+    if printf '%s' "$TLS_OUT" | grep -q 'Verify return code: 0 (ok)'; then
+      TLS_PROTO="$(printf '%s' "$TLS_OUT" | grep -m1 '^Protocol:' | cut -d: -f2 | tr -d ' ')"
+      TLS_CN="$(printf '%s' "$TLS_OUT" | grep -m1 '^subject=' | cut -d= -f2-)"
+      ok "TLS vérifié (chaîne + nom d'hôte) — ${TLS_PROTO:-?} — $TLS_CN"
+    else
+      ko "TLS non vérifié (chaîne de certification ou nom d'hôte)"
+    fi
+  else
+    info "openssl indisponible : vérification TLS limitée à sslmode=verify-full"
+  fi
 fi
 
 echo
@@ -103,16 +122,21 @@ else
 fi
 
 echo
-echo "=== 5. Session épinglée (dans une même session) ==="
+echo "=== 5. Épinglage de session (informatif) ==="
 if [ "$ONLINE" -eq 0 ] || [ -z "$PSQL_BIN" ]; then
-  skip "mode hors ligne (le prévol SQL refait ce test)"
+  skip "mode hors ligne"
 else
-  if "$PSQL_BIN" --no-psqlrc --quiet --set=ON_ERROR_STOP=1 -tAc "
-      select case when a.pid = b.pid then 'PINNED' else 'POOLED' end
-        from (select pg_backend_pid() as pid) a, (select pg_backend_pid() as pid) b;" 2>/dev/null | grep -q PINNED; then
-    ok "session épinglée (même backend entre deux transactions)"
+  # Deux transactions dans UNE session : même backend = session épinglée.
+  # Non discriminant chez Neon (le proxy garde la connexion serveur au repos) :
+  # seul le nom d'hôte, testé en §2, fait foi.
+  PIDS="$("$PSQL_BIN" --no-psqlrc -tA -c 'select pg_backend_pid()' \
+            -c 'select pg_backend_pid()' 2>/dev/null | tr -d '\r')"
+  FIRST="$(printf '%s\n' "$PIDS" | sed -n 1p)"
+  SECOND="$(printf '%s\n' "$PIDS" | sed -n 2p)"
+  if [ -n "$FIRST" ] && [ "$FIRST" = "$SECOND" ]; then
+    info "même backend sur deux transactions ($FIRST) — non probant chez Neon"
   else
-    ko "session non épinglée : pooler probable"
+    info "backends différents ($FIRST/$SECOND) — signe possible de pooler"
   fi
 fi
 

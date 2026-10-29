@@ -28,8 +28,8 @@ Exécutés par `sql/00_preflight.sql`, avant toute écriture :
 | Nom de base | = `AUDIT_DB`, et ne contient ni `prod`, ni `jisra-test`, ni `goqedvcdmgtejtyrawsp`, ni `supabase` | NO-GO immédiat |
 | `AUDIT_ENV` | `neon-audit` | NO-GO |
 | Endpoint **direct** | `PGHOST` renseigné et **sans** `-pooler` | NO-GO (verrous de session non fiables) |
-| Session épinglée | même `pg_backend_pid()` entre deux transactions de la même session | NO-GO (pooler détecté) |
-| TLS | `pg_stat_ssl.ssl = true` **et** `sslmode=verify-full` avec bundle CA lisible | NO-GO |
+| Session épinglée | *informatif* : même `pg_backend_pid()` sur deux transactions | aucune décision (non discriminant chez Neon) |
+| TLS | `sslmode=verify-full` + CA lisible, **et** `openssl s_client -starttls postgres` : chaîne + nom d'hôte vérifiés | NO-GO |
 | Version PostgreSQL | `server_version_num >= 130000`, **même majeure que la source du schéma** | NO-GO |
 | Rôles | `anon`, `authenticated`, `service_role` présents | NO-GO |
 | `auth.uid()` | une fonction `auth.uid()` | NO-GO |

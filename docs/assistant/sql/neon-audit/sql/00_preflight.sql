@@ -47,6 +47,11 @@ select (coalesce(:'audit_host', '') <> ''
         and coalesce(:'audit_host', '') !~* '-pooler') as host_direct_ok
 \gset
 
+-- Épinglage de session : mesure INFORMATIVE, non bloquante.
+-- Chez Neon, le proxy PgBouncer conserve la même connexion serveur pour un
+-- client au repos : deux transactions successives renvoient le même backend
+-- MÊME via l'endpoint mutualisé. Test non discriminant → seul le nom d'hôte
+-- (absence de `-pooler`) fait foi.
 select pg_backend_pid() as pid_first \gset
 select pg_backend_pid() as pid_second \gset
 select (:'pid_first' = :'pid_second') as session_pinned \gset
@@ -67,16 +72,27 @@ select
   (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'auth' and p.proname = 'uid') as auth_uid_functions;
 
--- Verdict agrégé (aucune écriture).
+-- Capacité effective de contourner la RLS : attribut direct OU appartenance à
+-- un rôle porteur (Neon : neondb_owner est membre de neon_superuser, qui porte
+-- BYPASSRLS ; l'attribut n'est pas posé sur le rôle lui-même).
+select
+  coalesce((select rolsuper or rolbypassrls from pg_roles where rolname = current_user), false)
+  or coalesce((select bool_or(pg_has_role(current_user, g.rolname, 'member'))
+                 from pg_roles g
+                where g.rolsuper or g.rolbypassrls), false) as owner_bypasses_rls
+\gset
+
+-- TLS : `pg_stat_ssl` n'est PAS probant chez Neon. L'endpoint termine le TLS au
+-- proxy ; la liaison proxy→backend est interne et apparaît sans TLS (ssl = f).
+-- Le TLS client est prouvé : (a) par sslmode=verify-full accepté par libpq,
+-- (b) par la vérification cryptographique `openssl s_client -starttls postgres`
+--     de check_connection.sh (chaîne + nom d'hôte). Aucun FAIL n'est donc émis ici.
 select
   case
     when not :'identity_ok'::boolean then 'FAIL:identite'
     when not :'host_direct_ok'::boolean then 'FAIL:connexion-non-directe'
-    when not :'session_pinned'::boolean then 'FAIL:pooler-detecte'
-    when coalesce((select ssl from pg_stat_ssl where pid = pg_backend_pid()), false) is not true then 'FAIL:tls'
     when current_setting('server_version_num')::int < 130000 then 'FAIL:version'
-    when not coalesce((select rolsuper or rolbypassrls from pg_roles where rolname = current_user), false)
-      then 'FAIL:owner-sans-bypassrls'
+    when not :'owner_bypasses_rls'::boolean then 'FAIL:owner-sans-bypassrls'
     else 'PASS'
   end as preflight;
 
@@ -87,24 +103,37 @@ select
   coalesce((select ssl from pg_stat_ssl where pid = pg_backend_pid()), false) as tls_enabled,
   coalesce((select version from pg_stat_ssl where pid = pg_backend_pid()), '') as tls_version,
   coalesce((select rolsuper from pg_roles where rolname = current_user), false) as is_superuser,
-  coalesce((select rolbypassrls from pg_roles where rolname = current_user), false) as bypassrls,
+  :'owner_bypasses_rls'::boolean as bypassrls_effective,
   (select count(*) from pg_roles where rolname in ('anon','authenticated','service_role')) as supabase_roles,
   (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'auth' and p.proname = 'uid') as auth_uid_functions;
 
--- Absence de données métier : la base doit être vide avant fixtures.
--- (to_regclass évite l'échec si une table n'existe pas encore.)
-select
-  coalesce((select count(*) from public.orders), 0) as orders_rows,
-  coalesce((select count(*) from public.chat_threads), 0) as chat_threads_rows,
-  coalesce((select count(*) from public.chat_messages), 0) as chat_messages_rows,
-  coalesce((select count(*) from public.ai_usage), 0) as ai_usage_rows,
-  coalesce((select count(*) from public.assistant_requests), 0) as assistant_requests_rows;
+-- Présence des tables attendues (aucune erreur si elles sont absentes).
+select t.name as table_name,
+       to_regclass('public.' || t.name) is not null as present
+  from (values ('orders'), ('chat_threads'), ('chat_messages'),
+               ('ai_usage'), ('assistant_requests')) t(name)
+ order by t.name;
+
+-- Comptage dynamique, uniquement sur les tables réellement présentes
+-- (aucune référence statique : une base vide ne provoque aucune erreur).
+select coalesce(
+         string_agg(
+           format('select %L as table_name, count(*)::bigint as rows from public.%I',
+                  t.name, t.name),
+           ' union all ' order by t.name),
+         'select null::text as table_name, null::bigint as rows where false'
+       )
+  from (values ('orders'), ('chat_threads'), ('chat_messages'),
+               ('ai_usage'), ('assistant_requests')) t(name)
+ where to_regclass('public.' || t.name) is not null
+\gexec
 
 \echo ''
 \echo 'PASS/FAIL attendu : preflight = PASS, host_direct_ok = t, session_pinned = t,'
-\echo 'tls_enabled = t, server_version_num >= 130000, bypassrls = t,'
-\echo 'et toutes les colonnes *_rows = 0 (base neuve, aucune donnée métier).'
+\echo 'TLS:ssl = t (ou NULL si pg_stat_ssl est masqué : TLS prouvé par verify-full),'
+\echo 'server_version_num >= 130000, bypassrls_effective = t,'
+\echo 'et toutes les colonnes rows = 0 (base neuve, aucune donnée métier).'
 \echo 'supabase_roles/auth_uid_functions valent 0 avant 05_auth_shim.sql : normal.'
-\echo 'Si bypassrls = f : les SECURITY DEFINER subiront la RLS et les tests seront'
-\echo 'invalides (voir DEPENDENCIES.md §3).'
+\echo 'Si bypassrls_effective = f : les SECURITY DEFINER subiront la RLS et les'
+\echo 'tests seront invalides (voir DEPENDENCIES.md §3).'
