@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Sonde GPT-5.4 mini — script ISOLÉ, hors application.
  * `--dry-run` par défaut (aucun réseau), `--live` requis pour un appel réel,
@@ -137,6 +138,23 @@ function selfTest() {
   check('G12 budget cumulé jamais supérieur à appels × 0,02 $', () => {
     if (MAX_CUMULATIVE_USD > MAX_CALLS * HARD_MAX_USD_PER_EXCHANGE + 1e-9) throw new Error('budget cumulé trop élevé')
   })
+  check('G13 placeholder rejeté (cause UND_ERR_INVALID_ARG)', () => {
+    if (sanitizeApiKey('<nouvelle clé dédiée>').issue !== 'placeholder') throw new Error('placeholder accepté')
+  })
+  check('G14 clé non-ASCII ou avec espace rejetée', () => {
+    if (sanitizeApiKey('sk-abcé123').issue !== 'non_ascii') throw new Error('non_ascii accepté')
+    if (sanitizeApiKey('sk-abc 123').issue !== 'espace_interne') throw new Error('espace accepté')
+  })
+  check('G15 clé CRLF normalisée, préfixe vérifié', () => {
+    const sanitized = sanitizeApiKey('  sk-abc123\r\n')
+    if (sanitized.key !== 'sk-abc123') throw new Error('normalisation')
+    if (sanitizeApiKey('abc123').issue !== 'prefixe') throw new Error('préfixe non vérifié')
+  })
+  check('G16 empreinte non réversible et sans valeur', () => {
+    const fingerprint = keyFingerprint('sk-abc123')
+    if (!/^[0-9a-f]{12}$/.test(fingerprint)) throw new Error('empreinte')
+    if (fingerprint.includes('sk-')) throw new Error('valeur fuitée')
+  })
   check('G09 aucun appel réseau hors --live', () => {
     if (!DRY_RUN) throw new Error('self-test doit rester en dry-run')
   })
@@ -147,7 +165,58 @@ function selfTest() {
   return failed.length === 0
 }
 
-/** Décrit une erreur réseau sans exposer la clé ni le corps de réponse. */
+/**
+ * En-têtes HTTP : Undici lève `UND_ERR_INVALID_ARG` dès qu'une valeur contient
+ * un espace interne, un caractère non-ASCII ou un saut de ligne. Une clé
+ * recopiée (placeholder `<...>`, `é`, retour chariot) produit exactement cette
+ * erreur, sans aucun appel facturable. On normalise puis on refuse explicitement.
+ */
+function sanitizeApiKey(raw) {
+  if (typeof raw !== 'string') return { key: null, issue: 'absent' }
+
+  const key = raw.replace(/[\r\n\t]/g, '').trim()
+  if (!key) return { key: null, issue: 'vide' }
+  if (/^<.*>$/.test(key)) return { key: null, issue: 'placeholder' }
+  // Un espace (0x20) sort aussi de la plage imprimable : tester l'espace d'abord
+  // garantit un diagnostic exact (`espace_interne` plutôt que `non_ascii`).
+  if (/\s/.test(key)) return { key: null, issue: 'espace_interne' }
+  if (/[^\x21-\x7E]/.test(key)) return { key: null, issue: 'non_ascii' }
+  if (!key.startsWith('sk-')) return { key: null, issue: 'prefixe' }
+  return { key, issue: null }
+}
+
+/** Empreinte non réversible pour vérifier qu'une clé est chargée sans l'afficher. */
+function keyFingerprint(key) {
+  if (!key) return null
+  return require('node:crypto').createHash('sha256').update(key).digest('hex').slice(0, 12)
+}
+
+/** Clé lue depuis l'environnement ou depuis un fichier HORS dépôt (`--key-file`). */
+function resolveApiKey() {
+  const fromEnv = sanitizeApiKey(process.env.OPENAI_API_KEY)
+  if (fromEnv.key) return { key: fromEnv.key, source: 'env', issue: null }
+
+  const index = process.argv.indexOf('--key-file')
+  if (index !== -1) {
+    const filePath = process.argv[index + 1]
+    if (!filePath) return { key: null, source: 'file', issue: 'chemin_absent' }
+    const resolved = require('node:path').resolve(filePath)
+    const repoRoot = require('node:path').resolve(__dirname, '..')
+    if (resolved.startsWith(repoRoot)) {
+      // Une clé ne doit jamais résider dans le dépôt (risque de commit).
+      return { key: null, source: 'file', issue: 'fichier_dans_le_depot' }
+    }
+    try {
+      const sanitized = sanitizeApiKey(require('node:fs').readFileSync(resolved, 'utf8'))
+      return { key: sanitized.key, source: 'file', issue: sanitized.issue }
+    } catch {
+      return { key: null, source: 'file', issue: 'fichier_illisible' }
+    }
+  }
+
+  return { key: null, source: 'env', issue: fromEnv.issue ?? 'absent' }
+}
+
 function describeFetchError(error) {
   const cause = error && typeof error === 'object' ? error.cause : undefined
   return {
@@ -160,8 +229,13 @@ function describeFetchError(error) {
 }
 
 async function runLive() {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY absente')
+  const resolved = resolveApiKey()
+  if (!resolved.key) {
+    // Aucune valeur de clé n'est journalisée : seulement la cause.
+    throw new Error(`OPENAI_API_KEY_INVALID:${resolved.source}:${resolved.issue}`)
+  }
+  const apiKey = resolved.key
+  console.log(`INFO  clé chargée depuis ${resolved.source} (empreinte ${keyFingerprint(apiKey)})`)
 
   let cumulativeUsd = 0
   for (let index = 0; index < MAX_CALLS; index += 1) {
