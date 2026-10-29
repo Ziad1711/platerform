@@ -1,12 +1,14 @@
 'use client'
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { MessageSquare, MoreVertical, Pin, PinOff, Plus, Send, Sparkles, Trash2, Wallet } from 'lucide-react'
 import AssistantChartCard from '@/components/assistant/assistant-chart-card'
+import AssistantWarnings from '@/components/assistant/assistant-warnings'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
 import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
+import { decideAutoScroll, mergeDisplayMessages } from '@/lib/assistant/chat-ui'
 
 interface ThreadItem {
   id: string
@@ -212,11 +214,17 @@ export default function AssistantIAPage() {
   const [serverError, setServerError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<{ content: string; storeId: string } | null>(null)
+  const [pendingUserMessageCreatedAt, setPendingUserMessageCreatedAt] = useState<string | null>(null)
   const [threadMenuOpenId, setThreadMenuOpenId] = useState<string | null>(null)
   const [loadingStepIndex, setLoadingStepIndex] = useState(0)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  // Références DOM stables par message assistant : cible du défilement.
+  const assistantMessageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const handledAssistantIdRef = useRef<string | null>(null)
+  const autoScrollAllowedRef = useRef(true)
+  const previousThreadRef = useRef<string | null>(null)
 
   const hasStore = Boolean(currentStoreId)
   const canLoad = hasStore
@@ -345,6 +353,7 @@ export default function AssistantIAPage() {
       setServerError(null)
       setWarning(typeof data?.warning === 'string' && data.warning ? data.warning : null)
       setOptimisticUserMessage(null)
+      setPendingUserMessageCreatedAt(null)
     },
     onError: (error, variables) => {
       if (variables.storeId !== currentStoreId) return
@@ -353,6 +362,7 @@ export default function AssistantIAPage() {
       setServerError(error instanceof Error ? error.message : 'Erreur d’envoi')
       setWarning(null)
       setOptimisticUserMessage(null)
+      setPendingUserMessageCreatedAt(null)
     },
     onSettled: () => {
       sendAbortRef.current = null
@@ -467,6 +477,8 @@ export default function AssistantIAPage() {
     if (!clean || !hasStore || !currentStoreId) return
     setServerError(null)
     setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
+    setPendingUserMessageCreatedAt(new Date().toISOString())
+    autoScrollAllowedRef.current = true
     setInput('')
 
     // Même texte, même compte, même boutique et même conversation relancés
@@ -505,21 +517,32 @@ export default function AssistantIAPage() {
   }
 
   const messages = useMemo(() => messagesQuery.data?.messages || [], [messagesQuery.data?.messages])
-  const displayMessages = useMemo(() => {
-    if (!pendingUserMessage) return messages
 
-    return [
-      ...messages,
-      {
-        id: 'optimistic-user-message',
-        thread_id: selectedThreadId || 'pending-thread',
-        role: 'user' as const,
-        content: pendingUserMessage,
-        credits_used: 0,
-        created_at: new Date().toISOString(),
-      },
-    ]
-  }, [messages, pendingUserMessage, selectedThreadId])
+  const persistedThreadKey = selectedThreadId || 'pending-thread'
+
+  // Fusion dédoublonnée + tri déterministe : l'ordre ne dépend ni de l'ordre
+  // d'arrivée réseau ni du rafraîchissement de la conversation.
+  const displayMessages = useMemo(
+    () =>
+      mergeDisplayMessages<ChatMessage>(
+        messages,
+        pendingUserMessage
+          ? {
+              content: pendingUserMessage,
+              threadId: persistedThreadKey,
+              createdAt: pendingUserMessageCreatedAt || undefined,
+            }
+          : null
+      ),
+    [messages, pendingUserMessage, pendingUserMessageCreatedAt, persistedThreadKey]
+  )
+
+  const latestAssistantId = useMemo(() => {
+    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+      if (displayMessages[index].role === 'assistant') return displayMessages[index].id
+    }
+    return null
+  }, [displayMessages])
 
   const latestAssistantSuggestions = useMemo(() => {
     const lastAssistant = [...displayMessages]
@@ -565,10 +588,74 @@ export default function AssistantIAPage() {
     return () => clearInterval(timer)
   }, [sendMessageMutation.isPending, liveActivitySteps.length])
 
+  // Suivi du défilement manuel : tant que l'utilisateur reste proche du bas,
+  // les nouveaux contenus peuvent être révélés ; s'il remonte pour lire,
+  // aucun défilement forcé n'a lieu.
+  const handleMessagesScroll = useCallback(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    autoScrollAllowedRef.current = distanceFromBottom <= 96
+  }, [])
+
+  const scrollContainerTo = useCallback((decision: 'bottom' | 'assistant-start', assistantId: string | null) => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const reduceMotion =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        : false
+    const behavior: ScrollBehavior = reduceMotion ? 'auto' : 'smooth'
+
+    if (decision === 'bottom') {
+      container.scrollTo({ top: container.scrollHeight, behavior })
+      return
+    }
+
+    const node = assistantId ? assistantMessageRefs.current.get(assistantId) : null
+    if (!node) {
+      container.scrollTo({ top: container.scrollHeight, behavior })
+      return
+    }
+
+    // Positionnement au début de la réponse, uniquement dans la zone des messages.
+    const offset =
+      node.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 8
+    container.scrollTo({ top: Math.max(0, offset), behavior })
+  }, [])
+
   useEffect(() => {
-    if (!messagesContainerRef.current) return
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [displayMessages.length, sendMessageMutation.isPending, selectedThreadId])
+    const threadChanged = previousThreadRef.current !== selectedThreadId
+    previousThreadRef.current = selectedThreadId
+
+    const decision = decideAutoScroll({
+      threadChanged,
+      latestAssistantId,
+      lastHandledAssistantId: handledAssistantIdRef.current,
+      userScrolledAway: !autoScrollAllowedRef.current,
+    })
+
+    if (decision === 'none') return
+
+    handledAssistantIdRef.current = latestAssistantId
+
+    // Deux frames : le message, son graphique et ses avertissements sont rendus.
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollContainerTo(decision, latestAssistantId))
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [latestAssistantId, selectedThreadId, scrollContainerTo])
+
+  // Indicateur de génération : on garde le message envoyé visible, sans saut.
+  useEffect(() => {
+    if (!sendMessageMutation.isPending) return
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollContainerTo('bottom', null))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [sendMessageMutation.isPending, scrollContainerTo])
 
   return (
     <div className="h-full min-h-0 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 p-4">
@@ -669,7 +756,11 @@ export default function AssistantIAPage() {
 
       <section className="bg-card rounded-xl border shadow-sm flex flex-col overflow-hidden min-h-0">
 
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-secondary/40">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
+          className="flex-1 overflow-y-auto p-4 space-y-3 bg-secondary/40"
+        >
           {assistantClosedError ? (
             <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm">
               {assistantClosedError}
@@ -738,7 +829,16 @@ export default function AssistantIAPage() {
             </div>
           ) : (
             displayMessages.map((msg) => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                key={msg.id}
+                ref={(node) => {
+                  if (msg.role !== 'assistant') return
+                  if (node) assistantMessageRefs.current.set(msg.id, node)
+                  else assistantMessageRefs.current.delete(msg.id)
+                }}
+                data-message-role={msg.role}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 border ${
                     msg.role === 'user'
@@ -752,13 +852,7 @@ export default function AssistantIAPage() {
                   ) : null}
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.warnings?.length ? (
-                    <div className="mt-2 space-y-1">
-                      {msg.metadata.structured_response.warnings.map((warningText, idx) => (
-                        <div key={`${warningText}-${idx}`} className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                          {warningText}
-                        </div>
-                      ))}
-                    </div>
+                    <AssistantWarnings warnings={msg.metadata.structured_response.warnings} />
                   ) : null}
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.suggestions?.length ? (
