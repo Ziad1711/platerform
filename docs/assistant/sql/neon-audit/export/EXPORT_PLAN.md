@@ -201,3 +201,37 @@ Détails, écarts de fidélité et alternative retenue :
 `USAGE` sur `public`, `VALID UNTIL` court) puis `pg_dump --schema-only`, rôle
 supprimé immédiatement après. La commande d'export du §2 s'applique alors
 telle quelle, suivie de `export/verify_restore.sql`.
+
+---
+
+## 10. Restauration sur Neon — procédure réellement appliquée
+
+1. **Prévol** de la cible (`sql/00_preflight.sql`) : identité, endpoint direct,
+   TLS, `BYPASSRLS` effectif, base vide → `PASS`.
+2. **Empreinte** du dump vérifiée contre la valeur autorisée.
+3. `sql/05_auth_shim.sql` : rôles `anon`/`authenticated`/`service_role`, schéma
+   `auth`, `auth.uid()/role()/jwt()`, table `auth.users(id)`. **À exécuter avant**
+   la restauration (policies et clés étrangères en dépendent).
+4. Restauration en `ON_ERROR_STOP=1`.
+
+**Collision connue et traitée explicitement** : le dump contient
+`CREATE SCHEMA public;`, alors que Neon possède déjà `public`
+(`ERROR: schema "public" already exists`, aucune écriture appliquée). Remède
+appliqué : **copie dérivée** `public-schema.restore.sql` où **cette seule ligne**
+est neutralisée, l'original restant intact et son empreinte inchangée :
+
+| Fichier | SHA-256 |
+|---|---|
+| `public-schema.sql` (référence autorisée) | `628a928f03ea17ae7898076d58fadf3ab260bddbcc2fdb2cc69ea55b8995a166` |
+| `public-schema.restore.sql` (restauré) | `ba26b2ce507015a4493fa2623750e48646cc5d21ebd70517be7edd86766ef294` |
+
+Différence prouvée : une seule ligne (`diff` = 2 marqueurs). Aucune autre
+modification, aucune donnée, aucun secret.
+
+5. **Conformité** (`export/verify_restore.sql`) : 107/4/4/209/219/70 conformes,
+   0 table sans RLS, 0 type personnalisé, 150 `SECURITY DEFINER`, 0 extension
+   exclue, 0 ligne métier.
+6. Écarts de permissions constatés (non corrigés à cette étape) : aucun grant de
+   table pour `authenticated` (rétabli par `01` sur le périmètre assistant) ;
+   **209 fonctions exécutables par `PUBLIC` contre 63 en production**, du fait de
+   la perte des ACL par fonction (`--no-privileges`).
