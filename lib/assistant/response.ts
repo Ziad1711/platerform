@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import {
+  factRangeDays,
+  factRangeMonths,
+  factRangeYears,
+  type VerifiedFact,
+} from '@/lib/assistant/fact-registry'
 import type { AssistantIntent, AssistantStructuredResponse } from '@/lib/assistant/types'
 import type { AnalyticsMetric, AnalyticsState, KpiEnvelope } from '@/lib/assistant/analytics-contract'
 
@@ -227,42 +233,151 @@ export function sanitizeNarrative(text: string): SanitizedExplanation {
  * Un chiffre non fourni par une source serveur ne peut pas être vérifié : plutôt
  * que de l'afficher, la phrase fautive est retirée et l'anomalie est signalée.
  */
+/** Devises reconnues dans une phrase, normalisées vers leur code. */
+const CURRENCY_ALIASES: Record<string, string> = {
+  mad: 'MAD', dh: 'MAD', dhs: 'MAD', dirham: 'MAD', dirhams: 'MAD',
+  eur: 'EUR', euro: 'EUR', euros: 'EUR',
+  usd: 'USD', dollar: 'USD', dollars: 'USD',
+}
+
+const MONTH_ALIASES: Record<string, number> = {
+  janvier: 1, janv: 1, fevrier: 2, fev: 2, mars: 3, avril: 4, avr: 4, mai: 5,
+  juin: 6, juillet: 7, juil: 7, aout: 8, septembre: 9, sept: 9, octobre: 10, oct: 10,
+  novembre: 11, nov: 11, decembre: 12, dec: 12,
+}
+
+/** Périodes relatives : la longueur de la période citée doit correspondre. */
+const RELATIVE_PERIODS: Array<{ pattern: RegExp; days?: number; maxDays?: number }> = [
+  { pattern: /\bhier\b/, days: 1 },
+  { pattern: /aujourd[\u2019']?hui/i, days: 1 },
+  { pattern: /\b7 derniers jours\b/, days: 7 },
+  { pattern: /\b30 derniers jours\b/, days: 30 },
+  { pattern: /cette semaine|semaine en cours|semaine derni[eè]re|semaine pass[eé]e/, maxDays: 7 },
+  { pattern: /ce mois|mois en cours|mois dernier|mois pr[eé]c[eé]dent/, maxDays: 31 },
+]
+
+function normalizeWords(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function sentenceCurrency(sentence: string): string | null {
+  const matches = normalizeWords(sentence).match(/\b(mad|dhs?|dirhams?|euros?|eur|usd|dollars?)\b/g) ?? []
+  for (const token of matches) {
+    const code = CURRENCY_ALIASES[token]
+    if (code) return code
+  }
+  return null
+}
+
+function sentenceMonths(sentence: string): Set<number> {
+  const months = new Set<number>()
+  const normalized = normalizeWords(sentence)
+  for (const [name, month] of Object.entries(MONTH_ALIASES)) {
+    if (new RegExp(`\\b${name}\\b`).test(normalized)) months.add(month)
+  }
+  return months
+}
+
+function isYearToken(token: string): boolean {
+  return /^(?:19|20|21)\d{2}$/.test(token)
+}
+
+/**
+ * Supprime du texte IA tout nombre non corroboré par un fait vérifié du
+ * périmètre courant.
+ *
+ * Un fait porte boutique, période, devise et unité : une phrase qui attribue au
+ * nombre une autre devise, un autre mois, une autre année ou une autre durée
+ * relative est retirée, même si la valeur numérique existe ailleurs.
+ */
 export function sanitizeExplanation(
   text: string,
-  allowedValues: ReadonlyArray<string | null | undefined>,
+  facts: ReadonlyArray<VerifiedFact>,
 ): SanitizedExplanation {
   const source = String(text || '').trim()
   if (!source) return { text: '', rejectedAmounts: [] }
 
-  const allowed = new Set<string>()
-  for (const value of allowedValues) {
-    if (value === null || value === undefined) continue
-    for (const variant of normalizeAmountToken(String(value))) {
+  const indexed = new Map<string, VerifiedFact[]>()
+  for (const fact of facts) {
+    for (const variant of normalizeAmountToken(String(fact.value))) {
       const canonical = canonicalAmount(variant)
-      if (canonical !== null) allowed.add(canonical)
-      const integer = canonical?.split('.')[0]
-      if (integer) allowed.add(integer)
+      if (canonical === null) continue
+      const bucket = indexed.get(canonical)
+      if (bucket) bucket.push(fact)
+      else indexed.set(canonical, [fact])
     }
   }
 
   const rejectedAmounts: string[] = []
-  // Découpage par phrase : jamais à l'intérieur d'un décimal (« 100.00 »).
   const sentences = source.split(/(?<=[!?;\n])|(?<=\.)(?=\s|$)/u)
   const kept: string[] = []
 
   for (const sentence of sentences) {
     const tokens = sentence.match(AMOUNT_PATTERN) ?? []
-    let offending = false
+    if (tokens.length === 0) {
+      kept.push(sentence)
+      continue
+    }
 
+    const currency = sentenceCurrency(sentence)
+    const hasPercent = sentence.includes('%')
+    const months = sentenceMonths(sentence)
+    const years = new Set<number>()
     for (const token of tokens) {
-      const variants = normalizeAmountToken(token)
-      const verified = variants.some((variant) => {
-        const canonical = canonicalAmount(variant)
-        return canonical !== null && allowed.has(canonical)
-      })
-      if (!verified) {
+      if (isYearToken(token.trim())) years.add(Number(token.trim()))
+    }
+    const relative = RELATIVE_PERIODS.find((entry) => entry.pattern.test(sentence)) ?? null
+
+    const compatible = (fact: VerifiedFact): boolean => {
+      if (currency) {
+        if (fact.unit !== 'currency' || !fact.currency) return false
+        if (fact.currency.toUpperCase() !== currency) return false
+      }
+      if (hasPercent && fact.unit !== 'percent') return false
+      if (!hasPercent && !currency && fact.unit === 'percent') return false
+
+      if (months.size > 0) {
+        const covered = factRangeMonths(fact.range)
+        if (!Array.from(months).some((month) => covered.has(month))) return false
+      }
+      if (years.size > 0) {
+        const covered = factRangeYears(fact.range)
+        if (!Array.from(years).every((year) => covered.has(year))) return false
+      }
+      if (relative) {
+        const days = factRangeDays(fact.range)
+        if (relative.days !== undefined && days !== relative.days) return false
+        if (relative.maxDays !== undefined && days > relative.maxDays) return false
+      }
+      return true
+    }
+
+    let offending = false
+    for (const token of tokens) {
+      const trimmed = token.trim()
+
+      if (isYearToken(trimmed)) {
+        // Une année n'est jamais « vérifiée par sa valeur » : elle doit être
+        // couverte par la période d'au moins un fait du tour.
+        const covered = facts.some((fact) => factRangeYears(fact.range).has(Number(trimmed)))
+        if (!covered) {
+          offending = true
+          rejectedAmounts.push(trimmed)
+        }
+        continue
+      }
+
+      const candidates = normalizeAmountToken(trimmed)
+        .map((variant) => canonicalAmount(variant))
+        .filter((value): value is string => value !== null)
+        .flatMap((value) => indexed.get(value) ?? [])
+
+      if (!candidates.some(compatible)) {
         offending = true
-        rejectedAmounts.push(token.trim())
+        rejectedAmounts.push(trimmed)
       }
     }
 
@@ -279,19 +394,26 @@ export function sanitizeExplanation(
 
 export interface ChartSeriesPoint {
   label: string
-  /** Valeur numérique pour l'échelle du graphique (rendu uniquement). */
-  value: number
-  /** Libellé exact (décimal non arrondi + devise) pour l'infobulle. */
-  valueLabel: string
+  /**
+   * Valeur numérique pour l'échelle (rendu uniquement). `null` = journée sans
+   * donnée publiée : la courbe doit être interrompue, jamais comblée par zéro.
+   */
+  value: number | null
+  /** Libellé exact (décimal + devise) pour l'infobulle ; `null` si absent. */
+  valueLabel: string | null
   currency: string
   /** Identité conservée même en mono-boutique ; aucune fusion implicite. */
   storeId: string
+  /** `true` = journée du périmètre sans valeur publiable. */
+  missing?: boolean
 }
 
 export interface ChartResult {
   title: string
   description: string
   type: 'line' | 'bar'
+  /** Unité affichée sur l'axe : jamais une valeur recalculée. */
+  unit: 'currency' | 'count' | 'percent'
   points: ChartSeriesPoint[]
   warnings: string[]
 }
@@ -314,10 +436,26 @@ function singleCurrencyOf(values: Array<string | null>): string | null {
  * Série journalière : seuls les points `complete` ou `empty` sont tracés.
  * Une devise unique est exigée ; un point sans devise exacte est écarté.
  */
+/** Points maximum affichés sur une courbe : au-delà, la période est signalée. */
+const MAX_LINE_POINTS = 31
+
+/** Liste des journées métier `[from, to[`, sans dépendre du fuseau local. */
+function businessDayList(range: { from: string; to: string }): string[] {
+  const days: string[] = []
+  const start = Date.parse(`${range.from}T00:00:00.000Z`)
+  const end = Date.parse(`${range.to}T00:00:00.000Z`)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return days
+  for (let cursor = start; cursor < end; cursor += 86_400_000) {
+    days.push(new Date(cursor).toISOString().slice(0, 10))
+  }
+  return days
+}
+
 export function buildDailyChart(
   daily: unknown,
   envelopeCurrency: string | null,
   envelopeStoreId: string | null = '__single_scope__',
+  rangeLabel?: string | null,
 ): ChartResult | null {
   const record = asRecord(daily)
   if (!record) return null
@@ -326,51 +464,85 @@ export function buildDailyChart(
   const source = Array.isArray(record.days) ? record.days : Array.isArray(record.rows) ? record.rows : []
   const warnings: string[] = []
   let dropped = 0
+  let duplicated = false
 
-  const candidates = source
-    .map((row) => asRecord(row))
-    .filter((row): row is Record<string, unknown> => Boolean(row))
-    .map((row) => {
-      const state = typeof row.state === 'string' ? row.state : 'missing'
-      const currency = typeof row.currency === 'string' ? row.currency : null
-      const revenue = typeof row.revenue === 'string' ? row.revenue : null
-      if (!PLOTTABLE_STATES.has(state) || !currency || !revenue) {
-        dropped += 1
-        return null
-      }
-      const storeId = typeof row.storeId === 'string' ? row.storeId : envelopeStoreId
-      if (!storeId) {
-        dropped += 1
-        return null
-      }
-      return { date: String(row.date ?? ''), revenue, currency, storeId }
-    })
-    .filter((row): row is { date: string; revenue: string; currency: string; storeId: string } => Boolean(row))
-    .filter((row) => row.date !== '')
+  const published = new Map<string, { revenue: string; currency: string; storeId: string }>()
+  for (const raw of source) {
+    const row = asRecord(raw)
+    if (!row) {
+      dropped += 1
+      continue
+    }
+    const state = typeof row.state === 'string' ? row.state : 'missing'
+    const currency = typeof row.currency === 'string' ? row.currency : null
+    const revenue = typeof row.revenue === 'string' ? row.revenue : null
+    const date = typeof row.date === 'string' ? row.date : ''
+    const storeId = typeof row.storeId === 'string' ? row.storeId : envelopeStoreId
+    if (!PLOTTABLE_STATES.has(state) || !currency || !revenue || !date || !storeId) {
+      dropped += 1
+      continue
+    }
+    if (published.has(date)) {
+      duplicated = true
+      continue
+    }
+    published.set(date, { revenue, currency, storeId })
+  }
 
-  if (dropped > 0) warnings.push(`Graphique : ${dropped} point(s) non traçable(s) écarté(s).`)
+  // Deux boutiques sur la même date ne peuvent pas former une seule série.
+  if (duplicated) return null
 
-  const currency = singleCurrencyOf(candidates.map((row) => row.currency))
+  const currency = singleCurrencyOf(Array.from(published.values()).map((row) => row.currency))
   if (!currency || (envelopeCurrency && currency !== envelopeCurrency)) {
-    if (candidates.length > 0) warnings.push('Graphique non tracé : devises hétérogènes ou incohérentes.')
+    if (published.size > 0) warnings.push('Graphique non tracé : devises hétérogènes ou incohérentes.')
     return null
   }
 
-  const stores = new Set(candidates.map((row) => row.storeId))
-  if (stores.size !== 1) return null
+  const stores = new Set(Array.from(published.values()).map((row) => row.storeId))
+  if (stores.size > 1) return null
+  const storeId = Array.from(stores)[0] ?? envelopeStoreId
+  if (!storeId) return null
 
-  const points: ChartSeriesPoint[] = candidates.slice(-14).flatMap((row) => {
-    const value = toScaleValue(row.revenue)
-    if (value === null) return []
-    return [{ label: row.date, value, valueLabel: exactLabel(row.revenue, currency), currency, storeId: row.storeId }]
+  const declaredRange = asRecord(record.range)
+  const from = typeof declaredRange?.from === 'string' ? declaredRange.from : null
+  const to = typeof declaredRange?.to === 'string' ? declaredRange.to : null
+  const labels = from && to ? businessDayList({ from, to }) : Array.from(published.keys()).sort()
+  if (labels.length === 0) return null
+
+  const shown = labels.slice(-MAX_LINE_POINTS)
+  if (labels.length > shown.length) {
+    warnings.push(`Graphique limité aux ${MAX_LINE_POINTS} derniers jours de la période.`)
+  }
+
+  let gaps = 0
+  const points: ChartSeriesPoint[] = shown.map((label) => {
+    const hit = published.get(label)
+    if (!hit) {
+      gaps += 1
+      return { label, value: null, valueLabel: null, currency, storeId, missing: true }
+    }
+    const value = toScaleValue(hit.revenue)
+    if (value === null) {
+      gaps += 1
+      return { label, value: null, valueLabel: null, currency, storeId, missing: true }
+    }
+    return { label, value, valueLabel: exactLabel(hit.revenue, currency), currency, storeId }
   })
 
-  if (points.length < 2) return null
+  if (dropped > 0) warnings.push(`Graphique : ${dropped} point(s) non publiable(s) écarté(s).`)
+  if (gaps > 0) {
+    warnings.push(`${gaps} journée(s) sans donnée publiée : la courbe est interrompue, aucun zéro n’est supposé.`)
+  }
 
+  // Au moins deux valeurs réellement publiées : une série de trous n'est pas un résultat.
+  if (points.filter((point) => point.value !== null).length < 2) return null
+
+  const period = rangeLabel ? ` — ${rangeLabel}` : ''
   return {
     title: 'Évolution du chiffre d’affaires',
-    description: `CA réalisé par journée métier (${currency}), points traçables uniquement.`,
+    description: `CA réalisé par journée métier en ${currency}${period}. Les journées sans donnée interrompent la courbe.`,
     type: 'line',
+    unit: 'currency',
     points,
     warnings,
   }
@@ -420,7 +592,7 @@ function buildSectionChart(
 
   if (points.length === 0) return null
 
-  return { title: options.title, description: options.description, type: 'bar', points, warnings: [] }
+  return { title: options.title, description: options.description, type: 'bar', unit: 'currency', points, warnings: [] }
 }
 
 function chartToResponse(chart: ChartResult, currency: string | null): AssistantStructuredResponse {
@@ -429,6 +601,7 @@ function chartToResponse(chart: ChartResult, currency: string | null): Assistant
     message_text: '',
     chart: true,
     chart_type: chart.type,
+    chart_unit: chart.unit,
     chart_title: chart.title,
     chart_description: currency ? `${chart.description} Devise : ${currency}.` : chart.description,
     chart_data: chart.points.map((point) => ({
@@ -497,6 +670,8 @@ export interface StructuredContext {
   daily?: unknown
   products?: unknown
   cities?: unknown
+  /** Libellé de période déjà résolu côté serveur. */
+  rangeLabel?: string
 }
 
 /**
@@ -528,31 +703,43 @@ export function buildStructuredResponseFromContext(
 
   const envelopeStoreIds = envelope ? Object.keys(envelope.access ?? {}) : []
   const envelopeStoreId = envelopeStoreIds.length === 1 ? envelopeStoreIds[0] : null
+  const rangeLabel = typeof record.rangeLabel === 'string' ? record.rangeLabel : null
 
   // Aucun graphique sur une donnée absente ou interdite.
   if (envelope && BLOCKED_STATES.has(envelope.state)) return base
 
-  const daily =
-    intent === 'chart_request' || intent === 'dashboard_summary' || intent === 'performance_request'
-      ? buildDailyChart(record.daily, envelope?.currency ?? null, envelopeStoreId)
-      : null
+  // Sélection déterministe côté serveur : chaque graphique n'est construit
+  // qu'à partir d'un agrégat validé, puis ordonné selon la question posée.
+  const periodSuffix = rangeLabel ? ` — ${rangeLabel}` : ''
 
-  const products = intent === 'top_products' ? buildSectionChart(record.products, {
+  const dailyChart = buildDailyChart(
+    record.daily,
+    envelope?.currency ?? null,
+    envelopeStoreId,
+    rangeLabel,
+  )
+
+  const productChart = buildSectionChart(record.products, {
     title: 'Produits par chiffre d’affaires',
-    description: 'Classement borné : la somme n’est pas le CA total. Aucun profit affiché.',
+    description: `Classement borné${periodSuffix} : la somme des produits affichés n’est pas le CA total.`,
     labelField: 'productName',
-  }) : null
+  })
 
-  const cities =
-    intent === 'performance_request' || intent === 'chart_request'
-      ? buildSectionChart(record.cities, {
-        title: 'Chiffre d’affaires par ville',
-        description: 'CA des lignes livrées, sans marge ni coût.',
-        labelField: 'city',
-      })
-      : null
+  const cityChart = buildSectionChart(record.cities, {
+    title: 'Chiffre d’affaires par ville',
+    description: `Part du CA réalisé par ville${periodSuffix}.`,
+    labelField: 'city',
+  })
 
-  const chart = daily ?? products ?? cities
+  const priority: Partial<Record<AssistantIntent, Array<ChartResult | null>>> = {
+    top_products: [productChart, dailyChart, cityChart],
+    profit_analysis: [productChart, dailyChart],
+    performance_request: [cityChart, dailyChart, productChart],
+    chart_request: [dailyChart, cityChart, productChart],
+    dashboard_summary: [dailyChart, productChart, cityChart],
+  }
+
+  const chart = (priority[intent] ?? [dailyChart]).find((candidate): candidate is ChartResult => Boolean(candidate)) ?? null
   if (!chart) return base
 
   for (const warning of chart.warnings) warnings.add(warning)

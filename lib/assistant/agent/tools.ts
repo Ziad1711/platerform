@@ -91,6 +91,9 @@ export function selectToolsForIntent(intent: AssistantIntent, userMessage: strin
   if (text.includes('compar') || text.includes(' vs ') || text.includes('versus')) {
     return ['getStoreComparison']
   }
+  if (text.includes('dépense') || text.includes('depense') || text.includes('charge')) {
+    if (!selected.includes('getExpensesByCategory')) selected.push('getExpensesByCategory')
+  }
   if (text.includes('client') || text.includes('historique') || text.includes('commande de')) {
     if (!selected.includes('getCustomerOrderHistory')) selected.push('getCustomerOrderHistory')
   }
@@ -246,6 +249,22 @@ export async function executeAgentTool(input: ExecuteAgentToolInput) {
   }
 }
 
+/** Explication naturelle par section, sans jargon interne ni chiffre. */
+const UNAVAILABLE_REASONS: Record<string, string> = {
+  getSupplierSummary: 'Le solde fournisseur agrégé n’est pas encore disponible pour l’assistant.',
+  getExpensesByCategory:
+    'La ventilation des dépenses par catégorie n’est pas encore disponible ici. Le total des dépenses opérationnelles reste consultable dans Finance.',
+  getAdsPerformanceByCampaign:
+    'La performance par campagne n’est pas encore disponible : la publicité est publiée au niveau global de la période.',
+  getOrderSearch: 'La recherche de commande n’est pas encore disponible dans la conversation.',
+  getCustomerOrderHistory: 'L’historique client n’est pas accessible dans la conversation pour des raisons de confidentialité.',
+  getDeliveryPerformance:
+    'La performance par transporteur n’est pas encore disponible. Les livraisons restent visibles dans la page Livraison.',
+  getStockSummary:
+    'Le stock par variante n’est pas encore disponible ici. Le niveau de stock reste consultable dans la page Stock.',
+  webSearch: 'La recherche externe n’est pas activée.',
+}
+
 /** Section non disponible : forme identique à `SectionResult`, aucun chiffre. */
 function unavailableSection(section: string) {
   return {
@@ -253,7 +272,9 @@ function unavailableSection(section: string) {
     meta: { section, state: 'unavailable' as const, source: 'none', issues: [] },
     rows: [],
     totals: {},
-    notices: ['Aucune agrégation bornée et autorisée pour cet indicateur.'],
+    notices: [
+      UNAVAILABLE_REASONS[section] || 'Cet indicateur n’est pas encore disponible pour l’assistant.',
+    ],
   }
 }
 

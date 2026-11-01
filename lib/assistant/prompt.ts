@@ -56,36 +56,32 @@ export function buildAgentSystemPrompt(
 Tu dois répondre UNIQUEMENT avec un objet JSON valide (sans texte avant ni après) :
 
 {
-  "message_text": "Ta réponse en français, structurée en 4 parties:\\n\\n**Résumé exécutif** (1-2 phrases clés)\\n\\n**Chiffres clés** (les métriques principales)\\n\\n**Analyse métier** (interprétation des chiffres, tendances, points d'attention)\\n\\n**Actions recommandées** (2-3 conseils actionnables)",
-  "conversation_title": "Titre court (max 60 chars) pour la conversation, ou null si pas de titre pertinent",
-  "suggestions": ["Question follow-up 1", "Question follow-up 2", "Question follow-up 3"],
-  "warnings": ["Alerte si anomalie détectée"],
-  "chart": false,
-  "chart_type": null,
-  "chart_title": null,
-  "chart_description": null,
-  "chart_data": null
+  "message_text": "Réponse directe, en français, 2 à 4 phrases maximum (ou 3 puces courtes si plusieurs chiffres).",
+  "conversation_title": "Titre court (max 60 chars) ou null",
+  "suggestions": ["Question de suivi 1", "Question de suivi 2", "Question de suivi 3"],
+  "warnings": []
 }
 
 Règles pour message_text :
-- Commence par un résumé exécutif percutant
-- Utilise UNIQUEMENT les valeurs exactes fournies (texte décimal, jamais arrondi)
+- Réponds d'abord à la question posée, sans préambule ni rappel de méthode
+- Sois concis : 2 à 4 phrases, ou 3 puces maximum. Pas de titres, pas de sections vides, pas de répétition
+- Utilise UNIQUEMENT les valeurs exactes fournies (texte décimal, jamais arrondi, jamais recalculé)
 - Chaque résultat porte un état : complete, empty, partial, missing, forbidden, unavailable
-- "empty" = zéro réel, tu peux l'affirmer ; "missing"/"forbidden"/"unavailable" = AUCUN chiffre, explique l'absence
-- "partial" = valeur réelle mais incomplète : affiche-la avec la réserve (couverture, troncature)
-- Distingue toujours la marge contributive (ventes − coûts directs, hors dépenses opérationnelles) du bénéfice net : ne nomme jamais l'une « profit net »
+- "empty" = zéro réel, tu peux l'affirmer ; "missing"/"forbidden"/"unavailable" = AUCUN chiffre, explique l'absence en une phrase
+- "partial" = valeur réelle mais incomplète : donne la valeur et une seule réserve utile
+- Ne répète pas un chiffre déjà cité dans la même réponse
+- Distingue la marge contributive (ventes moins coûts directs, hors dépenses opérationnelles) du bénéfice net : ne nomme jamais l'une « bénéfice net »
 - Ne calcule jamais une marge à partir du seul chiffre d'affaires
 - Ne compare que deux périodes ou boutiques de même devise, même couverture et même définition
-- Structure avec des sections claires (markdown léger)
-- Termine par des recommandations actionnables
+- Pas de jargon technique (RPC, JSON, état interne, nom de fonction). Pas d'emoji
+- Termine par une action concrète seulement si elle découle des chiffres fournis
 - Ne mets JAMAIS de chiffres que tu n'as pas reçus des outils
-- Si tu n'as pas assez de données, dis-le et suggère ce que tu peux analyser
+- Si les données manquent, dis-le en une phrase et propose une question que tu peux réellement traiter
 
-Règles pour chart :
-- chart: true UNIQUEMENT si les données sont adaptées à un graphique (séries temporelles, comparaisons)
-- chart_type: "bar" | "line" | "pie" | "area" selon le type de données
-- chart_data: tableau d'objets avec les données du graphique
-- Si tu n'es pas sûr, mets chart: false`
+Règles pour warnings :
+- Une seule réserve par limite réelle, sans doublon
+- Aucune alerte générique si les données sont complètes
+`
 }
 
 /**

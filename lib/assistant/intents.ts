@@ -137,12 +137,89 @@ function findMonthCandidates(text: string): MonthCandidate[] {
 }
 
 
+/** Journée métier valide `YYYY-MM-DD`, sans dépendre du fuseau du serveur. */
+function toBusinessDayIso(year: number, month: number, day: number): string | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null
+  const stamp = Date.UTC(year, month - 1, day)
+  const parsed = new Date(stamp)
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function normalizeMonthWord(value: string): string {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+/**
+ * Période explicite en jours, bornes incluses côté utilisateur :
+ * - `du 1/9/2026 au 8/9/2026` ou `du 01/09 au 08/09` (année courante) ;
+ * - `2026-09-01 … 2026-09-08` ;
+ * - `du 1er au 8 septembre 2026`.
+ *
+ * La borne haute renvoyée est **exclue** (`[from, to[`), comme le contrat
+ * analytique. Une paire incohérente ou incomplète renvoie `null` : aucune
+ * période n'est devinée.
+ */
+function tryParseExplicitDayRange(text: string): { start: string; end: string } | null {
+  const year = currentBusinessYear()
+
+  // Deux dates ISO complètes.
+  const iso = Array.from(text.matchAll(/(\d{4})-(\d{2})-(\d{2})/g))
+  if (iso.length >= 2) {
+    const from = toBusinessDayIso(Number(iso[0][1]), Number(iso[0][2]), Number(iso[0][3]))
+    const toInclusive = toBusinessDayIso(Number(iso[1][1]), Number(iso[1][2]), Number(iso[1][3]))
+    if (!from || !toInclusive || from > toInclusive) return null
+    return { start: from, end: addBusinessDays(toInclusive, 1) }
+  }
+
+  // Deux dates JJ/MM(/AAAA), dans l'ordre du message.
+  const slashed = Array.from(text.matchAll(/(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/g))
+  if (slashed.length >= 2) {
+    const firstYear = slashed[0][3] ? Number(slashed[0][3]) : year
+    const secondYear = slashed[1][3] ? Number(slashed[1][3]) : firstYear
+    const from = toBusinessDayIso(firstYear, Number(slashed[0][2]), Number(slashed[0][1]))
+    const toInclusive = toBusinessDayIso(secondYear, Number(slashed[1][2]), Number(slashed[1][1]))
+    if (!from || !toInclusive || from > toInclusive) return null
+    return { start: from, end: addBusinessDays(toInclusive, 1) }
+  }
+
+  // « du 1er au 8 septembre 2026 ».
+  const normalized = normalizeMonthWord(text).replace(/\s+/g, ' ')
+  const named = normalized.match(
+    /\bdu\s+(\d{1,2})(?:er)?\s+au\s+(\d{1,2})(?:er)?\s+([a-z]+)(?:\s+(\d{4}))?/,
+  )
+  if (named) {
+    const month = MONTH_NAMES[named[3]]
+    const namedYear = named[4] ? Number(named[4]) : year
+    if (month && isSupportedYear(namedYear)) {
+      const from = toBusinessDayIso(namedYear, month, Number(named[1]))
+      const toInclusive = toBusinessDayIso(namedYear, month, Number(named[2]))
+      if (!from || !toInclusive || from > toInclusive) return null
+      return { start: from, end: addBusinessDays(toInclusive, 1) }
+    }
+  }
+
+  return null
+}
+
 /**
  * Vérifie si le message contient une période explicite.
  */
 function hasExplicitRange(text: string): boolean {
+  if (tryParseExplicitDayRange(text)) return true
+  if (text.includes("aujourd'hui") || text.includes('aujourd hui')) return true
   if (text.includes('hier')) return true
   if (text.includes('30 derniers jours') || text.includes('30 jours')) return true
+  if (text.includes('7 derniers jours') || text.includes('sept derniers jours')) return true
+  if (text.includes('semaine dernière') || text.includes('semaine passée')) return true
+  if (text.includes('cette semaine') || text.includes('semaine en cours')) return true
   if (text.includes('mois dernier')) return true
   if (text.includes('ce mois') || text.includes('mois en cours')) return true
   if (tryParseAbsoluteMonth(text)) return true
@@ -152,11 +229,19 @@ function hasExplicitRange(text: string): boolean {
 export function resolveRangeFromQuestion(message: string, memory?: ThreadAnalyticMemory | null): AnalyticsRange {
   const text = message.toLowerCase()
 
+  // Journées explicites : priorité maximale, aucune interprétation relative.
+  const explicitDays = tryParseExplicitDayRange(text)
+  if (explicitDays) return explicitDays
+
   const absolute = tryParseAbsoluteMonth(text)
   if (absolute) return absolute
 
+  if (text.includes("aujourd'hui") || text.includes('aujourd hui')) return 'today'
   if (text.includes('hier')) return 'yesterday'
   if (text.includes('30 derniers jours') || text.includes('30 jours')) return '30d'
+  if (text.includes('7 derniers jours') || text.includes('sept derniers jours')) return '7d'
+  if (text.includes('semaine dernière') || text.includes('semaine passée')) return 'last_week'
+  if (text.includes('cette semaine') || text.includes('semaine en cours')) return 'week'
   if (text.includes('mois dernier')) return 'last_month'
   if (text.includes('ce mois') || text.includes('mois en cours')) return 'month'
 
@@ -460,11 +545,18 @@ export function resolveIntent(message: string): AssistantIntent {
     return 'comparison_request'
   }
 
-  if (text.includes('graph') || text.includes('courbe') || text.includes('chart')) {
+  if (text.includes('graph') || text.includes('courbe') || text.includes('chart') || text.includes('évolution') || text.includes('evolution')) {
     return 'chart_request'
   }
 
-  if (text.includes('performance') || text.includes('performances')) {
+  if (
+    text.includes('performance') ||
+    text.includes('performances') ||
+    text.includes('par ville') ||
+    text.includes('villes') ||
+    text.includes('région') ||
+    text.includes('region')
+  ) {
     return 'performance_request'
   }
 

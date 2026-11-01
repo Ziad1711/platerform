@@ -2,13 +2,43 @@
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquare, MoreVertical, Pin, PinOff, Plus, Send, Sparkles, Trash2, Wallet } from 'lucide-react'
+import {
+  Loader2,
+  MessageSquare,
+  Mic,
+  MoreVertical,
+  Pin,
+  PinOff,
+  Plus,
+  Send,
+  Sparkles,
+  Square,
+  Trash2,
+  Wallet,
+  X,
+} from 'lucide-react'
 import AssistantChartCard from '@/components/assistant/assistant-chart-card'
 import AssistantWarnings from '@/components/assistant/assistant-warnings'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
 import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
 import { decideAutoScroll, hasUsableChart, mergeDisplayMessages, sanitizeMetricsSummary } from '@/lib/assistant/chat-ui'
+import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, MIN_AUDIO_BYTES } from '@/lib/assistant/transcription-limits'
+
+/** Longueur maximale d'un message de chat (alignée sur la route serveur). */
+const MAX_TRANSCRIPT_LENGTH = 2_000
+
+/** Horodatage isolé du rendu : seule la dictée l'utilise. */
+function currentTimestamp(): number {
+  return Date.now()
+}
+
+/** Durée d'enregistrement affichée `mm:ss`. */
+function formatDuration(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
 
 interface ThreadItem {
   id: string
@@ -217,6 +247,10 @@ export default function AssistantIAPage() {
   const [pendingUserMessageCreatedAt, setPendingUserMessageCreatedAt] = useState<string | null>(null)
   const [threadMenuOpenId, setThreadMenuOpenId] = useState<string | null>(null)
   const [loadingStepIndex, setLoadingStepIndex] = useState(0)
+  const [recording, setRecording] = useState(false)
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const [transcribing, setTranscribing] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -228,6 +262,23 @@ export default function AssistantIAPage() {
   const programmaticScrollUntilRef = useRef(0)
   const lastScrollTopRef = useRef(0)
   const revealUserMessageRef = useRef(false)
+
+  // Dictée vocale : l'audio reste en mémoire, jamais stocké.
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recorderStreamRef = useRef<MediaStream | null>(null)
+  const recorderChunksRef = useRef<Blob[]>([])
+  const recorderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const recorderModeRef = useRef<'send' | 'insert'>('insert')
+  const recorderCancelledRef = useRef(false)
+  const recorderStartedAtRef = useRef(0)
+  const transcribeAbortRef = useRef<AbortController | null>(null)
+  // Verrous synchrones : deux clics ne peuvent ni ouvrir deux micros ni payer
+  // deux transcriptions.
+  const voiceStartLockRef = useRef(false)
+  const voiceSessionRef = useRef(0)
+  const voiceRequestIdRef = useRef<string | null>(null)
+  const transcribeInFlightRef = useRef(false)
+  const sendingRef = useRef(false)
 
   const hasStore = Boolean(currentStoreId)
   const canLoad = hasStore
@@ -478,6 +529,10 @@ export default function AssistantIAPage() {
   const handleSend = async (message: string) => {
     const clean = message.trim()
     if (!clean || !hasStore || !currentStoreId) return
+    // Un seul envoi à la fois : un double clic (ou un envoi vocal tardif) ne
+    // doit jamais produire deux messages ni deux débits.
+    if (sendingRef.current) return
+    sendingRef.current = true
     setServerError(null)
     setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
     setPendingUserMessageCreatedAt(new Date().toISOString())
@@ -498,6 +553,7 @@ export default function AssistantIAPage() {
     )
 
     if (!retry) {
+      sendingRef.current = false
       setInput(clean)
       setOptimisticUserMessage(null)
       setServerError('Navigateur incompatible : identifiant de requête indisponible.')
@@ -517,6 +573,263 @@ export default function AssistantIAPage() {
       pendingRequestRef.current = null
     } catch {
       setInput(clean)
+    } finally {
+      sendingRef.current = false
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Dictée vocale : enregistrement local, transcription côté serveur    */
+  /* ------------------------------------------------------------------ */
+
+  const clearRecorderTimer = useCallback(() => {
+    if (recorderTimerRef.current) {
+      clearInterval(recorderTimerRef.current)
+      recorderTimerRef.current = null
+    }
+  }, [])
+
+  /** Libère le micro : aucune piste active ne survit à l'enregistrement. */
+  const stopTracks = useCallback(() => {
+    recorderStreamRef.current?.getTracks().forEach((track) => track.stop())
+    recorderStreamRef.current = null
+  }, [])
+
+  const resetRecorderState = useCallback(() => {
+    recorderRef.current = null
+    recorderChunksRef.current = []
+    clearRecorderTimer()
+    stopTracks()
+    setRecording(false)
+    setRecordSeconds(0)
+  }, [clearRecorderTimer, stopTracks])
+
+  /** Annulation : aucun appel API, aucune donnée audio conservée. */
+  const cancelRecording = useCallback(() => {
+    // Invalide immédiatement tout callback tardif (onstop, réponse réseau).
+    voiceSessionRef.current += 1
+    recorderCancelledRef.current = true
+    const recorder = recorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop()
+      } catch {
+        // déjà arrêté
+      }
+    }
+    transcribeAbortRef.current?.abort()
+    transcribeAbortRef.current = null
+    setTranscribing(false)
+    resetRecorderState()
+  }, [resetRecorderState])
+
+  const stopRecording = useCallback(
+    (mode: 'send' | 'insert') => {
+      const recorder = recorderRef.current
+      if (!recorder || recorder.state === 'inactive') return
+      recorderModeRef.current = mode
+      clearRecorderTimer()
+      setRecording(false)
+      try {
+        recorder.stop()
+      } catch {
+        resetRecorderState()
+      }
+    },
+    [clearRecorderTimer, resetRecorderState],
+  )
+
+  // Départ de la page : arrêt du micro, minuteur et requête de transcription.
+  useEffect(() => {
+    return () => {
+      clearRecorderTimer()
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try {
+          recorderRef.current.stop()
+        } catch {
+          // ignore
+        }
+      }
+      recorderStreamRef.current?.getTracks().forEach((track) => track.stop())
+      transcribeAbortRef.current?.abort()
+    }
+  }, [clearRecorderTimer])
+
+  // Changement de boutique : la dictée en cours est abandonnée sans envoi.
+  const voiceStoreRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (voiceStoreRef.current && voiceStoreRef.current !== currentStoreId) cancelRecording()
+    voiceStoreRef.current = currentStoreId
+  }, [currentStoreId, cancelRecording])
+
+  async function transcribeAudio(
+    blob: Blob,
+    durationMs: number,
+    mode: 'send' | 'insert',
+    sessionId: number,
+  ) {
+    if (sessionId !== voiceSessionRef.current) return
+    if (transcribeInFlightRef.current) return
+    if (blob.size > MAX_AUDIO_BYTES) {
+      setVoiceError('Enregistrement trop volumineux.')
+      return
+    }
+
+    transcribeInFlightRef.current = true
+    setTranscribing(true)
+    setVoiceError(null)
+    const controller = new AbortController()
+    transcribeAbortRef.current = controller
+
+    try {
+      const form = new FormData()
+      form.append('file', blob, 'dictation.webm')
+      form.append('storeId', String(currentStoreId))
+      form.append('durationMs', String(Math.max(0, Math.round(durationMs))))
+      form.append(
+        'requestId',
+        voiceRequestIdRef.current ??
+          (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : ''),
+      )
+
+      const res = await fetch('/api/assistant/transcribe', {
+        method: 'POST',
+        body: form,
+        signal: controller.signal,
+      })
+      const data = await res.json().catch(() => null)
+      // Session invalidée entre-temps (annulation, changement de boutique) :
+      // aucun état ni envoi n'est appliqué à la conversation courante.
+      if (sessionId !== voiceSessionRef.current) return
+      if (!res.ok) throw new Error(readApiError(data, 'Transcription impossible'))
+
+      const text = String((data as { text?: unknown } | null)?.text ?? '').trim()
+      if (!text) throw new Error('Aucune parole détectée dans l’enregistrement.')
+
+      if (text.length > MAX_TRANSCRIPT_LENGTH) {
+        setInput(text.slice(0, MAX_TRANSCRIPT_LENGTH))
+        setVoiceError('Transcription longue : vérifiez le texte avant de l’envoyer.')
+        return
+      }
+
+      if (mode === 'send') {
+        if (isAssistantBlocked || sendMessageMutation.isPending) {
+          setInput(text)
+          setVoiceError('Transcription placée dans le champ : l’envoi automatique est indisponible.')
+          return
+        }
+        // Le texte reste dans le champ si l'envoi est refusé par un verrou
+        // concurrent : aucune parole transcrite n'est perdue.
+        setInput(text)
+        await handleSend(text)
+        return
+      }
+
+      setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
+      setTimeout(() => inputRef.current?.focus(), 0)
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return
+      if (sessionId === voiceSessionRef.current) {
+        setVoiceError(error instanceof Error ? error.message : 'Transcription impossible.')
+      }
+    } finally {
+      transcribeInFlightRef.current = false
+      if (sessionId === voiceSessionRef.current) {
+        setTranscribing(false)
+        transcribeAbortRef.current = null
+      }
+    }
+  }
+
+  async function startRecording() {
+    // Verrou synchrone AVANT toute demande de permission : deux clics rapides
+    // ne peuvent pas ouvrir deux flux micro.
+    if (voiceStartLockRef.current) return
+    if (recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore) return
+    voiceStartLockRef.current = true
+    setVoiceError(null)
+
+    if (
+      typeof navigator === 'undefined' ||
+      typeof navigator.mediaDevices?.getUserMedia !== 'function' ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      setVoiceError('La dictée n’est pas prise en charge par ce navigateur.')
+      voiceStartLockRef.current = false
+      return
+    }
+
+    try {
+      // Nouvelle session : tout callback d'une dictée précédente devient obsolète.
+      const sessionId = voiceSessionRef.current + 1
+      voiceSessionRef.current = sessionId
+      voiceRequestIdRef.current =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : null
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      recorderStreamRef.current = stream
+
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+      const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+
+      recorderCancelledRef.current = false
+      recorderChunksRef.current = []
+      recorderStartedAtRef.current = currentTimestamp()
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) recorderChunksRef.current.push(event.data)
+      }
+
+      recorder.onstop = () => {
+        const chunks = recorderChunksRef.current
+        recorderChunksRef.current = []
+        const durationMs = Math.max(0, Date.now() - recorderStartedAtRef.current)
+        const mode = recorderModeRef.current
+        recorderRef.current = null
+        stopTracks()
+
+        // Callback tardif d'une session annulée : ignoré sans traitement.
+        if (sessionId !== voiceSessionRef.current) return
+
+        if (recorderCancelledRef.current) {
+          recorderCancelledRef.current = false
+          return
+        }
+
+        const blob = new Blob(chunks, { type: chunks[0]?.type || mimeType || 'audio/webm' })
+        if (blob.size < MIN_AUDIO_BYTES) {
+          setVoiceError('Enregistrement trop court : aucune parole détectée.')
+          return
+        }
+
+        void transcribeAudio(blob, durationMs, mode, sessionId)
+      }
+
+      recorder.start(200)
+      recorderRef.current = recorder
+      setRecording(true)
+      setRecordSeconds(0)
+
+      recorderTimerRef.current = setInterval(() => {
+        const elapsed = Math.round((Date.now() - recorderStartedAtRef.current) / 1000)
+        setRecordSeconds(elapsed)
+        if (elapsed >= MAX_AUDIO_SECONDS) stopRecording('insert')
+      }, 500)
+    } catch (error) {
+      stopTracks()
+      const name = error instanceof DOMException ? error.name : ''
+      setVoiceError(
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'Accès au micro refusé. Autorisez le microphone pour dicter.'
+          : 'Micro indisponible sur cet appareil.',
+      )
+    } finally {
+      voiceStartLockRef.current = false
     }
   }
 
@@ -959,6 +1272,61 @@ export default function AssistantIAPage() {
             </div>
           ) : null}
 
+          {recording ? (
+            <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <span className="relative flex h-2 w-2" aria-hidden>
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+              </span>
+              <span className="font-medium">Enregistrement {formatDuration(recordSeconds)}</span>
+              <span className="hidden text-red-700/80 sm:inline">
+                Envoyer valide la transcription, carré l’insère dans le champ.
+              </span>
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => stopRecording('send')}
+                  className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2.5 text-white hover:bg-primary/90"
+                  title="Arrêter et envoyer"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span className="text-[11px]">Envoyer</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stopRecording('insert')}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-100"
+                  title="Arrêter et insérer le texte"
+                  aria-label="Arrêter et insérer le texte"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelRecording}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-red-700 hover:bg-red-100"
+                  title="Annuler l’enregistrement"
+                  aria-label="Annuler l’enregistrement"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {transcribing ? (
+            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Transcription en cours…
+            </div>
+          ) : null}
+
+          {voiceError ? (
+            <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {voiceError}
+            </div>
+          ) : null}
+
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
@@ -967,7 +1335,7 @@ export default function AssistantIAPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  if (input.trim() && !isAssistantBlocked && !sendMessageMutation.isPending) {
+                  if (input.trim() && !recording && !transcribing && !isAssistantBlocked && !sendMessageMutation.isPending) {
                     handleSend(input)
                   }
                 }
@@ -978,8 +1346,18 @@ export default function AssistantIAPage() {
               disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
             />
             <button
+              type="button"
+              onClick={startRecording}
+              disabled={recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50"
+              title="Dicter un message"
+              aria-label="Dicter un message"
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+            <button
               onClick={() => handleSend(input)}
-              disabled={!input.trim() || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              disabled={!input.trim() || recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className="h-10 w-10 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 inline-flex items-center justify-center"
             >
               <Send className="w-4 h-4" />

@@ -182,6 +182,21 @@ async function runAgent(mocks, overrides = {}) {
 async function main() {
   const responseModule = createLoader({})('lib/assistant/response.ts')
 
+  const factRegistry = createLoader({})('lib/assistant/fact-registry.ts')
+  const transcriptionBudget = createLoader({})('lib/assistant/transcription-budget.ts')
+  const transcriptionLimits = createLoader({})('lib/assistant/transcription-limits.ts')
+
+  // Fait vérifié avec provenance complète (boutique, période, devise, unité).
+  const fact = (value, overrides = {}) => ({
+    value,
+    storeId: 'store',
+    currency: 'MAD',
+    unit: 'currency',
+    range: { from: '2026-01-01', to: '2026-01-08' },
+    source: 'synthetic:revenue',
+    ...overrides,
+  })
+
   check('P1-12a', 'JSON invalide neutralisé sans exception', () => {
     const parsed = responseModule.parseAssistantLlmOutput('{ "message_text": "oops" , ')
     assert(parsed.issues.includes('LLM_OUTPUT_INVALID_JSON'), `issues=${JSON.stringify(parsed.issues)}`)
@@ -203,7 +218,7 @@ async function main() {
   check('P1-10a', 'Montant non vérifié retiré du texte IA', () => {
     const clean = responseModule.sanitizeExplanation(
       'Le CA est 999999 MAD. Le CA vérifié est 100.00 MAD.',
-      ['100.00'],
+      [fact('100.00')],
     )
     assert(!clean.text.includes('999999'), `texte conservé : ${clean.text}`)
     assert(clean.text.includes('100.00'), 'montant vérifié conservé')
@@ -213,6 +228,7 @@ async function main() {
 
   check('P1-10b', 'Aucun chiffre toléré quand aucune valeur vérifiée', () => {
     const clean = responseModule.sanitizeExplanation('Environ 12 500 MAD sur 30 jours.', [])
+
     assertNoDigits(clean.text, 'texte sans valeur vérifiée')
     return clean.rejectedAmounts.join('|')
   })
@@ -426,7 +442,7 @@ async function main() {
     assert(!text.includes('999999'), `chiffre inventé conservé : ${text}`)
     assert(text.includes('100.00'), 'faits vérifiés présents')
     assert(
-      (invented.structuredResponse.warnings ?? []).some((warning) => warning.includes('Chiffre non vérifié retiré')),
+      (invented.structuredResponse.warnings ?? []).some((warning) => warning.includes('absent des données vérifiées')),
       'avertissement de retrait attendu',
     )
     return text.split('\n')[0]
@@ -760,9 +776,192 @@ async function main() {
 
   check('A11', 'Chaque point graphique conserve storeId et refuse plusieurs boutiques', () => {
     const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/response.ts'), 'utf8')
-    assert(source.includes('storeId: row.storeId'), 'storeId non conservé')
-    assert(source.includes('if (stores.size !== 1) return null'), 'multi-boutiques non refusé')
+    assert(source.includes('published.set(date, { revenue, currency, storeId })'), 'storeId non conservé')
+    assert(source.includes('if (stores.size > 1) return null'), 'multi-boutiques non refusé')
     return 'store identity preserved'
+  })
+
+
+  /* ------------------------------------------------------------------------ */
+  /* Provenance des faits : aucune validation par simple égalité numérique    */
+  /* ------------------------------------------------------------------------ */
+
+  check('P1-21a', 'Même montant dans une autre devise : refusé', () => {
+    const clean = responseModule.sanitizeExplanation(
+      'Le chiffre d’affaires est 500 MAD.',
+      [fact('500', { currency: 'EUR' })],
+    )
+    assertNoDigits(clean.text, 'devise incompatible')
+    return clean.rejectedAmounts.join('|')
+  })
+
+  check('P1-21b', 'Même montant sur un autre mois : refusé', () => {
+    const clean = responseModule.sanitizeExplanation(
+      'En février 2026, le chiffre d’affaires est 500 MAD.',
+      [fact('500', { range: { from: '2026-03-01', to: '2026-04-01' } })],
+    )
+    assertNoDigits(clean.text, 'période incompatible')
+    return clean.rejectedAmounts.join('|')
+  })
+
+  check('P1-21c', 'Année hors période : refusée sans exception générale', () => {
+    const clean = responseModule.sanitizeExplanation(
+      'En 2025, le chiffre d’affaires est 500 MAD.',
+      [fact('500')],
+    )
+    assertNoDigits(clean.text, 'année non couverte')
+    return clean.rejectedAmounts.join('|')
+  })
+
+  check('P1-21d', 'Unité incompatible : un pourcentage ne vaut pas un montant', () => {
+    const clean = responseModule.sanitizeExplanation(
+      'Le taux de livraison est 65 %.',
+      [fact('65', { currency: null, unit: 'count' })],
+    )
+    assertNoDigits(clean.text, 'unité incompatible')
+    return clean.rejectedAmounts.join('|')
+  })
+
+  check('P1-21e', 'Une section interdite ne produit aucun fait', () => {
+    const facts = factRegistry.collectVerifiedFacts(
+      {
+        getDashboardKPIs: {
+          kind: 'kpis',
+          state: 'forbidden',
+          range: { from: '2026-01-01', to: '2026-01-08' },
+          currency: 'MAD',
+          access: { store: 'full' },
+          metrics: { revenue: { value: '500', unit: 'decimal', state: 'forbidden' } },
+        },
+      },
+      { storeIds: ['store'], currency: 'MAD' },
+    )
+    assertEqual(facts.length, 0, 'fait interdit collecté')
+    return '0 fait'
+  })
+
+  check('P1-21f', 'Une valeur d’une autre boutique n’est pas collectée', () => {
+    const facts = factRegistry.collectVerifiedFacts(
+      {
+        getDashboardKPIs: {
+          kind: 'kpis',
+          state: 'complete',
+          range: { from: '2026-01-01', to: '2026-01-08' },
+          currency: 'MAD',
+          access: { autre: 'full' },
+          metrics: { revenue: { value: '500', unit: 'decimal', state: 'complete' } },
+        },
+      },
+      { storeIds: ['store'], currency: 'MAD' },
+    )
+    assertEqual(facts.length, 0, 'boutique hors périmètre collectée')
+    return '0 fait'
+  })
+
+  check('P1-21g', 'Fait valide conservé avec sa provenance', () => {
+    const facts = factRegistry.collectVerifiedFacts(
+      {
+        getDashboardKPIs: {
+          kind: 'kpis',
+          state: 'complete',
+          range: { from: '2026-01-01', to: '2026-01-08' },
+          currency: 'MAD',
+          access: { store: 'full' },
+          metrics: { revenue: { value: '500.00', unit: 'decimal', state: 'complete' } },
+        },
+      },
+      { storeIds: ['store'], currency: 'MAD' },
+    )
+    assertEqual(facts.length, 1, 'un fait attendu')
+    assertEqual(facts[0].storeId, 'store', 'boutique')
+    assertEqual(facts[0].currency, 'MAD', 'devise')
+    assertEqual(facts[0].range.from, '2026-01-01', 'période')
+    return `${facts[0].value} ${facts[0].currency} ${facts[0].range.from}`
+  })
+
+  /* ------------------------------------------------------------------------ */
+  /* Disk I/O et graphiques avec journées manquantes                          */
+  /* ------------------------------------------------------------------------ */
+
+  check('P1-22a', 'Repli direct désactivé dans le lecteur de l’assistant', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/analytics-reader.ts'), 'utf8')
+    assert(source.includes('includeDirect: false'), 'repli direct encore actif')
+    return 'includeDirect=false'
+  })
+
+  check('P1-22b', 'Journée manquante : point nul + courbe interrompue', () => {
+    const chart = responseModule.buildDailyChart(
+      {
+        kind: 'daily',
+        state: 'partial',
+        range: { from: '2026-01-01', to: '2026-01-05' },
+        days: [
+          { date: '2026-01-01', revenue: '10', currency: 'MAD', state: 'complete' },
+          { date: '2026-01-02', revenue: '20', currency: 'MAD', state: 'complete' },
+          { date: '2026-01-04', revenue: '40', currency: 'MAD', state: 'complete' },
+        ],
+      },
+      'MAD',
+    )
+    assert(chart !== null, 'graphique attendu')
+    assertEqual(chart.points.length, 4, 'journée manquante non représentée')
+    const gap = chart.points.find((point) => point.label === '2026-01-03')
+    assert(gap && gap.value === null && gap.missing === true, 'trou non nul')
+    assert(chart.warnings.some((warning) => warning.includes('interrompue')), 'avertissement de trou absent')
+    return `${chart.points.length} points dont 1 trou`
+  })
+
+  check('P1-22c', 'Sous deux valeurs publiées : aucun graphique', () => {
+    const chart = responseModule.buildDailyChart(
+      {
+        kind: 'daily',
+        state: 'partial',
+        range: { from: '2026-01-01', to: '2026-01-04' },
+        days: [{ date: '2026-01-01', revenue: '10', currency: 'MAD', state: 'complete' }],
+      },
+      'MAD',
+    )
+    assertEqual(chart, null, 'série de trous acceptée')
+    return 'null'
+  })
+
+  /* ------------------------------------------------------------------------ */
+  /* Dictée : idempotence et fermeture par défaut                             */
+  /* ------------------------------------------------------------------------ */
+
+  check('P1-23a', 'Dictée fermée par défaut', () => {
+    assertEqual(transcriptionLimits.isTranscriptionEnabled({}), false, 'dictée ouverte sans drapeau')
+    assertEqual(
+      transcriptionLimits.isTranscriptionEnabled({ ASSISTANT_TRANSCRIPTION_ENABLED: 'enabled' }),
+      true,
+      'drapeau non respecté',
+    )
+    return 'fail-closed'
+  })
+
+  check('P1-23b', 'Doublon simultané : un seul appel fournisseur', () => {
+    transcriptionBudget.resetTranscriptionBudget()
+    const first = transcriptionBudget.claimTranscriptionRequest('u1', 'req-1', 1000)
+    const second = transcriptionBudget.claimTranscriptionRequest('u1', 'req-1', 1001)
+    assertEqual(first.status, 'new', 'première tentative')
+    assertEqual(second.status, 'pending', 'doublon non bloqué')
+    transcriptionBudget.completeTranscriptionRequest('u1', 'req-1', 'texte', 1002)
+    const third = transcriptionBudget.claimTranscriptionRequest('u1', 'req-1', 1003)
+    assertEqual(third.status, 'done', 'résultat non rejoué')
+    assertEqual(third.text, 'texte', 'texte non rejoué')
+    return 'new → pending → done'
+  })
+
+  check('P1-23c', 'Échec fournisseur : tentative relançable', () => {
+    transcriptionBudget.resetTranscriptionBudget()
+    transcriptionBudget.claimTranscriptionRequest('u2', 'req-2', 1000)
+    transcriptionBudget.failTranscriptionRequest('u2', 'req-2')
+    assertEqual(
+      transcriptionBudget.claimTranscriptionRequest('u2', 'req-2', 1001).status,
+      'new',
+      'échec non libéré',
+    )
+    return 'released'
   })
 
   const failed = results.filter((item) => !item.pass)

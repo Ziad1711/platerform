@@ -203,6 +203,11 @@ export async function readAssistantKpis(
       storeIds: unique,
       from: range.from,
       to: range.to,
+      // Repli direct VOLONTAIREMENT désactivé : le budget de 7 couples n'a pas
+      // pu être vérifié dans le corps du RPC sans solliciter la base, et
+      // `rpc_dashboard_kpi_reader_v2` peut rappeler un calcul direct par point
+      // pour le coût de livraison. Tant que ce coût n'est pas démontré borné,
+      // la couverture analytique passe après la stabilité PostgreSQL.
       includeDirect: false,
       rpc: KPI_READER_RPC_V2,
     })
@@ -246,7 +251,7 @@ export async function readAssistantKpis(
       stores,
       limits: [
         'Montants non additionnés entre devises distinctes.',
-        'Couverture absente ou sale : aucun scan direct de secours.',
+        'Couverture absente : aucune lecture directe de secours n’est déclenchée.',
         'Le résultat opérationnel (après dépenses) requiert une RPC financière dédiée.',
       ],
       issues: [],

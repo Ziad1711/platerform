@@ -22,7 +22,10 @@ export interface ComparisonRange {
 }
 
 export type AnalyticsRange =
+  | 'today'
   | 'yesterday'
+  | 'week'
+  | 'last_week'
   | '7d'
   | '30d'
   | 'month'
@@ -59,9 +62,12 @@ export interface AssistantStructuredResponse {
   warnings?: string[]
   chart?: boolean
   chart_type?: AssistantChartType
+  /** Unité choisie côté serveur ; le client ne la déduit jamais. */
+  chart_unit?: 'currency' | 'count' | 'percent'
   chart_title?: string
   chart_description?: string
-  chart_data?: Array<Record<string, string | number>>
+  /** `null` = journée sans donnée : le client ne doit pas la convertir en zéro. */
+  chart_data?: Array<Record<string, string | number | null>>
   metrics_summary?: Array<{ label: string; value: string | number }>
 }
 
