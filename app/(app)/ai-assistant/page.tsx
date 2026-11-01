@@ -636,7 +636,8 @@ export default function AssistantIAPage() {
       const gap = 2
       const barWidth = Math.max(1.5, (width - gap * (bars - 1)) / bars)
       context.clearRect(0, 0, width, height)
-      context.fillStyle = '#dc2626'
+      // Couleur du thème (text-primary) : cohérente en clair et en sombre.
+      context.fillStyle = window.getComputedStyle(canvas).color || '#1fa971'
 
       for (let index = 0; index < bars; index += 1) {
         let sum = 0
@@ -1403,8 +1404,8 @@ export default function AssistantIAPage() {
 
           <div className="flex items-end gap-2">
             <div
-              className={`relative flex-1 rounded-lg border bg-card focus-within:ring-2 focus-within:ring-primary ${
-                recording ? 'border-red-300' : ''
+              className={`relative flex-1 rounded-lg border bg-card transition-colors focus-within:ring-2 focus-within:ring-primary ${
+                recording ? 'border-primary/40 bg-primary/[0.04]' : ''
               }`}
             >
               <textarea
@@ -1432,17 +1433,21 @@ export default function AssistantIAPage() {
                 <div
                   role="group"
                   aria-label="Enregistrement en cours"
-                  className="absolute inset-0 flex items-center gap-2 rounded-lg px-2.5"
+                  className="absolute inset-0 flex items-center gap-2 rounded-lg px-3"
                 >
                   <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
                   </span>
-                  <canvas ref={waveformCanvasRef} aria-hidden className="h-8 min-w-0 flex-1" />
+                  <canvas
+                    ref={waveformCanvasRef}
+                    aria-hidden
+                    className="h-8 min-w-0 flex-1 text-primary"
+                  />
                   <span
                     role="status"
                     aria-live="polite"
-                    className="shrink-0 text-[11px] font-medium tabular-nums text-red-700"
+                    className="w-9 shrink-0 text-center text-[11px] font-medium tabular-nums text-foreground/80"
                   >
                     {formatDuration(recordSeconds)}
                   </span>
@@ -1450,7 +1455,7 @@ export default function AssistantIAPage() {
                     <button
                       type="button"
                       onClick={cancelRecording}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-700 hover:bg-red-100"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary"
                       title="Annuler l’enregistrement"
                       aria-label="Annuler l’enregistrement"
                     >
@@ -1459,7 +1464,7 @@ export default function AssistantIAPage() {
                     <button
                       type="button"
                       onClick={() => stopRecording('insert')}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-100"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-primary/30 bg-card text-primary hover:bg-primary/10"
                       title="Arrêter et insérer le texte"
                       aria-label="Arrêter et insérer le texte"
                     >

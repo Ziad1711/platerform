@@ -87,6 +87,18 @@ Règles pour warnings :
 /**
  * Construit le prompt utilisateur avec le contexte et les résultats des outils.
  */
+/** Journée lisible pour le prompt ; une valeur invalide n'interrompt jamais l'appel. */
+function formatPromptDay(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date)
+}
+
 export function buildAgentUserPrompt(input: {
   userMessage: string
   range: AnalyticsRange
@@ -97,8 +109,11 @@ export function buildAgentUserPrompt(input: {
   const { userMessage, range, selectedTools, toolResults, storeContext } = input
 
   const rangeLabel = typeof range === 'object'
-    ? `du ${new Date(range.start).toLocaleDateString('fr-FR')} au ${new Date(range.end).toLocaleDateString('fr-FR')}`
+    ? `du ${formatPromptDay(range.start)} au ${formatPromptDay(range.end)}`
+    : range === 'today' ? 'aujourd’hui'
     : range === 'yesterday' ? 'hier'
+    : range === 'week' ? 'cette semaine'
+    : range === 'last_week' ? 'la semaine dernière'
     : range === '7d' ? 'des 7 derniers jours'
     : range === '30d' ? 'des 30 derniers jours'
     : range === 'month' ? 'du mois en cours'

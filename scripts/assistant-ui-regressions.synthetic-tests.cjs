@@ -329,6 +329,21 @@ check('U24', 'aucun déplacement de layout pendant l’enregistrement', () => {
   return 'largeur conservée'
 })
 
+check('U25', 'enregistrement aux couleurs Jisra, sans rouge décoratif', () => {
+  assert(!PAGE.includes('border-red-300'), 'bordure rouge encore présente')
+  assert(!PAGE.includes('bg-red-500'), 'point d’enregistrement rouge')
+  assert(!PAGE.includes('#dc2626'), 'onde rouge codée en dur')
+  assert(PAGE.includes('text-primary'), 'couleur de thème absente de l’onde')
+  return 'thème Jisra'
+})
+
+check('U26', 'alignement de l’enregistrement dans le champ', () => {
+  assert(PAGE.includes('items-center gap-2 rounded-lg px-3'), 'ligne non alignée')
+  assert(PAGE.includes('w-9 shrink-0 text-center'), 'durée non stabilisée')
+  assert(PAGE.includes('h-8 min-w-0 flex-1 text-primary'), 'onde non centrée')
+  return 'aligné'
+})
+
 console.log('\n=== Tests de régression — interface assistant ===\n')
 for (const entry of results) {
   console.log(`${entry.pass ? 'PASS' : 'FAIL'}  ${entry.id.padEnd(4)} ${entry.name}${entry.detail ? ` — ${entry.detail}` : ''}`)

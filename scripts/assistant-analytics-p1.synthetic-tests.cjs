@@ -1068,6 +1068,37 @@ async function main() {
     return 'atomic + plafonds serveur'
   })
 
+
+  /* ------------------------------------------------------------------------ */
+  /* Période mensuelle ISO : le libellé ne doit jamais lever d'exception      */
+  /* ------------------------------------------------------------------------ */
+
+  const isoRangeMocks = agentMocks({
+    providerText: JSON.stringify({ message_text: 'Résumé de la période.' }),
+    toolDataByTool: {
+      order: ['getDashboardKPIs'],
+      getDashboardKPIs: envelope('complete', { revenue: metric('100.00') }),
+    },
+  })
+
+  let isoRangeResult = null
+  let isoRangeError = null
+  try {
+    isoRangeResult = await runAgent(isoRangeMocks, {
+      range: { start: '2026-03-01T00:00:00.000Z', end: '2026-04-01T00:00:00.000Z' },
+    })
+  } catch (error) {
+    isoRangeError = error
+  }
+
+  check('P1-26a', 'Période mensuelle ISO : réponse produite, libellé en jours métier', () => {
+    assert(!isoRangeError, `exception: ${isoRangeError && isoRangeError.message}`)
+    const text = isoRangeResult.structuredResponse.message_text
+    assert(text.includes('mars'), `libellé inattendu: ${text.slice(0, 80)}`)
+    assert(!text.includes('Invalid'), 'date invalide exposée')
+    return 'mars'
+  })
+
   const failed = results.filter((item) => !item.pass)
   const reportLines = []
   const width = Math.max(...results.map((item) => item.name.length), 40)

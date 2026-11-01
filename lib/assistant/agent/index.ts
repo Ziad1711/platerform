@@ -15,7 +15,7 @@ import {
   resolveAssistantBusinessRange,
 } from '@/lib/assistant/analytics-reader'
 import { resolveComparisonPeriods } from '@/lib/assistant/intents'
-import { addBusinessDays, type BusinessRange } from '@/lib/dashboard/business-time'
+import { addBusinessDays, businessTodayIso, type BusinessRange } from '@/lib/dashboard/business-time'
 import type {
   AnalyticsMetric,
   AnalyticsState,
@@ -130,6 +130,21 @@ function formatTruthMetric(metric: TruthMetric, currency: string | null, withRes
 }
 
 
+/**
+ * Normalise une borne de période en journée métier `YYYY-MM-DD`.
+ *
+ * Les périodes mensuelles sont fournies en instants ISO : les passer telles
+ * quelles à `addBusinessDays` levait une erreur générique côté réponse.
+ * Aucune valeur invalide n'est devinée : `null` force un libellé neutre.
+ */
+function toBusinessDay(value: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) return null
+  const day = businessTodayIso(new Date(parsed))
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
+}
+
 /** Journée métier `YYYY-MM-DD` formatée sans décalage de fuseau. */
 function formatDayLabel(day: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
@@ -150,10 +165,14 @@ function capitalize(value: string): string {
 
 function formatRangeLabel(range: AnalyticsRange): string {
   if (typeof range === 'object' && 'start' in range && 'end' in range) {
+    const start = toBusinessDay(range.start)
+    const end = toBusinessDay(range.end)
+    if (!start || !end) return 'la période demandée'
+    if (end <= start) return formatDayLabel(start)
     // `end` est une borne exclue : la dernière journée citée est `end − 1`.
-    const lastDay = addBusinessDays(range.end, -1)
-    if (range.start === lastDay) return formatDayLabel(range.start)
-    return `du ${formatDayLabel(range.start)} au ${formatDayLabel(lastDay)}`
+    const lastDay = addBusinessDays(end, -1)
+    if (start === lastDay) return formatDayLabel(start)
+    return `du ${formatDayLabel(start)} au ${formatDayLabel(lastDay)}`
   }
   switch (range) {
     case 'today': return 'aujourd’hui'
