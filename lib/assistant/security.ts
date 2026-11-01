@@ -384,6 +384,16 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   ASSISTANT_ERROR: 'Une erreur est survenue. Réessayez.',
   QUOTA_ORDER_LIMIT_REACHED: 'Quota de commandes atteint.',
   QUOTA_STORES_LIMIT_REACHED: 'Quota de boutiques atteint.',
+  TRANSCRIPTION_UNSUPPORTED_TYPE: 'Format audio non pris en charge par le navigateur.',
+  TRANSCRIPTION_TOO_LARGE: 'Enregistrement trop volumineux.',
+  TRANSCRIPTION_AUDIO_EMPTY: 'Aucune parole détectée dans l’enregistrement.',
+  TRANSCRIPTION_TOO_LONG: 'Enregistrement trop long : la dictée est limitée à deux minutes.',
+  TRANSCRIPTION_RATE_LIMITED: 'Trop de dictées. Réessayez dans quelques minutes.',
+  TRANSCRIPTION_DAILY_LIMIT: 'Limite quotidienne de dictée atteinte.',
+  TRANSCRIPTION_PROVIDER_FAILED: 'La transcription est momentanément indisponible.',
+  TRANSCRIPTION_TIMEOUT: 'La transcription a mis trop de temps à répondre.',
+  TRANSCRIPTION_NOT_CONFIGURED: 'La dictée vocale n’est pas configurée sur ce serveur.',
+  TRANSCRIPTION_EMPTY_RESULT: 'La transcription n’a produit aucun texte exploitable.',
 }
 
 export function getErrorStatus(error: unknown) {
@@ -421,6 +431,16 @@ export function getErrorStatus(error: unknown) {
   if (message === 'INSUFFICIENT_CREDITS') return 402
   if (message === 'ASSISTANT_TIMEOUT') return 504
   if (message === 'ASSISTANT_PROVIDER_FAILED') return 502
+  if (message === 'TRANSCRIPTION_UNSUPPORTED_TYPE') return 415
+  if (message === 'TRANSCRIPTION_TOO_LARGE') return 413
+  if (message === 'TRANSCRIPTION_AUDIO_EMPTY') return 422
+  if (message === 'TRANSCRIPTION_TOO_LONG') return 422
+  if (message === 'TRANSCRIPTION_RATE_LIMITED') return 429
+  if (message === 'TRANSCRIPTION_DAILY_LIMIT') return 429
+  if (message === 'TRANSCRIPTION_PROVIDER_FAILED') return 502
+  if (message === 'TRANSCRIPTION_TIMEOUT') return 504
+  if (message === 'TRANSCRIPTION_NOT_CONFIGURED') return 503
+  if (message === 'TRANSCRIPTION_EMPTY_RESULT') return 422
   if (message.startsWith('QUOTA_')) return 403
 
   return 500
