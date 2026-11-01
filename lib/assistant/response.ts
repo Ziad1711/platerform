@@ -268,6 +268,8 @@ const MONTH_ALIASES: Record<string, number> = {
 const RELATIVE_PERIODS: Array<{ pattern: RegExp; days?: number; maxDays?: number }> = [
   { pattern: /\bhier\b/, days: 1 },
   { pattern: /aujourd[\u2019']?hui/i, days: 1 },
+  { pattern: /(?:البارح|أمس|امس)/, days: 1 },
+  { pattern: /اليوم/, days: 1 },
   { pattern: /\b7 derniers jours\b/, days: 7 },
   { pattern: /\b30 derniers jours\b/, days: 30 },
   { pattern: /cette semaine|semaine en cours|semaine derni[eè]re|semaine pass[eé]e/, maxDays: 7 },
@@ -341,7 +343,6 @@ export function sanitizeExplanation(
     }
 
     const currency = sentenceCurrency(sentence)
-    const hasPercent = sentence.includes('%')
     const months = sentenceMonths(sentence)
     const years = new Set<number>()
     for (const token of tokens) {
@@ -349,13 +350,16 @@ export function sanitizeExplanation(
     }
     const relative = RELATIVE_PERIODS.find((entry) => entry.pattern.test(sentence)) ?? null
 
-    const compatible = (fact: VerifiedFact): boolean => {
-      if (currency) {
-        if (fact.unit !== 'currency' || !fact.currency) return false
-        if (fact.currency.toUpperCase() !== currency) return false
-      }
-      if (hasPercent && fact.unit !== 'percent') return false
-      if (!hasPercent && !currency && fact.unit === 'percent') return false
+    const compatible = (fact: VerifiedFact, token: string): boolean => {
+      // Une phrase peut contenir à la fois un montant et un taux : l'unité
+      // se détermine au voisinage du nombre, jamais au niveau de la phrase.
+      const tokenAt = sentence.indexOf(token)
+      const afterToken = tokenAt < 0 ? '' : sentence.slice(tokenAt + token.length).trimStart()
+      const tokenPercent = afterToken.startsWith('%')
+      if (tokenPercent) {
+        if (fact.unit !== 'percent') return false
+      } else if (fact.unit === 'percent') return false
+      if (currency && fact.unit === 'currency' && fact.currency?.toUpperCase() !== currency) return false
 
       if (months.size > 0) {
         const covered = factRangeMonths(fact.range)
@@ -363,7 +367,9 @@ export function sanitizeExplanation(
       }
       if (years.size > 0) {
         const covered = factRangeYears(fact.range)
-        if (!Array.from(years).every((year) => covered.has(year))) return false
+        // Les deux années comparées sont vérifiées séparément ci-dessous :
+        // une valeur d'une période n'a pas à couvrir les deux années.
+        if (!Array.from(years).some((year) => covered.has(year))) return false
       }
       if (relative) {
         const days = factRangeDays(fact.range)
@@ -393,7 +399,7 @@ export function sanitizeExplanation(
         .filter((value): value is string => value !== null)
         .flatMap((value) => indexed.get(value) ?? [])
 
-      if (!candidates.some(compatible)) {
+      if (!candidates.some((fact) => compatible(fact, trimmed))) {
         offending = true
         rejectedAmounts.push(trimmed)
       }

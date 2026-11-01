@@ -373,6 +373,18 @@ check('U30', 'Escape ferme le drawer et focus géré', () => {
   return 'accessibilité'
 })
 
+check('U33', 'Un seul panneau mobile et déclencheurs distincts', () => {
+  const layout = fs.readFileSync(path.join(ROOT, 'app/(app)/layout-client.tsx'), 'utf8')
+  const sidebar = fs.readFileSync(path.join(ROOT, 'components/dashboard/sidebar.tsx'), 'utf8')
+  assert(layout.includes('MobileNavigationContext.Provider'), 'état des panneaux non partagé')
+  assert(sidebar.includes("panel === 'navigation'"), 'menu Jisra non coordonné')
+  assert(PAGE.includes("panel === 'conversations'"), 'conversations non coordonnées')
+  assert(PAGE.includes('data-assistant-nav-toggle'), 'bouton principal mobile absent')
+  assert(sidebar.includes("pathname === '/ai-assistant' ? 'hidden'"), 'déclencheurs superposables')
+  assert(sidebar.includes("event.key === 'Escape'") && PAGE.includes("event.key === 'Escape'"), 'Escape incomplet')
+  return 'navigation/conversations exclusives'
+})
+
 check('U31', 'RTL : contenus en dir auto, graphiques en LTR', () => {
   assert(PAGE.includes('dir="auto"'), 'direction automatique absente')
   assert(PAGE.includes('dir="ltr"'), 'chiffres non isolés en LTR')

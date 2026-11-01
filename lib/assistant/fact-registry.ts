@@ -35,6 +35,10 @@ export interface VerifiedFact {
   range: VerifiedFactRange
   /** Outil ou section d'origine (traçabilité, jamais affiché). */
   source: string
+  /** Dimension optionnelle : évite d'attribuer un classement au total. */
+  dimension?: string
+  axis?: 'order' | 'delivery' | 'event'
+  access?: 'full' | 'commercial'
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -60,9 +64,8 @@ function publishable(state: unknown): boolean {
  *
  * - une enveloppe KPI doit désigner exactement une boutique du périmètre ;
  * - une section doit avoir un accès mono-boutique et une devise unique ;
- * - comparaisons et séries journalières ne sont pas collectées : leurs valeurs
- *   sont multi-périodes ou par jour, et ne peuvent pas être attribuées sans
- *   ambiguïté dans une phrase libre.
+ * - les comparaisons et séries journalières portent leur propre période ;
+ *   une valeur interdite ou non comparable n'est jamais enregistrée.
  */
 export function collectVerifiedFacts(
   toolData: Record<string, unknown>,
@@ -73,18 +76,65 @@ export function collectVerifiedFacts(
 
   const push = (
     raw: unknown,
-    meta: { storeId: string; currency: string | null; unit: VerifiedFactUnit; range: VerifiedFactRange; source: string },
+    meta: { storeId: string; currency: string | null; unit: VerifiedFactUnit; range: VerifiedFactRange; source: string; dimension?: string; axis?: 'order' | 'delivery' | 'event'; access?: 'full' | 'commercial' },
   ) => {
     if (facts.length >= MAX_FACTS) return
     if (raw === null || raw === undefined) return
     const value = typeof raw === 'number' ? (Number.isFinite(raw) ? String(raw) : null) : typeof raw === 'string' ? raw.trim() : null
-    if (!value) return
+    if (!value || !/^-?\d+(?:\.\d+)?$/.test(value)) return
     facts.push({ value, ...meta })
   }
 
   for (const [source, payload] of Object.entries(toolData)) {
     const record = asRecord(payload)
     if (!record) continue
+
+    if (record.kind === 'periods' && publishable(record.state)) {
+      const ranges = asRecord(record.ranges)
+      const currency = typeof record.currency === 'string' ? record.currency : null
+      if (allowedStores.size !== 1 || !currency || (scope.currency && scope.currency !== currency)) continue
+      const storeId = Array.from(allowedStores)[0]
+      for (const delta of Array.isArray(record.deltas) ? record.deltas : []) {
+        const d = asRecord(delta)
+        if (!d || d.state !== 'complete' || typeof d.metric !== 'string' ||
+          !['orders', 'delivered', 'revenue', 'adSpend', 'contributionMargin'].includes(d.metric)) continue
+        const unit: VerifiedFactUnit = ['orders', 'delivered'].includes(d.metric) ? 'count' : 'currency'
+        const factCurrency = unit === 'currency' ? currency : null
+        for (const [field, period] of [['current', 'current'], ['baseline', 'baseline']] as const) {
+          const range = asRange(ranges?.[period])
+          if (range) push(d[field], { storeId, currency: factCurrency, unit, range, source: `${source}:${d.metric}:${field}`, axis: 'order' })
+        }
+        // Un écart porte sur deux périodes : il ne doit être cité qu'avec
+        // une référence explicite à la comparaison, pas à une seule période.
+        const current = asRange(ranges?.current)
+        const baseline = asRange(ranges?.baseline)
+        if (current && baseline && typeof d.delta === 'string') {
+          push(d.delta, {
+            storeId, currency: factCurrency, unit,
+            range: { from: current.from < baseline.from ? current.from : baseline.from, to: current.to > baseline.to ? current.to : baseline.to },
+            source: `${source}:${d.metric}:delta`, dimension: 'comparison', axis: 'order',
+          })
+        }
+      }
+      continue
+    }
+
+    if (record.kind === 'daily' && publishable(record.state)) {
+      for (const day of Array.isArray(record.days) ? record.days : []) {
+        const d = asRecord(day)
+        if (!d || d.state !== 'complete' || typeof d.date !== 'string' || !allowedStores.has(String(d.storeId))) continue
+        const next = new Date(`${d.date}T00:00:00Z`)
+        if (!Number.isFinite(next.getTime())) continue
+        next.setUTCDate(next.getUTCDate() + 1)
+        const range = { from: d.date, to: next.toISOString().slice(0, 10) }
+        const storeId = String(d.storeId)
+        for (const [field, unit] of [['orders', 'count'], ['delivered', 'count'], ['revenue', 'currency'], ['ads', 'currency']] as const) {
+          if (unit === 'currency' && (typeof d.currency !== 'string' || (scope.currency && d.currency !== scope.currency))) continue
+          push(d[field], { storeId, currency: unit === 'currency' ? String(d.currency) : null, unit, range, source: `${source}:${field}`, dimension: d.date, axis: 'order' })
+        }
+      }
+      continue
+    }
 
     if (record.kind === 'kpis') {
       const range = asRange(record.range)
@@ -94,6 +144,7 @@ export function collectVerifiedFacts(
       if (!range || accessStores.length !== 1) continue
       const storeId = accessStores[0]
       if (!allowedStores.has(storeId)) continue
+      if (scope.currency && currency !== scope.currency) continue
 
       const metrics = asRecord(record.metrics)
       if (!metrics) continue
@@ -102,6 +153,7 @@ export function collectVerifiedFacts(
         if (!m || !publishable(m.state)) continue
         if (m.value === null || m.value === undefined || typeof m.value === 'object') continue
         const unit: VerifiedFactUnit = m.unit === 'percent' ? 'percent' : m.unit === 'count' ? 'count' : 'currency'
+        if (access?.[storeId] !== 'full' && ['purchaseCost', 'deliveryCost', 'confirmationCost', 'contributionMargin'].includes(alias)) continue
         if (unit === 'currency' && !currency) continue
         push(m.value, {
           storeId,
@@ -109,6 +161,8 @@ export function collectVerifiedFacts(
           unit,
           range,
           source: `${source}:${alias}`,
+          axis: 'order',
+          access: access?.[storeId] === 'full' ? 'full' : 'commercial',
         })
       }
       continue
@@ -131,9 +185,22 @@ export function collectVerifiedFacts(
     for (const row of rows) {
       const r = asRecord(row)
       if (!r) continue
-      push(r.revenue, { storeId, currency: currencies[0], unit: 'currency', range, source: `${source}:revenue` })
-      push(r.profit, { storeId, currency: currencies[0], unit: 'currency', range, source: `${source}:profit` })
-      push(r.quantity, { storeId, currency: null, unit: 'count', range, source: `${source}:quantity` })
+      const dimension = typeof r.productName === 'string' ? r.productName : typeof r.city === 'string' ? r.city : undefined
+      const permission = access?.[storeId] === 'full' ? 'full' : 'commercial'
+      push(r.revenue, { storeId, currency: currencies[0], unit: 'currency', range, source: `${source}:revenue`, dimension, axis: 'order', access: permission })
+      if (permission === 'full') push(r.profit, { storeId, currency: currencies[0], unit: 'currency', range, source: `${source}:profit`, dimension, axis: 'order', access: permission })
+      push(r.quantity, { storeId, currency: null, unit: 'count', range, source: `${source}:quantity`, dimension, axis: 'order', access: permission })
+      if (meta.section === 'cities') {
+        for (const field of ['totalOrders', 'confirmedOrders', 'deliveredOrders', 'returnedOrders', 'cancelledOrders'] as const) {
+          push(r[field], { storeId, currency: null, unit: 'count', range, source: `${source}:${field}`, dimension, axis: 'order', access: permission })
+        }
+      }
+      if (meta.section === 'confirmation') {
+        for (const field of ['totalOrders', 'confirmedOrders', 'deliveredOrders', 'returnedOrders', 'cancelledOrders', 'pendingOrders'] as const) {
+          push(r[field], { storeId, currency: null, unit: 'count', range, source: `${source}:${field}`, axis: 'order', access: permission })
+        }
+        push(r.confirmationRate, { storeId, currency: null, unit: 'percent', range, source: `${source}:confirmationRate`, axis: 'order', access: permission })
+      }
     }
   }
 
@@ -154,7 +221,7 @@ export function dedupeMessages(messages: ReadonlyArray<string | null | undefined
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[\u2019']/g, "'")
-      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/[^a-z0-9\u0600-\u06ff]+/g, ' ')
       .trim()
 
     if (seen.has(key)) continue

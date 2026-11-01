@@ -362,8 +362,6 @@ function sameScopeAndCurrency(a: AnalyticsReaderResult, b: AnalyticsReaderResult
   })
 }
 
-const STALE_AFTER_HOURS = 48
-
 /**
  * Compatibilité structurelle des deux lectures : périmètre, devise, **accès
  * courant**, version de définition et signature de couverture, boutique par
@@ -423,7 +421,10 @@ function freshnessOf(...results: AnalyticsReaderResult[]): ComparisonFreshness {
     generatedAt: readAt,
     oldestRebuildAt,
     ageHours,
-    stale: ageHours !== null && ageHours > STALE_AFTER_HOURS,
+    // L'ancienneté seule d'un agrégat historique propre n'est pas une invalidation.
+    stale: results.some((result) => result.stores.some((store) =>
+      store.coverage.days_dirty > 0 || store.coverage.days_incompatible > 0,
+    )),
   }
 }
 
@@ -439,12 +440,15 @@ export async function compareAssistantPeriods(
   storeIds: string[],
   current: BusinessRange,
   baseline?: BusinessRange,
+  currentSession?: AssistantAnalyticsSession,
 ): Promise<PeriodComparison> {
   assertBusinessRange(current)
   const previousRange = baseline ? assertBusinessRange(baseline) : assertBusinessRange(previousBusinessRange(current))
 
   const [currentResult, baselineResult] = await Promise.all([
-    readAssistantKpis(supabase, storeIds, current),
+    currentSession && currentSession.range.from === current.from && currentSession.range.to === current.to
+      ? currentSession.kpis()
+      : readAssistantKpis(supabase, storeIds, current),
     readAssistantKpis(supabase, storeIds, previousRange),
   ])
 
@@ -462,9 +466,7 @@ export async function compareAssistantPeriods(
   for (const reason of structure.reasons) notices.push(`Périodes non comparables : ${reason}.`)
   if (!covered) notices.push('Périodes non comparables : couverture incomplète ou journée sale.')
   if (freshness.stale) {
-    notices.push(
-      `Fraîcheur des données : lecture la plus ancienne il y a ${freshness.ageHours} h (seuil ${STALE_AFTER_HOURS} h).`,
-    )
+    notices.push('Comparaison non fiable : agrégat invalidé ou définition incompatible.')
     issues.push('COMPARISON_AGGREGATES_STALE')
   }
 
@@ -560,9 +562,12 @@ export async function compareAssistantStores(
   supabase: SupabaseClient,
   storeIds: string[],
   range: BusinessRange,
+  session?: AssistantAnalyticsSession,
 ): Promise<StoreComparison> {
   assertBusinessRange(range)
-  const result = await readAssistantKpis(supabase, storeIds, range)
+  const result = session && session.range.from === range.from && session.range.to === range.to
+    ? await session.kpis()
+    : await readAssistantKpis(supabase, storeIds, range)
 
   const notices: string[] = []
   const issues: string[] = [...result.issues]

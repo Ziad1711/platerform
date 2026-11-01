@@ -429,12 +429,16 @@ export async function POST(request: Request) {
       })
     }
 
+    const plannedOutputTokens = ['dashboard_summary', 'performance_request', 'period_comparison', 'comparison_request'].includes(intent)
+      ? Math.max(ASSISTANT_MAX_OUTPUT_TOKENS, 1600)
+      : ASSISTANT_MAX_OUTPUT_TOKENS
     const estimatedCredits = estimateCreditsForRequest({
       message: body.message,
       history: conversationalHistory.map((m) => m.content),
       // Réserve pour le prompt système et les résultats d'outils, absents du
       // calcul d'origine : la pré-réservation reste prudente, jamais exacte.
-      reserveInputTokens: 1500,
+      reserveInputTokens: plannedOutputTokens > ASSISTANT_MAX_OUTPUT_TOKENS ? 3000 : 1500,
+      expectedOutputTokens: plannedOutputTokens,
     })
 
     const { wallet } = await ensureCreditsAvailable(supabase, estimatedCredits)
@@ -483,7 +487,7 @@ export async function POST(request: Request) {
         providerModel: model,
         language,
         signal: controller.signal,
-        maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: plannedOutputTokens,
         comparisonBaseline,
       })
     } catch (agentError) {

@@ -1,12 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Sidebar from '@/components/dashboard/sidebar'
 import OnboardingModal from '@/components/dashboard/onboarding-modal'
 import QuotaAlertBar from '@/components/dashboard/quota-alert-bar'
 import { usePathname } from 'next/navigation'
 import { ChevronUp } from 'lucide-react'
 import { Toaster } from 'sonner'
+import { MobileNavigationContext, type MobilePanel } from '@/lib/assistant/mobile-navigation'
+
 function BackToTop() {
   const [visible, setVisible] = useState(false)
 
@@ -41,12 +43,33 @@ export default function AppLayoutClient({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
+  const [panel, setPanel] = useState<MobilePanel>(null)
+
+  const closePanel = useCallback(() => setPanel(null), [])
+  useEffect(() => {
+    const frame = requestAnimationFrame(closePanel)
+    return () => cancelAnimationFrame(frame)
+  }, [pathname, closePanel])
+  useEffect(() => {
+    if (!panel) return
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPanel(null)
+    }
+    const onResize = () => { if (window.innerWidth >= 1024) setPanel(null) }
+    window.addEventListener('keydown', onEscape)
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('keydown', onEscape)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [panel])
 
   const isAssistantPage = pathname === '/ai-assistant'
   const isSettingsPage = pathname === '/settings'
 
   return (
     <div className="flex h-screen bg-background text-foreground">
+      <MobileNavigationContext.Provider value={{ panel, setPanel }}>
       <Sidebar />
       <OnboardingModal />
       <div className="flex-1 flex flex-col min-w-0">
@@ -66,6 +89,7 @@ export default function AppLayoutClient({
       </div>
       <Toaster position="bottom-right" richColors closeButton />
       <BackToTop />
+      </MobileNavigationContext.Provider>
     </div>
   )
 }

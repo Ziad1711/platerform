@@ -22,6 +22,7 @@ import AssistantChartCard from '@/components/assistant/assistant-chart-card'
 import AssistantWarnings from '@/components/assistant/assistant-warnings'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
+import { useMobileNavigation } from '@/lib/assistant/mobile-navigation'
 import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
 import { decideAutoScroll, hasUsableChart, mergeDisplayMessages, sanitizeMetricsSummary } from '@/lib/assistant/chat-ui'
 import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS } from '@/lib/assistant/transcription-limits'
@@ -96,12 +97,12 @@ function renderInlineMarkdown(text: string) {
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
         <strong key={index} className="font-semibold">
-          {part.slice(2, -2)}
+          <bdi dir="auto">{part.slice(2, -2)}</bdi>
         </strong>
       )
     }
 
-    return <span key={index}>{part}</span>
+    return <bdi key={index} dir="auto">{part}</bdi>
   })
 }
 
@@ -138,7 +139,7 @@ function renderMessageContent(content: string) {
       }
 
       nodes.push(
-        <div key={`table-${index}`} className="mt-2 overflow-x-auto rounded-lg border border-border bg-card/90">
+        <div key={`table-${index}`} dir="auto" className="mt-2 overflow-x-auto rounded-lg border border-border bg-card/90">
           <table className="min-w-full text-xs">
             <thead className="bg-secondary">
               <tr>
@@ -248,7 +249,9 @@ export default function AssistantIAPage() {
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<{ content: string; storeId: string } | null>(null)
   const [pendingUserMessageCreatedAt, setPendingUserMessageCreatedAt] = useState<string | null>(null)
   const [threadMenuOpenId, setThreadMenuOpenId] = useState<string | null>(null)
-  const [threadsOpen, setThreadsOpen] = useState(false)
+  const { panel, setPanel } = useMobileNavigation()
+  const threadsOpen = panel === 'conversations'
+  const setThreadsOpen = (open: boolean) => setPanel(open ? 'conversations' : null)
   const [loadingStepIndex, setLoadingStepIndex] = useState(0)
   const [recording, setRecording] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
@@ -596,7 +599,20 @@ export default function AssistantIAPage() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        setThreadsOpen(false)
+        setPanel(null)
+        requestAnimationFrame(() => threadsButtonRef.current?.focus())
+      }
+      if (event.key !== 'Tab' || !threadsDrawerRef.current) return
+      const controls = Array.from(threadsDrawerRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]'))
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (!first || !last) return
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === threadsDrawerRef.current)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -608,7 +624,7 @@ export default function AssistantIAPage() {
       document.body.style.overflow = previousOverflow
       cancelAnimationFrame(frame)
     }
-  }, [threadsOpen])
+  }, [threadsOpen, setPanel])
 
   // Hauteur réellement visible : le clavier virtuel réduit `visualViewport`.
   // La zone de saisie reste ainsi ancrée en bas, sans double défilement.
@@ -633,9 +649,9 @@ export default function AssistantIAPage() {
   }, [])
 
   const closeThreads = useCallback(() => {
-    setThreadsOpen(false)
+    setPanel(null)
     requestAnimationFrame(() => threadsButtonRef.current?.focus())
-  }, [])
+  }, [setPanel])
 
   /* ------------------------------------------------------------------ */
   /* Dictée vocale : enregistrement local, transcription côté serveur    */
@@ -1311,6 +1327,9 @@ export default function AssistantIAPage() {
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border lg:shadow-sm">
         <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2 lg:hidden">
+          <button type="button" data-assistant-nav-toggle onClick={() => setPanel('navigation')} aria-label="Ouvrir la navigation Jisra" aria-expanded={panel === 'navigation'} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card">
+            <Menu className="h-4 w-4" />
+          </button>
           <button
             ref={threadsButtonRef}
             type="button"
@@ -1318,9 +1337,9 @@ export default function AssistantIAPage() {
             aria-label="Ouvrir les conversations"
             aria-expanded={threadsOpen}
             aria-controls="threads-drawer"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card hover:bg-secondary"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card hover:bg-secondary"
           >
-            <Menu className="h-4 w-4" />
+            <MessageSquare className="h-4 w-4" />
           </button>
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Assistant</span>
           <button
@@ -1433,8 +1452,8 @@ export default function AssistantIAPage() {
                           key={`${metric.label}-${metric.value}`}
                           className="inline-flex items-baseline gap-1 rounded-md border border-border bg-secondary/70 px-2 py-1"
                         >
-                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{metric.label}</span>
-                          <span className="text-[12px] font-semibold text-foreground">{metric.value}</span>
+                          <bdi dir="auto" className="text-[10px] uppercase tracking-wide text-muted-foreground">{metric.label}</bdi>
+                          <bdi dir="ltr" className="text-[12px] font-semibold text-foreground">{metric.value}</bdi>
                         </span>
                       ))}
                     </div>
