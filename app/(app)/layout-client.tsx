@@ -68,7 +68,7 @@ export default function AppLayoutClient({
   const isSettingsPage = pathname === '/settings'
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="flex h-dvh bg-background text-foreground">
       <MobileNavigationContext.Provider value={{ panel, setPanel }}>
       <Sidebar />
       <OnboardingModal />

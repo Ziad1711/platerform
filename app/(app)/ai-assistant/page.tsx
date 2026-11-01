@@ -613,27 +613,9 @@ export default function AssistantIAPage() {
     }
   }, [threadsOpen, setPanel])
 
-  // Hauteur réellement visible : le clavier virtuel réduit `visualViewport`.
-  // La zone de saisie reste ainsi ancrée en bas, sans double défilement.
-  useEffect(() => {
-    const viewport = window.visualViewport
-    const element = pageRef.current
-    if (!viewport || !element) return
-
-    const apply = () => {
-      const top = Math.max(0, element.getBoundingClientRect().top)
-      element.style.height = `${Math.max(240, Math.round(viewport.height - top))}px`
-    }
-
-    apply()
-    viewport.addEventListener('resize', apply)
-    viewport.addEventListener('scroll', apply)
-    return () => {
-      viewport.removeEventListener('resize', apply)
-      viewport.removeEventListener('scroll', apply)
-      element.style.removeProperty('height')
-    }
-  }, [])
+  // Hauteur gérée par `h-dvh` + `interactive-widget=resizes-content` (viewport
+  // dynamique) : le clavier virtuel redimensionne le layout, la grille `h-full`
+  // reste ancrée au bas réellement visible. Aucun calcul JS de hauteur à maintenir.
 
   const closeThreads = useCallback(() => {
     setPanel(null)
