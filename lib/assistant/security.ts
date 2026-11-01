@@ -396,6 +396,9 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   TRANSCRIPTION_EMPTY_RESULT: 'La transcription n’a produit aucun texte exploitable.',
   TRANSCRIPTION_IN_PROGRESS: 'Cette dictée est déjà en cours de transcription.',
   TRANSCRIPTION_DURATION_MISSING: 'Durée de l’enregistrement manquante : dictée refusée.',
+  TRANSCRIPTION_ALREADY_PROCESSED: 'Cette dictée a déjà été traitée. Relancez un nouvel enregistrement.',
+  TRANSCRIPTION_BUDGET_UNAVAILABLE:
+    'Le plafond de dictée est momentanément indisponible : aucune transcription n’a été lancée.',
 }
 
 export function getErrorStatus(error: unknown) {
@@ -445,6 +448,8 @@ export function getErrorStatus(error: unknown) {
   if (message === 'TRANSCRIPTION_EMPTY_RESULT') return 422
   if (message === 'TRANSCRIPTION_IN_PROGRESS') return 409
   if (message === 'TRANSCRIPTION_DURATION_MISSING') return 400
+  if (message === 'TRANSCRIPTION_ALREADY_PROCESSED') return 409
+  if (message === 'TRANSCRIPTION_BUDGET_UNAVAILABLE') return 503
   if (message.startsWith('QUOTA_')) return 403
 
   return 500

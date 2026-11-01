@@ -8,17 +8,21 @@
 
 export const TRANSCRIPTION_MODEL = 'gpt-transcribe'
 
-/** 4 Mo : sous la limite de requête de la plateforme et très au-dessus d'une dictée. */
+/**
+ * 4 Mo : sous la limite de requête de la plateforme (4,5 Mo) et très au-dessus
+ * d'une dictée WAV de 120 s (≈ 3,84 Mo à 16 kHz mono 16 bits).
+ */
 export const MAX_AUDIO_BYTES = 4 * 1024 * 1024
-/** En dessous, l'audio est considéré comme vide (aucune parole utile). */
-export const MIN_AUDIO_BYTES = 1_200
+/** Durée minimale : en dessous, aucune parole exploitable. */
+export const MIN_AUDIO_SECONDS = 0.5
 /** Durée maximale d'un enregistrement envoyé. */
 export const MAX_AUDIO_SECONDS = 120
-/** Budget journalier par utilisateur : 10 minutes, soit environ 0,045 USD. */
+/** Format canonique : WAV PCM mono 16 bits à 16 kHz (durée vérifiable). */
+export const TARGET_SAMPLE_RATE = 16_000
+export const TARGET_CHANNELS = 1
+/** Plafond journalier partagé par utilisateur (réservé en base, atomique). */
 export const TRANSCRIPTION_DAILY_SECONDS = 600
-/** Fenêtre anti-abus locale. */
-export const TRANSCRIPTION_WINDOW_MS = 10 * 60_000
-export const TRANSCRIPTION_MAX_REQUESTS = 10
+export const TRANSCRIPTION_DAILY_REQUESTS = 40
 /** Tarif public indicatif du modèle (USD par minute d'audio). */
 export const TRANSCRIPTION_COST_PER_MINUTE_USD = 0.0045
 
@@ -33,17 +37,11 @@ export function isTranscriptionEnabled(env: Record<string, string | undefined> =
   return String(env[TRANSCRIPTION_FLAG_ENV] ?? '').trim().toLowerCase() === 'enabled'
 }
 
-const SUPPORTED_AUDIO_TYPES = [
-  'audio/webm',
-  'audio/ogg',
-  'audio/mp4',
-  'audio/m4a',
-  'audio/x-m4a',
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/wav',
-  'audio/x-wav',
-] as const
+/**
+ * Seul WAV est accepté : sa durée se vérifie exactement dans l'en-tête.
+ * Un format compressé sans durée lisible ne permettrait pas de plafonner le coût.
+ */
+const SUPPORTED_AUDIO_TYPES = ['audio/wav', 'audio/x-wav'] as const
 
 /** Type MIME de base, sans paramètres (`;codecs=opus`). */
 export function baseAudioType(type: string | null | undefined): string {

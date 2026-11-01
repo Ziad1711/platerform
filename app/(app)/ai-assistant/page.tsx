@@ -23,7 +23,8 @@ import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
 import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
 import { decideAutoScroll, hasUsableChart, mergeDisplayMessages, sanitizeMetricsSummary } from '@/lib/assistant/chat-ui'
-import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, MIN_AUDIO_BYTES } from '@/lib/assistant/transcription-limits'
+import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS } from '@/lib/assistant/transcription-limits'
+import { encodeWav } from '@/lib/assistant/audio-wav'
 
 /** Longueur maximale d'un message de chat (alignée sur la route serveur). */
 const MAX_TRANSCRIPT_LENGTH = 2_000
@@ -279,6 +280,11 @@ export default function AssistantIAPage() {
   const voiceRequestIdRef = useRef<string | null>(null)
   const transcribeInFlightRef = useRef(false)
   const sendingRef = useRef(false)
+  // Onde sonore réellement alimentée par le microphone.
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const waveformRafRef = useRef<number | null>(null)
 
   const hasStore = Boolean(currentStoreId)
   const canLoad = hasStore
@@ -595,6 +601,75 @@ export default function AssistantIAPage() {
     recorderStreamRef.current = null
   }, [])
 
+  const stopWaveform = useCallback(() => {
+    if (waveformRafRef.current !== null) {
+      cancelAnimationFrame(waveformRafRef.current)
+      waveformRafRef.current = null
+    }
+  }, [])
+
+  /** Dessine l'onde réelle du microphone (canvas, aucune boucle React). */
+  const startWaveform = useCallback(() => {
+    const render = () => {
+      const canvas = waveformCanvasRef.current
+      const analyser = analyserRef.current
+      if (!canvas || !analyser) {
+        waveformRafRef.current = requestAnimationFrame(render)
+        return
+      }
+      const context = canvas.getContext('2d')
+      if (!context) return
+
+      const ratio = Math.min(2, window.devicePixelRatio || 1)
+      const width = Math.max(40, canvas.clientWidth)
+      const height = Math.max(20, canvas.clientHeight)
+      if (canvas.width !== Math.floor(width * ratio) || canvas.height !== Math.floor(height * ratio)) {
+        canvas.width = Math.floor(width * ratio)
+        canvas.height = Math.floor(height * ratio)
+      }
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+
+      const data = new Uint8Array(analyser.fftSize)
+      analyser.getByteTimeDomainData(data)
+      const bars = 28
+      const step = Math.max(1, Math.floor(data.length / bars))
+      const gap = 2
+      const barWidth = Math.max(1.5, (width - gap * (bars - 1)) / bars)
+      context.clearRect(0, 0, width, height)
+      context.fillStyle = '#dc2626'
+
+      for (let index = 0; index < bars; index += 1) {
+        let sum = 0
+        for (let offset = 0; offset < step; offset += 1) {
+          const sample = (data[index * step + offset] - 128) / 128
+          sum += sample * sample
+        }
+        const rms = Math.sqrt(sum / step)
+        const barHeight = Math.max(2, Math.min(height, rms * height * 3.2))
+        const x = index * (barWidth + gap)
+        const y = (height - barHeight) / 2
+        if (typeof context.roundRect === 'function') {
+          context.beginPath()
+          context.roundRect(x, y, barWidth, barHeight, barWidth / 2)
+          context.fill()
+        } else {
+          context.fillRect(x, y, barWidth, barHeight)
+        }
+      }
+
+      waveformRafRef.current = requestAnimationFrame(render)
+    }
+    render()
+  }, [])
+
+  const stopAudioGraph = useCallback(() => {
+    stopWaveform()
+    analyserRef.current = null
+    const context = audioContextRef.current
+    audioContextRef.current = null
+    if (context && context.state !== 'closed') void context.close().catch(() => undefined)
+  }, [stopWaveform])
+
   const resetRecorderState = useCallback(() => {
     recorderRef.current = null
     recorderChunksRef.current = []
@@ -619,9 +694,10 @@ export default function AssistantIAPage() {
     }
     transcribeAbortRef.current?.abort()
     transcribeAbortRef.current = null
+    stopAudioGraph()
     setTranscribing(false)
     resetRecorderState()
-  }, [resetRecorderState])
+  }, [resetRecorderState, stopAudioGraph])
 
   const stopRecording = useCallback(
     (mode: 'send' | 'insert') => {
@@ -651,9 +727,13 @@ export default function AssistantIAPage() {
         }
       }
       recorderStreamRef.current?.getTracks().forEach((track) => track.stop())
+      stopWaveform()
+      const context = audioContextRef.current
+      audioContextRef.current = null
+      if (context && context.state !== 'closed') void context.close().catch(() => undefined)
       transcribeAbortRef.current?.abort()
     }
-  }, [clearRecorderTimer])
+  }, [clearRecorderTimer, stopWaveform])
 
   // Changement de boutique : la dictée en cours est abandonnée sans envoi.
   const voiceStoreRef = useRef<string | null>(null)
@@ -662,12 +742,7 @@ export default function AssistantIAPage() {
     voiceStoreRef.current = currentStoreId
   }, [currentStoreId, cancelRecording])
 
-  async function transcribeAudio(
-    blob: Blob,
-    durationMs: number,
-    mode: 'send' | 'insert',
-    sessionId: number,
-  ) {
+  async function transcribeAudio(blob: Blob, mode: 'send' | 'insert', sessionId: number) {
     if (sessionId !== voiceSessionRef.current) return
     if (transcribeInFlightRef.current) return
     if (blob.size > MAX_AUDIO_BYTES) {
@@ -683,9 +758,8 @@ export default function AssistantIAPage() {
 
     try {
       const form = new FormData()
-      form.append('file', blob, 'dictation.webm')
+      form.append('file', blob, 'dictation.wav')
       form.append('storeId', String(currentStoreId))
-      form.append('durationMs', String(Math.max(0, Math.round(durationMs))))
       form.append(
         'requestId',
         voiceRequestIdRef.current ??
@@ -754,7 +828,9 @@ export default function AssistantIAPage() {
     if (
       typeof navigator === 'undefined' ||
       typeof navigator.mediaDevices?.getUserMedia !== 'function' ||
-      typeof MediaRecorder === 'undefined'
+      typeof MediaRecorder === 'undefined' ||
+      typeof window === 'undefined' ||
+      typeof window.AudioContext === 'undefined'
     ) {
       setVoiceError('La dictée n’est pas prise en charge par ce navigateur.')
       voiceStartLockRef.current = false
@@ -770,12 +846,24 @@ export default function AssistantIAPage() {
           ? crypto.randomUUID()
           : null
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      })
       recorderStreamRef.current = stream
 
       const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
       const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+
+      const AudioContextCtor = window.AudioContext
+      const audioContext = new AudioContextCtor()
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0.75
+      audioContext.createMediaStreamSource(stream).connect(analyser)
+      audioContextRef.current = audioContext
+      analyserRef.current = analyser
+      if (audioContext.state === 'suspended') void audioContext.resume()
 
       recorderCancelledRef.current = false
       recorderChunksRef.current = []
@@ -788,10 +876,10 @@ export default function AssistantIAPage() {
       recorder.onstop = () => {
         const chunks = recorderChunksRef.current
         recorderChunksRef.current = []
-        const durationMs = Math.max(0, Date.now() - recorderStartedAtRef.current)
         const mode = recorderModeRef.current
         recorderRef.current = null
         stopTracks()
+        stopAudioGraph()
 
         // Callback tardif d'une session annulée : ignoré sans traitement.
         if (sessionId !== voiceSessionRef.current) return
@@ -801,19 +889,46 @@ export default function AssistantIAPage() {
           return
         }
 
-        const blob = new Blob(chunks, { type: chunks[0]?.type || mimeType || 'audio/webm' })
-        if (blob.size < MIN_AUDIO_BYTES) {
-          setVoiceError('Enregistrement trop court : aucune parole détectée.')
+        const recorded = new Blob(chunks, { type: chunks[0]?.type || mimeType || 'audio/webm' })
+        if (recorded.size === 0) {
+          setVoiceError('Enregistrement vide : aucune parole détectée.')
           return
         }
 
-        void transcribeAudio(blob, durationMs, mode, sessionId)
+        // Conversion locale en WAV 16 kHz mono : la durée devient vérifiable
+        // côté serveur, sans dépendre d'une valeur envoyée par le navigateur.
+        void (async () => {
+          try {
+            const encoded = await recorded.arrayBuffer()
+            const decoder = new AudioContextCtor()
+            const decoded = await decoder.decodeAudioData(encoded)
+            const wav = encodeWav(decoded)
+            await decoder.close()
+
+            if (sessionId !== voiceSessionRef.current) return
+            if (wav.byteLength > MAX_AUDIO_BYTES) {
+              setVoiceError('Enregistrement trop volumineux.')
+              return
+            }
+
+            const wavBuffer = wav.buffer.slice(
+              wav.byteOffset,
+              wav.byteOffset + wav.byteLength,
+            ) as ArrayBuffer
+            await transcribeAudio(new Blob([wavBuffer], { type: 'audio/wav' }), mode, sessionId)
+          } catch {
+            if (sessionId === voiceSessionRef.current) {
+              setVoiceError('Enregistrement audio illisible : réessayez.')
+            }
+          }
+        })()
       }
 
-      recorder.start(200)
+      recorder.start(250)
       recorderRef.current = recorder
       setRecording(true)
       setRecordSeconds(0)
+      startWaveform()
 
       recorderTimerRef.current = setInterval(() => {
         const elapsed = Math.round((Date.now() - recorderStartedAtRef.current) / 1000)
@@ -822,6 +937,7 @@ export default function AssistantIAPage() {
       }, 500)
     } catch (error) {
       stopTracks()
+      stopAudioGraph()
       const name = error instanceof DOMException ? error.name : ''
       setVoiceError(
         name === 'NotAllowedError' || name === 'SecurityError'
@@ -1272,48 +1388,6 @@ export default function AssistantIAPage() {
             </div>
           ) : null}
 
-          {recording ? (
-            <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              <span className="relative flex h-2 w-2" aria-hidden>
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-              </span>
-              <span className="font-medium">Enregistrement {formatDuration(recordSeconds)}</span>
-              <span className="hidden text-red-700/80 sm:inline">
-                Envoyer valide la transcription, carré l’insère dans le champ.
-              </span>
-              <div className="ml-auto flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => stopRecording('send')}
-                  className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2.5 text-white hover:bg-primary/90"
-                  title="Arrêter et envoyer"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  <span className="text-[11px]">Envoyer</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => stopRecording('insert')}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-100"
-                  title="Arrêter et insérer le texte"
-                  aria-label="Arrêter et insérer le texte"
-                >
-                  <Square className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelRecording}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-red-700 hover:bg-red-100"
-                  title="Annuler l’enregistrement"
-                  aria-label="Annuler l’enregistrement"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          ) : null}
-
           {transcribing ? (
             <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1328,28 +1402,90 @@ export default function AssistantIAPage() {
           ) : null}
 
           <div className="flex items-end gap-2">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  if (input.trim() && !recording && !transcribing && !isAssistantBlocked && !sendMessageMutation.isPending) {
-                    handleSend(input)
+            <div
+              className={`relative flex-1 rounded-lg border bg-card focus-within:ring-2 focus-within:ring-primary ${
+                recording ? 'border-red-300' : ''
+              }`}
+            >
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    if (input.trim() && !recording && !transcribing && !isAssistantBlocked && !sendMessageMutation.isPending) {
+                      handleSend(input)
+                    }
                   }
-                }
-              }}
-              placeholder="Posez votre question business..."
-              rows={2}
-              className="flex-1 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-            />
+                }}
+                placeholder="Posez votre question business..."
+                rows={2}
+                aria-label="Message à envoyer"
+                className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-sm focus:outline-none ${
+                  recording ? 'invisible' : ''
+                }`}
+                disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              />
+
+              {recording ? (
+                <div
+                  role="group"
+                  aria-label="Enregistrement en cours"
+                  className="absolute inset-0 flex items-center gap-2 rounded-lg px-2.5"
+                >
+                  <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                  </span>
+                  <canvas ref={waveformCanvasRef} aria-hidden className="h-8 min-w-0 flex-1" />
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    className="shrink-0 text-[11px] font-medium tabular-nums text-red-700"
+                  >
+                    {formatDuration(recordSeconds)}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={cancelRecording}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-700 hover:bg-red-100"
+                      title="Annuler l’enregistrement"
+                      aria-label="Annuler l’enregistrement"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => stopRecording('insert')}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-100"
+                      title="Arrêter et insérer le texte"
+                      aria-label="Arrêter et insérer le texte"
+                    >
+                      <Square className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => stopRecording('send')}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-white hover:bg-primary/90"
+                      title="Arrêter et envoyer"
+                      aria-label="Arrêter et envoyer"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
             <button
               type="button"
               onClick={startRecording}
               disabled={recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50"
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
+                recording ? 'invisible' : ''
+              }`}
               title="Dicter un message"
               aria-label="Dicter un message"
             >
@@ -1358,7 +1494,9 @@ export default function AssistantIAPage() {
             <button
               onClick={() => handleSend(input)}
               disabled={!input.trim() || recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-              className="h-10 w-10 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 inline-flex items-center justify-center"
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
+                recording ? 'invisible' : ''
+              }`}
             >
               <Send className="w-4 h-4" />
             </button>

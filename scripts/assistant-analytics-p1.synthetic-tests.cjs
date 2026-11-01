@@ -183,8 +183,9 @@ async function main() {
   const responseModule = createLoader({})('lib/assistant/response.ts')
 
   const factRegistry = createLoader({})('lib/assistant/fact-registry.ts')
-  const transcriptionBudget = createLoader({})('lib/assistant/transcription-budget.ts')
   const transcriptionLimits = createLoader({})('lib/assistant/transcription-limits.ts')
+  const wavModule = createLoader({})('lib/assistant/audio-wav.ts')
+  const budgetModule = createLoader({})('lib/assistant/transcription-budget.ts')
 
   // Fait vérifié avec provenance complète (boutique, période, devise, unité).
   const fact = (value, overrides = {}) => ({
@@ -939,29 +940,125 @@ async function main() {
     return 'fail-closed'
   })
 
-  check('P1-23b', 'Doublon simultané : un seul appel fournisseur', () => {
-    transcriptionBudget.resetTranscriptionBudget()
-    const first = transcriptionBudget.claimTranscriptionRequest('u1', 'req-1', 1000)
-    const second = transcriptionBudget.claimTranscriptionRequest('u1', 'req-1', 1001)
-    assertEqual(first.status, 'new', 'première tentative')
-    assertEqual(second.status, 'pending', 'doublon non bloqué')
-    transcriptionBudget.completeTranscriptionRequest('u1', 'req-1', 'texte', 1002)
-    const third = transcriptionBudget.claimTranscriptionRequest('u1', 'req-1', 1003)
-    assertEqual(third.status, 'done', 'résultat non rejoué')
-    assertEqual(third.text, 'texte', 'texte non rejoué')
-    return 'new → pending → done'
+  /* ------------------------------------------------------------------------ */
+  /* Audio : durée réelle vérifiée côté serveur (WAV)                         */
+  /* ------------------------------------------------------------------------ */
+
+  const silentBuffer = (seconds) => {
+    const frames = Math.round(seconds * 16_000)
+    return {
+      numberOfChannels: 1,
+      length: frames,
+      sampleRate: 16_000,
+      getChannelData: () => new Float32Array(frames),
+    }
+  }
+
+  check('P1-24a', 'WAV 16 kHz mono : durée exacte lue dans l’en-tête', () => {
+    const bytes = wavModule.encodeWav(silentBuffer(1))
+    const validation = wavModule.validateWavForTranscription(bytes)
+    assert(validation.ok, `WAV valide refusé: ${validation.code ?? ''}`)
+    assertEqual(validation.info.channels, 1, 'mono attendu')
+    assertEqual(validation.info.sampleRate, 16_000, '16 kHz attendu')
+    assert(Math.abs(validation.info.durationSeconds - 1) < 0.01, `durée=${validation.info.durationSeconds}`)
+    return `${validation.info.durationSeconds.toFixed(3)} s`
   })
 
-  check('P1-23c', 'Échec fournisseur : tentative relançable', () => {
-    transcriptionBudget.resetTranscriptionBudget()
-    transcriptionBudget.claimTranscriptionRequest('u2', 'req-2', 1000)
-    transcriptionBudget.failTranscriptionRequest('u2', 'req-2')
-    assertEqual(
-      transcriptionBudget.claimTranscriptionRequest('u2', 'req-2', 1001).status,
-      'new',
-      'échec non libéré',
+  check('P1-24b', 'Durée > 120 s refusée malgré une taille sous la limite', () => {
+    const bytes = wavModule.encodeWav(silentBuffer(121))
+    assert(bytes.byteLength < 4 * 1024 * 1024, 'taille hors sujet pour ce test')
+    const validation = wavModule.validateWavForTranscription(bytes)
+    assert(!validation.ok, 'durée excessive acceptée')
+    assertEqual(validation.code, 'TRANSCRIPTION_TOO_LONG', 'code attendu')
+    return 'too_long'
+  })
+
+  check('P1-24c', 'WAV stéréo refusé (format non canonique)', () => {
+    const mono = wavModule.encodeWav(silentBuffer(1))
+    const copy = new Uint8Array(mono.byteLength)
+    copy.set(mono)
+    const view = new DataView(copy.buffer)
+    view.setUint16(22, 2, true) // channels
+    view.setUint32(28, 16_000 * 2 * 2, true) // byte rate
+    view.setUint16(32, 2 * 2, true) // block align
+    const validation = wavModule.validateWavForTranscription(copy)
+    assert(!validation.ok, 'stéréo acceptée')
+    assertEqual(validation.code, 'TRANSCRIPTION_UNSUPPORTED_TYPE', 'code attendu')
+    return 'unsupported'
+  })
+
+  check('P1-24d', 'Durée absente de l’en-tête : refus, jamais une valeur cliente', () => {
+    const bytes = wavModule.encodeWav(silentBuffer(1))
+    const truncated = bytes.slice(0, 44)
+    const validation = wavModule.validateWavForTranscription(truncated)
+    assert(!validation.ok, 'WAV sans données accepté')
+    assert(
+      validation.code === 'TRANSCRIPTION_AUDIO_EMPTY' || validation.code === 'TRANSCRIPTION_UNSUPPORTED_TYPE',
+      `code attendu, obtenu ${validation.code}`,
     )
-    return 'released'
+    return 'empty'
+  })
+
+  /* ------------------------------------------------------------------------ */
+  /* Budget : réservation partagée, échec fermé                               */
+  /* ------------------------------------------------------------------------ */
+
+  const rpcMock = (result) => ({ rpc: async () => result })
+
+  const unavailable = await budgetModule.reserveTranscriptionSlot(
+    rpcMock({ data: null, error: { message: 'function does not exist' } }),
+    { requestId: 'r1', seconds: 10 },
+  )
+  check('P1-25a', 'RPC de budget absent : échec fermé', () => {
+    assertEqual(unavailable.status, 'unavailable', 'repli permissif détecté')
+    return 'unavailable'
+  })
+
+  const duplicate = await budgetModule.reserveTranscriptionSlot(
+    rpcMock({ data: [{ outcome: 'duplicate', seconds_used: 42 }], error: null }),
+    { requestId: 'r2', seconds: 10 },
+  )
+  check('P1-25b', 'Même requestId : doublon, aucun second appel', () => {
+    assertEqual(duplicate.status, 'duplicate', 'doublon non détecté')
+    return 'duplicate'
+  })
+
+  const limited = await budgetModule.reserveTranscriptionSlot(
+    rpcMock({ data: [{ outcome: 'daily_limit', seconds_used: 600 }], error: null }),
+    { requestId: 'r3', seconds: 10 },
+  )
+  check('P1-25c', 'Plafond journalier atteint : refus', () => {
+    assertEqual(limited.status, 'daily_limit', 'plafond non appliqué')
+    return 'daily_limit'
+  })
+
+  const reserved = await budgetModule.reserveTranscriptionSlot(
+    rpcMock({ data: [{ outcome: 'reserved', seconds_used: 52 }], error: null }),
+    { requestId: 'r4', seconds: 10 },
+  )
+  check('P1-25d', 'Réservation valide : secondes consommées exposées', () => {
+    assertEqual(reserved.status, 'reserved', 'réservation refusée')
+    assertEqual(reserved.secondsUsed, 52, 'compteur incohérent')
+    return `used=${reserved.secondsUsed}`
+  })
+
+  check('P1-25e', 'La route ne lit jamais une durée fournie par le client', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'app/api/assistant/transcribe/route.ts'), 'utf8')
+    assert(!source.includes("form.get('durationMs')"), 'durée cliente encore lue')
+    assert(source.includes('validateWavForTranscription'), 'validation WAV absente')
+    assert(source.includes('reserveTranscriptionSlot'), 'réservation absente')
+    return 'server duration'
+  })
+
+  check('P1-25f', 'Migration : verrou atomique et anti-rejeu', () => {
+    const sql = fs.readFileSync(
+      path.join(ROOT, 'supabase/migrations/20261101190000_assistant_transcription_budget.sql'),
+      'utf8',
+    )
+    assert(sql.includes('pg_advisory_xact_lock'), 'verrou absent')
+    assert(sql.includes("primary key (user_id, request_id)"), 'anti-rejeu absent')
+    assert(sql.includes('security definer'), 'élévation absente')
+    return 'atomic'
   })
 
   const failed = results.filter((item) => !item.pass)

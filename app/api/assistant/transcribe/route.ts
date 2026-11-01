@@ -1,12 +1,15 @@
 /**
- * Dictée vocale de l'assistant : audio → texte, sans conservation.
+ * Dictée vocale de l'assistant : WAV → texte, sans conservation.
  *
  * Sécurité :
  * - mêmes verrous que le chat (origine, verrou global, allowlist Supabase Auth,
  *   permission `ai_assistant.use`, appartenance à la boutique) ;
  * - clé OpenAI exclusivement côté serveur ;
  * - audio uniquement en mémoire, jamais écrit sur disque ni dans Supabase ;
- * - plafond de taille, de durée, de fréquence et de coût quotidien.
+ * - durée recalculée depuis l'en-tête WAV : la valeur du navigateur n'est pas lue ;
+ * - budget journalier réservé de façon atomique en base AVANT l'appel
+ *   fournisseur, avec échec fermé si la réservation est indisponible ;
+ * - anti-rejeu : un même `requestId` ne peut pas être facturé deux fois.
  *
  * Aucun débit de crédits IA ici : le coût de transcription reste séparé du
  * portefeuille de chat dans cette version.
@@ -19,20 +22,12 @@ import {
   assertTrustedOrigin,
   toPublicError,
 } from '@/lib/assistant/security'
-import {
-  claimTranscriptionRequest,
-  completeTranscriptionRequest,
-  failTranscriptionRequest,
-  reserveTranscriptionBudget,
-} from '@/lib/assistant/transcription-budget'
+import { reserveTranscriptionSlot } from '@/lib/assistant/transcription-budget'
+import { validateWavForTranscription } from '@/lib/assistant/audio-wav'
 import {
   MAX_AUDIO_BYTES,
-  MAX_AUDIO_SECONDS,
-  MIN_AUDIO_BYTES,
   TRANSCRIPTION_MODEL,
-  baseAudioType,
   buildTranscriptionPrompt,
-  isSupportedAudioType,
   isTranscriptionEnabled,
 } from '@/lib/assistant/transcription-limits'
 
@@ -44,19 +39,14 @@ const UPSTREAM_TIMEOUT_MS = 25_000
 /** Marge multipart au-dessus de la limite audio. */
 const MAX_BODY_BYTES = MAX_AUDIO_BYTES + 128 * 1024
 
-function readSeconds(raw: FormDataEntryValue | null): number {
-  const milliseconds = Number(raw ?? 0)
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return 0
-  return Math.round(milliseconds / 1000)
-}
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function POST(request: Request) {
   try {
     assertTrustedOrigin(request)
     assertAssistantEnabled()
 
-    // Fermée par défaut : le quota n'est pas global tant qu'aucun compteur
-    // partagé atomique n'est en place. Aucun appel fournisseur n'est possible ici.
+    // Fermée par défaut : le quota n'est garanti que par le RPC partagé.
     if (!isTranscriptionEnabled()) throw new Error('TRANSCRIPTION_NOT_CONFIGURED')
 
     const { supabase, user } = await requireAuthenticatedUser()
@@ -79,11 +69,10 @@ export async function POST(request: Request) {
     if (!file || typeof file === 'string') throw new Error('TRANSCRIPTION_AUDIO_EMPTY')
 
     const audio = file as Blob
-    if (typeof audio.size !== 'number' || audio.size < MIN_AUDIO_BYTES) {
+    if (typeof audio.size !== 'number' || audio.size <= 0) {
       throw new Error('TRANSCRIPTION_AUDIO_EMPTY')
     }
     if (audio.size > MAX_AUDIO_BYTES) throw new Error('TRANSCRIPTION_TOO_LARGE')
-    if (!isSupportedAudioType(audio.type)) throw new Error('TRANSCRIPTION_UNSUPPORTED_TYPE')
 
     const storeId = String(form.get('storeId') || '').trim()
     if (!storeId) throw new Error('INVALID_STORE_ID')
@@ -92,82 +81,69 @@ export async function POST(request: Request) {
     await requireAssistantPermission(supabase, user.id, storeId)
 
     const requestId = String(form.get('requestId') || '').trim()
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
-      throw new Error('INVALID_REQUEST')
-    }
+    if (!UUID_PATTERN.test(requestId)) throw new Error('INVALID_REQUEST')
 
-    // Idempotence : une même tentative ne paie jamais deux fois.
-    const claim = claimTranscriptionRequest(user.id, requestId)
-    if (claim.status === 'pending') throw new Error('TRANSCRIPTION_IN_PROGRESS')
-    if (claim.status === 'done') {
-      return NextResponse.json({ text: claim.text, replayed: true })
-    }
+    // Durée réelle : lecture stricte de l'en-tête WAV, jamais du client.
+    const bytes = new Uint8Array(await audio.arrayBuffer())
+    const validation = validateWavForTranscription(bytes)
+    if (!validation.ok) throw new Error(validation.code)
+    const seconds = validation.info.durationSeconds
+
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) throw new Error('TRANSCRIPTION_NOT_CONFIGURED')
+
+    // Réservation atomique en base, AVANT tout appel payant.
+    const reservation = await reserveTranscriptionSlot(supabase, { requestId, seconds })
+    if (reservation.status === 'duplicate') throw new Error('TRANSCRIPTION_ALREADY_PROCESSED')
+    if (reservation.status === 'daily_limit') throw new Error('TRANSCRIPTION_DAILY_LIMIT')
+    if (reservation.status === 'unavailable') throw new Error('TRANSCRIPTION_BUDGET_UNAVAILABLE')
+
+    const upstream = new FormData()
+    upstream.append('file', audio, 'dictation.wav')
+    upstream.append('model', TRANSCRIPTION_MODEL)
+    upstream.append('prompt', buildTranscriptionPrompt())
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+    const forwardAbort = () => controller.abort()
+    request.signal.addEventListener('abort', forwardAbort, { once: true })
 
     try {
-      const reportedSeconds = readSeconds(form.get('durationMs'))
-      if (reportedSeconds <= 0) throw new Error('TRANSCRIPTION_DURATION_MISSING')
-      if (reportedSeconds > MAX_AUDIO_SECONDS + 1) throw new Error('TRANSCRIPTION_TOO_LONG')
+      const response = await fetch(OPENAI_ENDPOINT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: upstream,
+        signal: controller.signal,
+      })
 
-      // Durée plafonnée et **jamais sous-estimée** : la valeur client est
-      // confrontée à une estimation basse depuis la taille (≈16 kbit/s), afin
-      // qu'une durée minimisée ne contourne pas le plafond de coût.
-      const estimatedSeconds = Math.ceil(audio.size / 2_000)
-      const billedSeconds = Math.min(
-        Math.max(reportedSeconds, estimatedSeconds, 1),
-        MAX_AUDIO_SECONDS,
-      )
-
-      const budget = reserveTranscriptionBudget(user.id, billedSeconds)
-      if (!budget.ok) throw new Error(budget.code)
-
-      const apiKey = process.env.OPENAI_API_KEY
-      if (!apiKey) throw new Error('TRANSCRIPTION_NOT_CONFIGURED')
-
-      const upstream = new FormData()
-      upstream.append('file', audio, `dictation.${baseAudioType(audio.type).split('/')[1] || 'webm'}`)
-      upstream.append('model', TRANSCRIPTION_MODEL)
-      upstream.append('prompt', buildTranscriptionPrompt())
-
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
-      const forwardAbort = () => controller.abort()
-      request.signal.addEventListener('abort', forwardAbort, { once: true })
-
-      try {
-        const response = await fetch(OPENAI_ENDPOINT, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}` },
-          body: upstream,
-          signal: controller.signal,
+      if (!response.ok) {
+        console.warn('[assistant] transcription_provider_failed', {
+          storeId,
+          status: response.status,
         })
-
-        if (!response.ok) {
-          console.warn('[assistant] transcription_provider_failed', {
-            storeId,
-            status: response.status,
-          })
-          throw new Error('TRANSCRIPTION_PROVIDER_FAILED')
-        }
-
-        const payload = (await response.json().catch(() => null)) as { text?: unknown } | null
-        const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
-        if (!text) throw new Error('TRANSCRIPTION_EMPTY_RESULT')
-
-        // Texte payé mémorisé : un doublon renvoie ce texte sans nouvel appel.
-        completeTranscriptionRequest(user.id, requestId, text)
-        console.info('[assistant] transcription_ok', { storeId, durationSeconds: billedSeconds })
-        return NextResponse.json({ text })
-      } finally {
-        clearTimeout(timer)
-        request.signal.removeEventListener('abort', forwardAbort)
+        throw new Error('TRANSCRIPTION_PROVIDER_FAILED')
       }
-    } catch (error) {
-      // Aucun texte exploitable : la tentative est libérée pour un nouvel essai.
-      failTranscriptionRequest(user.id, requestId)
-      throw error
+
+      const payload = (await response.json().catch(() => null)) as { text?: unknown } | null
+      const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
+      if (!text) throw new Error('TRANSCRIPTION_EMPTY_RESULT')
+
+      // La réservation reste consommée : un échec ne rouvre pas de budget.
+      console.info('[assistant] transcription_ok', {
+        storeId,
+        durationSeconds: Math.ceil(seconds),
+      })
+      return NextResponse.json({
+        text,
+        durationSeconds: Number(seconds.toFixed(2)),
+      })
+    } finally {
+      clearTimeout(timer)
+      request.signal.removeEventListener('abort', forwardAbort)
     }
   } catch (error) {
-    const aborted = error instanceof Error && (error.name === 'AbortError' || error.message === 'TRANSCRIPTION_TIMEOUT')
+    const aborted =
+      error instanceof Error && (error.name === 'AbortError' || error.message === 'TRANSCRIPTION_TIMEOUT')
     const safeError = aborted ? new Error('TRANSCRIPTION_TIMEOUT') : error
     const publicError = toPublicError(safeError)
     return NextResponse.json(

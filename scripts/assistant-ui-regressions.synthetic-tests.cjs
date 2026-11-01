@@ -299,6 +299,36 @@ check('U16', 'rendu : aucun montant interdit réintroduit', () => {
   return 'aucun chiffre'
 })
 
+check('U21', 'dictée intégrée au champ : aucune seconde barre', () => {
+  assert(PAGE.includes('waveformCanvasRef'), 'onde sonore non branchée')
+  assert(PAGE.includes('role="group"'), 'groupe d’enregistrement absent')
+  assert(PAGE.includes('absolute inset-0'), 'superposition dans le champ absente')
+  assert(!PAGE.includes('mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200'), 'ancienne barre séparée encore présente')
+  return 'overlay intégré'
+})
+
+check('U22', 'trois contrôles ordonnés : annuler, insérer, envoyer', () => {
+  const cancel = PAGE.indexOf('aria-label="Annuler l’enregistrement"')
+  const insert = PAGE.indexOf('aria-label="Arrêter et insérer le texte"')
+  const send = PAGE.indexOf('aria-label="Arrêter et envoyer"')
+  assert(cancel > -1 && insert > -1 && send > -1, 'contrôle manquant')
+  assert(cancel < insert && insert < send, 'ordre des contrôles incohérent')
+  return 'X → carré → envoyer'
+})
+
+check('U23', 'durée jamais fournie par le navigateur', () => {
+  assert(!PAGE.includes('durationMs'), 'durée cliente encore envoyée')
+  assert(PAGE.includes('encodeWav'), 'conversion WAV absente')
+  assert(PAGE.includes("'audio/wav'"), 'type WAV absent')
+  return 'WAV serveur'
+})
+
+check('U24', 'aucun déplacement de layout pendant l’enregistrement', () => {
+  assert(PAGE.includes("recording ? 'invisible' : ''"), 'boutons non masqués sans déplacement')
+  assert(PAGE.includes('relative flex-1 rounded-lg border'), 'conteneur du champ non positionné')
+  return 'largeur conservée'
+})
+
 console.log('\n=== Tests de régression — interface assistant ===\n')
 for (const entry of results) {
   console.log(`${entry.pass ? 'PASS' : 'FAIL'}  ${entry.id.padEnd(4)} ${entry.name}${entry.detail ? ` — ${entry.detail}` : ''}`)
