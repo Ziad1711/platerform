@@ -68,6 +68,32 @@ function compactLabel(value: unknown): string {
   return text.length > 14 ? `${text.slice(0, 13)}…` : text
 }
 
+/** Journée métier `YYYY-MM-DD` → libellé lisible court (`12 nov.`). */
+function formatDateAxis(value: unknown): string {
+  const text = String(value ?? '')
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  if (!match) return compactLabel(text)
+  const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
+  return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1] ?? match[2]}`
+}
+
+/** Journée métier → libellé complet pour l'infobulle (`12 novembre 2025`). */
+function formatDateTooltip(value: unknown): string {
+  const text = String(value ?? '')
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  if (!match) return text
+  const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1] ?? match[2]} ${match[1]}`
+}
+
+/** Nom de série lisible pour l'infobulle, à partir de l'unité du graphique. */
+function seriesNameForUnit(unit?: string): string {
+  if (unit === 'currency') return 'Chiffre d’affaires'
+  if (unit === 'count') return 'Commandes'
+  if (unit === 'percent') return 'Taux'
+  return 'Valeur'
+}
+
 export default function AssistantChartCard({ response }: { response: AssistantStructuredResponse }) {
   if (!response.chart || !response.chart_data?.length) {
     return null
@@ -75,6 +101,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
 
   const xKey = getXAxisKey(response.chart_data)
   const valueKey = getPrimaryValueKey(response.chart_data)
+  const seriesName = seriesNameForUnit(response.chart_unit)
 
   // Pas de graphique sans clé de valeur exploitable : un axe vide n'est pas un résultat.
   if (!valueKey) return null
@@ -84,6 +111,14 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
     tickLine: false,
     axisLine: false,
   } as const
+
+  const tooltipProps = {
+    formatter: renderTooltipValue,
+    labelFormatter: formatDateTooltip,
+    cursor: { stroke: '#94a3b8', strokeDasharray: '3 3' },
+  } as const
+
+  const isDaily = xKey === 'date'
 
   return (
     <div dir="ltr" className="mt-3 rounded-xl border bg-card p-3">
@@ -95,18 +130,18 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
           {response.chart_type === 'line' ? (
             <LineChart data={response.chart_data} accessibilityLayer>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={compactLabel} />
+              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
-              <Tooltip formatter={renderTooltipValue} />
-              <Line type="monotone" dataKey={valueKey} stroke="#2563eb" strokeWidth={2} dot={false} connectNulls={false} />
+              <Tooltip {...tooltipProps} />
+              <Line type="linear" name={seriesName} dataKey={valueKey} stroke="#2563eb" strokeWidth={2} dot={isDaily ? { r: 2 } : false} connectNulls={false} />
             </LineChart>
           ) : response.chart_type === 'area' ? (
             <AreaChart data={response.chart_data} accessibilityLayer>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={compactLabel} />
+              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
-              <Tooltip formatter={renderTooltipValue} />
-              <Area type="monotone" dataKey={valueKey} stroke="#2563eb" fill="#93c5fd" />
+              <Tooltip {...tooltipProps} />
+              <Area type="linear" name={seriesName} dataKey={valueKey} stroke="#2563eb" fill="#93c5fd" connectNulls={false} />
             </AreaChart>
           ) : response.chart_type === 'pie' ? (
             <PieChart>
@@ -121,25 +156,14 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
           ) : (
             <BarChart data={response.chart_data} accessibilityLayer>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={compactLabel} />
+              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
-              <Tooltip formatter={renderTooltipValue} />
-              <Bar dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]} />
+              <Tooltip {...tooltipProps} />
+              <Bar name={seriesName} dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]} />
             </BarChart>
           )}
         </ResponsiveContainer>
       </div>
-
-      {response.metrics_summary?.length ? (
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {response.metrics_summary.map((metric) => (
-            <div key={metric.label} className="rounded-lg border bg-secondary px-3 py-2">
-              <div dir="auto" className="text-[11px] text-muted-foreground"><bdi dir="auto">{metric.label}</bdi></div>
-              <div dir="ltr" className="text-sm font-semibold text-foreground"><bdi dir="ltr">{metric.value}</bdi></div>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 }
