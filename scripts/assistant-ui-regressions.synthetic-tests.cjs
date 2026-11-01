@@ -373,6 +373,20 @@ check('U30', 'Escape ferme le drawer et focus géré', () => {
   return 'accessibilité'
 })
 
+check('U31', 'RTL : contenus en dir auto, graphiques en LTR', () => {
+  assert(PAGE.includes('dir="auto"'), 'direction automatique absente')
+  assert(PAGE.includes('dir="ltr"'), 'chiffres non isolés en LTR')
+  const chart = fs.readFileSync('components/assistant/assistant-chart-card.tsx', 'utf8')
+  assert(chart.includes('dir="ltr"'), 'graphique sans direction LTR')
+  return 'bidirectionnel'
+})
+
+check('U32', 'drawer au-dessus du bouton flottant SaaS', () => {
+  assert(PAGE.includes('z-[70]'), 'drawer sous la navigation principale')
+  assert(PAGE.includes('z-[60]'), 'overlay sous la navigation principale')
+  return 'z-index'
+})
+
 console.log('\n=== Tests de régression — interface assistant ===\n')
 for (const entry of results) {
   console.log(`${entry.pass ? 'PASS' : 'FAIL'}  ${entry.id.padEnd(4)} ${entry.name}${entry.detail ? ` — ${entry.detail}` : ''}`)

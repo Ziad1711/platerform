@@ -1183,7 +1183,7 @@ export default function AssistantIAPage() {
     <div ref={pageRef} className="grid h-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[300px_1fr] lg:gap-4 lg:p-4">
       {threadsOpen ? (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-[60] bg-black/50 lg:hidden"
           onClick={closeThreads}
           aria-hidden
         />
@@ -1195,7 +1195,7 @@ export default function AssistantIAPage() {
         aria-modal={threadsOpen}
         aria-label="Conversations"
         tabIndex={-1}
-        className={`fixed inset-y-0 left-0 z-50 flex w-[85%] max-w-xs min-h-0 flex-col overflow-hidden border-r bg-card shadow-xl transition-transform duration-200 ease-out focus:outline-none lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:rounded-xl lg:border lg:shadow-sm lg:transition-none ${
+        className={`fixed inset-y-0 left-0 z-[70] flex w-[85%] max-w-xs min-h-0 flex-col overflow-hidden border-r bg-card shadow-xl transition-transform duration-200 ease-out focus:outline-none lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:rounded-xl lg:border lg:shadow-sm lg:transition-none ${
           threadsOpen ? 'translate-x-0' : '-translate-x-full invisible lg:visible'
         }`}
       >
@@ -1424,10 +1424,10 @@ export default function AssistantIAPage() {
                       : 'bg-card text-foreground border-border'
                   }`}
                 >
-                  <div className="space-y-1">{renderMessageContent(msg.content)}</div>
+                  <div dir="auto" className="space-y-1 text-start">{renderMessageContent(msg.content)}</div>
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.metrics_summary?.length ? (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    <div dir="ltr" className="mt-2.5 flex flex-wrap gap-1.5">
                       {sanitizeMetricsSummary(msg.metadata.structured_response.metrics_summary).map((metric) => (
                         <span
                           key={`${metric.label}-${metric.value}`}
@@ -1532,6 +1532,7 @@ export default function AssistantIAPage() {
                 placeholder="Posez votre question business..."
                 rows={2}
                 aria-label="Message à envoyer"
+                dir="auto"
                 className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-sm focus:outline-none ${
                   recording ? 'invisible' : ''
                 }`}

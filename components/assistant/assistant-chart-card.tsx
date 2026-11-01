@@ -86,7 +86,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
   } as const
 
   return (
-    <div className="mt-3 rounded-xl border bg-card p-3">
+    <div dir="ltr" className="mt-3 rounded-xl border bg-card p-3">
       {response.chart_title ? <h4 className="text-sm font-semibold text-foreground">{response.chart_title}</h4> : null}
       {response.chart_description ? <p className="text-xs text-muted-foreground mt-1">{response.chart_description}</p> : null}
 
