@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
@@ -15,8 +15,6 @@ import {
   TrendingUp,
   DollarSign,
   Share2,
-  Menu,
-  X,
   ChevronLeft,
   LogOut,
   PhoneCall,
@@ -27,6 +25,7 @@ import { JisraMark, JisraWordmark } from '@/components/logo'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { MENU_PERMISSIONS } from '@/lib/auth/permissions'
 import { useStore } from '@/lib/store-context'
+import { useMobileNavigation } from '@/lib/assistant/mobile-navigation'
 
 const menuItems = [
   { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
@@ -47,8 +46,11 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const { panel, setPanel } = useMobileNavigation()
+  const mobileOpen = panel === 'navigation'
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null)
+  const mobileToggleRef = useRef<HTMLButtonElement | null>(null)
+  const mobileDrawerRef = useRef<HTMLDivElement | null>(null)
   const supabase = createClient()
 
   const { currentStoreId, userId } = useStore()
@@ -61,20 +63,62 @@ export default function Sidebar() {
   })
 
   useEffect(() => {
-    setNavigatingTo(null)
-    setMobileOpen(false)
-  }, [pathname])
+    const frame = requestAnimationFrame(() => {
+      setNavigatingTo(null)
+      setPanel(null)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [pathname, setPanel])
 
   // Close mobile sidebar on resize to desktop
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 1024) {
-        setMobileOpen(false)
+        setPanel(null)
       }
     }
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [])
+  }, [setPanel])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const frame = requestAnimationFrame(() => mobileDrawerRef.current?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setPanel(null)
+        requestAnimationFrame(() => {
+          if (pathname === '/ai-assistant') {
+            document.querySelector<HTMLButtonElement>('[data-assistant-nav-toggle]')?.focus()
+          } else {
+            mobileToggleRef.current?.focus()
+          }
+        })
+      }
+      if (event.key !== 'Tab' || !mobileDrawerRef.current) return
+      const controls = Array.from(mobileDrawerRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]'))
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (!first || !last) return
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === mobileDrawerRef.current)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      cancelAnimationFrame(frame)
+    }
+  }, [mobileOpen, setPanel, pathname])
+
 
   const { data: profile } = useQuery({
     queryKey: ['sidebar-profile', userId],
@@ -153,7 +197,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <ul className="space-y-1">
-           {visibleMenuItems.map((item, index) => {
+           {visibleMenuItems.map((item) => {
             const Icon = item.icon
             const isActive = pathname === item.href || navigatingTo === item.href
 
@@ -261,9 +305,10 @@ export default function Sidebar() {
     <>
       {/* Mobile Menu Button */}
       <button
-        onClick={() => setMobileOpen(!mobileOpen)}
+        ref={mobileToggleRef}
+        onClick={() => setPanel(mobileOpen ? null : 'navigation')}
         data-mobile-nav-toggle
-        className="lg:hidden fixed top-4 left-4 z-50 p-2.5 rounded-xl bg-background border border-border shadow-lg shadow-[#1fa971]/30 text-[#1fa971] hover:bg-gradient-to-br hover:from-[#1fa971] hover:to-[#178a5a] hover:text-white hover:shadow-xl hover:shadow-[#1fa971]/50 hover:scale-105 active:scale-95 transition-all duration-200"
+        className={`${pathname === '/ai-assistant' ? 'hidden' : 'lg:hidden'} fixed top-4 left-4 z-50 p-2.5 rounded-xl bg-background border border-border shadow-lg shadow-[#1fa971]/30 text-[#1fa971] hover:bg-gradient-to-br hover:from-[#1fa971] hover:to-[#178a5a] hover:text-white hover:shadow-xl hover:shadow-[#1fa971]/50 hover:scale-105 active:scale-95 transition-all duration-200`}
         aria-label={mobileOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
       >
         <div className="relative w-5 h-5 flex items-center justify-center">
@@ -283,14 +328,19 @@ export default function Sidebar() {
       {mobileOpen && (
         <div
           className="lg:hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm"
-          onClick={() => setMobileOpen(false)}
+          onClick={() => setPanel(null)}
         />
       )}
 
       {/* Mobile Sidebar (Drawer) - always shows names */}
       <div
+        ref={mobileDrawerRef}
+        role="dialog"
+        aria-modal={mobileOpen}
+        aria-label="Navigation Jisra"
+        tabIndex={-1}
         className={`lg:hidden fixed inset-y-0 left-0 z-40 w-72 bg-background border-r border-border shadow-2xl transform transition-transform duration-300 ease-in-out ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+          mobileOpen ? 'translate-x-0' : '-translate-x-full invisible'
         }`}
       >
         <div className="flex flex-col h-full">

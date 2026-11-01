@@ -12,7 +12,7 @@ interface StoreContext {
  * 1. Rôle métier
  * 2. Règles de vérité des données
  * 3. Mémoire conversationnelle
- * 4. Stratégie de planification d'outils
+ * 4. Lecture du plan d'outils exécuté côté serveur
  * 5. Format de réponse final
  */
 export function buildAgentSystemPrompt(
@@ -50,19 +50,18 @@ ${languageRule}
 - Si une dimension a été analysée avant (villes, produits, etc.), elle peut servir de contexte
 - Ne répète pas les informations déjà données sauf si l'utilisateur demande explicitement
 
-## 4. STRATÉGIE DE PLANIFICATION D'OUTILS
-- Analyse d'abord ce que demande l'utilisateur : période, métrique, dimension, comparaison
-- Choisis les outils les plus pertinents pour répondre à la question
-- Si la question est vague, utilise les outils généraux (KPI, profit, top produits)
-- Si la question est spécifique (ville, produit, pub), utilise l'outil dédié
-- Tu peux combiner plusieurs outils si nécessaire (ex: KPI + profit + ads)
-- Si la question demande une comparaison, exécute les outils pour chaque période/store
+## 4. DONNÉES DISPONIBLES
+- Les outils ont déjà été choisis et exécutés côté serveur : tu ne peux ni les appeler ni lire d'autres données.
+- Croise les résultats compatibles pour répondre à la question, sans traiter un classement limité comme le total.
+- Les points journaliers sont des cohortes datées par commande et leurs statuts actuels, pas des événements survenus ce jour-là.
+- Une journée aujourd'hui est ouverte : ne compare pas son volume brut à une journée complète comme si les fenêtres étaient équivalentes.
+- Si une dimension manque, signale la limite utile au diagnostic sans imaginer de causalité ni proposer un outil indisponible.
 
 ## 5. FORMAT DE RÉPONSE FINAL
 Tu dois répondre UNIQUEMENT avec un objet JSON valide (sans texte avant ni après) :
 
 {
-  "message_text": "Réponse directe, en français, 2 à 4 phrases maximum (ou 3 puces courtes si plusieurs chiffres).",
+  "message_text": "Réponse directe dans la langue de l'utilisateur, de profondeur adaptée à la demande.",
   "conversation_title": "Titre court (max 60 chars) ou null",
   "suggestions": ["Question de suivi 1", "Question de suivi 2", "Question de suivi 3"],
   "warnings": []
@@ -70,7 +69,7 @@ Tu dois répondre UNIQUEMENT avec un objet JSON valide (sans texte avant ni apr�
 
 Règles pour message_text :
 - Réponds d'abord à la question posée, sans préambule ni rappel de méthode
-- Sois concis : 2 à 4 phrases, ou 3 puces maximum. Pas de titres, pas de sections vides, pas de répétition
+- Question KPI : une réponse courte. Analyse générale ou stratégique : verdict, forces, faiblesses, hypothèses distinctes des faits et actions priorisées ; développe seulement les dimensions réellement documentées.
 - Utilise UNIQUEMENT les valeurs exactes fournies (texte décimal, jamais arrondi, jamais recalculé)
 - Chaque résultat porte un état : complete, empty, partial, missing, forbidden, unavailable
 - "empty" = zéro réel, tu peux l'affirmer ; "missing"/"forbidden"/"unavailable" = AUCUN chiffre, explique l'absence en une phrase

@@ -639,6 +639,19 @@ async function main() {
     return 'delta revenue=0'
   })
 
+  const historicalReader = readerWith([
+    kpiPayload('full', { last_rebuild_at: '2025-10-01T00:00:00Z' }),
+    kpiPayload('full', { last_rebuild_at: '2025-10-01T00:00:00Z' }),
+  ])
+  const historicalComparison = await historicalReader.compareAssistantPeriods(
+    {}, [storeId], { from: '2026-09-01', to: '2026-10-01' }, { from: '2025-09-01', to: '2025-10-01' },
+  )
+  check('D-03c', 'Agrégats historiques anciens mais propres restent comparables', () => {
+    assertEqual(historicalComparison.freshness.stale, false, 'âge seul ne salit pas un agrégat')
+    assertEqual(historicalComparison.state, 'complete', 'comparaison de septembre refusée')
+    assert(historicalComparison.deltas.some((delta) => delta.metric === 'revenue' && delta.delta !== null), 'écart manquant')
+  })
+
 
 /* -------------------------------------------------------------------------- */
 /* Séparation des comparaisons dans l'outil                                    */
@@ -1231,6 +1244,95 @@ async function main() {
     assert(!/stock/i.test(suggestions), `suggestion stock: ${suggestions}`)
     assert((suggestionRun.structuredResponse.suggestions ?? []).length > 0, 'aucune suggestion utile')
     return suggestions
+  })
+
+  // Qualification décisionnelle sans fournisseur ni base : les 15 situations
+  // métier utilisent les mêmes fonctions pures et doubles que la suite P1.
+  const scenarios = [
+    ['01', 'Analyse octobre', 'Analyse mon business pour octobre 2026', 'dashboard_summary', 'getDashboardKPIs'],
+    ['02', 'Hier vs aujourd’hui', "Qu’est-ce qui s’est passé hier et aujourd’hui ?", 'period_comparison', 'getStoreComparison'],
+    ['03', 'Septembre historique', 'Quel mois était meilleur : septembre 2025 ou septembre 2026 ?', 'period_comparison', 'getStoreComparison'],
+    ['04', 'Taux de livraison', 'Analyse le taux de livraison', 'generic_business_chat', 'getDashboardKPIs'],
+    ['05', 'Produit rentable', 'Quel produit est le plus rentable ?', 'top_products', 'getTopProducts'],
+    ['06', 'Publicité', 'Analyse mes dépenses publicitaires', 'ads_analysis', 'getDashboardKPIs'],
+    ['07', 'Ville', 'Analyse par ville', 'performance_request', 'getCityPerformance'],
+    ['08', 'Manque de données', 'Analyse mon stock', 'stock_analysis', 'getStockSummary'],
+    ['09', 'Journée ouverte', "Compare hier et aujourd'hui", 'period_comparison', 'getStoreComparison'],
+    ['10', 'Devises', 'Compare les boutiques', 'comparison_request', 'getStoreComparison'],
+    ['11', 'Finance restreinte', 'Analyse mon profit', 'profit_analysis', 'getDashboardKPIs'],
+    ['12', 'Darija', 'شنو وقع البارح واليوم فالمبيعات؟', 'period_comparison', 'getStoreComparison'],
+    ['13', 'KPI simple', 'Combien de commandes ?', 'generic_business_chat', 'getDashboardKPIs'],
+    ['14', 'Stratégique', 'Analyse mon business et conseille-moi', 'dashboard_summary', 'getDailyRevenueTrend'],
+    ['15', 'Multi-outils', 'Analyse mes ventes par ville et produit', 'performance_request', 'getCityPerformance'],
+  ]
+  const plannedTools = tools.selectToolsForIntent
+  for (const [id, name, question, expectedIntent, expectedTool] of scenarios) {
+    check(`D-${id}`, name, () => {
+      assertEqual(intentsModule.resolveIntent(question), expectedIntent, 'intention')
+      const selected = plannedTools(expectedIntent, question)
+      assert(selected.includes(expectedTool), `outil requis: ${expectedTool}, obtenu ${selected.join(',')}`)
+      assert(selected.length <= 6, 'trop de lecteurs par tour')
+      return selected.join(',')
+    })
+  }
+
+  check('D-03b', 'Comparaison à deux mois et chiffres vérifiés conservés', () => {
+    const pair = intentsModule.resolveComparisonPeriods('septembre 2025 ou septembre 2026')
+    assertEqual(pair.current.from, '2025-09-01', 'premier mois')
+    assertEqual(pair.baseline.from, '2026-09-01', 'second mois')
+    const facts = factRegistry.collectVerifiedFacts({ getStoreComparison: {
+      kind: 'periods', state: 'complete', currency: 'MAD', ranges: pair,
+      deltas: [{ metric: 'revenue', current: '1200', baseline: '900', delta: '300', state: 'complete' }],
+    } }, { storeIds: ['store'], currency: 'MAD' })
+    assertEqual(facts.length, 3, 'deux valeurs + écart')
+    const clean = responseModule.sanitizeExplanation('Septembre 2025 : 1200 MAD. Septembre 2026 : 900 MAD.', facts)
+    assert(clean.text.includes('1200') && clean.text.includes('900'), 'comparaison effacée')
+    return '2 périodes / 3 faits'
+  })
+
+  const pairForReply = intentsModule.resolveComparisonPeriods('septembre 2025 ou septembre 2026')
+  const comparisonReply = await runAgent(agentMocks({
+    providerText: JSON.stringify({ message_text: 'Le CA le plus récent est meilleur.' }),
+    toolDataByTool: { order: ['getStoreComparison'], getStoreComparison: {
+      kind: 'periods', state: 'complete', currency: 'MAD', ranges: pairForReply,
+      deltas: [
+        { metric: 'orders', current: '10', baseline: '12', delta: '-2', state: 'complete' },
+        { metric: 'revenue', current: '1200', baseline: '900', delta: '300', state: 'complete' },
+      ],
+    } },
+  }), { intent: 'period_comparison', userMessage: 'septembre 2025 ou septembre 2026' })
+  check('D-03d', 'Réponse finale : deux périodes et verdict basés sur le CA', () => {
+    const text = comparisonReply.structuredResponse.message_text
+    assert(text.includes('septembre 2025') && text.includes('septembre 2026'), 'périodes absentes')
+    assert(text.includes('1200 MAD') && text.includes('900 MAD') && text.includes('300 MAD'), 'écart perdu')
+    assert(text.includes('septembre 2025 est la meilleure période'), 'verdict CA erroné')
+    assert(!text.includes('999999'), 'valeur non vérifiée')
+    return 'comparaison publiée sans KPI inventé'
+  })
+
+  check('D-08b', 'Aucune donnée inventée sur une journée absente', () => {
+    const facts = factRegistry.collectVerifiedFacts({ getDailyRevenueTrend: {
+      kind: 'daily', state: 'partial', days: [{ storeId: 'store', date: '2026-10-01', currency: 'MAD', state: 'missing', revenue: '999' }],
+    } }, { storeIds: ['store'], currency: 'MAD' })
+    assertEqual(facts.length, 0, 'jour manquant publié')
+  })
+
+  check('D-10b', 'Comparaison multidevise sans fait financier commun', () => {
+    const facts = factRegistry.collectVerifiedFacts({ getStoreComparison: {
+      kind: 'periods', state: 'complete', currency: 'EUR', ranges: {
+        current: { from: '2025-09-01', to: '2025-10-01' }, baseline: { from: '2026-09-01', to: '2026-10-01' },
+      }, deltas: [{ metric: 'revenue', current: '1200', baseline: '900', delta: '300', state: 'complete' }],
+    } }, { storeIds: ['store'], currency: 'MAD' })
+    assertEqual(facts.length, 0, 'EUR attribué au MAD')
+  })
+
+  check('D-11b', 'Accès commercial : coût et marge jamais inscrits', () => {
+    const facts = factRegistry.collectVerifiedFacts({ getDashboardKPIs: {
+      ...envelope('complete', { revenue: metric('100'), contributionMargin: metric('60') }),
+      access: { store: 'commercial' },
+    } }, { storeIds: ['store'], currency: 'MAD' })
+    assert(facts.some((item) => item.source.endsWith(':revenue')), 'CA commercial absent')
+    assert(!facts.some((item) => item.source.endsWith(':contributionMargin')), 'marge commercial divulguée')
   })
 
   const failed = results.filter((item) => !item.pass)

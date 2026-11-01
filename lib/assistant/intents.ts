@@ -514,6 +514,8 @@ const RELATIVE_PERIOD_PATTERNS: Array<{ pattern: RegExp; key: string }> = [
   { pattern: /(?:30 derniers jours|trente derniers jours)/, key: '30d' },
   { pattern: /(?:hier)/, key: 'yesterday' },
   { pattern: /(?:aujourd['’]hui)/, key: 'today' },
+  { pattern: /(?:البارح|أمس|امس)/, key: 'yesterday' },
+  { pattern: /(?:اليوم)/, key: 'today' },
 ]
 
 const RELATIVE_LABELS: Record<string, string> = {
@@ -670,6 +672,10 @@ export function resolveIntent(message: string): AssistantIntent {
   // (« septembre 2025 ou bien de 2026 ? », « quel mois est le meilleur ? »).
   if (resolveComparisonPeriods(message)) return 'period_comparison'
 
+  if (/(?:hier|البارح|أمس|امس)/i.test(message) && /(?:aujourd['’]?hui|aujourd hui|اليوم)/i.test(message)) {
+    return 'period_comparison'
+  }
+
   if (/(?:compar|\bvs\b|versus|قارن|مقارنة|مقارنه)/i.test(text)) {
     return 'comparison_request'
   }
@@ -701,7 +707,7 @@ export function resolveIntent(message: string): AssistantIntent {
     return 'top_products'
   }
 
-  if (text.includes('publicité') || text.includes('ads') || text.includes('roas')) {
+  if (text.includes('publicité') || text.includes('publicitaire') || text.includes('ads') || text.includes('roas')) {
     return 'ads_analysis'
   }
 

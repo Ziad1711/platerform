@@ -58,40 +58,46 @@ export function selectToolsForIntent(intent: AssistantIntent, userMessage: strin
   const toolsByIntent: Record<AssistantIntent, AgentToolName[]> = {
     greeting: [],
     small_talk: [],
-    dashboard_summary: ['getDashboardKPIs', 'getProfitSummary', 'getAdsSpend'],
-    top_products: ['getTopProducts', 'getProfitSummary'],
-    ads_analysis: ['getAdsSpend', 'getAdsPerformanceByCampaign', 'getDashboardKPIs'],
-    profit_analysis: ['getProfitSummary', 'getTopProducts'],
+    dashboard_summary: ['getDashboardKPIs', 'getDailyRevenueTrend'],
+    top_products: ['getTopProducts', 'getDashboardKPIs'],
+    ads_analysis: ['getDashboardKPIs'],
+    profit_analysis: ['getDashboardKPIs'],
     stock_analysis: ['getStockSummary'],
     supplier_summary: ['getSupplierSummary'],
-    recent_orders: ['getRecentOrders', 'getOrdersByStatus'],
+    recent_orders: ['getRecentOrders', 'getDashboardKPIs'],
     comparison_request: ['getStoreComparison'],
     period_comparison: ['getStoreComparison'],
-    chart_request: ['getDashboardKPIs', 'getTopProducts', 'getExpensesByCategory', 'getDailyRevenueTrend'],
-    performance_request: ['getDashboardKPIs', 'getOrdersByStatus', 'getProfitSummary', 'getCityPerformance'],
-    generic_business_chat: ['getDashboardKPIs', 'getProfitSummary', 'getTopProducts', 'getAdsSpend', 'getRecentOrders'],
+    chart_request: ['getDashboardKPIs', 'getDailyRevenueTrend'],
+    performance_request: ['getDashboardKPIs', 'getDailyRevenueTrend'],
+    generic_business_chat: ['getDashboardKPIs'],
   }
 
   const selected = [...(toolsByIntent[intent] || [])]
   const text = userMessage.toLowerCase()
+  // Les RPC détaillées agrègent les commandes en amont du LIMIT de résultat.
+  // Un bilan ouvert reste sur V5 ; la demande ciblée ajoute la dimension.
 
   // Détection de dimension spécifique dans le message
   if (text.includes('ville') || text.includes('casa') || text.includes('rabat') || text.includes('marrakech') || text.includes('fès') || text.includes('tanger')) {
     if (!selected.includes('getCityPerformance')) selected.push('getCityPerformance')
   }
+  if (/(?:مدينة|مدن|المدن|المدينة)/.test(text) && !selected.includes('getCityPerformance')) selected.push('getCityPerformance')
+  if (/(?:منتوج|منتجات|المنتجات)/.test(text) && !selected.includes('getTopProducts')) selected.push('getTopProducts')
+  if ((text.includes('produit') || text.includes('article')) && !selected.includes('getTopProducts')) selected.push('getTopProducts')
+  if (/(?:تأكيد|أكد|التأكيد)/.test(text) && !selected.includes('getConfirmationPerformance')) selected.push('getConfirmationPerformance')
   if (text.includes('agent') || text.includes('confirmation') || text.includes('confirme')) {
     if (!selected.includes('getConfirmationPerformance')) selected.push('getConfirmationPerformance')
   }
-  if (text.includes('livraison') || text.includes('delivery') || text.includes('transport')) {
+  if (text.includes('transport') || text.includes('transporteur')) {
     if (!selected.includes('getDeliveryPerformance')) selected.push('getDeliveryPerformance')
   }
   if (text.includes('campagne') || text.includes('campaign') || text.includes('roas') || text.includes('cpc') || text.includes('cpm')) {
     if (!selected.includes('getAdsPerformanceByCampaign')) selected.push('getAdsPerformanceByCampaign')
   }
-  if (text.includes('compar') || text.includes(' vs ') || text.includes('versus')) {
-    return ['getStoreComparison']
+  if (intent !== 'period_comparison' && (text.includes('compar') || text.includes(' vs ') || text.includes('versus') || text.includes('قارن'))) {
+    if (!selected.includes('getStoreComparison')) selected.push('getStoreComparison')
   }
-  if (text.includes('dépense') || text.includes('depense') || text.includes('charge')) {
+  if ((text.includes('dépense') || text.includes('depense') || text.includes('charge')) && intent !== 'ads_analysis') {
     if (!selected.includes('getExpensesByCategory')) selected.push('getExpensesByCategory')
   }
   if (text.includes('client') || text.includes('historique') || text.includes('commande de')) {
@@ -194,10 +200,11 @@ export async function executeAgentTool(input: ExecuteAgentToolInput) {
           [...session.storeIds],
           session.range,
           input.comparisonBaseline,
+          session,
         )
         return result(comparison)
       }
-      const comparison = await compareAssistantStores(session.supabase, [...session.storeIds], session.range)
+      const comparison = await compareAssistantStores(session.supabase, [...session.storeIds], session.range, session)
       return result(comparison)
     } catch (error) {
       return result(comparisonFailure(error))
@@ -221,10 +228,11 @@ export async function executeAgentTool(input: ExecuteAgentToolInput) {
     case 'getCityPerformance':
       return result(await readCitySection(request))
     case 'getConfirmationPerformance': {
-      const [confirmation, agents] = await Promise.all([
-        readConfirmationSection(request),
-        readAgentSection(request),
-      ])
+      // Le tunnel agrégé suffit à une question de confirmation générale.
+      // Ne lire la RPC par agent que si cette dimension a été demandée.
+      const confirmation = await readConfirmationSection(request)
+      const byAgent = /(?:agent|commercial|الموظف|الوكيل)/i.test(input.userMessage)
+      const agents = byAgent ? await readAgentSection(request) : undefined
       return result({ confirmation, agents })
     }
     case 'getTopProducts':

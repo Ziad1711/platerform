@@ -87,8 +87,8 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
 
   return (
     <div dir="ltr" className="mt-3 rounded-xl border bg-card p-3">
-      {response.chart_title ? <h4 className="text-sm font-semibold text-foreground">{response.chart_title}</h4> : null}
-      {response.chart_description ? <p className="text-xs text-muted-foreground mt-1">{response.chart_description}</p> : null}
+      {response.chart_title ? <h4 dir="auto" className="text-sm font-semibold text-foreground"><bdi dir="auto">{response.chart_title}</bdi></h4> : null}
+      {response.chart_description ? <p dir="auto" className="text-xs text-muted-foreground mt-1"><bdi dir="auto">{response.chart_description}</bdi></p> : null}
 
       <div className="mt-3 h-56 w-full min-h-[14rem] sm:h-64" role="img" aria-label={response.chart_title || 'Graphique'}>
         <ResponsiveContainer width="100%" height="100%">
@@ -134,8 +134,8 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
           {response.metrics_summary.map((metric) => (
             <div key={metric.label} className="rounded-lg border bg-secondary px-3 py-2">
-              <div className="text-[11px] text-muted-foreground">{metric.label}</div>
-              <div className="text-sm font-semibold text-foreground">{metric.value}</div>
+              <div dir="auto" className="text-[11px] text-muted-foreground"><bdi dir="auto">{metric.label}</bdi></div>
+              <div dir="ltr" className="text-sm font-semibold text-foreground"><bdi dir="ltr">{metric.value}</bdi></div>
             </div>
           ))}
         </div>
