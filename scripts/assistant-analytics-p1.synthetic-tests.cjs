@@ -443,8 +443,8 @@ async function main() {
     assert(!text.includes('999999'), `chiffre inventé conservé : ${text}`)
     assert(text.includes('100.00'), 'faits vérifiés présents')
     assert(
-      (invented.structuredResponse.warnings ?? []).some((warning) => warning.includes('absent des données vérifiées')),
-      'avertissement de retrait attendu',
+      !(invented.structuredResponse.warnings ?? []).some((warning) => warning.includes('absent des données vérifiées')),
+      'suppression de chiffre affichée comme erreur globale',
     )
     return text.split('\n')[0]
   })
@@ -1097,6 +1097,36 @@ async function main() {
     assert(text.includes('mars'), `libellé inattendu: ${text.slice(0, 80)}`)
     assert(!text.includes('Invalid'), 'date invalide exposée')
     return 'mars'
+  })
+
+
+  /* ------------------------------------------------------------------------ */
+  /* Réserves pertinentes uniquement                                          */
+  /* ------------------------------------------------------------------------ */
+
+  check('P1-27a', 'Réserves devise/couverture calculées sur les données lues', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/analytics-reader.ts'), 'utf8')
+    assert(!/limits: \[\s*'Montants non additionnés/.test(source), 'limite devise inconditionnelle')
+    assert(source.includes('coverageGap'), 'couverture non conditionnée')
+    assert(source.includes('days_missing > 0'), 'journées manquantes non contrôlées')
+    assert(!source.includes('aucune lecture directe de secours'), 'ancienne limite codée en dur')
+    return 'conditionnel'
+  })
+
+  const simpleMocks = agentMocks({
+    providerText: JSON.stringify({ message_text: 'Analyse simple de la période.' }),
+    toolDataByTool: {
+      order: ['getDashboardKPIs'],
+      getDashboardKPIs: envelope('complete', { revenue: metric('100.00') }),
+    },
+  })
+  const simple = await runAgent(simpleMocks)
+
+  check('P1-27b', 'Analyse simple : aucune alerte devise ou comparaison', () => {
+    const warnings = (simple.structuredResponse.warnings ?? []).join(' | ')
+    assert(!/devise/i.test(warnings), `alerte devise: ${warnings}`)
+    assert(!/compar/i.test(warnings), `alerte comparaison: ${warnings}`)
+    return 'aucune alerte parasite'
   })
 
   const failed = results.filter((item) => !item.pass)

@@ -508,17 +508,15 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     fallbackNotice: comparisonNotices[0] ?? null,
   })
 
-  const numericWarnings = rejectedAmounts.length > 0
-    ? ['Un chiffre absent des données vérifiées a été retiré de la réponse.']
-    : []
-
+  // Un chiffre non corroboré est retiré silencieusement : la réponse reste
+  // fiable (faits vérifiés + texte qualitatif). Ce n'est pas une erreur globale ;
+  // le compteur reste tracé dans `agent_run` pour l'exploitation.
   const warnings = dedupeMessages([
     ...truth.warnings,
     ...sectionNotices,
     ...comparisonNotices,
     ...(llmOutput.warnings ?? []),
     ...parsedOutput.issues,
-    ...numericWarnings,
     ...(sectionStates.includes('unavailable') ? ['Une section demandée n’est pas disponible : elle n’est pas chiffrée.'] : []),
   ])
 

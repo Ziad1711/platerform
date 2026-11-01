@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Loader2,
   MessageSquare,
+  Menu,
   Mic,
   MoreVertical,
   Pin,
@@ -247,6 +248,7 @@ export default function AssistantIAPage() {
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<{ content: string; storeId: string } | null>(null)
   const [pendingUserMessageCreatedAt, setPendingUserMessageCreatedAt] = useState<string | null>(null)
   const [threadMenuOpenId, setThreadMenuOpenId] = useState<string | null>(null)
+  const [threadsOpen, setThreadsOpen] = useState(false)
   const [loadingStepIndex, setLoadingStepIndex] = useState(0)
   const [recording, setRecording] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
@@ -255,6 +257,9 @@ export default function AssistantIAPage() {
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const threadsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const threadsDrawerRef = useRef<HTMLElement | null>(null)
+  const pageRef = useRef<HTMLDivElement | null>(null)
   // Références DOM stables par message assistant : cible du défilement.
   const assistantMessageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const handledAssistantIdRef = useRef<string | null>(null)
@@ -362,6 +367,7 @@ export default function AssistantIAPage() {
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ['assistant-threads'] })
       setActiveThreadId(data.thread.id)
+      setThreadsOpen(false)
       setServerError(null)
       setTimeout(() => inputRef.current?.focus(), 0)
     },
@@ -583,6 +589,53 @@ export default function AssistantIAPage() {
       sendingRef.current = false
     }
   }
+
+  // Drawer mobile : Escape, verrou de défilement et focus initial.
+  useEffect(() => {
+    if (!threadsOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setThreadsOpen(false)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const frame = requestAnimationFrame(() => threadsDrawerRef.current?.focus())
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      cancelAnimationFrame(frame)
+    }
+  }, [threadsOpen])
+
+  // Hauteur réellement visible : le clavier virtuel réduit `visualViewport`.
+  // La zone de saisie reste ainsi ancrée en bas, sans double défilement.
+  useEffect(() => {
+    const viewport = window.visualViewport
+    const element = pageRef.current
+    if (!viewport || !element) return
+
+    const apply = () => {
+      const top = Math.max(0, element.getBoundingClientRect().top)
+      element.style.height = `${Math.max(240, Math.round(viewport.height - top))}px`
+    }
+
+    apply()
+    viewport.addEventListener('resize', apply)
+    viewport.addEventListener('scroll', apply)
+    return () => {
+      viewport.removeEventListener('resize', apply)
+      viewport.removeEventListener('scroll', apply)
+      element.style.removeProperty('height')
+    }
+  }, [])
+
+  const closeThreads = useCallback(() => {
+    setThreadsOpen(false)
+    requestAnimationFrame(() => threadsButtonRef.current?.focus())
+  }, [])
 
   /* ------------------------------------------------------------------ */
   /* Dictée vocale : enregistrement local, transcription côté serveur    */
@@ -1127,21 +1180,48 @@ export default function AssistantIAPage() {
   }, [latestUserMessageId, positionMessages])
 
   return (
-    <div className="h-full min-h-0 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 p-4">
-      <aside className="bg-card rounded-xl border shadow-sm flex flex-col overflow-hidden min-h-0">
+    <div ref={pageRef} className="grid h-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[300px_1fr] lg:gap-4 lg:p-4">
+      {threadsOpen ? (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={closeThreads}
+          aria-hidden
+        />
+      ) : null}
+      <aside
+        id="threads-drawer"
+        ref={threadsDrawerRef}
+        role="dialog"
+        aria-modal={threadsOpen}
+        aria-label="Conversations"
+        tabIndex={-1}
+        className={`fixed inset-y-0 left-0 z-50 flex w-[85%] max-w-xs min-h-0 flex-col overflow-hidden border-r bg-card shadow-xl transition-transform duration-200 ease-out focus:outline-none lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:rounded-xl lg:border lg:shadow-sm lg:transition-none ${
+          threadsOpen ? 'translate-x-0' : '-translate-x-full invisible lg:visible'
+        }`}
+      >
         <div className="p-4 border-b flex items-center justify-between">
           <div className="flex items-center gap-2 text-foreground font-semibold">
             <MessageSquare className="w-4 h-4" />
             Conversations
           </div>
-          <button
-            onClick={() => createThreadMutation.mutate()}
-            disabled={createThreadMutation.isPending}
-            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-primary text-white hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Nouvelle
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => createThreadMutation.mutate()}
+              disabled={createThreadMutation.isPending}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs text-white hover:bg-primary/90 disabled:opacity-50"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nouvelle
+            </button>
+            <button
+              type="button"
+              onClick={closeThreads}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary lg:hidden"
+              aria-label="Fermer les conversations"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-3 border-b bg-secondary/70">
@@ -1167,7 +1247,13 @@ export default function AssistantIAPage() {
                   }`}
                 >
                   <div className="flex items-start gap-2">
-                    <button onClick={() => setActiveThreadId(thread.id)} className="flex-1 text-left min-w-0 px-1 py-1">
+                    <button
+                      onClick={() => {
+                        setActiveThreadId(thread.id)
+                        setThreadsOpen(false)
+                      }}
+                      className="min-w-0 flex-1 px-1 py-1 text-left"
+                    >
                       <div className="text-sm font-medium text-foreground flex items-center gap-1">
                         <span className="truncate">{thread.title || 'Nouvelle conversation'}</span>
                         {thread.is_pinned ? <Pin className="w-3 h-3 text-amber-500 shrink-0" /> : null}
@@ -1223,12 +1309,35 @@ export default function AssistantIAPage() {
         </div>
       </aside>
 
-      <section className="bg-card rounded-xl border shadow-sm flex flex-col overflow-hidden min-h-0">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border lg:shadow-sm">
+        <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2 lg:hidden">
+          <button
+            ref={threadsButtonRef}
+            type="button"
+            onClick={() => setThreadsOpen(true)}
+            aria-label="Ouvrir les conversations"
+            aria-expanded={threadsOpen}
+            aria-controls="threads-drawer"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card hover:bg-secondary"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Assistant</span>
+          <button
+            type="button"
+            onClick={() => createThreadMutation.mutate()}
+            disabled={createThreadMutation.isPending}
+            aria-label="Nouvelle conversation"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card hover:bg-secondary disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </header>
 
         <div
           ref={messagesContainerRef}
           onScroll={handleMessagesScroll}
-          className="flex-1 overflow-y-auto p-4 space-y-3 bg-secondary/40"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-secondary/40 p-3 sm:p-4"
         >
           {assistantClosedError ? (
             <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm">
@@ -1309,7 +1418,7 @@ export default function AssistantIAPage() {
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 border ${
+                  className={`max-w-[92%] break-words rounded-2xl px-3 py-2.5 text-sm leading-6 border sm:max-w-[85%] sm:px-4 ${
                     msg.role === 'user'
                       ? 'bg-primary text-white border-blue-600'
                       : 'bg-card text-foreground border-border'
@@ -1376,7 +1485,7 @@ export default function AssistantIAPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-3 border-t bg-card">
+        <div className="shrink-0 border-t bg-card px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-3">
           {warning ? (
             <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
               {warning}

@@ -242,6 +242,25 @@ export async function readAssistantKpis(
     }
 
     const stores = payload.stores.map(storeResult)
+
+    // Réserves calculées sur les données réellement lues : une limite affichée
+    // sans rapport avec la réponse (devise unique, couverture complète) est un
+    // faux avertissement qui décrédibilise l'analyse.
+    const limits: string[] = []
+    if (new Set(stores.map((store) => store.currency)).size > 1) {
+      limits.push('Montants non additionnés entre devises distinctes.')
+    }
+    const coverageGap = stores.some(
+      (store) =>
+        store.coverage.days_missing > 0 ||
+        store.coverage.days_partial > 0 ||
+        store.coverage.days_dirty > 0 ||
+        store.coverage.days_incompatible > 0,
+    )
+    if (coverageGap) {
+      limits.push('Certaines journées ne sont pas publiées : la couverture est partielle.')
+    }
+
     return {
       contractVersion: ANALYTICS_CONTRACT_VERSION,
       state: globalState(stores),
@@ -249,11 +268,7 @@ export async function readAssistantKpis(
       source: 'rpc_dashboard_kpi_reader_v2',
       generatedAt: payload.generated_at,
       stores,
-      limits: [
-        'Montants non additionnés entre devises distinctes.',
-        'Couverture absente : aucune lecture directe de secours n’est déclenchée.',
-        'Le résultat opérationnel (après dépenses) requiert une RPC financière dédiée.',
-      ],
+      limits,
       issues: [],
     }
   } catch (error) {

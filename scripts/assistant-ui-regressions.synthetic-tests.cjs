@@ -344,6 +344,35 @@ check('U26', 'alignement de l’enregistrement dans le champ', () => {
   return 'aligné'
 })
 
+check('U27', 'drawer mobile : hamburger, overlay et glissement', () => {
+  assert(PAGE.includes('aria-label="Ouvrir les conversations"'), 'hamburger absent')
+  assert(PAGE.includes('id="threads-drawer"'), 'drawer absent')
+  assert(PAGE.includes('aria-modal={threadsOpen}'), 'drawer non modal')
+  assert(PAGE.includes('onClick={closeThreads}'), 'overlay sans fermeture')
+  return 'drawer accessible'
+})
+
+check('U28', 'sélection ferme le drawer, création accessible', () => {
+  assert(PAGE.includes('setThreadsOpen(false)'), 'fermeture absente')
+  assert(PAGE.includes('aria-label="Nouvelle conversation"'), 'création mobile absente')
+  return 'ok'
+})
+
+check('U29', 'hauteur mobile, safe area et scroll unique', () => {
+  assert(PAGE.includes('visualViewport'), 'hauteur clavier non gérée')
+  assert(PAGE.includes('env(safe-area-inset-bottom)'), 'safe area absente')
+  assert(PAGE.includes('overscroll-contain'), 'scroll contenu absent')
+  assert(PAGE.includes('overflow-hidden'), 'débordement page non bloqué')
+  return 'mobile plein écran'
+})
+
+check('U30', 'Escape ferme le drawer et focus géré', () => {
+  assert(PAGE.includes("event.key === 'Escape'"), 'Escape absent')
+  assert(PAGE.includes('threadsDrawerRef.current?.focus()'), 'focus initial absent')
+  assert(PAGE.includes('threadsButtonRef.current?.focus()'), 'retour du focus absent')
+  return 'accessibilité'
+})
+
 console.log('\n=== Tests de régression — interface assistant ===\n')
 for (const entry of results) {
   console.log(`${entry.pass ? 'PASS' : 'FAIL'}  ${entry.id.padEnd(4)} ${entry.name}${entry.detail ? ` — ${entry.detail}` : ''}`)
