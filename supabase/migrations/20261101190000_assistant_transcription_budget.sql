@@ -39,9 +39,7 @@ revoke all on table public.assistant_transcription_requests from public, anon, a
 
 create or replace function public.rpc_assistant_reserve_transcription(
   p_request_id uuid,
-  p_seconds integer,
-  p_max_seconds integer,
-  p_max_requests integer
+  p_seconds integer
 )
 returns table (outcome text, seconds_used integer)
 language plpgsql
@@ -49,6 +47,9 @@ security definer
 set search_path = public, pg_temp
 as $function$
 declare
+  -- Plafonds fixés côté base : un appelant ne peut jamais les élargir.
+  c_max_seconds constant integer := 600;
+  c_max_requests constant integer := 40;
   v_user uuid := auth.uid();
   v_day date := (now() at time zone 'utc')::date;
   v_used integer;
@@ -63,10 +64,6 @@ begin
   if p_seconds is null or p_seconds < 1 or p_seconds > 120 then
     raise exception 'TRANSCRIPTION_BAD_DURATION';
   end if;
-  if p_max_seconds is null or p_max_seconds < 1 or p_max_requests is null or p_max_requests < 1 then
-    raise exception 'TRANSCRIPTION_BAD_LIMIT';
-  end if;
-
   -- Sérialise les tentatives d'un même utilisateur : la vérification et
   -- l'écriture ne peuvent pas s'intercaler entre deux instances.
   perform pg_advisory_xact_lock(hashtextextended(v_user::text, 12));
@@ -101,7 +98,7 @@ begin
      and b.day = v_day
    for update;
 
-  if v_used + p_seconds > p_max_seconds or v_requests + 1 > p_max_requests then
+  if v_used + p_seconds > c_max_seconds or v_requests + 1 > c_max_requests then
     return query select 'daily_limit'::text, v_used;
     return;
   end if;
@@ -120,10 +117,10 @@ begin
 end;
 $function$;
 
-comment on function public.rpc_assistant_reserve_transcription(uuid, integer, integer, integer) is
+comment on function public.rpc_assistant_reserve_transcription(uuid, integer) is
   'Réserve atomiquement une durée de dictée avant l''appel fournisseur ; anti-rejeu par request_id.';
 
-revoke all on function public.rpc_assistant_reserve_transcription(uuid, integer, integer, integer)
+revoke all on function public.rpc_assistant_reserve_transcription(uuid, integer)
   from public, anon;
-grant execute on function public.rpc_assistant_reserve_transcription(uuid, integer, integer, integer)
+grant execute on function public.rpc_assistant_reserve_transcription(uuid, integer)
   to authenticated;

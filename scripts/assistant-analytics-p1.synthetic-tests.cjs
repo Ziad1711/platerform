@@ -1058,7 +1058,14 @@ async function main() {
     assert(sql.includes('pg_advisory_xact_lock'), 'verrou absent')
     assert(sql.includes("primary key (user_id, request_id)"), 'anti-rejeu absent')
     assert(sql.includes('security definer'), 'élévation absente')
-    return 'atomic'
+    assert(!sql.includes('p_max_seconds'), 'plafond élargissable par l’appelant')
+    assert(sql.includes('c_max_seconds constant integer := 600'), 'plafond secondes non figé')
+    assert(sql.includes('c_max_requests constant integer := 40'), 'plafond requêtes non figé')
+    assertEqual(transcriptionLimits.TRANSCRIPTION_DAILY_SECONDS, 600, 'constante client désalignée')
+    assertEqual(transcriptionLimits.TRANSCRIPTION_DAILY_REQUESTS, 40, 'constante client désalignée')
+    const client = fs.readFileSync(path.join(ROOT, 'lib/assistant/transcription-budget.ts'), 'utf8')
+    assert(!client.includes('p_max_seconds'), 'le client envoie encore les plafonds')
+    return 'atomic + plafonds serveur'
   })
 
   const failed = results.filter((item) => !item.pass)

@@ -10,11 +10,6 @@
  * comme une garantie globale.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import {
-  TRANSCRIPTION_DAILY_REQUESTS,
-  TRANSCRIPTION_DAILY_SECONDS,
-} from '@/lib/assistant/transcription-limits'
-
 export const TRANSCRIPTION_RESERVE_RPC = 'rpc_assistant_reserve_transcription'
 
 export type TranscriptionReservation =
@@ -39,11 +34,11 @@ export async function reserveTranscriptionSlot(
   const seconds = Math.ceil(input.seconds)
   if (!Number.isFinite(seconds) || seconds < 1) return { status: 'unavailable' }
 
+  // Les plafonds vivent dans le RPC (SECURITY DEFINER), jamais dans la requête :
+  // un appelant ne peut donc pas les élargir.
   const { data, error } = await supabase.rpc(TRANSCRIPTION_RESERVE_RPC, {
     p_request_id: input.requestId,
     p_seconds: seconds,
-    p_max_seconds: TRANSCRIPTION_DAILY_SECONDS,
-    p_max_requests: TRANSCRIPTION_DAILY_REQUESTS,
   })
 
   if (error) return { status: 'unavailable' }
