@@ -430,6 +430,38 @@ function parseProviderStructuredOutput(text: string): Partial<AssistantStructure
 export { parseProviderStructuredOutput }
 
 /**
+ * Explique précisément pourquoi une comparaison de périodes n'est pas concluante.
+ * Si une seule période est réellement sans donnée publiée, on la nomme et on
+ * conserve l'analyse de la période disponible, sans prétendre avoir comparé.
+ */
+function buildUnavailableComparisonText(
+  periodResult: { deltas?: Array<{ current?: string | null; baseline?: string | null }> },
+  pair: { labels: { current: string; baseline: string } } | null,
+  availableAnalysis: string,
+  language: 'fr' | 'ar',
+): string {
+  const deltas = periodResult.deltas ?? []
+  const hasCurrent = deltas.some((d) => typeof d.current === 'string' && d.current.trim() !== '')
+  const hasBaseline = deltas.some((d) => typeof d.baseline === 'string' && d.baseline.trim() !== '')
+
+  if (hasCurrent && !hasBaseline && pair) {
+    return language === 'ar'
+      ? `${pair.labels.baseline} ما كاينة حتى معطيات متحققة ليها (التاريخ ما مغطاش فالقاعدة ولا ما بقاش محفوظ). هادشي علاش ما قدرناش نديرو مقارنة. هادي قراءة ديال ${pair.labels.current}:\n\n${availableAnalysis}`
+      : `${pair.labels.baseline} ne contient aucune donnée vérifiée (historique non couvert ou non conservé). La comparaison n'est donc pas possible. Analyse de ${pair.labels.current} :\n\n${availableAnalysis}`
+  }
+
+  if (!hasCurrent && hasBaseline && pair) {
+    return language === 'ar'
+      ? `${pair.labels.current} ما كاينة حتى معطيات متحققة ليها. هادي قراءة ديال ${pair.labels.baseline}:\n\n${availableAnalysis}`
+      : `${pair.labels.current} ne contient aucune donnée vérifiée. Analyse de ${pair.labels.baseline} :\n\n${availableAnalysis}`
+  }
+
+  return language === 'ar'
+    ? 'ما قدرناش نقارنو هاد الفترتين بثقة: التعريف، التغطية ولا الوصول مختلفين. ما كنعلنو حتى فرق غير متحقق.'
+    : 'Comparaison non concluante : couverture, définition ou accès incompatible entre les deux périodes. Aucun écart non vérifié n’est publié.'
+}
+
+/**
  * Outils désactivés côté serveur. La recherche web externe n'est pas activée en
  * V1 : elle transmettrait le message utilisateur (donc des données métier) à un
  * tiers non contractualisé, sans contrôle de confidentialité.
@@ -667,11 +699,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   // libre du modèle pourrait contredire le verdict malgré des chiffres exacts.
   const messageText = comparisonIsUsable
     ? `${comparisonPair?.labels.current ?? (language === 'ar' ? 'الفترة الأولى' : 'Période A')} / ${comparisonPair?.labels.baseline ?? (language === 'ar' ? 'الفترة الثانية' : 'période B')} : ${comparisonText} ${verdict}`
-    : requestedComparison && periodResult?.kind === 'periods'
-      ? (language === 'ar'
-          ? 'ما نقدرش نقارن هاد الفترتين بثقة بالمعطيات المتوفرة.'
-          : 'Comparaison non concluante : aucune métrique entièrement comparable entre les deux périodes.')
-      : initialText
+    : initialText
   const envelope = readKpiEnvelope(toolData)
   const total = envelope?.metrics.totalOrders?.count ?? null
   const delivered = envelope?.metrics.deliveredOrders?.count ?? null
@@ -700,9 +728,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   const directComparison = requestedComparison && periodResult?.kind === 'periods' && periodResult.state === 'partial' &&
     (periodResult.deltas ?? []).every((delta) => delta.state !== 'complete')
   const publishedText = directComparison
-    ? (language === 'ar'
-        ? 'ما نقدرش نقارن الفترتين بثقة: التغطية أو تعريف الأرقام مختلف. ما كنعلن حتى فرق غير متحقق.'
-        : 'Comparaison non concluante : couverture ou définition incompatible entre les deux périodes. Aucun écart non vérifié n’est publié.')
+    ? buildUnavailableComparisonText(periodResult, comparisonPair, finalText, language)
     : finalText
   const outputText = requestedComparison && periodResult?.kind === 'periods' && periodResult.state === 'forbidden'
     ? (language === 'ar' ? 'ما عندكش الصلاحية تقارن هاد الفترات.' : 'Accès refusé : ces périodes ne peuvent pas être comparées.')

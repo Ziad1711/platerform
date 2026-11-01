@@ -1378,6 +1378,40 @@ async function main() {
     return 'jour isolé'
   })
 
+  check('P1-32a', 'Novembre 2025 vs novembre 2024 : périodes résolues', () => {
+    const pair = intentsModule.resolveComparisonPeriods('compare novembre 2025 et novembre 2024')
+    assert(pair !== null, 'paire attendue')
+    assert(pair.current.from.endsWith('-11-01'), `courant = novembre: ${pair.current.from}`)
+    assert(pair.baseline.from.endsWith('-11-01'), `référence = novembre: ${pair.baseline.from}`)
+    assertEqual(Number(pair.current.from.slice(0, 4)), 2025, 'novembre 2025 courant')
+    assertEqual(Number(pair.baseline.from.slice(0, 4)), 2024, 'novembre 2024 référence')
+    assertEqual(intentsModule.resolveIntent('compare novembre 2025 et novembre 2024'), 'period_comparison', 'intent')
+    return 'novembre 2025 vs novembre 2024'
+  })
+
+  const missingBaselineReply = await runAgent(agentMocks({
+    providerText: JSON.stringify({ message_text: 'Analyse de novembre 2025.' }),
+    toolDataByTool: {
+      order: ['getDashboardKPIs', 'getStoreComparison'],
+      getDashboardKPIs: envelope('complete', { revenue: metric('1200') }),
+      getStoreComparison: {
+        kind: 'periods', state: 'partial', currency: 'MAD',
+        ranges: { current: { from: '2025-11-01', to: '2025-12-01' }, baseline: { from: '2024-11-01', to: '2024-12-01' } },
+        deltas: [
+          { metric: 'orders', current: '10', baseline: null, delta: null, state: 'partial' },
+          { metric: 'revenue', current: '1200', baseline: null, delta: null, state: 'partial' },
+        ],
+      },
+    },
+  }), { intent: 'period_comparison', userMessage: 'compare novembre 2025 et novembre 2024' })
+  check('P1-32b', 'Période de référence absente : limite nommée + analyse disponible', () => {
+    const text = missingBaselineReply.structuredResponse.message_text
+    assert(/novembre 2024/i.test(text), 'période absente non nommée')
+    assert(/novembre 2025/i.test(text), 'période disponible absente')
+    assert(!/999999/.test(text), 'valeur non vérifiée')
+    return text.slice(0, 90)
+  })
+
   const failed = results.filter((item) => !item.pass)
   const reportLines = []
   const width = Math.max(...results.map((item) => item.name.length), 40)
