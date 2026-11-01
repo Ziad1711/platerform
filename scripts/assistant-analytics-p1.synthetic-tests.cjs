@@ -181,6 +181,7 @@ async function runAgent(mocks, overrides = {}) {
 
 async function main() {
   const responseModule = createLoader({})('lib/assistant/response.ts')
+  const intentsModule = createLoader({})('lib/assistant/intents.ts')
 
   const factRegistry = createLoader({})('lib/assistant/fact-registry.ts')
   const transcriptionLimits = createLoader({})('lib/assistant/transcription-limits.ts')
@@ -1127,6 +1128,109 @@ async function main() {
     assert(!/devise/i.test(warnings), `alerte devise: ${warnings}`)
     assert(!/compar/i.test(warnings), `alerte comparaison: ${warnings}`)
     return 'aucune alerte parasite'
+  })
+
+
+  /* ------------------------------------------------------------------------ */
+  /* Périodes, comparaisons FR/AR et langue                                   */
+  /* ------------------------------------------------------------------------ */
+
+  check('P1-28a', 'Darija : octobre 2025 vs octobre 2026', () => {
+    const periods = intentsModule.resolveComparisonPeriods('قارن ليا أكتوبر 2025 وأكتوبر 2026')
+    assert(periods !== null, 'comparaison non détectée')
+    assert(periods.labels.current.includes('2025'), `label A: ${periods.labels.current}`)
+    assert(periods.labels.baseline.includes('2026'), `label B: ${periods.labels.baseline}`)
+    assert(periods.labels.current.includes('octobre'), `mois non résolu: ${periods.labels.current}`)
+    return `${periods.labels.current} / ${periods.labels.baseline}`
+  })
+
+  check('P1-28b', 'Français : septembre 2025 ou bien de 2026', () => {
+    const periods = intentsModule.resolveComparisonPeriods('le mois de septembre 2025 ou bien de 2026')
+    assert(periods !== null, 'comparaison non détectée')
+    assert(periods.labels.current.includes('septembre 2025'), `A: ${periods.labels.current}`)
+    assert(periods.labels.baseline.includes('septembre 2026'), `B: ${periods.labels.baseline}`)
+    return `${periods.labels.current} / ${periods.labels.baseline}`
+  })
+
+  check('P1-28c', 'Période explicite jamais remplacée par 7 jours', () => {
+    const range = intentsModule.resolveRangeFromQuestion('Analyse ma performance du mois d’octobre 2026')
+    assert(typeof range === 'object', `période non absolue: ${JSON.stringify(range)}`)
+    assert(JSON.stringify(range).includes('2026'), 'année perdue')
+    assertEqual(intentsModule.needsPeriodClarification('Analyse ma performance du mois d’octobre 2026', range), false, 'clarification inutile')
+    return 'absolue'
+  })
+
+  check('P1-28d', 'Année citée sans mois : clarification, pas 7 jours', () => {
+    assertEqual(
+      intentsModule.needsPeriodClarification('Compare 2025 et 2026', '7d'),
+      true,
+      'substitution silencieuse possible',
+    )
+    assertEqual(intentsModule.needsPeriodClarification('Analyse les 7 derniers jours', '7d'), false, '7 jours explicite')
+    return 'clarification'
+  })
+
+  check('P1-28e', 'Intention de comparaison sans mot « comparer »', () => {
+    assertEqual(intentsModule.resolveIntent('septembre 2025 ou bien de 2026 ?'), 'period_comparison', 'FR')
+    assertEqual(intentsModule.resolveIntent('واش أكتوبر 2025 أحسن من أكتوبر 2026'), 'period_comparison', 'AR')
+    assertEqual(intentsModule.resolveIntent('Analyse mes ventes'), 'generic_business_chat', 'pas de faux comparatif')
+    return 'ok'
+  })
+
+  check('P1-28f', 'Détection de langue FR / AR', () => {
+    assertEqual(intentsModule.detectLanguage('Analyse mes ventes'), 'fr', 'français')
+    assertEqual(intentsModule.detectLanguage('شنو أحسن شهر فالمبيعات'), 'ar', 'arabe')
+    return 'langue'
+  })
+
+  check('P1-29a', 'Graphique comparatif : deux barres vérifiées', () => {
+    const chart = responseModule.buildComparisonChart(
+      {
+        kind: 'periods',
+        state: 'complete',
+        currency: 'MAD',
+        deltas: [
+          { metric: 'revenue', current: '2000.00', baseline: '1000.00', delta: '1000.00', state: 'complete' },
+        ],
+      },
+      { current: 'octobre 2026', baseline: 'octobre 2025' },
+      'MAD',
+    )
+    assert(chart !== null, 'graphique attendu')
+    assertEqual(chart.points.length, 2, 'deux périodes')
+    assert(chart.points.every((point) => typeof point.value === 'number'), 'valeurs numériques')
+    assert(chart.points[1].valueLabel.includes('MAD'), 'libellé exact')
+    return '2 barres'
+  })
+
+  check('P1-29b', 'Graphique comparatif refusé si devise inconnue', () => {
+    const chart = responseModule.buildComparisonChart(
+      { kind: 'periods', state: 'complete', currency: null, deltas: [{ metric: 'revenue', current: '10', baseline: '5', state: 'complete' }] },
+      null,
+      null,
+    )
+    assertEqual(chart, null, 'graphique multi-devise accepté')
+    return 'null'
+  })
+
+
+  const suggestionMocks = agentMocks({
+    providerText: JSON.stringify({
+      message_text: 'Analyse disponible.',
+      suggestions: ['Analyse mon stock', 'Analyse mon business'],
+    }),
+    toolDataByTool: {
+      order: ['getDashboardKPIs'],
+      getDashboardKPIs: envelope('complete', { revenue: metric('10.00') }),
+    },
+  })
+  const suggestionRun = await runAgent(suggestionMocks)
+
+  check('P1-30a', 'Suggestions : jamais une capacité indisponible', () => {
+    const suggestions = (suggestionRun.structuredResponse.suggestions ?? []).join(' | ')
+    assert(!/stock/i.test(suggestions), `suggestion stock: ${suggestions}`)
+    assert((suggestionRun.structuredResponse.suggestions ?? []).length > 0, 'aucune suggestion utile')
+    return suggestions
   })
 
   const failed = results.filter((item) => !item.pass)

@@ -40,6 +40,8 @@ export interface RunSecureAgentInput {
   userMessage: string
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
   providerModel: string
+  /** Langue de la demande : pilote la langue de réponse. */
+  language?: 'fr' | 'ar'
   /** Annulation transmise jusqu'au fournisseur IA. */
   signal?: AbortSignal
   /** Plafond de tokens de sortie appliqué par le fournisseur. */

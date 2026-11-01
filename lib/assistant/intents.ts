@@ -25,6 +25,14 @@ function currentBusinessYear(): number {
   return Number(businessTodayIso().slice(0, 4))
 }
 
+/** Année calendaire métier complète `[1er janvier, 1er janvier suivant[`. */
+function calendarYearRange(year: number): { start: string; end: string } {
+  const from = `${year}-01-01`
+  const to = `${year + 1}-01-01`
+  const { start, end } = businessRangeToInstants({ from, to })
+  return { start: start.toISOString(), end: end.toISOString() }
+}
+
 function isSupportedYear(year: number): boolean {
   return Number.isInteger(year) && year >= 2000 && year <= 2100
 }
@@ -95,7 +103,7 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
   const found = findMonthCandidates(text)
   if (found.length > 0) {
     const first = found[0]
-    return businessMonthRange(first.year, first.month)
+    return businessMonthRange(candidateYear(first, text), first.month)
   }
 
   // "02/2026", "02-2026"
@@ -115,27 +123,111 @@ function tryParseAbsoluteMonth(text: string): AnalyticsRange | null {
 interface MonthCandidate {
   index: number
   month: number
-  year: number
+  year: number | null
 }
 
-/** Occurrences de mois nommés, triées par position dans le texte. */
+/** Variantes arabes normalisées sans changer la longueur (index fiables). */
+function foldArabic(value: string): string {
+  return value
+    .replace(/[\u0623\u0625\u0622]/g, '\u0627')
+    .replace(/\u0649/g, '\u064A')
+    .replace(/\u0629/g, '\u0647')
+    .replace(/\u0640/g, '')
+}
+
+/** Mois arabes / darija (Maroc). */
+const ARABIC_MONTHS: Record<string, number> = {
+  'يناير': 1,
+  'فبراير': 2,
+  'مارس': 3,
+  'ابريل': 4,
+  'ماي': 5,
+  'مايو': 5,
+  'يونيو': 6,
+  'يونيه': 6,
+  'يوليوز': 7,
+  'يوليو': 7,
+  'غشت': 8,
+  'اغسطس': 8,
+  'شتنبر': 9,
+  'سبتمبر': 9,
+  'اكتوبر': 10,
+  'نونبر': 11,
+  'نوفمبر': 11,
+  'دجنبر': 12,
+  'ديسمبر': 12,
+}
+
+const MONTH_NAMES_NORMALIZED: Record<string, number> = (() => {
+  const out: Record<string, number> = {}
+  for (const [name, month] of Object.entries(MONTH_NAMES)) {
+    out[normalizeMonthWord(name)] = month
+  }
+  return out
+})()
+
+/** Table unique FR + AR, noms longs d'abord pour éviter « juil » dans « juillet ». */
+const MONTH_LOOKUP: Array<{ name: string; month: number; arabic: boolean }> = [
+  ...Object.entries(MONTH_NAMES_NORMALIZED).map(([name, month]) => ({ name, month, arabic: false })),
+  ...Object.entries(ARABIC_MONTHS).map(([name, month]) => ({ name: foldArabic(name), month, arabic: true })),
+].sort((a, b) => b.name.length - a.name.length)
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Occurrences de mois nommés (FR/AR), triées par position, année si citée. */
 function findMonthCandidates(text: string): MonthCandidate[] {
   const candidates: MonthCandidate[] = []
-  for (const [name, monthNum] of Object.entries(MONTH_NAMES)) {
-    const pattern = new RegExp(`${name}\\s*(\\d{4})?`, 'g')
+  const frText = normalizeMonthWord(text)
+  const arText = foldArabic(text)
+
+  for (const entry of MONTH_LOOKUP) {
+    const haystack = entry.arabic ? arText : frText
+    const pattern = new RegExp(escapeRegExp(entry.name), 'g')
     let match: RegExpExecArray | null
-    while ((match = pattern.exec(text)) !== null) {
-      const year = match[1] ? parseInt(match[1], 10) : currentBusinessYear()
-      if (!isSupportedYear(year)) continue
-      // Une correspondance déjà couverte par un nom plus long (ex. « juil » dans
-      // « juillet ») est ignorée.
-      if (candidates.some((candidate) => Math.abs(candidate.index - match!.index) < name.length)) continue
-      candidates.push({ index: match.index, month: monthNum, year })
+    while ((match = pattern.exec(haystack)) !== null) {
+      // Un nom déjà couvert par une correspondance plus longue est ignoré.
+      if (candidates.some((candidate) => Math.abs(candidate.index - match!.index) < entry.name.length)) continue
+
+      const after = haystack
+        .slice(match.index + entry.name.length, match.index + entry.name.length + 26)
+        .match(/\b(20\d{2})\b/)
+      const before = haystack
+        .slice(Math.max(0, match.index - 20), match.index)
+        .match(/\b(20\d{2})\b/)
+      const rawYear = after?.[1] ?? before?.[1]
+      candidates.push({
+        index: match.index,
+        month: entry.month,
+        year: rawYear ? Number(rawYear) : null,
+      })
     }
   }
+
   return candidates.sort((a, b) => a.index - b.index)
 }
 
+/** Années distinctes citées, dans l'ordre du texte. */
+function yearsInText(text: string): number[] {
+  const years: number[] = []
+  for (const match of text.matchAll(/\b(20\d{2})\b/g)) {
+    const year = Number(match[1])
+    if (isSupportedYear(year) && !years.includes(year)) years.push(year)
+  }
+  return years
+}
+
+/** Dernière occurrence d'un mois (mois courant inclus). */
+function lastOccurrenceYear(month: number, now: Date = new Date()): number {
+  const [year, currentMonth] = businessTodayIso(now).split('-').map(Number)
+  return currentMonth >= month ? year : year - 1
+}
+
+/** « octobre dernier », « العام لي فات », etc. */
+function lastPeriodRequested(text: string): boolean {
+  return /(?:\b(?:dernier|derniere|dernière|passé|passee|passée)\b|العام لي فات|العام الماضي|السنة الماضية|السنه لي فاتت|الشهر لي فات)/i.test(text)
+}
 
 /** Journée métier valide `YYYY-MM-DD`, sans dépendre du fuseau du serveur. */
 function toBusinessDayIso(year: number, month: number, day: number): string | null {
@@ -244,6 +336,22 @@ export function resolveRangeFromQuestion(message: string, memory?: ThreadAnalyti
   if (text.includes('cette semaine') || text.includes('semaine en cours')) return 'week'
   if (text.includes('mois dernier')) return 'last_month'
   if (text.includes('ce mois') || text.includes('mois en cours')) return 'month'
+
+  // Darija / arabe marocain
+  if (/(?:هاد العام|هذا العام|هاد السنة|هذه السنة|هاد السنه)/.test(message)) {
+    return calendarYearRange(currentBusinessYear())
+  }
+  if (/(?:العام لي فات|العام الماضي|السنة الماضية|السنه لي فاتت|السنة لي فاتت)/.test(message)) {
+    return calendarYearRange(currentBusinessYear() - 1)
+  }
+  if (/(?:هاد الشهر|هذا الشهر)/.test(message)) return 'month'
+  if (/(?:الشهر لي فات|الشهر الماضي)/.test(message)) return 'last_month'
+  if (/(?:هاد الأسبوع|هذا الأسبوع)/.test(message)) return 'week'
+  if (/(?:الأسبوع لي فات|الأسبوع الماضي)/.test(message)) return 'last_week'
+  if (/(?:البارح|أمس|امس)/.test(message)) return 'yesterday'
+  if (/(?:اليوم)/.test(text)) return 'today'
+  if (/(?:7 أيام|7 ايام|سبعة أيام)/.test(message)) return '7d'
+  if (/(?:30 يوم|30 يوما|ثلاثين يوم)/.test(message)) return '30d'
 
   // Si le message courant n'a pas de période explicite mais qu'on a une mémoire
   // avec une période explicite précédente, on la réutilise
@@ -447,7 +555,7 @@ export function resolveComparisonPeriods(message: string, now: Date = new Date()
   const text = message.toLowerCase()
 
   // Mois numériques MM/YYYY ou MM-YYYY, dans l'ordre du message.
-  const numericMonths: MonthCandidate[] = []
+  const numericMonths: Array<MonthCandidate & { year: number }> = []
   const numericPattern = /(\d{1,2})\s*[/-]\s*(\d{4})/g
   let numericMatch: RegExpExecArray | null
   while ((numericMatch = numericPattern.exec(text)) !== null) {
@@ -464,13 +572,29 @@ export function resolveComparisonPeriods(message: string, now: Date = new Date()
     if (second) return comparisonFromMonths(first, second)
   }
 
-  // 1. Mois nommés : la position dans le texte fixe l'ordre.
+  // 1. Mois nommés (FR/AR) : la position dans le texte fixe l'ordre.
   const months = findMonthCandidates(text)
+
+  // Un seul mois cité avec deux années : « septembre 2025 ou bien de 2026 »,
+  // « أكتوبر 2025 و أكتوبر 2026 » sans répéter le mois.
+  if (months.length === 1) {
+    const years = yearsInText(message)
+    if (years.length >= 2) {
+      return comparisonFromMonths(
+        { ...months[0], year: years[0] },
+        { ...months[0], year: years[1] },
+      )
+    }
+  }
+
   if (months.length >= 2) {
     const first = months[0]
     const second = months.find((candidate) => candidate.month !== first.month || candidate.year !== first.year)
     if (second) {
-      return comparisonFromMonths(first, second)
+      return comparisonFromMonths(
+        { ...first, year: candidateYear(first, message, now) },
+        { ...second, year: candidateYear(second, message, now) },
+      )
     }
   }
 
@@ -504,7 +628,13 @@ export function resolveComparisonPeriods(message: string, now: Date = new Date()
   return null
 }
 
-function comparisonFromMonths(first: MonthCandidate, second: MonthCandidate): ComparisonPeriods {
+/** Année d'un mois cité : explicite, sinon dernière occurrence ou année en cours. */
+function candidateYear(candidate: MonthCandidate, message: string, now: Date = new Date()): number {
+  if (candidate.year && isSupportedYear(candidate.year)) return candidate.year
+  return lastPeriodRequested(message) ? lastOccurrenceYear(candidate.month, now) : currentBusinessYear()
+}
+
+function comparisonFromMonths(first: MonthCandidate & { year: number }, second: MonthCandidate & { year: number }): ComparisonPeriods {
   const currentRange = businessMonthRange(first.year, first.month)
   const baselineRange = businessMonthRange(second.year, second.month)
   const monthNames = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
@@ -536,12 +666,11 @@ export function resolveIntent(message: string): AssistantIntent {
     return 'small_talk'
   }
 
-  // Détection de comparaison de périodes (2 dates distinctes)
-  if (text.includes('compar') || text.includes('vs') || text.includes('versus')) {
-    const comparisonPeriods = resolveComparisonPeriods(message)
-    if (comparisonPeriods) {
-      return 'period_comparison'
-    }
+  // Deux périodes réellement résolues ⇒ comparaison, même sans mot « comparer »
+  // (« septembre 2025 ou bien de 2026 ? », « quel mois est le meilleur ? »).
+  if (resolveComparisonPeriods(message)) return 'period_comparison'
+
+  if (/(?:compar|\bvs\b|versus|قارن|مقارنة|مقارنه)/i.test(text)) {
     return 'comparison_request'
   }
 
@@ -603,4 +732,35 @@ export function asksForOtherStore(message: string) {
     text.includes('autre boutique') ||
     text.includes('un autre store')
   )
+}
+
+/**
+ * Langue de la demande : arabe/darija si la part de caractères arabes est
+ * significative ou si des marqueurs darija apparaissent ; français sinon.
+ */
+export function detectLanguage(message: string): 'ar' | 'fr' {
+  const arabic = (message.match(/[\u0600-\u06FF]/g) ?? []).length
+  const letters = (message.match(/[A-Za-z\u0600-\u06FF]/g) ?? []).length
+  if (arabic > 0 && arabic / Math.max(1, letters) >= 0.2) return 'ar'
+  if (/(?:واش|شنو|بغيت|بغا|ديال|هاد|لي فات|دابا|شحال|كيفاش|مزيان|عطيني|شوف)/.test(message)) return 'ar'
+  return 'fr'
+}
+
+/**
+ * Vrai si la question contient une période qui n'a PAS pu être résolue et que
+ * le défaut « 7 derniers jours » ne doit jamais remplacer silencieusement.
+ */
+export function needsPeriodClarification(message: string, range: AnalyticsRange): boolean {
+  if (typeof range === 'object') return false
+  if (range !== '7d') return false
+
+  const text = message.toLowerCase()
+  if (/(?:7 derniers jours|sept derniers jours|7 أيام|7 ايام)/.test(message)) return false
+
+  const hasYear = /\b(20\d{2})\b/.test(message)
+  const hasMonth = findMonthCandidates(message).length > 0
+  const hasArabicRelative = /(?:هاد العام|العام لي فات|هاد الشهر|الشهر لي فات|البارح|اليوم|هاد الأسبوع|الأسبوع لي فات)/.test(message)
+  const hasFrenchRelative = /(?:ce mois|mois dernier|semaine|hier|aujourd)/.test(text)
+
+  return hasYear || hasMonth || hasArabicRelative || hasFrenchRelative
 }

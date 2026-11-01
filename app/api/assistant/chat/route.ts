@@ -25,7 +25,7 @@ import {
 } from '@/lib/assistant/idempotency'
 import { finalizeAssistantTurn } from '@/lib/assistant/finalization'
 import { assertAssistantAccess, assertAssistantEnabled } from '@/lib/assistant/access'
-import { asksForOtherStore, extractComparisonRanges, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
+import { asksForOtherStore, detectLanguage, extractComparisonRanges, needsPeriodClarification, resolveIntent, resolveRangeFromQuestion, createEmptyMemory, updateMemoryFromAnalysis, type ThreadAnalyticMemory } from '@/lib/assistant/intents'
 import { resolveAssistantBusinessRange } from '@/lib/assistant/analytics-reader'
 import { getAssistantModelName } from '@/lib/assistant/providers'
 import { buildGreetingResponse, buildSmallTalkResponse, buildStructuredResponseFromContext } from '@/lib/assistant/response'
@@ -324,6 +324,7 @@ export async function POST(request: Request) {
 
     const intent = resolveIntent(body.message)
     const range = resolveRangeFromQuestion(body.message, threadMemory)
+    const language = detectLanguage(body.message)
 
     // Deux périodes explicitement demandées : la seconde devient la référence.
     // Sans période explicite, `getStoreComparison` reste une comparaison de boutiques.
@@ -348,7 +349,25 @@ export async function POST(request: Request) {
     // débit, mais message tracé avec la clé d'idempotence.
     let smallResponse: AssistantStructuredResponse | null = null
 
-    if (asksForOtherStore(body.message)) {
+    if (needsPeriodClarification(body.message, range)) {
+      // Période explicitement demandée mais non résolue : on demande une
+      // précision courte, sans appel IA et sans débit de crédits.
+      smallResponse = language === 'ar'
+        ? {
+            message_text:
+              'حدد الفترتين اللي بغيتي نقارن (مثلاً: « أكتوبر 2025 وأكتوبر 2026 »). ما كنعوضش الفترة اللي طلبتيها بآخر 7 أيام.',
+            suggestions: ['أكتوبر 2025 وأكتوبر 2026', 'شتنبر 2025 وشتنبر 2026', 'هاد الشهر والشهر لي فات'],
+            activity_steps: [{ label: 'توضيح الفترة المطلوبة' }],
+            chart: false,
+          }
+        : {
+            message_text:
+              'Précisez les deux périodes à comparer (par exemple « octobre 2025 et octobre 2026 »). Je ne remplace jamais une période demandée par les 7 derniers jours.',
+            suggestions: ['octobre 2025 et octobre 2026', 'septembre 2025 et septembre 2026', 'ce mois et le mois dernier'],
+            activity_steps: [{ label: 'Clarification de la période demandée' }],
+            chart: false,
+          }
+    } else if (asksForOtherStore(body.message)) {
       smallResponse = {
         message_text:
           'Je ne peux pas accéder à un autre store. Je peux seulement analyser le store actif auquel vous avez accès.',
@@ -357,7 +376,7 @@ export async function POST(request: Request) {
         chart: false,
       }
     } else if (intent === 'greeting' || intent === 'small_talk') {
-      smallResponse = intent === 'greeting' ? buildGreetingResponse() : buildSmallTalkResponse()
+      smallResponse = intent === 'greeting' ? buildGreetingResponse(language) : buildSmallTalkResponse(language)
       smallResponse.activity_steps = [{ label: 'Interaction conversationnelle' }]
     }
 
@@ -462,6 +481,7 @@ export async function POST(request: Request) {
         userMessage: body.message,
         conversationHistory: conversationalHistory,
         providerModel: model,
+        language,
         signal: controller.signal,
         maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
         comparisonBaseline,

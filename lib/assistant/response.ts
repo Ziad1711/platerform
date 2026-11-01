@@ -22,20 +22,38 @@ const BLOCKED_STATES: ReadonlySet<string> = new Set(['forbidden', 'missing', 'un
 /** États d'un point graphique réellement traçable. */
 const PLOTTABLE_STATES: ReadonlySet<string> = new Set(['complete', 'empty'])
 
-export function buildGreetingResponse(): AssistantStructuredResponse {
-  return {
-    message_text: 'Bonjour 👋 Comment puis-je vous aider aujourd’hui ?',
-    suggestions: DEFAULT_SUGGESTIONS,
-    chart: false,
-  }
+const ARABIC_SUGGESTIONS = [
+  'حلل الأداء ديالي',
+  'وريني المبيعات',
+  'شنو أحسن المنتجات',
+]
+
+export function buildGreetingResponse(language: 'fr' | 'ar' = 'fr'): AssistantStructuredResponse {
+  return language === 'ar'
+    ? {
+        message_text: 'السلام 👋 كيفاش نقدر نعاونك اليوم؟',
+        suggestions: ARABIC_SUGGESTIONS,
+        chart: false,
+      }
+    : {
+        message_text: 'Bonjour 👋 Comment puis-je vous aider aujourd’hui ?',
+        suggestions: DEFAULT_SUGGESTIONS,
+        chart: false,
+      }
 }
 
-export function buildSmallTalkResponse(): AssistantStructuredResponse {
-  return {
-    message_text: 'Avec plaisir 🙌 Dites-moi ce que vous voulez analyser sur votre store.',
-    suggestions: DEFAULT_SUGGESTIONS,
-    chart: false,
-  }
+export function buildSmallTalkResponse(language: 'fr' | 'ar' = 'fr'): AssistantStructuredResponse {
+  return language === 'ar'
+    ? {
+        message_text: 'بكل سرور 🙌 قول ليا شنو بغيتي نحلل فالمتجر ديالك.',
+        suggestions: ARABIC_SUGGESTIONS,
+        chart: false,
+      }
+    : {
+        message_text: 'Avec plaisir 🙌 Dites-moi ce que vous voulez analyser sur votre store.',
+        suggestions: DEFAULT_SUGGESTIONS,
+        chart: false,
+      }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -595,6 +613,79 @@ function buildSectionChart(
   return { title: options.title, description: options.description, type: 'bar', unit: 'currency', points, warnings: [] }
 }
 
+/** Métriques comparables affichables en barres, par ordre de pertinence. */
+const COMPARISON_METRICS: Array<{ key: string; label: string; unit: 'currency' | 'count' }> = [
+  { key: 'revenue', label: 'Chiffre d’affaires', unit: 'currency' },
+  { key: 'orders', label: 'Commandes', unit: 'count' },
+  { key: 'delivered', label: 'Commandes livrées', unit: 'count' },
+  { key: 'adSpend', label: 'Dépenses publicitaires', unit: 'currency' },
+]
+
+/**
+ * Barres comparatives pour deux périodes réelles (`kind: 'periods'`).
+ * Une seule métrique vérifiée est retenue ; aucune valeur n'est inventée ni
+ * interpolée, et une métrique incomplète est ignorée.
+ */
+export function buildComparisonChart(
+  comparison: unknown,
+  labels: { current?: string; baseline?: string } | null,
+  envelopeCurrency: string | null,
+): ChartResult | null {
+  const record = asRecord(comparison)
+  if (!record || record.kind !== 'periods') return null
+  if (typeof record.state === 'string' && BLOCKED_STATES.has(record.state)) return null
+
+  const deltas = Array.isArray(record.deltas)
+    ? record.deltas.map((delta) => asRecord(delta)).filter((delta): delta is Record<string, unknown> => Boolean(delta))
+    : []
+
+  for (const metric of COMPARISON_METRICS) {
+    const delta = deltas.find((item) => item.metric === metric.key && item.state === 'complete')
+    if (!delta) continue
+
+    const current = typeof delta.current === 'string' ? delta.current : null
+    const baseline = typeof delta.baseline === 'string' ? delta.baseline : null
+    if (!current || !baseline) continue
+
+    const currency = typeof record.currency === 'string' ? record.currency : envelopeCurrency
+    if (metric.unit === 'currency' && !currency) continue
+
+    const currentValue = toScaleValue(current)
+    const baselineValue = toScaleValue(baseline)
+    if (currentValue === null || baselineValue === null) continue
+
+    const currentLabel = labels?.current && labels.current.trim() ? labels.current : 'Période demandée'
+    const baselineLabel = labels?.baseline && labels.baseline.trim() ? labels.baseline : 'Période de référence'
+    const unitCurrency = metric.unit === 'currency' ? currency : null
+
+    return {
+      title: `Comparaison — ${metric.label}`,
+      description: `${currentLabel} comparé à ${baselineLabel}. Barres issues des valeurs vérifiées de chaque période.`,
+      type: 'bar',
+      unit: metric.unit,
+      points: [
+        {
+          label: baselineLabel,
+          value: baselineValue,
+          valueLabel: exactLabel(baseline, unitCurrency),
+          currency: currency ?? '',
+          storeId: 'comparison',
+        },
+        {
+          label: currentLabel,
+          value: currentValue,
+          valueLabel: exactLabel(current, unitCurrency),
+          currency: currency ?? '',
+          storeId: 'comparison',
+        },
+      ],
+      warnings: [],
+    }
+  }
+
+  return null
+}
+
 function chartToResponse(chart: ChartResult, currency: string | null): AssistantStructuredResponse {
   const xKey = chart.type === 'line' ? 'date' : 'name'
   return {
@@ -672,6 +763,8 @@ export interface StructuredContext {
   cities?: unknown
   /** Libellé de période déjà résolu côté serveur. */
   rangeLabel?: string
+  comparison?: unknown
+  comparisonLabels?: { current?: string; baseline?: string } | null
 }
 
 /**
@@ -731,7 +824,20 @@ export function buildStructuredResponseFromContext(
     labelField: 'city',
   })
 
+  const comparisonLabels = asRecord(record.comparisonLabels)
+  const comparisonChart = buildComparisonChart(
+    record.comparison,
+    comparisonLabels
+      ? {
+          current: typeof comparisonLabels.current === 'string' ? comparisonLabels.current : undefined,
+          baseline: typeof comparisonLabels.baseline === 'string' ? comparisonLabels.baseline : undefined,
+        }
+      : null,
+    envelope?.currency ?? null,
+  )
+
   const priority: Partial<Record<AssistantIntent, Array<ChartResult | null>>> = {
+    period_comparison: [comparisonChart, dailyChart, cityChart, productChart],
     top_products: [productChart, dailyChart, cityChart],
     profit_analysis: [productChart, dailyChart],
     performance_request: [cityChart, dailyChart, productChart],

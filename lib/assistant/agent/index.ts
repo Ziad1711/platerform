@@ -105,6 +105,69 @@ function buildServerTruth(toolData: Record<string, unknown>, fallbackCurrency: s
   }
 }
 
+const METRIC_LABELS_AR: Record<string, string> = {
+  totalOrders: 'الطلبات',
+  deliveredOrders: 'الطلبات المسلّمة',
+  returnedOrders: 'المرتجعات',
+  cancelledOrders: 'الإلغاءات',
+  revenue: 'رقم المعاملات المحقق',
+  revenueEstimated: 'رقم المعاملات التقديري',
+  adSpend: 'مصاريف الإعلانات',
+  deliveryRate: 'نسبة التسليم',
+  purchaseCost: 'تكلفة الشراء',
+  deliveryCost: 'تكلفة التوصيل',
+  confirmationCost: 'تكلفة التأكيد',
+  contributionMargin: 'الهامش المساهم (بدون المصاريف التشغيلية)',
+}
+
+/** Clés trop volumineuses pour le prompt : le serveur les garde pour le rendu. */
+const PROMPT_DROP_KEYS = new Set([
+  'stores',
+  'days',
+  'points',
+  'coverage',
+  'limits',
+  'issues',
+  'freshness',
+  'definitionVersions',
+  'revision',
+  'lastRebuildAt',
+  'timeZone',
+])
+
+/** Projection compacte des outils : réduit fortement les tokens facturés. */
+function compactForPrompt(value: unknown, depth = 0): unknown {
+  if (depth > 6) return null
+  if (Array.isArray(value)) return value.slice(0, 5).map((item) => compactForPrompt(item, depth + 1))
+  if (!value || typeof value !== 'object') return value
+
+  const source = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(source)) {
+    if (PROMPT_DROP_KEYS.has(key)) continue
+    if (Array.isArray(item)) {
+      out[key] = item.slice(0, 5).map((entry) => compactForPrompt(entry, depth + 1))
+      continue
+    }
+    out[key] = compactForPrompt(item, depth + 1)
+  }
+  return out
+}
+
+/** Suggestions réellement exécutables : jamais une capacité indisponible. */
+const UNAVAILABLE_SUGGESTION = /(?:stock|fournisseur|livraison|transporteur|campagne|المخزون|المورد|التوصيل|الحملة)/i
+
+function filterSuggestions(
+  list: ReadonlyArray<string> | undefined,
+  language: 'fr' | 'ar',
+): string[] {
+  const cleaned = (list ?? []).filter((item) => item.trim() && !UNAVAILABLE_SUGGESTION.test(item)).slice(0, 4)
+  if (cleaned.length > 0) return cleaned
+  return language === 'ar'
+    ? ['حلل الأداء ديالي', 'وريني المبيعات']
+    : ['Analyse mon business', 'Montre-moi mes ventes']
+}
+
 const METRIC_LABELS: Record<string, string> = {
   totalOrders: 'Commandes',
   deliveredOrders: 'Commandes livrées',
@@ -146,11 +209,11 @@ function toBusinessDay(value: string): string | null {
 }
 
 /** Journée métier `YYYY-MM-DD` formatée sans décalage de fuseau. */
-function formatDayLabel(day: string): string {
+function formatDayLabel(day: string, language: 'fr' | 'ar' = 'fr'): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
   if (!match) return day
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(language === 'ar' ? 'ar-MA' : 'fr-FR', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
@@ -163,16 +226,31 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-function formatRangeLabel(range: AnalyticsRange): string {
+function formatRangeLabel(range: AnalyticsRange, language: 'fr' | 'ar' = 'fr'): string {
   if (typeof range === 'object' && 'start' in range && 'end' in range) {
     const start = toBusinessDay(range.start)
     const end = toBusinessDay(range.end)
-    if (!start || !end) return 'la période demandée'
-    if (end <= start) return formatDayLabel(start)
+    if (!start || !end) return language === 'ar' ? 'الفترة المطلوبة' : 'la période demandée'
+    if (end <= start) return formatDayLabel(start, language)
     // `end` est une borne exclue : la dernière journée citée est `end − 1`.
     const lastDay = addBusinessDays(end, -1)
-    if (start === lastDay) return formatDayLabel(start)
-    return `du ${formatDayLabel(start)} au ${formatDayLabel(lastDay)}`
+    if (start === lastDay) return formatDayLabel(start, language)
+    return language === 'ar'
+      ? `من ${formatDayLabel(start, language)} إلى ${formatDayLabel(lastDay, language)}`
+      : `du ${formatDayLabel(start, language)} au ${formatDayLabel(lastDay, language)}`
+  }
+  if (language === 'ar') {
+    switch (range) {
+      case 'today': return 'اليوم'
+      case 'yesterday': return 'البارح'
+      case 'week': return 'هاد الأسبوع'
+      case 'last_week': return 'الأسبوع لي فات'
+      case '7d': return 'آخر 7 أيام'
+      case '30d': return 'آخر 30 يوم'
+      case 'month': return 'هاد الشهر'
+      case 'last_month': return 'الشهر لي فات'
+      default: return 'الفترة المطلوبة'
+    }
   }
   switch (range) {
     case 'today': return 'aujourd’hui'
@@ -200,9 +278,28 @@ function buildTruthMessageText(input: {
   truth: ServerTruth
   explanation: string
   facts: ReadonlyArray<VerifiedFact>
+  language?: 'fr' | 'ar'
   fallbackNotice?: string | null
 }): { text: string; rejectedAmounts: string[] } {
   const { rangeLabel, truth, explanation, facts, fallbackNotice } = input
+  const language: 'fr' | 'ar' = input.language === 'ar' ? 'ar' : 'fr'
+  const t = language === 'ar'
+    ? {
+        forbidden: 'المعطيات المالية ممنوعة على هاد النطاق. ما كنعرضش أي رقم.',
+        unavailable: 'المعطيات اللازمة ما كايناش، وما كنقدمش أي رقم.',
+        empty: 'ما كاين حتى طلب مسجل فهاد الفترة (صفر حقيقي).',
+        partial: 'التغطية ناقصة: الأرقام كتخص غير الأيام المتوفرة.',
+        margin: 'الهامش المساهم ما هوش ربح صافي: المصاريف التشغيلية ما تنقصاتش.',
+        noIndicator: 'المعطيات متوفرة ولكن ما قدرتش ننشر المؤشر المطلوب.',
+      }
+    : {
+        forbidden: 'l’accès aux données financières de ce périmètre est refusé. Aucune valeur n’est affichée.',
+        unavailable: 'les données nécessaires ne sont pas disponibles, aucun chiffre n’est avancé.',
+        empty: 'aucune commande enregistrée sur la période (zéro réel).',
+        partial: 'Couverture incomplète : les valeurs publiées ne portent que sur les journées disponibles.',
+        margin: 'Marge contributive : les dépenses opérationnelles ne sont pas déduites, ce n’est pas un bénéfice net.',
+        noIndicator: 'les données sont disponibles mais aucun indicateur demandé n’a pu être publié.',
+      }
   const state = truth.envelopeState
   const scope = capitalize(rangeLabel)
 
@@ -217,14 +314,11 @@ function buildTruthMessageText(input: {
   }
 
   if (state === 'forbidden') {
-    return {
-      text: `${scope} : l’accès aux données financières de ce périmètre est refusé. Aucune valeur n’est affichée.`,
-      rejectedAmounts: [],
-    }
+    return { text: `${scope} : ${t.forbidden}`, rejectedAmounts: [] }
   }
 
   if (state === 'missing' || state === 'unavailable') {
-    const base = `${scope} : les données nécessaires ne sont pas disponibles, aucun chiffre n’est avancé.`
+    const base = `${scope} : ${t.unavailable}`
     return {
       text: qualitative ? `${base} ${qualitative}` : base,
       rejectedAmounts: clean.rejectedAmounts,
@@ -233,7 +327,7 @@ function buildTruthMessageText(input: {
 
   if (state === 'empty') {
     return {
-      text: [`${scope} : aucune commande enregistrée sur la période (zéro réel).`, qualitative]
+      text: [`${scope} : ${t.empty}`, qualitative]
         .filter(Boolean)
         .join('\n\n'),
       rejectedAmounts: clean.rejectedAmounts,
@@ -244,7 +338,8 @@ function buildTruthMessageText(input: {
   for (const alias of ['revenue', 'totalOrders', 'deliveredOrders', 'deliveryRate', 'adSpend']) {
     const metric = truth.metrics[alias]
     if (!metric || metric.value === null) continue
-    keyFigures.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency, state !== 'partial')}`)
+    const label = language === 'ar' ? METRIC_LABELS_AR[alias] ?? METRIC_LABELS[alias] ?? alias : METRIC_LABELS[alias] ?? alias
+    keyFigures.push(`${label} : ${formatTruthMetric(metric, truth.currency, state !== 'partial')}`)
   }
 
   const factsLine = keyFigures.slice(0, 4).join(' · ')
@@ -254,14 +349,14 @@ function buildTruthMessageText(input: {
   if (factsLine && !qualitativeHasFigures) parts.push(`${scope} : ${factsLine}.`)
   if (qualitative) parts.push(qualitative)
   if (state === 'partial') {
-    parts.push('Couverture incomplète : les valeurs publiées ne portent que sur les journées disponibles.')
+    parts.push(t.partial)
   }
   if (truth.metrics.contributionMargin?.value != null) {
-    parts.push('Marge contributive : les dépenses opérationnelles ne sont pas déduites, ce n’est pas un bénéfice net.')
+    parts.push(t.margin)
   }
 
   if (parts.length === 0) {
-    parts.push(`${scope} : les données sont disponibles mais aucun indicateur demandé n’a pu être publié.`)
+    parts.push(`${scope} : ${t.noIndicator}`)
   }
 
   return { text: parts.join('\n\n'), rejectedAmounts: clean.rejectedAmounts }
@@ -326,6 +421,7 @@ function filterAllowedTools<T extends { toolName: AgentToolName }>(planned: T[])
 
 export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promise<RunSecureAgentOutput> {
   const { supabase, scopeStoreIds, scopeContext, intent, range, userMessage, conversationHistory, providerModel } = input
+  const language: 'fr' | 'ar' = input.language === 'ar' ? 'ar' : 'fr'
   const provider = getAssistantProvider()
 
   // Comparaison de périodes : la paire explicite du message fait foi
@@ -410,17 +506,21 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   activitySteps.push({ label: 'Génération de la réponse' })
 
 
-  const systemPrompt = buildAgentSystemPrompt(intent, {
-    storeId: scopeContext.displayStoreId,
-    storeName: scopeContext.displayStoreName,
-    storeCurrency: scopeContext.displayCurrency,
-    userMainCurrency: scopeContext.userMainCurrency,
-  })
+  const systemPrompt = buildAgentSystemPrompt(
+    intent,
+    {
+      storeId: scopeContext.displayStoreId,
+      storeName: scopeContext.displayStoreName,
+      storeCurrency: scopeContext.displayCurrency,
+      userMainCurrency: scopeContext.userMainCurrency,
+    },
+    language,
+  )
   const userPrompt = buildAgentUserPrompt({
     userMessage,
     range,
     selectedTools: plannedTools.map((x) => x.toolName),
-    toolResults,
+    toolResults: compactForPrompt(toolResults) as Record<string, unknown>,
     storeContext: {
       storeId: scopeContext.displayStoreId,
       storeName: scopeContext.displayStoreName,
@@ -488,7 +588,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
 
   const rangeLabel = comparisonPair
     ? `${comparisonPair.labels.current} (comparée à ${comparisonPair.labels.baseline})`
-    : formatRangeLabel(effectiveRange)
+    : formatRangeLabel(effectiveRange, language)
 
   const explanation = llmOutput.message_text ?? parsedOutput.rawText
 
@@ -505,6 +605,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     truth,
     explanation,
     facts,
+    language,
     fallbackNotice: comparisonNotices[0] ?? null,
   })
 
@@ -522,6 +623,9 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
 
   const summary = buildTruthMetricsSummary(truth)
   const figuresAvailable = Object.values(truth.metrics).some((metric) => metric.value !== null)
+  const comparisonChartAvailable =
+    Boolean(comparisonPair) &&
+    (toolData.getStoreComparison as { kind?: string } | undefined)?.kind === 'periods'
 
   const fallbackStructured = buildStructuredResponseFromContext(intent, messageText, {
     currency: scopeContext.displayCurrency,
@@ -530,6 +634,8 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     daily: dailyResult ?? null,
     products: productSection ?? null,
     cities: citySection ?? null,
+    comparison: toolData.getStoreComparison ?? null,
+    comparisonLabels: comparisonPair?.labels ?? null,
   })
 
   // Journalisation minimale : aucun contenu utilisateur, aucune donnée métier.
@@ -550,14 +656,17 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     ...fallbackStructured,
     conversation_title: llmOutput.conversation_title,
     message_text: messageText,
-    suggestions: llmOutput.suggestions?.length ? llmOutput.suggestions : fallbackStructured.suggestions,
+    suggestions: filterSuggestions(
+      llmOutput.suggestions?.length ? llmOutput.suggestions : fallbackStructured.suggestions,
+      language,
+    ),
     warnings,
     metrics_summary: summary.length > 0 ? summary : fallbackStructured.metrics_summary ?? [],
     activity_steps: activitySteps,
   }
 
   // Aucun graphique sur une donnée absente, interdite ou sans valeur vérifiée.
-  if (blocked || !figuresAvailable) {
+  if (blocked || (!figuresAvailable && !comparisonChartAvailable)) {
     structuredResponse.chart = false
     structuredResponse.chart_type = undefined
     structuredResponse.chart_title = undefined
