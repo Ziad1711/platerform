@@ -589,6 +589,19 @@ const THIS_YEAR_PATTERN = /(?:cette année|cette annee|année en cours|annee en 
 /** Marqueurs « l'année dernière » (FR + darija). */
 const LAST_YEAR_PATTERN = /(?:l['’]?année (?:dernière|passée|précédente)|l['’]?annee (?:derniere|passee|precedente)|année (?:dernière|passée)|العام (?:لي فات|اللي فات|الماضي)|السنة (?:لي فاتت|الماضية)|السنه (?:لي فاتت|الماضية))/i
 
+/** Cadre de tendance : la question compare un jour à une référence. */
+const TREND_FRAMING_PATTERN = /(?:baisse|hausse|augment|diminu|dégrad|amélior|évolution|evolution|variation|mieux|pire|\bbon(?:ne)?s?\b|نقص|زاد|تحسن|تراجع|انخفاض|ارتفاع|مزيان|ناقص|زيادة|طاح|طلع)/i
+
+const WEEKDAY_LABELS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+
+function hasTrendFraming(message: string): boolean {
+  return TREND_FRAMING_PATTERN.test(message)
+}
+
+function weekdayLabel(weekday: number): string {
+  return WEEKDAY_LABELS[weekday] ?? 'jour'
+}
+
 function firstMatchIndex(text: string, pattern: RegExp): number {
   const match = pattern.exec(text)
   return match ? match.index : -1
@@ -661,6 +674,27 @@ export function resolveComparisonPeriods(message: string, now: Date = new Date()
         { ...first, year: candidateYear(first, message, now) },
         { ...second, year: candidateYear(second, message, now) },
       )
+    }
+  }
+
+  // Jour de semaine + tendance (« les confirmations de vendredi ont-elles
+  // baissé ? ») : comparer le jour le plus récent au même jour de la semaine
+  // précédente, jamais au volume des 7 derniers jours.
+  const weekday = findWeekday(message)
+  if (
+    weekday !== null &&
+    hasTrendFraming(message) &&
+    months.length === 0 &&
+    yearsInText(message).length === 0
+  ) {
+    const today = businessTodayIso(now)
+    const diff = (businessDateParts(now).weekday - weekday + 7) % 7
+    const currentDay = addBusinessDays(today, -diff)
+    const baselineDay = addBusinessDays(currentDay, -7)
+    return {
+      current: { from: currentDay, to: addBusinessDays(currentDay, 1) },
+      baseline: { from: baselineDay, to: addBusinessDays(baselineDay, 1) },
+      labels: { current: weekdayLabel(weekday), baseline: `${weekdayLabel(weekday)} précédent` },
     }
   }
 

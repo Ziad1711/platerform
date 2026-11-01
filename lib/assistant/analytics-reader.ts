@@ -30,14 +30,16 @@ import {
   type AssistantAnalyticsSession,
   type ComparableMetric,
   type ComparisonFreshness,
+  type ConfirmationComparison,
   type KpiEnvelope,
   type KpiMetricAlias,
   type MetricDelta,
   type PeriodComparison,
   type StoreComparison,
   type StoreComparisonEntry,
+  toNumber,
 } from '@/lib/assistant/analytics-contract'
-import { assertBusinessRange, MAX_SCOPE_STORES } from '@/lib/assistant/analytics-range'
+import { assertBusinessRange, MAX_SCOPE_STORES, rangeInstants } from '@/lib/assistant/analytics-range'
 import { validateKpiPayload } from '@/lib/assistant/analytics-rpc-validation'
 
 export type { AnalyticsReaderResult, AssistantAnalyticsSession } from '@/lib/assistant/analytics-contract'
@@ -428,6 +430,28 @@ function freshnessOf(...results: AnalyticsReaderResult[]): ComparisonFreshness {
   }
 }
 
+/** Compteurs du tunnel de confirmation pour une période (COUNT sur `orders`, sans agrégat lourd). */
+async function readConfirmationCounts(
+  supabase: SupabaseClient,
+  storeIds: string[],
+  range: BusinessRange,
+): Promise<{ totalOrders: number; confirmedOrders: number } | null> {
+  const { startUtc, endUtc } = rangeInstants(range)
+  const { data, error } = await supabase.rpc('rpc_dashboard_confirmation_counters', {
+    p_store_ids: storeIds,
+    p_start_date: startUtc,
+    p_end_date: endUtc,
+  })
+  if (error) return null
+  const rows = Array.isArray(data) ? data : [data].filter(Boolean)
+  const row = rows[0] as Record<string, unknown> | undefined
+  if (!row) return null
+  const totalOrders = toNumber(row.total_orders)
+  const confirmedOrders = toNumber(row.confirmed_orders)
+  if (totalOrders === null || confirmedOrders === null) return null
+  return { totalOrders, confirmedOrders }
+}
+
 /**
  * Comparaison de deux périodes réelles pour le même périmètre.
  *
@@ -518,6 +542,34 @@ export async function compareAssistantPeriods(
 
   if (state !== 'complete') issues.push('COMPARISON_NOT_FULLY_COMPUTABLE')
 
+  // Tunnel de confirmation : comparable même si les agrégats KPI sont partiels,
+  // car la RPC compte directement les commandes de la période. Une lecture en
+  // échec n'annule jamais la comparaison KPI.
+  let confirmation: ConfirmationComparison | undefined
+  try {
+    const [confCurrent, confBaseline] = await Promise.all([
+      readConfirmationCounts(supabase, storeIds, current),
+      readConfirmationCounts(supabase, storeIds, previousRange),
+    ])
+    if (confCurrent && confBaseline) {
+      confirmation = {
+        current: {
+          totalOrders: confCurrent.totalOrders,
+          confirmedOrders: confCurrent.confirmedOrders,
+          confirmationRate: percentOfCounts(confCurrent.confirmedOrders, confCurrent.totalOrders),
+        },
+        baseline: {
+          totalOrders: confBaseline.totalOrders,
+          confirmedOrders: confBaseline.confirmedOrders,
+          confirmationRate: percentOfCounts(confBaseline.confirmedOrders, confBaseline.totalOrders),
+        },
+        state: 'complete',
+      }
+    }
+  } catch {
+    confirmation = undefined
+  }
+
   return {
     contractVersion: ANALYTICS_CONTRACT_VERSION,
     kind: 'periods',
@@ -529,6 +581,7 @@ export async function compareAssistantPeriods(
     })(),
     definitions: { current: definitionsOf(currentResult), baseline: definitionsOf(baselineResult) },
     deltas,
+    confirmation,
     freshness,
     notices,
     issues,
