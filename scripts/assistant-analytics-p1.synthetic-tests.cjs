@@ -1052,7 +1052,7 @@ async function main() {
 
   check('P1-25f', 'Migration : verrou atomique et anti-rejeu', () => {
     const sql = fs.readFileSync(
-      path.join(ROOT, 'supabase/migrations/20261101190000_assistant_transcription_budget.sql'),
+      path.join(ROOT, 'supabase/migrations/20261101164710_assistant_transcription_budget.sql'),
       'utf8',
     )
     assert(sql.includes('pg_advisory_xact_lock'), 'verrou absent')
