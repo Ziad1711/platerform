@@ -1,5 +1,5 @@
 import type { AnalyticsRange, AssistantIntent, ComparisonRange } from '@/lib/assistant/types'
-import { addBusinessDays, businessRange, businessRangeToInstants, businessTodayIso } from '@/lib/dashboard/business-time'
+import { addBusinessDays, businessDateParts, businessRange, businessRangeToInstants, businessTodayIso } from '@/lib/dashboard/business-time'
 
 const GREETINGS = ['bonjour', 'salut', 'bonsoir', 'hello', 'coucou']
 
@@ -318,12 +318,51 @@ function hasExplicitRange(text: string): boolean {
   return false
 }
 
+/** Jours de la semaine (0 = dimanche … 6 = samedi), FR et arabe/darija. */
+const WEEKDAYS_FR: Record<string, number> = {
+  dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6,
+}
+const WEEKDAYS_AR: Record<string, number> = {
+  'الأحد': 0, 'الاحد': 0, 'الاثنين': 1, 'الإثنين': 1, 'الثلاثاء': 2,
+  'الأربعاء': 3, 'الاربعاء': 3, 'الخميس': 4, 'الجمعة': 5, 'السبت': 6,
+}
+
+function findWeekday(message: string): number | null {
+  const text = message.toLowerCase()
+  for (const [name, weekday] of Object.entries(WEEKDAYS_FR)) {
+    if (new RegExp(`\\b${name}\\b`).test(text)) return weekday
+  }
+  for (const [name, weekday] of Object.entries(WEEKDAYS_AR)) {
+    if (message.includes(name)) return weekday
+  }
+  return null
+}
+
+/**
+ * « les confirmations de vendredi » ⇒ le vendredi le plus récent (aujourd'hui
+ * inclus) dans le fuseau métier. Aucune substitution par une autre période.
+ */
+function resolveWeekdayRange(message: string, now: Date = new Date()): { start: string; end: string } | null {
+  const weekday = findWeekday(message)
+  if (weekday === null) return null
+  const today = businessTodayIso(now)
+  const todayWeekday = businessDateParts(now).weekday
+  const diff = (todayWeekday - weekday + 7) % 7
+  const from = addBusinessDays(today, -diff)
+  return { start: from, end: addBusinessDays(from, 1) }
+}
+
 export function resolveRangeFromQuestion(message: string, memory?: ThreadAnalyticMemory | null): AnalyticsRange {
   const text = message.toLowerCase()
 
   // Journées explicites : priorité maximale, aucune interprétation relative.
   const explicitDays = tryParseExplicitDayRange(text)
   if (explicitDays) return explicitDays
+
+  // Jour de semaine nommé (« vendredi », « الجمعة ») : résolu au jour métier
+  // le plus récent, jamais remplacé par « les 7 derniers jours ».
+  const weekdayRange = resolveWeekdayRange(message)
+  if (weekdayRange) return weekdayRange
 
   const absolute = tryParseAbsoluteMonth(text)
   if (absolute) return absolute
@@ -545,6 +584,31 @@ function relativeBusinessRange(key: string, now: Date): { from: string; to: stri
   return { from: range.from, to: range.to }
 }
 
+/** Marqueurs « cette année » (FR + darija). */
+const THIS_YEAR_PATTERN = /(?:cette année|cette annee|année en cours|annee en cours|هاد العام|هذا العام|هاد السنة|هذه السنة|هاد السنه|هذه السنه)/i
+/** Marqueurs « l'année dernière » (FR + darija). */
+const LAST_YEAR_PATTERN = /(?:l['’]?année (?:dernière|passée|précédente)|l['’]?annee (?:derniere|passee|precedente)|année (?:dernière|passée)|العام (?:لي فات|اللي فات|الماضي)|السنة (?:لي فاتت|الماضية)|السنه (?:لي فاتت|الماضية))/i
+
+function firstMatchIndex(text: string, pattern: RegExp): number {
+  const match = pattern.exec(text)
+  return match ? match.index : -1
+}
+
+/**
+ * Fenêtre `[1er janvier, même jour de l'année + 1 jour[` : la comparaison
+ * annuelle compare exactement la même tranche de calendrier des deux années,
+ * jamais une année complète contre une année en cours.
+ */
+function yearToDateWindow(year: number, now: Date): { from: string; to: string } {
+  const parts = businessDateParts(now)
+  const month = String(parts.month).padStart(2, '0')
+  const day = String(parts.day).padStart(2, '0')
+  return {
+    from: `${year}-01-01`,
+    to: addBusinessDays(`${year}-${month}-${day}`, 1),
+  }
+}
+
 /**
  * Périodes de comparaison explicites, dans l'ordre où l'utilisateur les cite.
  *
@@ -597,6 +661,32 @@ export function resolveComparisonPeriods(message: string, now: Date = new Date()
         { ...first, year: candidateYear(first, message, now) },
         { ...second, year: candidateYear(second, message, now) },
       )
+    }
+  }
+
+  // Comparaison annuelle : « cette année vs l'année dernière », avec ou sans
+  // mois (« octobre de cette année vs octobre de l'année dernière »). Les deux
+  // fenêtres couvrent la même tranche de calendrier (même jour de l'année).
+  const thisYearIdx = firstMatchIndex(message, THIS_YEAR_PATTERN)
+  const lastYearIdx = firstMatchIndex(message, LAST_YEAR_PATTERN)
+  if (thisYearIdx >= 0 && lastYearIdx >= 0) {
+    const year = currentBusinessYear()
+    const currentFirst = thisYearIdx <= lastYearIdx
+    const currentYear = currentFirst ? year : year - 1
+    const baselineYear = currentFirst ? year - 1 : year
+
+    // Un mois est cité : on compare le même mois des deux années.
+    if (months.length > 0) {
+      return comparisonFromMonths(
+        { ...months[0], year: currentYear },
+        { ...months[0], year: baselineYear },
+      )
+    }
+
+    return {
+      current: yearToDateWindow(currentYear, now),
+      baseline: yearToDateWindow(baselineYear, now),
+      labels: { current: `année ${currentYear}`, baseline: `année ${baselineYear}` },
     }
   }
 
