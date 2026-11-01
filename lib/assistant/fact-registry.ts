@@ -116,6 +116,25 @@ export function collectVerifiedFacts(
           })
         }
       }
+
+      // Tunnel de confirmation comparé : les deux périodes sont publiées comme
+      // faits (compteurs + taux), afin qu'une baisse/hausse de confirmation
+      // puisse être citée avec ses deux valeurs sans être retirée.
+      const conf = asRecord(record.confirmation)
+      if (conf && conf.state === 'complete') {
+        const cur = asRecord(conf.current)
+        const base = asRecord(conf.baseline)
+        if (cur && base) {
+          const curRange = asRange(ranges?.current)
+          const baseRange = asRange(ranges?.baseline)
+          for (const [confRow, range] of [[cur, curRange], [base, baseRange]] as const) {
+            if (!range) continue
+            push(confRow.totalOrders, { storeId, currency: null, unit: 'count', range, source: `${source}:confirmation:totalOrders`, axis: 'order' })
+            push(confRow.confirmedOrders, { storeId, currency: null, unit: 'count', range, source: `${source}:confirmation:confirmedOrders`, axis: 'order' })
+            push(confRow.confirmationRate, { storeId, currency: null, unit: 'percent', range, source: `${source}:confirmation:confirmationRate`, axis: 'order' })
+          }
+        }
+      }
       continue
     }
 

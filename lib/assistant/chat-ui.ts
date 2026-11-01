@@ -303,10 +303,13 @@ export function summarizeWarnings(warnings: readonly string[] | null | undefined
   }
 
   const orderedCategories = CATEGORY_RULES.map((rule) => rule.category).filter((category) => groups.has(category))
+  if (groups.has('other')) orderedCategories.push('other')
   const primary = orderedCategories[0] || 'other'
   const primaryRule = CATEGORY_RULES.find((rule) => rule.category === primary)
 
-  const summary = primaryRule ? primaryRule.headline : 'Précisions sur les données disponibles.'
+  // Une réserve non classée reste pertinente : son libellé humanisé est affiché,
+  // jamais un encadré générique « Précisions sur les données disponibles ».
+  const summary = primaryRule ? primaryRule.headline : (groups.get('other')?.[0] ?? null)
 
   const details: string[] = []
   for (const category of orderedCategories) {

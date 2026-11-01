@@ -382,13 +382,14 @@ function businessDiagnosis(truth: ServerTruth, language: 'fr' | 'ar'): string | 
   return `Sur ${total} commandes datées de la période, ${notDelivered} n’ont pas actuellement le statut « livrée » ; cela ne signifie pas qu’elles sont toutes perdues. ${cancellation ? `Annulations : ${cancelledCount} (${cancellation} %).` : ''} Priorité : examiner leurs statuts avant de décider d’une action.`
 }
 
-function buildTruthMetricsSummary(truth: ServerTruth): Array<{ label: string; value: string | number }> {
+function buildTruthMetricsSummary(truth: ServerTruth, language: 'fr' | 'ar'): Array<{ label: string; value: string | number }> {
   const summary: Array<{ label: string; value: string | number }> = []
+  const labels = language === 'ar' ? METRIC_LABELS_AR : METRIC_LABELS
 
   for (const alias of ['totalOrders', 'deliveredOrders', 'revenue', 'adSpend', 'contributionMargin', 'deliveryRate']) {
     const metric = truth.metrics[alias]
     if (!metric || metric.value === null) continue
-    summary.push({ label: METRIC_LABELS[alias] ?? alias, value: formatTruthMetric(metric, truth.currency, false) })
+    summary.push({ label: labels[alias] ?? alias, value: formatTruthMetric(metric, truth.currency, false) })
   }
 
   return summary
@@ -719,7 +720,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     ...(sectionStates.includes('unavailable') ? ['Une section demandée n’est pas disponible : elle n’est pas chiffrée.'] : []),
   ])
 
-  const summary = buildTruthMetricsSummary(truth)
+  const summary = buildTruthMetricsSummary(truth, language)
   const figuresAvailable = Object.values(truth.metrics).some((metric) => metric.value !== null)
   const comparisonChartAvailable = comparableDeltas.length > 0
 

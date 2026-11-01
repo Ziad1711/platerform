@@ -330,7 +330,9 @@ export default function AssistantIAPage() {
     if (activeThreadId && threadList.some((thread) => thread.id === activeThreadId)) {
       return activeThreadId
     }
-    return threadList[0]?.id || null
+    // Aucun thread actif ⇒ conversation vide : ne jamais basculer
+    // automatiquement vers le dernier fil à l'ouverture du chatbot.
+    return null
   }, [threadList, activeThreadId])
 
   const pendingUserMessage =
@@ -350,32 +352,6 @@ export default function AssistantIAPage() {
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(readApiError(data, 'Impossible de charger les messages'))
       return data
-    },
-  })
-
-  const createThreadMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentStoreId) throw new Error('Sélectionnez une boutique avant de créer une conversation.')
-
-      const res = await fetch('/api/assistant/threads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId: currentStoreId, title: 'Nouvelle conversation' }),
-      })
-
-      const data = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(readApiError(data, 'Impossible de créer la conversation'))
-      return data as { thread: ThreadItem }
-    },
-    onSuccess: async (data) => {
-      await queryClient.invalidateQueries({ queryKey: ['assistant-threads'] })
-      setActiveThreadId(data.thread.id)
-      setThreadsOpen(false)
-      setServerError(null)
-      setTimeout(() => inputRef.current?.focus(), 0)
-    },
-    onError: (error) => {
-      setServerError(error instanceof Error ? error.message : 'Erreur de création')
     },
   })
 
@@ -539,6 +515,17 @@ export default function AssistantIAPage() {
   }
 
   const pendingRequestRef = useRef<{ key: string; requestId: string } | null>(null)
+
+  // Ouvre une nouvelle conversation vide sans créer de fil en base : le fil
+  // n'est créé qu'à l'envoi du premier message (aucun fil vide superflu).
+  const startNewConversation = () => {
+    setActiveThreadId(null)
+    setThreadsOpen(false)
+    setServerError(null)
+    setWarning(null)
+    setInput('')
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
 
 
   const handleSend = async (message: string) => {
@@ -1054,33 +1041,15 @@ export default function AssistantIAPage() {
     return null
   }, [displayMessages])
 
-  const latestAssistantSuggestions = useMemo(() => {
-    const lastAssistant = [...displayMessages]
-      .reverse()
-      .find((m) => m.role === 'assistant' && m.metadata?.structured_response?.suggestions?.length)
-
-    return lastAssistant?.metadata?.structured_response?.suggestions || SUGGESTIONS
-  }, [displayMessages])
-
-  const liveActivitySteps = useMemo(() => {
-    const source = (pendingUserMessage || input || '').toLowerCase()
-    const wantsWeb =
-      source.includes('marché') ||
-      source.includes('concurrence') ||
-      source.includes('benchmark') ||
-      source.includes('tendance externe')
-
-    const labels = [
-      'Je réfléchis à votre demande',
-      'Je vérifie vos accès et le store actif',
-      'Je consulte les données de votre base',
-      wantsWeb ? 'Je cherche aussi du contexte web' : null,
-      'Je calcule les métriques',
-      'Je prépare une réponse claire',
-    ].filter(Boolean) as string[]
-
-    return labels.map((label) => ({ label }))
-  }, [pendingUserMessage, input])
+  // Progression discrète et professionnelle : aucune opération technique
+  // (« vérifier les accès », « consulter la base ») n'est annoncée comme
+  // réellement effectuée tant qu'elle n'est pas confirmée.
+  const liveActivitySteps: Array<{ label: string }> = [
+    { label: 'Analyse de votre demande' },
+    { label: 'Consultation des données autorisées' },
+    { label: 'Calcul des indicateurs' },
+    { label: 'Rédaction de la réponse' },
+  ]
 
   useEffect(() => {
     if (!sendMessageMutation.isPending) {
@@ -1222,9 +1191,8 @@ export default function AssistantIAPage() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => createThreadMutation.mutate()}
-              disabled={createThreadMutation.isPending}
-              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs text-white hover:bg-primary/90 disabled:opacity-50"
+              onClick={startNewConversation}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs text-white hover:bg-primary/90"
             >
               <Plus className="w-3.5 h-3.5" />
               Nouvelle
@@ -1344,10 +1312,9 @@ export default function AssistantIAPage() {
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Assistant</span>
           <button
             type="button"
-            onClick={() => createThreadMutation.mutate()}
-            disabled={createThreadMutation.isPending}
+            onClick={startNewConversation}
             aria-label="Nouvelle conversation"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card hover:bg-secondary disabled:opacity-50"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card hover:bg-secondary"
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -1517,13 +1484,6 @@ export default function AssistantIAPage() {
             </div>
           ) : null}
 
-          {transcribing ? (
-            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Transcription en cours…
-            </div>
-          ) : null}
-
           {voiceError ? (
             <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {voiceError}
@@ -1553,7 +1513,7 @@ export default function AssistantIAPage() {
                 aria-label="Message à envoyer"
                 dir="auto"
                 className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-sm focus:outline-none ${
-                  recording ? 'invisible' : ''
+                  recording || transcribing ? 'invisible' : ''
                 }`}
                 disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               />
@@ -1610,6 +1570,15 @@ export default function AssistantIAPage() {
                     </button>
                   </div>
                 </div>
+              ) : transcribing ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="absolute inset-0 flex items-center gap-2 rounded-lg px-3"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">Transcription en cours…</span>
+                </div>
               ) : null}
             </div>
 
@@ -1634,19 +1603,6 @@ export default function AssistantIAPage() {
             >
               <Send className="w-4 h-4" />
             </button>
-          </div>
-
-          <div className="mt-2 flex flex-wrap gap-2">
-            {latestAssistantSuggestions.slice(0, 4).map((suggestion) => (
-              <button
-                key={`bottom-${suggestion}`}
-                onClick={() => handleSend(suggestion)}
-                disabled={isAssistantBlocked || sendMessageMutation.isPending}
-                className="text-[11px] px-2.5 py-1 rounded-full border bg-secondary hover:bg-secondary"
-              >
-                {suggestion}
-              </button>
-            ))}
           </div>
         </div>
       </section>

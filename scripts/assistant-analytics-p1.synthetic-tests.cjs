@@ -1335,6 +1335,49 @@ async function main() {
     assert(!facts.some((item) => item.source.endsWith(':contributionMargin')), 'marge commercial divulguée')
   })
 
+  check('P1-31a', 'Comparaison annuelle : fenêtres YTD alignées (même jour)', () => {
+    const pair = intentsModule.resolveComparisonPeriods('واش البيزنيس تحسن هاد العام مقارنة بالعام لي فات')
+    assert(pair !== null, 'paire annuelle attendue')
+    assert(pair.current.from.endsWith('-01-01'), `courante = 1er janvier: ${pair.current.from}`)
+    assert(pair.baseline.from.endsWith('-01-01'), `référence = 1er janvier: ${pair.baseline.from}`)
+    const curYear = Number(pair.current.from.slice(0, 4))
+    const baseYear = Number(pair.baseline.from.slice(0, 4))
+    assertEqual(baseYear, curYear - 1, 'année précédente')
+    // Même tranche de calendrier : les deux fenêtres ont le même nombre de jours.
+    const curDays = (Date.parse(`${pair.current.to}T00:00:00Z`) - Date.parse(`${pair.current.from}T00:00:00Z`)) / 86400000
+    const baseDays = (Date.parse(`${pair.baseline.to}T00:00:00Z`) - Date.parse(`${pair.baseline.from}T00:00:00Z`)) / 86400000
+    assertEqual(curDays, baseDays, 'durées identiques')
+    assertEqual(intentsModule.resolveIntent('واش البيزنيس تحسن هاد العام مقارنة بالعام لي فات'), 'period_comparison', 'intent annuel')
+    return `${pair.labels.current} vs ${pair.labels.baseline}`
+  })
+
+  check('P1-31b', 'Même mois de deux années sans année explicite (darija)', () => {
+    const pair = intentsModule.resolveComparisonPeriods('حلل أكتوبر ديال هاد العام وقارنو مع أكتوبر ديال العام لي فات')
+    assert(pair !== null, 'paire attendue')
+    assert(pair.current.from.endsWith('-10-01'), `octobre courant: ${pair.current.from}`)
+    assert(pair.baseline.from.endsWith('-10-01'), `octobre référence: ${pair.baseline.from}`)
+    return `${pair.labels.current} vs ${pair.labels.baseline}`
+  })
+
+  check('P1-31c', 'Vendredi + tendance : comparaison avec le vendredi précédent', () => {
+    const pair = intentsModule.resolveComparisonPeriods('les confirmations de vendredi étaient bonnes ou en baisse')
+    assert(pair !== null, 'paire attendue')
+    assertEqual(pair.labels.current, 'vendredi', 'courant = vendredi')
+    assertEqual(pair.labels.baseline, 'vendredi précédent', 'référence = vendredi précédent')
+    const gap = (Date.parse(`${pair.current.from}T00:00:00Z`) - Date.parse(`${pair.baseline.from}T00:00:00Z`)) / 86400000
+    assertEqual(gap, 7, 'écart d’une semaine exactement')
+    assertEqual(intentsModule.resolveIntent('les confirmations de vendredi étaient bonnes ou en baisse'), 'period_comparison', 'intent comparaison')
+    return 'vendredi vs vendredi précédent'
+  })
+
+  check('P1-31d', 'Vendredi sans tendance : jour isolé, pas de comparaison', () => {
+    const pair = intentsModule.resolveComparisonPeriods('les confirmations de vendredi')
+    assertEqual(pair, null, 'aucune comparaison')
+    const range = intentsModule.resolveRangeFromQuestion('les confirmations de vendredi')
+    assert(range && typeof range === 'object' && 'start' in range, 'jour métier attendu')
+    return 'jour isolé'
+  })
+
   const failed = results.filter((item) => !item.pass)
   const reportLines = []
   const width = Math.max(...results.map((item) => item.name.length), 40)

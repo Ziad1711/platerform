@@ -210,9 +210,18 @@ export interface PeriodComparison {
   currency: string | null
   definitions: { current: number[]; baseline: number[] }
   deltas: MetricDelta[]
+  /** Comparaison du tunnel de confirmation, si les deux périodes sont lisibles. */
+  confirmation?: ConfirmationComparison
   freshness?: ComparisonFreshness
   notices: string[]
   issues: string[]
+}
+
+/** Tunnel de confirmation comparé entre deux périodes (commandes datées par `order_date`). */
+export interface ConfirmationComparison {
+  current: { totalOrders: number; confirmedOrders: number; confirmationRate: string | null }
+  baseline: { totalOrders: number; confirmedOrders: number; confirmationRate: string | null }
+  state: AnalyticsState
 }
 
 export interface StoreComparisonEntry {
