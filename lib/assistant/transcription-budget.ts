@@ -27,6 +27,68 @@ export type TranscriptionBudgetResult =
   | { ok: true }
   | { ok: false; code: 'TRANSCRIPTION_RATE_LIMITED' | 'TRANSCRIPTION_DAILY_LIMIT' }
 
+/* -------------------------------------------------------------------------- */
+/* Idempotence locale : une même tentative ne paie pas deux fois              */
+/* -------------------------------------------------------------------------- */
+
+const IDEMPOTENCY_TTL_MS = 10 * 60_000
+const idempotency = new Map<string, { state: 'pending' | 'done'; text?: string; at: number }>()
+
+function idempotencyKey(userId: string, requestId: string): string {
+  return `${userId}:${requestId}`
+}
+
+function pruneIdempotency(now: number) {
+  for (const [key, entry] of idempotency) {
+    if (now - entry.at >= IDEMPOTENCY_TTL_MS) idempotency.delete(key)
+  }
+}
+
+export type TranscriptionClaim =
+  | { status: 'new' }
+  | { status: 'pending' }
+  | { status: 'done'; text: string }
+
+/**
+ * Réserve une tentative avant l'appel fournisseur. Un doublon simultané reçoit
+ * `pending` (aucun second appel), un doublon terminé reçoit le texte déjà payé.
+ * Portée : mémoire du processus — ce n'est pas une garantie inter-instances.
+ */
+export function claimTranscriptionRequest(
+  userId: string,
+  requestId: string,
+  now = Date.now(),
+): TranscriptionClaim {
+  pruneIdempotency(now)
+  const key = idempotencyKey(userId, requestId)
+  const existing = idempotency.get(key)
+
+  if (existing) {
+    if (existing.state === 'done' && typeof existing.text === 'string') {
+      return { status: 'done', text: existing.text }
+    }
+    return { status: 'pending' }
+  }
+
+  idempotency.set(key, { state: 'pending', at: now })
+  return { status: 'new' }
+}
+
+/** Enregistre le texte payé et libère le verrou de tentative. */
+export function completeTranscriptionRequest(
+  userId: string,
+  requestId: string,
+  text: string,
+  now = Date.now(),
+): void {
+  idempotency.set(idempotencyKey(userId, requestId), { state: 'done', text, at: now })
+}
+
+/** Échec fournisseur : la tentative peut être relancée sans faux résultat. */
+export function failTranscriptionRequest(userId: string, requestId: string): void {
+  idempotency.delete(idempotencyKey(userId, requestId))
+}
+
 function dayKey(now: number): string {
   return new Date(now).toISOString().slice(0, 10)
 }
@@ -98,4 +160,5 @@ export function releaseTranscriptionBudget(userId: string, seconds: number, now 
 /** Réinitialisation locale (vérifications ciblées, aucun effet en production). */
 export function resetTranscriptionBudget(): void {
   entries.clear()
+  idempotency.clear()
 }

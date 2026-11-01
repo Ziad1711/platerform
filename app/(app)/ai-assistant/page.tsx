@@ -272,6 +272,13 @@ export default function AssistantIAPage() {
   const recorderCancelledRef = useRef(false)
   const recorderStartedAtRef = useRef(0)
   const transcribeAbortRef = useRef<AbortController | null>(null)
+  // Verrous synchrones : deux clics ne peuvent ni ouvrir deux micros ni payer
+  // deux transcriptions.
+  const voiceStartLockRef = useRef(false)
+  const voiceSessionRef = useRef(0)
+  const voiceRequestIdRef = useRef<string | null>(null)
+  const transcribeInFlightRef = useRef(false)
+  const sendingRef = useRef(false)
 
   const hasStore = Boolean(currentStoreId)
   const canLoad = hasStore
@@ -522,6 +529,10 @@ export default function AssistantIAPage() {
   const handleSend = async (message: string) => {
     const clean = message.trim()
     if (!clean || !hasStore || !currentStoreId) return
+    // Un seul envoi à la fois : un double clic (ou un envoi vocal tardif) ne
+    // doit jamais produire deux messages ni deux débits.
+    if (sendingRef.current) return
+    sendingRef.current = true
     setServerError(null)
     setOptimisticUserMessage({ content: clean, storeId: String(currentStoreId) })
     setPendingUserMessageCreatedAt(new Date().toISOString())
@@ -542,6 +553,7 @@ export default function AssistantIAPage() {
     )
 
     if (!retry) {
+      sendingRef.current = false
       setInput(clean)
       setOptimisticUserMessage(null)
       setServerError('Navigateur incompatible : identifiant de requête indisponible.')
@@ -561,6 +573,8 @@ export default function AssistantIAPage() {
       pendingRequestRef.current = null
     } catch {
       setInput(clean)
+    } finally {
+      sendingRef.current = false
     }
   }
 
@@ -592,6 +606,8 @@ export default function AssistantIAPage() {
 
   /** Annulation : aucun appel API, aucune donnée audio conservée. */
   const cancelRecording = useCallback(() => {
+    // Invalide immédiatement tout callback tardif (onstop, réponse réseau).
+    voiceSessionRef.current += 1
     recorderCancelledRef.current = true
     const recorder = recorderRef.current
     if (recorder && recorder.state !== 'inactive') {
@@ -646,12 +662,20 @@ export default function AssistantIAPage() {
     voiceStoreRef.current = currentStoreId
   }, [currentStoreId, cancelRecording])
 
-  async function transcribeAudio(blob: Blob, durationMs: number, mode: 'send' | 'insert') {
+  async function transcribeAudio(
+    blob: Blob,
+    durationMs: number,
+    mode: 'send' | 'insert',
+    sessionId: number,
+  ) {
+    if (sessionId !== voiceSessionRef.current) return
+    if (transcribeInFlightRef.current) return
     if (blob.size > MAX_AUDIO_BYTES) {
       setVoiceError('Enregistrement trop volumineux.')
       return
     }
 
+    transcribeInFlightRef.current = true
     setTranscribing(true)
     setVoiceError(null)
     const controller = new AbortController()
@@ -662,6 +686,13 @@ export default function AssistantIAPage() {
       form.append('file', blob, 'dictation.webm')
       form.append('storeId', String(currentStoreId))
       form.append('durationMs', String(Math.max(0, Math.round(durationMs))))
+      form.append(
+        'requestId',
+        voiceRequestIdRef.current ??
+          (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : ''),
+      )
 
       const res = await fetch('/api/assistant/transcribe', {
         method: 'POST',
@@ -669,6 +700,9 @@ export default function AssistantIAPage() {
         signal: controller.signal,
       })
       const data = await res.json().catch(() => null)
+      // Session invalidée entre-temps (annulation, changement de boutique) :
+      // aucun état ni envoi n'est appliqué à la conversation courante.
+      if (sessionId !== voiceSessionRef.current) return
       if (!res.ok) throw new Error(readApiError(data, 'Transcription impossible'))
 
       const text = String((data as { text?: unknown } | null)?.text ?? '').trim()
@@ -686,6 +720,9 @@ export default function AssistantIAPage() {
           setVoiceError('Transcription placée dans le champ : l’envoi automatique est indisponible.')
           return
         }
+        // Le texte reste dans le champ si l'envoi est refusé par un verrou
+        // concurrent : aucune parole transcrite n'est perdue.
+        setInput(text)
         await handleSend(text)
         return
       }
@@ -694,15 +731,24 @@ export default function AssistantIAPage() {
       setTimeout(() => inputRef.current?.focus(), 0)
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
-      setVoiceError(error instanceof Error ? error.message : 'Transcription impossible.')
+      if (sessionId === voiceSessionRef.current) {
+        setVoiceError(error instanceof Error ? error.message : 'Transcription impossible.')
+      }
     } finally {
-      setTranscribing(false)
-      transcribeAbortRef.current = null
+      transcribeInFlightRef.current = false
+      if (sessionId === voiceSessionRef.current) {
+        setTranscribing(false)
+        transcribeAbortRef.current = null
+      }
     }
   }
 
   async function startRecording() {
+    // Verrou synchrone AVANT toute demande de permission : deux clics rapides
+    // ne peuvent pas ouvrir deux flux micro.
+    if (voiceStartLockRef.current) return
     if (recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore) return
+    voiceStartLockRef.current = true
     setVoiceError(null)
 
     if (
@@ -711,10 +757,19 @@ export default function AssistantIAPage() {
       typeof MediaRecorder === 'undefined'
     ) {
       setVoiceError('La dictée n’est pas prise en charge par ce navigateur.')
+      voiceStartLockRef.current = false
       return
     }
 
     try {
+      // Nouvelle session : tout callback d'une dictée précédente devient obsolète.
+      const sessionId = voiceSessionRef.current + 1
+      voiceSessionRef.current = sessionId
+      voiceRequestIdRef.current =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : null
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       recorderStreamRef.current = stream
 
@@ -738,6 +793,9 @@ export default function AssistantIAPage() {
         recorderRef.current = null
         stopTracks()
 
+        // Callback tardif d'une session annulée : ignoré sans traitement.
+        if (sessionId !== voiceSessionRef.current) return
+
         if (recorderCancelledRef.current) {
           recorderCancelledRef.current = false
           return
@@ -749,7 +807,7 @@ export default function AssistantIAPage() {
           return
         }
 
-        void transcribeAudio(blob, durationMs, mode)
+        void transcribeAudio(blob, durationMs, mode, sessionId)
       }
 
       recorder.start(200)
@@ -770,6 +828,8 @@ export default function AssistantIAPage() {
           ? 'Accès au micro refusé. Autorisez le microphone pour dicter.'
           : 'Micro indisponible sur cet appareil.',
       )
+    } finally {
+      voiceStartLockRef.current = false
     }
   }
 

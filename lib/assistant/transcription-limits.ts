@@ -22,6 +22,17 @@ export const TRANSCRIPTION_MAX_REQUESTS = 10
 /** Tarif public indicatif du modèle (USD par minute d'audio). */
 export const TRANSCRIPTION_COST_PER_MINUTE_USD = 0.0045
 
+/**
+ * Activation explicite de la dictée. Fermée par défaut : le plafond de coût
+ * n'est pas global (compteur en mémoire de processus), donc la route ne doit
+ * pas être exposée avant la mise en place d'un compteur partagé atomique.
+ */
+export const TRANSCRIPTION_FLAG_ENV = 'ASSISTANT_TRANSCRIPTION_ENABLED'
+
+export function isTranscriptionEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env[TRANSCRIPTION_FLAG_ENV] ?? '').trim().toLowerCase() === 'enabled'
+}
+
 const SUPPORTED_AUDIO_TYPES = [
   'audio/webm',
   'audio/ogg',

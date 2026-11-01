@@ -394,6 +394,8 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   TRANSCRIPTION_TIMEOUT: 'La transcription a mis trop de temps à répondre.',
   TRANSCRIPTION_NOT_CONFIGURED: 'La dictée vocale n’est pas configurée sur ce serveur.',
   TRANSCRIPTION_EMPTY_RESULT: 'La transcription n’a produit aucun texte exploitable.',
+  TRANSCRIPTION_IN_PROGRESS: 'Cette dictée est déjà en cours de transcription.',
+  TRANSCRIPTION_DURATION_MISSING: 'Durée de l’enregistrement manquante : dictée refusée.',
 }
 
 export function getErrorStatus(error: unknown) {
@@ -441,6 +443,8 @@ export function getErrorStatus(error: unknown) {
   if (message === 'TRANSCRIPTION_TIMEOUT') return 504
   if (message === 'TRANSCRIPTION_NOT_CONFIGURED') return 503
   if (message === 'TRANSCRIPTION_EMPTY_RESULT') return 422
+  if (message === 'TRANSCRIPTION_IN_PROGRESS') return 409
+  if (message === 'TRANSCRIPTION_DURATION_MISSING') return 400
   if (message.startsWith('QUOTA_')) return 403
 
   return 500

@@ -19,7 +19,12 @@ import {
   assertTrustedOrigin,
   toPublicError,
 } from '@/lib/assistant/security'
-import { reserveTranscriptionBudget } from '@/lib/assistant/transcription-budget'
+import {
+  claimTranscriptionRequest,
+  completeTranscriptionRequest,
+  failTranscriptionRequest,
+  reserveTranscriptionBudget,
+} from '@/lib/assistant/transcription-budget'
 import {
   MAX_AUDIO_BYTES,
   MAX_AUDIO_SECONDS,
@@ -28,6 +33,7 @@ import {
   baseAudioType,
   buildTranscriptionPrompt,
   isSupportedAudioType,
+  isTranscriptionEnabled,
 } from '@/lib/assistant/transcription-limits'
 
 export const runtime = 'nodejs'
@@ -48,6 +54,10 @@ export async function POST(request: Request) {
   try {
     assertTrustedOrigin(request)
     assertAssistantEnabled()
+
+    // Fermée par défaut : le quota n'est pas global tant qu'aucun compteur
+    // partagé atomique n'est en place. Aucun appel fournisseur n'est possible ici.
+    if (!isTranscriptionEnabled()) throw new Error('TRANSCRIPTION_NOT_CONFIGURED')
 
     const { supabase, user } = await requireAuthenticatedUser()
     // Allowlist vérifiée avant toute lecture, tout appel fournisseur et tout coût.
@@ -81,59 +91,80 @@ export async function POST(request: Request) {
     // lue ici, le niveau `full` n'est donc pas exigé.
     await requireAssistantPermission(supabase, user.id, storeId)
 
-    const reportedSeconds = readSeconds(form.get('durationMs'))
-    if (reportedSeconds > MAX_AUDIO_SECONDS + 1) throw new Error('TRANSCRIPTION_TOO_LONG')
+    const requestId = String(form.get('requestId') || '').trim()
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+      throw new Error('INVALID_REQUEST')
+    }
 
-    // Durée plafonnée et **jamais sous-estimée** : la valeur client est
-    // confrontée à une estimation basse depuis la taille (≈16 kbit/s), afin
-    // qu'une durée omise ou minimisée ne contourne pas le plafond de coût.
-    const estimatedSeconds = Math.ceil(audio.size / 2_000)
-    const billedSeconds = Math.min(
-      Math.max(reportedSeconds, estimatedSeconds, 1),
-      MAX_AUDIO_SECONDS,
-    )
-
-    const budget = reserveTranscriptionBudget(user.id, billedSeconds)
-    if (!budget.ok) throw new Error(budget.code)
-
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) throw new Error('TRANSCRIPTION_NOT_CONFIGURED')
-
-    const upstream = new FormData()
-    upstream.append('file', audio, `dictation.${baseAudioType(audio.type).split('/')[1] || 'webm'}`)
-    upstream.append('model', TRANSCRIPTION_MODEL)
-    upstream.append('prompt', buildTranscriptionPrompt())
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
-    const forwardAbort = () => controller.abort()
-    request.signal.addEventListener('abort', forwardAbort, { once: true })
+    // Idempotence : une même tentative ne paie jamais deux fois.
+    const claim = claimTranscriptionRequest(user.id, requestId)
+    if (claim.status === 'pending') throw new Error('TRANSCRIPTION_IN_PROGRESS')
+    if (claim.status === 'done') {
+      return NextResponse.json({ text: claim.text, replayed: true })
+    }
 
     try {
-      const response = await fetch(OPENAI_ENDPOINT, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: upstream,
-        signal: controller.signal,
-      })
+      const reportedSeconds = readSeconds(form.get('durationMs'))
+      if (reportedSeconds <= 0) throw new Error('TRANSCRIPTION_DURATION_MISSING')
+      if (reportedSeconds > MAX_AUDIO_SECONDS + 1) throw new Error('TRANSCRIPTION_TOO_LONG')
 
-      if (!response.ok) {
-        console.warn('[assistant] transcription_provider_failed', {
-          storeId,
-          status: response.status,
+      // Durée plafonnée et **jamais sous-estimée** : la valeur client est
+      // confrontée à une estimation basse depuis la taille (≈16 kbit/s), afin
+      // qu'une durée minimisée ne contourne pas le plafond de coût.
+      const estimatedSeconds = Math.ceil(audio.size / 2_000)
+      const billedSeconds = Math.min(
+        Math.max(reportedSeconds, estimatedSeconds, 1),
+        MAX_AUDIO_SECONDS,
+      )
+
+      const budget = reserveTranscriptionBudget(user.id, billedSeconds)
+      if (!budget.ok) throw new Error(budget.code)
+
+      const apiKey = process.env.OPENAI_API_KEY
+      if (!apiKey) throw new Error('TRANSCRIPTION_NOT_CONFIGURED')
+
+      const upstream = new FormData()
+      upstream.append('file', audio, `dictation.${baseAudioType(audio.type).split('/')[1] || 'webm'}`)
+      upstream.append('model', TRANSCRIPTION_MODEL)
+      upstream.append('prompt', buildTranscriptionPrompt())
+
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+      const forwardAbort = () => controller.abort()
+      request.signal.addEventListener('abort', forwardAbort, { once: true })
+
+      try {
+        const response = await fetch(OPENAI_ENDPOINT, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: upstream,
+          signal: controller.signal,
         })
-        throw new Error('TRANSCRIPTION_PROVIDER_FAILED')
+
+        if (!response.ok) {
+          console.warn('[assistant] transcription_provider_failed', {
+            storeId,
+            status: response.status,
+          })
+          throw new Error('TRANSCRIPTION_PROVIDER_FAILED')
+        }
+
+        const payload = (await response.json().catch(() => null)) as { text?: unknown } | null
+        const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
+        if (!text) throw new Error('TRANSCRIPTION_EMPTY_RESULT')
+
+        // Texte payé mémorisé : un doublon renvoie ce texte sans nouvel appel.
+        completeTranscriptionRequest(user.id, requestId, text)
+        console.info('[assistant] transcription_ok', { storeId, durationSeconds: billedSeconds })
+        return NextResponse.json({ text })
+      } finally {
+        clearTimeout(timer)
+        request.signal.removeEventListener('abort', forwardAbort)
       }
-
-      const payload = (await response.json().catch(() => null)) as { text?: unknown } | null
-      const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
-      if (!text) throw new Error('TRANSCRIPTION_EMPTY_RESULT')
-
-      console.info('[assistant] transcription_ok', { storeId, durationSeconds: billedSeconds })
-      return NextResponse.json({ text })
-    } finally {
-      clearTimeout(timer)
-      request.signal.removeEventListener('abort', forwardAbort)
+    } catch (error) {
+      // Aucun texte exploitable : la tentative est libérée pour un nouvel essai.
+      failTranscriptionRequest(user.id, requestId)
+      throw error
     }
   } catch (error) {
     const aborted = error instanceof Error && (error.name === 'AbortError' || error.message === 'TRANSCRIPTION_TIMEOUT')
