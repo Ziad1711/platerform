@@ -66,7 +66,8 @@ export interface AssistantStructuredResponse {
   chart_unit?: 'currency' | 'count' | 'percent'
   chart_title?: string
   chart_description?: string
-  chart_data?: Array<Record<string, string | number>>
+  /** `null` = journée sans donnée : le client ne doit pas la convertir en zéro. */
+  chart_data?: Array<Record<string, string | number | null>>
   metrics_summary?: Array<{ label: string; value: string | number }>
 }
 

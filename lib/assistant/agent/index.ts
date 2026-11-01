@@ -6,7 +6,7 @@ import {
   sectionState,
   sectionWarnings,
 } from '@/lib/assistant/response'
-import { collectVerifiedValues, dedupeMessages } from '@/lib/assistant/fact-registry'
+import { collectVerifiedFacts, dedupeMessages, type VerifiedFact } from '@/lib/assistant/fact-registry'
 import type { AnalyticsRange, AssistantStructuredResponse } from '@/lib/assistant/types'
 import { buildAgentSystemPrompt, buildAgentUserPrompt } from '@/lib/assistant/prompt'
 import { buildToolPlan, executeAgentTool, type AgentToolName } from '@/lib/assistant/agent/tools'
@@ -180,15 +180,16 @@ function buildTruthMessageText(input: {
   rangeLabel: string
   truth: ServerTruth
   explanation: string
-  allowedValues: ReadonlyArray<string | null | undefined>
+  facts: ReadonlyArray<VerifiedFact>
   fallbackNotice?: string | null
 }): { text: string; rejectedAmounts: string[] } {
-  const { rangeLabel, truth, explanation, allowedValues, fallbackNotice } = input
+  const { rangeLabel, truth, explanation, facts, fallbackNotice } = input
   const state = truth.envelopeState
   const scope = capitalize(rangeLabel)
 
-  // Un nombre du texte n'est conservé que s'il provient d'un fait vérifié.
-  const clean = sanitizeExplanation(explanation, allowedValues)
+  // Un nombre du texte n'est conservé que si un fait porte sa provenance
+  // (boutique, période, devise, unité) et contredit la phrase.
+  const clean = sanitizeExplanation(explanation, facts)
   const qualitative = clampSentences(clean.text, 3)
 
   if (state === 'none') {
@@ -220,14 +221,14 @@ function buildTruthMessageText(input: {
     }
   }
 
-  const facts: string[] = []
+  const keyFigures: string[] = []
   for (const alias of ['revenue', 'totalOrders', 'deliveredOrders', 'deliveryRate', 'adSpend']) {
     const metric = truth.metrics[alias]
     if (!metric || metric.value === null) continue
-    facts.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency, state !== 'partial')}`)
+    keyFigures.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency, state !== 'partial')}`)
   }
 
-  const factsLine = facts.slice(0, 4).join(' · ')
+  const factsLine = keyFigures.slice(0, 4).join(' · ')
   const qualitativeHasFigures = /\d/.test(qualitative)
   const parts: string[] = []
 
@@ -472,15 +473,19 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
 
   const explanation = llmOutput.message_text ?? parsedOutput.rawText
 
-  // Registre des faits : toutes les valeurs réellement publiées par les outils
-  // (KPI, sections, comparaisons, points journaliers), et rien d'autre.
-  const allowedValues = collectVerifiedValues(toolData)
+  // Registre des faits : valeurs publiées, avec boutique, période, devise et
+  // unité. Comparaisons et points journaliers sont exclus (multi-périodes).
+  const facts = collectVerifiedFacts(toolData, {
+    storeIds: scopeStoreIds,
+    currency: scopeContext.displayCurrency,
+    range: session?.range ?? null,
+  })
 
   const { text: messageText, rejectedAmounts } = buildTruthMessageText({
     rangeLabel,
     truth,
     explanation,
-    allowedValues,
+    facts,
     fallbackNotice: comparisonNotices[0] ?? null,
   })
 

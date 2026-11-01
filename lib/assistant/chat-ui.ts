@@ -363,7 +363,10 @@ export function hasUsableChart(
   if (!response?.chart) return false
   const data = response.chart_data
   if (!Array.isArray(data) || data.length < 2) return false
-  return data.every((row) => Boolean(row) && typeof row === 'object' && Object.keys(row).length >= 2)
+  if (!data.every((row) => Boolean(row) && typeof row === 'object' && Object.keys(row).length >= 2)) return false
+  // Deux valeurs réellement publiées au minimum : des trous ne font pas une série.
+  const numeric = data.filter((row) => typeof (row as { value?: unknown }).value === 'number').length
+  return numeric >= 2
 }
 
 /**
