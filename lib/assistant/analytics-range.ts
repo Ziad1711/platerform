@@ -81,9 +81,18 @@ export function resolveAssistantBusinessRange(range: AnalyticsRange, now = new D
     return assertBusinessRange({ from, to })
   }
 
-  if (range === 'yesterday') return assertBusinessRange(businessRange('yesterday', null, null, now))
+  if (range === 'today' || range === 'yesterday') {
+    return assertBusinessRange(businessRange(range, null, null, now))
+  }
   if (range === 'month' || range === 'last_month') {
     return assertBusinessRange(businessRange(range, null, null, now))
+  }
+  if (range === 'last_week') {
+    const week = businessRange('week', null, null, now)
+    return assertBusinessRange({ from: addBusinessDays(week.from, -7), to: week.from })
+  }
+  if (range === 'week') {
+    return assertBusinessRange(businessRange('week', null, null, now))
   }
 
   const days = range === '7d' ? 7 : 30

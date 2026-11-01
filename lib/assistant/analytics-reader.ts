@@ -203,7 +203,11 @@ export async function readAssistantKpis(
       storeIds: unique,
       from: range.from,
       to: range.to,
-      includeDirect: false,
+      // Repli direct borné du lecteur V5 (budget `KPI_READER_DIRECT_LIMIT`) :
+      // une journée absente ou sale reste `missing` au-delà du budget, sans
+      // zéro inventé. Désactivé auparavant, ce repli rendait le chatbot plus
+      // incomplet que le dashboard pour la même période.
+      includeDirect: true,
       rpc: KPI_READER_RPC_V2,
     })
 
@@ -246,7 +250,7 @@ export async function readAssistantKpis(
       stores,
       limits: [
         'Montants non additionnés entre devises distinctes.',
-        'Couverture absente ou sale : aucun scan direct de secours.',
+        'Repli direct limité à 7 journées : au-delà, une journée absente reste non couverte.',
         'Le résultat opérationnel (après dépenses) requiert une RPC financière dédiée.',
       ],
       issues: [],

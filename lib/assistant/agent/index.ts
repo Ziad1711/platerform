@@ -2,10 +2,11 @@ import { getAssistantProvider } from '@/lib/assistant/providers'
 import {
   buildStructuredResponseFromContext,
   parseAssistantLlmOutput,
-  sanitizeNarrative,
+  sanitizeExplanation,
   sectionState,
   sectionWarnings,
 } from '@/lib/assistant/response'
+import { collectVerifiedValues, dedupeMessages } from '@/lib/assistant/fact-registry'
 import type { AnalyticsRange, AssistantStructuredResponse } from '@/lib/assistant/types'
 import { buildAgentSystemPrompt, buildAgentUserPrompt } from '@/lib/assistant/prompt'
 import { buildToolPlan, executeAgentTool, type AgentToolName } from '@/lib/assistant/agent/tools'
@@ -14,7 +15,7 @@ import {
   resolveAssistantBusinessRange,
 } from '@/lib/assistant/analytics-reader'
 import { resolveComparisonPeriods } from '@/lib/assistant/intents'
-import type { BusinessRange } from '@/lib/dashboard/business-time'
+import { addBusinessDays, type BusinessRange } from '@/lib/dashboard/business-time'
 import type {
   AnalyticsMetric,
   AnalyticsState,
@@ -87,11 +88,12 @@ function buildServerTruth(toolData: Record<string, unknown>, fallbackCurrency: s
     if (truthMetric) metrics[alias] = truthMetric
   }
 
+  // Les réserves génériques (« données partielles », « accès insuffisant »)
+  // sont portées par le texte de la réponse : les répéter ici produisait des
+  // avertissements doublés. Seules les anomalies et limites précises restent.
   const warnings = [
     ...(envelope.issues ?? []),
     ...(envelope.limits ?? []),
-    ...(envelope.state === 'partial' ? ['Couverture partielle : les valeurs sont affichées avec réserve.'] : []),
-    ...(envelope.state === 'forbidden' ? ['Accès financier insuffisant sur le périmètre demandé.'] : []),
   ]
 
   return {
@@ -118,98 +120,131 @@ const METRIC_LABELS: Record<string, string> = {
   contributionMargin: 'Marge contributive (hors dépenses opérationnelles)',
 }
 
-function formatTruthMetric(metric: TruthMetric, currency: string | null): string {
+function formatTruthMetric(metric: TruthMetric, currency: string | null, withReserve = true): string {
   const value = metric.value ?? '—'
   const suffix = metric.unit === 'percent' ? ' %' : metric.unit === 'decimal' && currency ? ` ${currency}` : ''
-  const reserve = metric.state === 'partial' ? ' (partiel)' : ''
+  // La réserve globale (« couverture incomplète ») suffit : la répéter sur
+  // chaque ligne alourdissait la réponse sans apporter d'information.
+  const reserve = withReserve && metric.state === 'partial' ? ' (partiel)' : ''
   return `${value}${suffix}${reserve}`
 }
 
 
+/** Journée métier `YYYY-MM-DD` formatée sans décalage de fuseau. */
+function formatDayLabel(day: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
+  if (!match) return day
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date)
+}
+
+function capitalize(value: string): string {
+  if (!value) return value
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
 function formatRangeLabel(range: AnalyticsRange): string {
   if (typeof range === 'object' && 'start' in range && 'end' in range) {
-    const start = new Date(range.start).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-    const end = new Date(range.end).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-    return `du ${start} au ${end}`
+    // `end` est une borne exclue : la dernière journée citée est `end − 1`.
+    const lastDay = addBusinessDays(range.end, -1)
+    if (range.start === lastDay) return formatDayLabel(range.start)
+    return `du ${formatDayLabel(range.start)} au ${formatDayLabel(lastDay)}`
   }
   switch (range) {
+    case 'today': return 'aujourd’hui'
     case 'yesterday': return 'hier'
-    case '7d': return 'des 7 derniers jours'
-    case '30d': return 'des 30 derniers jours'
-    case 'month': return 'du mois en cours'
-    case 'last_month': return 'du mois dernier'
-    default: return 'de la période demandée'
+    case 'week': return 'cette semaine'
+    case 'last_week': return 'la semaine dernière'
+    case '7d': return 'les 7 derniers jours'
+    case '30d': return 'les 30 derniers jours'
+    case 'month': return 'ce mois-ci'
+    case 'last_month': return 'le mois dernier'
+    default: return 'la période demandée'
   }
+}
+
+/** Trois phrases suffisent : la réponse reste courte et lisible. */
+function clampSentences(text: string, max: number): string {
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return ''
+  const sentences = trimmed.split(/(?<=[.!?])\s+/u).filter(Boolean)
+  return sentences.length <= max ? trimmed : sentences.slice(0, max).join(' ').trim()
 }
 
 function buildTruthMessageText(input: {
   rangeLabel: string
   truth: ServerTruth
   explanation: string
+  allowedValues: ReadonlyArray<string | null | undefined>
+  fallbackNotice?: string | null
 }): { text: string; rejectedAmounts: string[] } {
-  const { rangeLabel, truth, explanation } = input
+  const { rangeLabel, truth, explanation, allowedValues, fallbackNotice } = input
   const state = truth.envelopeState
+  const scope = capitalize(rangeLabel)
 
-  // Aucune donnée vérifiée : la réponse ne peut porter aucun chiffre.
+  // Un nombre du texte n'est conservé que s'il provient d'un fait vérifié.
+  const clean = sanitizeExplanation(explanation, allowedValues)
+  const qualitative = clampSentences(clean.text, 3)
+
   if (state === 'none') {
-    const clean = sanitizeNarrative(explanation)
-    return {
-      text: clean.text
-        ? `Aucune donnée métier n’a pu être vérifiée pour ${rangeLabel}. ${clean.text}`
-        : `Aucune donnée métier n’a pu être vérifiée pour ${rangeLabel}. Aucun chiffre n’est avancé.`,
-      rejectedAmounts: clean.rejectedAmounts,
-    }
+    const text = fallbackNotice || qualitative || `${scope} : aucune donnée analytique vérifiable n’est disponible pour cette question.`
+    return { text, rejectedAmounts: clean.rejectedAmounts }
   }
 
   if (state === 'forbidden') {
     return {
-      text: `L’accès aux données de ce périmètre est refusé pour ${rangeLabel}. Aucune valeur n’est affichée.`,
+      text: `${scope} : l’accès aux données financières de ce périmètre est refusé. Aucune valeur n’est affichée.`,
       rejectedAmounts: [],
     }
   }
 
   if (state === 'missing' || state === 'unavailable') {
-    const clean = sanitizeNarrative(explanation)
+    const base = `${scope} : les données nécessaires ne sont pas disponibles, aucun chiffre n’est avancé.`
     return {
-      text: clean.text
-        ? `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé. ${clean.text}`
-        : `Les données ne sont pas disponibles pour ${rangeLabel}. Aucun chiffre n’est avancé.`,
+      text: qualitative ? `${base} ${qualitative}` : base,
       rejectedAmounts: clean.rejectedAmounts,
     }
   }
 
-  // Le texte IA ne porte jamais les chiffres : les faits chiffrés sont
-  // restitués exclusivement depuis les références alias/unité/période ci-dessous.
-  const clean = sanitizeNarrative(explanation)
-
   if (state === 'empty') {
     return {
-      text: `Sur la période ${rangeLabel}, aucune commande n’a été enregistrée (zéro réel).${
-        clean.text ? `\n\nInterprétation qualitative : ${clean.text}` : ''
-      }`,
+      text: [`${scope} : aucune commande enregistrée sur la période (zéro réel).`, qualitative]
+        .filter(Boolean)
+        .join('\n\n'),
       rejectedAmounts: clean.rejectedAmounts,
     }
   }
 
   const facts: string[] = []
-  for (const alias of ['totalOrders', 'deliveredOrders', 'revenue', 'adSpend', 'contributionMargin']) {
+  for (const alias of ['revenue', 'totalOrders', 'deliveredOrders', 'deliveryRate', 'adSpend']) {
     const metric = truth.metrics[alias]
     if (!metric || metric.value === null) continue
-    facts.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency)}`)
+    facts.push(`${METRIC_LABELS[alias] ?? alias} : ${formatTruthMetric(metric, truth.currency, state !== 'partial')}`)
   }
 
-  const header = state === 'partial'
-    ? `Données partielles pour ${rangeLabel} (couverture incomplète) :`
-    : `Faits vérifiés pour ${rangeLabel} :`
+  const factsLine = facts.slice(0, 4).join(' · ')
+  const qualitativeHasFigures = /\d/.test(qualitative)
+  const parts: string[] = []
 
-  const factsText = facts.length > 0 ? `${header}\n${facts.map((fact) => `- ${fact}`).join('\n')}` : ''
-  const notice = truth.metrics.contributionMargin?.value != null
-    ? '\n\nLa marge contributive n’est pas un bénéfice net : les dépenses opérationnelles ne sont pas déduites.'
-    : ''
+  if (factsLine && !qualitativeHasFigures) parts.push(`${scope} : ${factsLine}.`)
+  if (qualitative) parts.push(qualitative)
+  if (state === 'partial') {
+    parts.push('Couverture incomplète : les valeurs publiées ne portent que sur les journées disponibles.')
+  }
+  if (truth.metrics.contributionMargin?.value != null) {
+    parts.push('Marge contributive : les dépenses opérationnelles ne sont pas déduites, ce n’est pas un bénéfice net.')
+  }
 
-  const qualitative = clean.text ? `Interprétation qualitative : ${clean.text}` : ''
-  const text = [factsText, qualitative].filter(Boolean).join('\n\n')
-  return { text: `${text}${notice}`, rejectedAmounts: clean.rejectedAmounts }
+  if (parts.length === 0) {
+    parts.push(`${scope} : les données sont disponibles mais aucun indicateur demandé n’a pu être publié.`)
+  }
+
+  return { text: parts.join('\n\n'), rejectedAmounts: clean.rejectedAmounts }
 }
 
 function buildTruthMetricsSummary(truth: ServerTruth): Array<{ label: string; value: string | number }> {
@@ -218,7 +253,7 @@ function buildTruthMetricsSummary(truth: ServerTruth): Array<{ label: string; va
   for (const alias of ['totalOrders', 'deliveredOrders', 'revenue', 'adSpend', 'contributionMargin', 'deliveryRate']) {
     const metric = truth.metrics[alias]
     if (!metric || metric.value === null) continue
-    summary.push({ label: METRIC_LABELS[alias] ?? alias, value: formatTruthMetric(metric, truth.currency) })
+    summary.push({ label: METRIC_LABELS[alias] ?? alias, value: formatTruthMetric(metric, truth.currency, false) })
   }
 
   return summary
@@ -436,20 +471,24 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     : formatRangeLabel(effectiveRange)
 
   const explanation = llmOutput.message_text ?? parsedOutput.rawText
+
+  // Registre des faits : toutes les valeurs réellement publiées par les outils
+  // (KPI, sections, comparaisons, points journaliers), et rien d'autre.
+  const allowedValues = collectVerifiedValues(toolData)
+
   const { text: messageText, rejectedAmounts } = buildTruthMessageText({
     rangeLabel,
     truth,
     explanation,
+    allowedValues,
+    fallbackNotice: comparisonNotices[0] ?? null,
   })
 
   const numericWarnings = rejectedAmounts.length > 0
-    ? [
-      'Réponse IA modifiée : un ou plusieurs chiffres n’étaient pas vérifiés par les outils.',
-      ...rejectedAmounts.slice(0, 3).map((amount) => `Chiffre non vérifié retiré : ${amount}`),
-    ]
+    ? ['Un chiffre absent des données vérifiées a été retiré de la réponse.']
     : []
 
-  const warnings = Array.from(new Set([
+  const warnings = dedupeMessages([
     ...truth.warnings,
     ...sectionNotices,
     ...comparisonNotices,
@@ -457,13 +496,14 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     ...parsedOutput.issues,
     ...numericWarnings,
     ...(sectionStates.includes('unavailable') ? ['Une section demandée n’est pas disponible : elle n’est pas chiffrée.'] : []),
-  ]))
+  ])
 
   const summary = buildTruthMetricsSummary(truth)
   const figuresAvailable = Object.values(truth.metrics).some((metric) => metric.value !== null)
 
   const fallbackStructured = buildStructuredResponseFromContext(intent, messageText, {
     currency: scopeContext.displayCurrency,
+    rangeLabel,
     envelope: toolData.getDashboardKPIs ?? null,
     daily: dailyResult ?? null,
     products: productSection ?? null,

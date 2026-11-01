@@ -84,9 +84,14 @@ export async function POST(request: Request) {
     const reportedSeconds = readSeconds(form.get('durationMs'))
     if (reportedSeconds > MAX_AUDIO_SECONDS + 1) throw new Error('TRANSCRIPTION_TOO_LONG')
 
-    // Durée plafonnée : une valeur client absente ne permet pas de dépasser le
-    // budget, mais elle ne peut pas non plus le contourner.
-    const billedSeconds = Math.min(Math.max(reportedSeconds, 1), MAX_AUDIO_SECONDS)
+    // Durée plafonnée et **jamais sous-estimée** : la valeur client est
+    // confrontée à une estimation basse depuis la taille (≈16 kbit/s), afin
+    // qu'une durée omise ou minimisée ne contourne pas le plafond de coût.
+    const estimatedSeconds = Math.ceil(audio.size / 2_000)
+    const billedSeconds = Math.min(
+      Math.max(reportedSeconds, estimatedSeconds, 1),
+      MAX_AUDIO_SECONDS,
+    )
 
     const budget = reserveTranscriptionBudget(user.id, billedSeconds)
     if (!budget.ok) throw new Error(budget.code)

@@ -260,7 +260,10 @@ export function sanitizeExplanation(
         const canonical = canonicalAmount(variant)
         return canonical !== null && allowed.has(canonical)
       })
-      if (!verified) {
+      // Une année citée (« septembre 2026 ») n'est pas un montant : la retirer
+      // supprimerait une phrase utile sans protéger aucun chiffre financier.
+      const isYear = /^(?:19|20|21)\d{2}$/.test(token.trim())
+      if (!verified && !isYear) {
         offending = true
         rejectedAmounts.push(token.trim())
       }
@@ -292,6 +295,8 @@ export interface ChartResult {
   title: string
   description: string
   type: 'line' | 'bar'
+  /** Unité affichée sur l'axe : jamais une valeur recalculée. */
+  unit: 'currency' | 'count' | 'percent'
   points: ChartSeriesPoint[]
   warnings: string[]
 }
@@ -314,10 +319,14 @@ function singleCurrencyOf(values: Array<string | null>): string | null {
  * Série journalière : seuls les points `complete` ou `empty` sont tracés.
  * Une devise unique est exigée ; un point sans devise exacte est écarté.
  */
+/** Points maximum affichés sur une courbe : au-delà, la période est signalée. */
+const MAX_LINE_POINTS = 31
+
 export function buildDailyChart(
   daily: unknown,
   envelopeCurrency: string | null,
   envelopeStoreId: string | null = '__single_scope__',
+  rangeLabel?: string | null,
 ): ChartResult | null {
   const record = asRecord(daily)
   if (!record) return null
@@ -359,7 +368,12 @@ export function buildDailyChart(
   const stores = new Set(candidates.map((row) => row.storeId))
   if (stores.size !== 1) return null
 
-  const points: ChartSeriesPoint[] = candidates.slice(-14).flatMap((row) => {
+  const shown = candidates.slice(-MAX_LINE_POINTS)
+  if (candidates.length > shown.length) {
+    warnings.push(`Graphique limité aux ${MAX_LINE_POINTS} derniers jours de la période.`)
+  }
+
+  const points: ChartSeriesPoint[] = shown.flatMap((row) => {
     const value = toScaleValue(row.revenue)
     if (value === null) return []
     return [{ label: row.date, value, valueLabel: exactLabel(row.revenue, currency), currency, storeId: row.storeId }]
@@ -367,10 +381,12 @@ export function buildDailyChart(
 
   if (points.length < 2) return null
 
+  const period = rangeLabel ? ` — ${rangeLabel}` : ''
   return {
     title: 'Évolution du chiffre d’affaires',
-    description: `CA réalisé par journée métier (${currency}), points traçables uniquement.`,
+    description: `CA réalisé par journée métier en ${currency}${period}. Seuls les jours publiés sont tracés : aucune interpolation.`,
     type: 'line',
+    unit: 'currency',
     points,
     warnings,
   }
@@ -420,7 +436,7 @@ function buildSectionChart(
 
   if (points.length === 0) return null
 
-  return { title: options.title, description: options.description, type: 'bar', points, warnings: [] }
+  return { title: options.title, description: options.description, type: 'bar', unit: 'currency', points, warnings: [] }
 }
 
 function chartToResponse(chart: ChartResult, currency: string | null): AssistantStructuredResponse {
@@ -429,6 +445,7 @@ function chartToResponse(chart: ChartResult, currency: string | null): Assistant
     message_text: '',
     chart: true,
     chart_type: chart.type,
+    chart_unit: chart.unit,
     chart_title: chart.title,
     chart_description: currency ? `${chart.description} Devise : ${currency}.` : chart.description,
     chart_data: chart.points.map((point) => ({
@@ -497,6 +514,8 @@ export interface StructuredContext {
   daily?: unknown
   products?: unknown
   cities?: unknown
+  /** Libellé de période déjà résolu côté serveur. */
+  rangeLabel?: string
 }
 
 /**
@@ -528,31 +547,43 @@ export function buildStructuredResponseFromContext(
 
   const envelopeStoreIds = envelope ? Object.keys(envelope.access ?? {}) : []
   const envelopeStoreId = envelopeStoreIds.length === 1 ? envelopeStoreIds[0] : null
+  const rangeLabel = typeof record.rangeLabel === 'string' ? record.rangeLabel : null
 
   // Aucun graphique sur une donnée absente ou interdite.
   if (envelope && BLOCKED_STATES.has(envelope.state)) return base
 
-  const daily =
-    intent === 'chart_request' || intent === 'dashboard_summary' || intent === 'performance_request'
-      ? buildDailyChart(record.daily, envelope?.currency ?? null, envelopeStoreId)
-      : null
+  // Sélection déterministe côté serveur : chaque graphique n'est construit
+  // qu'à partir d'un agrégat validé, puis ordonné selon la question posée.
+  const periodSuffix = rangeLabel ? ` — ${rangeLabel}` : ''
 
-  const products = intent === 'top_products' ? buildSectionChart(record.products, {
+  const dailyChart = buildDailyChart(
+    record.daily,
+    envelope?.currency ?? null,
+    envelopeStoreId,
+    rangeLabel,
+  )
+
+  const productChart = buildSectionChart(record.products, {
     title: 'Produits par chiffre d’affaires',
-    description: 'Classement borné : la somme n’est pas le CA total. Aucun profit affiché.',
+    description: `Classement borné${periodSuffix} : la somme des produits affichés n’est pas le CA total.`,
     labelField: 'productName',
-  }) : null
+  })
 
-  const cities =
-    intent === 'performance_request' || intent === 'chart_request'
-      ? buildSectionChart(record.cities, {
-        title: 'Chiffre d’affaires par ville',
-        description: 'CA des lignes livrées, sans marge ni coût.',
-        labelField: 'city',
-      })
-      : null
+  const cityChart = buildSectionChart(record.cities, {
+    title: 'Chiffre d’affaires par ville',
+    description: `Part du CA réalisé par ville${periodSuffix}.`,
+    labelField: 'city',
+  })
 
-  const chart = daily ?? products ?? cities
+  const priority: Partial<Record<AssistantIntent, Array<ChartResult | null>>> = {
+    top_products: [productChart, dailyChart, cityChart],
+    profit_analysis: [productChart, dailyChart],
+    performance_request: [cityChart, dailyChart, productChart],
+    chart_request: [dailyChart, cityChart, productChart],
+    dashboard_summary: [dailyChart, productChart, cityChart],
+  }
+
+  const chart = (priority[intent] ?? [dailyChart]).find((candidate): candidate is ChartResult => Boolean(candidate)) ?? null
   if (!chart) return base
 
   for (const warning of chart.warnings) warnings.add(warning)
