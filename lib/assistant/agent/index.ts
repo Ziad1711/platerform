@@ -681,9 +681,9 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     const label = (labels as Record<string, string>)[item.metric] ?? item.metric
     const currency = ['revenue', 'adSpend', 'contributionMargin'].includes(item.metric) ? ` ${periodResult?.currency ?? ''}` : ''
     return language === 'ar'
-      ? `${label}: ${item.current}${currency} مقابل ${item.baseline}${currency} (الفرق ${item.delta}${currency}).`
-      : `${label} : ${item.current}${currency} contre ${item.baseline}${currency} (écart ${item.delta}${currency}).`
-  }).join(' ')
+      ? `- ${label}: ${item.current}${currency} مقابل ${item.baseline}${currency} (الفرق ${item.delta}${currency}).`
+      : `- ${label} : ${item.current}${currency} contre ${item.baseline}${currency} (écart ${item.delta}${currency}).`
+  }).join('\n')
   const requestedComparison = Boolean(comparisonPair)
   const comparisonIsUsable = Boolean(comparisonPair && periodResult?.kind === 'periods' &&
     comparableDeltas.length > 0)
@@ -693,12 +693,46 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   const verdict = isTodayComparison || revenueDirection === null ? '' : language === 'ar'
     ? revenueDirection === 0 ? 'رقم المعاملات متساوي بين الفترتين.' : `من ناحية رقم المعاملات، ${revenueDirection > 0 ? comparisonPair?.labels.current : comparisonPair?.labels.baseline} أحسن.`
     : revenueDirection === 0 ? 'CA réalisé identique entre les deux périodes.' : `Sur le CA réalisé, ${revenueDirection > 0 ? comparisonPair?.labels.current : comparisonPair?.labels.baseline} est la meilleure période.`
-  // Même quand le modèle cite déjà un montant, conserver la comparaison
-  // complète (deux périodes, écart, verdict) construite côté serveur.
-  // La comparaison est rédigée depuis les écarts contrôlés ; un jugement
-  // libre du modèle pourrait contredire le verdict malgré des chiffres exacts.
+  const ordersDelta = comparableDeltas.find((item) => item.metric === 'orders')
+  const deliveredDelta = comparableDeltas.find((item) => item.metric === 'delivered')
+  const ordersDirection = ordersDelta?.current && ordersDelta.baseline
+    ? compareDecimals(ordersDelta.current, ordersDelta.baseline) : null
+  const deliveredDirection = deliveredDelta?.current && deliveredDelta.baseline
+    ? compareDecimals(deliveredDelta.current, deliveredDelta.baseline) : null
+  const deliveryRates = ordersDelta && deliveredDelta
+    ? {
+        current: percentOfCounts(Number(deliveredDelta.current), Number(ordersDelta.current)),
+        baseline: percentOfCounts(Number(deliveredDelta.baseline), Number(ordersDelta.baseline)),
+      }
+    : null
+  const ratesValid = ordersDelta && deliveredDelta &&
+    [ordersDelta.current, ordersDelta.baseline, deliveredDelta.current, deliveredDelta.baseline]
+      .every((value) => value !== null && Number.isSafeInteger(Number(value))) &&
+    Number(deliveredDelta.current) <= Number(ordersDelta.current) &&
+    Number(deliveredDelta.baseline) <= Number(ordersDelta.baseline)
+  const comparisonRateLine = ratesValid && deliveryRates?.current && deliveryRates.baseline
+    ? (language === 'ar'
+        ? `- نسبة التسليم (الطلبات المؤرخة بكل فترة حسب حالتها الحالية): ${deliveryRates.current} % مقابل ${deliveryRates.baseline} %.`
+        : `- Taux de livraison (cohortes de commandes datées, selon leur statut actuel) : ${deliveryRates.current} % contre ${deliveryRates.baseline} %.`)
+    : ''
+  const divergence = ordersDirection !== null && revenueDirection !== null && ordersDirection * revenueDirection < 0
+    ? (language === 'ar'
+        ? `الطلبات ورقم المعاملات مشاو فجهتين مختلفتين. ${deliveredDirection !== null && deliveredDirection * revenueDirection > 0 ? 'تطور الطلبات المسلّمة كيتماشى مع رقم المعاملات، ولكن ما كيثبتش السبب بوحدو.' : 'خاصنا نفحصو نسبة التسليم وقيمة الطلبات المسلّمة قبل ما نجزموا بالسبب.'}`
+        : `Commandes et CA réalisé évoluent en sens opposé. ${deliveredDirection !== null && deliveredDirection * revenueDirection > 0 ? 'Les livraisons évoluent comme le CA, sans démontrer à elles seules la cause.' : 'Il faut vérifier le taux de livraison et la valeur des commandes livrées avant de conclure sur la cause.'}`)
+    : ''
+  // Ne pas réinjecter le verdict libre du modèle : il peut contredire les
+  // écarts vérifiés même lorsque ses nombres ont passé le filtre de faits.
   const messageText = comparisonIsUsable
-    ? `${comparisonPair?.labels.current ?? (language === 'ar' ? 'الفترة الأولى' : 'Période A')} / ${comparisonPair?.labels.baseline ?? (language === 'ar' ? 'الفترة الثانية' : 'période B')} : ${comparisonText} ${verdict}`
+    ? [
+        `## ${language === 'ar' ? 'مقارنة الفترتين' : 'Comparaison des périodes'}`,
+        `${comparisonPair?.labels.current ?? 'Période A'} / ${comparisonPair?.labels.baseline ?? 'Période B'}`,
+        verdict,
+        `## ${language === 'ar' ? 'الأرقام المتحققة' : 'Chiffres vérifiés'}`,
+        comparisonText,
+        comparisonRateLine,
+        divergence ? `## ${language === 'ar' ? 'شنو نستنتجو؟' : 'Interprétation'}\n${divergence}` : '',
+        divergence ? `## ${language === 'ar' ? 'الخطوة الجاية' : 'Décision'}\n${language === 'ar' ? 'راجع حالات الطلبات وقيمة الطلبات المسلّمة قبل تغيير الميزانية أو طريقة التوصيل.' : 'Vérifier les statuts et la valeur des commandes livrées avant de modifier le budget ou la livraison.'}` : '',
+      ].filter(Boolean).join('\n\n')
     : initialText
   const envelope = readKpiEnvelope(toolData)
   const total = envelope?.metrics.totalOrders?.count ?? null

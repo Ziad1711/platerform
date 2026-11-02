@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   Area,
   AreaChart,
@@ -128,6 +129,7 @@ function seriesNameForUnit(unit?: string): string {
 }
 
 export default function AssistantChartCard({ response }: { response: AssistantStructuredResponse }) {
+  const [selectedPoint, setSelectedPoint] = useState<number | null>(null)
   if (!response.chart || !response.chart_data?.length) {
     return null
   }
@@ -152,13 +154,14 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
   } as const
 
   const isDaily = xKey === 'date'
+  const selected = selectedPoint === null ? null : response.chart_data[selectedPoint]
 
   return (
-    <div dir="ltr" className="mt-3 rounded-xl border bg-card p-3">
+    <div dir="ltr" className="mt-3 min-w-0 max-w-full overflow-hidden rounded-xl border bg-card p-3">
       {response.chart_title ? <h4 dir="auto" className="text-sm font-semibold text-foreground"><bdi dir="auto">{response.chart_title}</bdi></h4> : null}
       {response.chart_description ? <p dir="auto" className="text-xs text-muted-foreground mt-1"><bdi dir="auto">{response.chart_description}</bdi></p> : null}
 
-      <div className="mt-3 h-56 w-full min-h-[14rem] sm:h-64" role="img" aria-label={response.chart_title || 'Graphique'}>
+      <div className="mt-3 h-56 w-full min-w-0 min-h-[14rem] sm:h-64" role="img" aria-label={response.chart_title || 'Graphique'}>
         <ResponsiveContainer width="100%" height="100%">
           {response.chart_type === 'line' ? (
             <LineChart data={response.chart_data} accessibilityLayer>
@@ -187,20 +190,31 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <Legend />
             </PieChart>
           ) : (
-            <BarChart data={response.chart_data} accessibilityLayer>
+            <BarChart data={response.chart_data} accessibilityLayer onClick={(event) => {
+              if (typeof event?.activeTooltipIndex === 'number') setSelectedPoint(event.activeTooltipIndex)
+            }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
-              <Tooltip {...tooltipProps} />
+              <Tooltip {...tooltipProps} wrapperStyle={{ display: 'none' }} />
               <Bar name={seriesName} dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]}>
-                {response.chart_data.length <= 4 ? (
-                  <LabelList dataKey="valueLabel" position="top" className="fill-foreground" fontSize={10} />
-                ) : null}
+                {response.chart_data.length <= 4 ? <LabelList dataKey="value" position="top" className="fill-foreground" fontSize={10} formatter={(value: unknown) => typeof value === 'number' ? compactAxisValue(value) : ''} /> : null}
               </Bar>
             </BarChart>
           )}
         </ResponsiveContainer>
       </div>
+      {response.chart_type === 'bar' ? (
+        <div className="mt-2 space-y-1 text-xs text-foreground" aria-live="polite">
+          {selected ? <div className="rounded-md bg-secondary p-2"><bdi dir="auto">{String(selected[xKey] ?? '')}</bdi> : <bdi dir="ltr">{String(selected.valueLabel ?? selected[valueKey] ?? '')}</bdi></div> : null}
+          {response.chart_data.map((point, index) => (
+            <button key={index} type="button" onClick={() => setSelectedPoint(index)} className="flex w-full min-w-0 items-baseline justify-between gap-2 rounded px-1 py-1 text-left hover:bg-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+              <bdi dir="auto" className="min-w-0 truncate">{String(point[xKey] ?? '')}</bdi>
+              <bdi dir="ltr" className="shrink-0 tabular-nums font-medium">{String(point.valueLabel ?? point[valueKey] ?? '')}</bdi>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

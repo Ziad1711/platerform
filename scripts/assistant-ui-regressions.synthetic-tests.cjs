@@ -323,10 +323,11 @@ check('U23', 'durée jamais fournie par le navigateur', () => {
   return 'WAV serveur'
 })
 
-check('U24', 'aucun déplacement de layout pendant l’enregistrement', () => {
-  assert(PAGE.includes("recording ? 'invisible' : ''"), 'boutons non masqués sans déplacement')
-  assert(PAGE.includes('relative flex-1 rounded-lg border'), 'conteneur du champ non positionné')
-  return 'largeur conservée'
+check('U24', 'onde sonore : champ élargi pendant l’enregistrement', () => {
+  assert(PAGE.includes("recording ? 'hidden' : ''"), 'boutons externes occupent encore la largeur de l’onde')
+  assert(PAGE.includes('relative min-w-0 flex-1 rounded-lg border'), 'champ sans largeur flexible')
+  assert(PAGE.includes('h-8 min-w-0 flex-1 text-primary'), 'onde non flexible')
+  return 'onde élargie sans boutons externes'
 })
 
 check('U25', 'enregistrement aux couleurs Jisra, sans rouge décoratif', () => {

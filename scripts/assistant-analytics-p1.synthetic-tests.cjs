@@ -1310,6 +1310,27 @@ async function main() {
     return 'comparaison publiée sans KPI inventé'
   })
 
+  const divergenceReply = await runAgent(agentMocks({
+    providerText: JSON.stringify({ message_text: 'Le CA est meilleur en 2026 : 999999 MAD.' }),
+    toolDataByTool: { order: ['getStoreComparison'], getStoreComparison: {
+      kind: 'periods', state: 'complete', currency: 'MAD',
+      ranges: intentsModule.resolveComparisonPeriods('octobre 2025 ou octobre 2026'),
+      deltas: [
+        { metric: 'orders', current: '100', baseline: '120', delta: '-20', state: 'complete' },
+        { metric: 'delivered', current: '80', baseline: '60', delta: '20', state: 'complete' },
+        { metric: 'revenue', current: '8000', baseline: '6000', delta: '2000', state: 'complete' },
+      ],
+    } },
+  }), { intent: 'period_comparison', userMessage: 'octobre 2025 ou octobre 2026', language: 'ar' })
+  check('D-03e', 'Comparaison octobre darija : ratios calculés, structure et aucun chiffre IA inventé', () => {
+    const text = divergenceReply.structuredResponse.message_text
+    assert(text.includes('##') && text.includes('\n- '), 'sections et puces manquantes')
+    assert(text.includes('80 %') && text.includes('50 %'), 'taux de livraison calculés incorrects')
+    assert(text.includes('الطلبات ورقم المعاملات'), 'divergence commandes/CA absente')
+    assert(!text.includes('999999'), 'montant inventé conservé')
+    return 'comparaison octobre structurée et sans chiffre libre'
+  })
+
   check('D-08b', 'Aucune donnée inventée sur une journée absente', () => {
     const facts = factRegistry.collectVerifiedFacts({ getDailyRevenueTrend: {
       kind: 'daily', state: 'partial', days: [{ storeId: 'store', date: '2026-10-01', currency: 'MAD', state: 'missing', revenue: '999' }],

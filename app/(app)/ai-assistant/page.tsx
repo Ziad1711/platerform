@@ -96,7 +96,7 @@ interface WalletResponse {
  * Garder ces séquences en `dir="ltr"` évite que les chiffres ne s'inversent
  * dans une phrase arabe ou mixte.
  */
-const BIDI_LTR_RUN = /(\d[\d\s\u00A0\u202F.,]*%?|[€$£]\s?\d[\d\s\u00A0\u202F.,]*)/g
+const BIDI_LTR_RUN = /((?:[€$£]\s?)?\d+(?:(?:[-/.,]\d+)|(?:[ \u00a0\u202f]\d{3}))*(?:[ \u00a0\u202f]?(?:MAD|DHS|DH|EUR|USD|%))?)/g
 
 /** Segments bidi : les groupes capturés (impairs) sont des îlots LTR. */
 function renderBidiText(text: string) {
@@ -106,7 +106,7 @@ function renderBidiText(text: string) {
   return parts.map((part, index) => {
     if (!part) return null
     return index % 2 === 1 ? (
-      <bdi key={index} dir="ltr" className="inline-block whitespace-nowrap">
+      <bdi key={index} dir="ltr" className="[unicode-bidi:isolate]">
         {part}
       </bdi>
     ) : (
@@ -209,9 +209,9 @@ function renderMessageContent(content: string) {
     if (/^\d+[.)]\s+/.test(trimmed)) {
       const marker = /^\d+/.exec(trimmed)?.[0] ?? ''
       nodes.push(
-        <div key={index} className="flex gap-2">
-          <span className="shrink-0 tabular-nums text-muted-foreground">{marker}.</span>
-          <span>{renderInlineMarkdown(trimmed.replace(/^\d+[.)]\s+/, ''))}</span>
+        <div key={index} dir="auto" className="flex min-w-0 gap-2">
+          <span dir="ltr" className="shrink-0 tabular-nums text-muted-foreground">{marker}.</span>
+          <span dir="auto" className="min-w-0">{renderInlineMarkdown(trimmed.replace(/^\d+[.)]\s+/, ''))}</span>
         </div>
       )
       continue
@@ -219,9 +219,9 @@ function renderMessageContent(content: string) {
 
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
       nodes.push(
-        <div key={index} className="flex gap-2">
-          <span>•</span>
-          <span>{renderInlineMarkdown(trimmed.slice(2))}</span>
+        <div key={index} dir="auto" className="flex min-w-0 gap-2">
+          <span className="shrink-0">•</span>
+          <span dir="auto" className="min-w-0">{renderInlineMarkdown(trimmed.slice(2))}</span>
         </div>
       )
       continue
@@ -233,7 +233,7 @@ function renderMessageContent(content: string) {
     }
 
     nodes.push(
-      <div key={index}>
+      <div key={index} dir="auto">
         {renderInlineMarkdown(line)}
       </div>
     )
@@ -1434,7 +1434,7 @@ export default function AssistantIAPage() {
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[92%] break-words rounded-2xl px-3 py-2.5 text-sm leading-6 border sm:max-w-[85%] sm:px-4 ${
+                  className={`min-w-0 max-w-[92%] break-words rounded-2xl px-3 py-2.5 text-sm leading-6 border sm:max-w-[85%] sm:px-4 ${
                     msg.role === 'user'
                       ? 'bg-primary text-white border-blue-600'
                       : 'bg-card text-foreground border-border'
@@ -1522,7 +1522,7 @@ export default function AssistantIAPage() {
 
           <div className="flex items-end gap-2">
             <div
-              className={`relative flex-1 rounded-lg border bg-card transition-colors focus-within:ring-2 focus-within:ring-primary ${
+              className={`relative min-w-0 flex-1 rounded-lg border bg-card transition-colors focus-within:ring-2 focus-within:ring-primary ${
                 recording ? 'border-primary/40 bg-primary/[0.04]' : ''
               }`}
             >
@@ -1616,8 +1616,8 @@ export default function AssistantIAPage() {
               type="button"
               onClick={startRecording}
               disabled={recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-              className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
-                recording ? 'invisible' : ''
+              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
+                recording ? 'hidden' : ''
               }`}
               title="Dicter un message"
               aria-label="Dicter un message"
@@ -1627,8 +1627,8 @@ export default function AssistantIAPage() {
             <button
               onClick={() => handleSend(input)}
               disabled={!input.trim() || recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-              className={`inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
-                recording ? 'invisible' : ''
+              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
+                recording ? 'hidden' : ''
               }`}
             >
               <Send className="w-4 h-4" />
