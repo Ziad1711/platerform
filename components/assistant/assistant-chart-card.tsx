@@ -7,6 +7,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -86,6 +87,38 @@ function formatDateTooltip(value: unknown): string {
   return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1] ?? match[2]} ${match[1]}`
 }
 
+/**
+ * Infobulle compacte et accessible : taille réduite, jamais plus large que
+ * l'écran, sans anneau de focus, pour ne pas recouvrir les barres sur mobile.
+ */
+function CompactTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean
+  payload?: Array<{ value?: unknown; name?: unknown; payload?: Record<string, unknown> }>
+  label?: unknown
+}) {
+  if (!active || !payload || payload.length === 0) return null
+  const title = formatDateTooltip(label)
+  return (
+    <div className="max-w-[16rem] rounded-md border border-border bg-background/95 px-2.5 py-1.5 text-xs shadow-sm">
+      {title ? <div className="mb-0.5 font-medium text-muted-foreground">{title}</div> : null}
+      {payload.map((entry, index) => (
+        <div key={index} className="flex items-baseline justify-between gap-2 text-foreground">
+          {typeof entry.name === 'string' && entry.name ? <span className="text-muted-foreground">{entry.name}</span> : null}
+          <span className="font-semibold tabular-nums">
+            {renderTooltipValue(entry.value, entry.name, {
+              payload: entry.payload as { valueLabel?: unknown; currency?: unknown } | undefined,
+            })}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** Nom de série lisible pour l'infobulle, à partir de l'unité du graphique. */
 function seriesNameForUnit(unit?: string): string {
   if (unit === 'currency') return 'Chiffre d’affaires'
@@ -113,9 +146,9 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
   } as const
 
   const tooltipProps = {
-    formatter: renderTooltipValue,
-    labelFormatter: formatDateTooltip,
+    content: <CompactTooltip />,
     cursor: { stroke: '#94a3b8', strokeDasharray: '3 3' },
+    wrapperStyle: { outline: 'none', zIndex: 30 },
   } as const
 
   const isDaily = xKey === 'date'
@@ -150,7 +183,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
                   <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip formatter={renderTooltipValue} />
+              <Tooltip content={<CompactTooltip />} wrapperStyle={{ outline: 'none', zIndex: 30 }} />
               <Legend />
             </PieChart>
           ) : (
@@ -159,7 +192,11 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
               <Tooltip {...tooltipProps} />
-              <Bar name={seriesName} dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]} />
+              <Bar name={seriesName} dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]}>
+                {response.chart_data.length <= 4 ? (
+                  <LabelList dataKey="valueLabel" position="top" className="fill-foreground" fontSize={10} />
+                ) : null}
+              </Bar>
             </BarChart>
           )}
         </ResponsiveContainer>

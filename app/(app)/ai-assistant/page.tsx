@@ -90,6 +90,31 @@ interface WalletResponse {
   remainingCredits: number
 }
 
+/**
+ * Îlots LTR isolés du contexte RTL : chiffres (séparateurs de milliers et
+ * décimales), pourcentages et montants préfixés par un symbole monétaire.
+ * Garder ces séquences en `dir="ltr"` évite que les chiffres ne s'inversent
+ * dans une phrase arabe ou mixte.
+ */
+const BIDI_LTR_RUN = /(\d[\d\s\u00A0\u202F.,]*%?|[€$£]\s?\d[\d\s\u00A0\u202F.,]*)/g
+
+/** Segments bidi : les groupes capturés (impairs) sont des îlots LTR. */
+function renderBidiText(text: string) {
+  const parts = text.split(BIDI_LTR_RUN)
+  if (parts.length === 1) return <bdi dir="auto">{text}</bdi>
+
+  return parts.map((part, index) => {
+    if (!part) return null
+    return index % 2 === 1 ? (
+      <bdi key={index} dir="ltr" className="inline-block whitespace-nowrap">
+        {part}
+      </bdi>
+    ) : (
+      <bdi key={index} dir="auto">{part}</bdi>
+    )
+  })
+}
+
 function renderInlineMarkdown(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g)
 
@@ -97,12 +122,12 @@ function renderInlineMarkdown(text: string) {
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
         <strong key={index} className="font-semibold">
-          <bdi dir="auto">{part.slice(2, -2)}</bdi>
+          {renderBidiText(part.slice(2, -2))}
         </strong>
       )
     }
 
-    return <bdi key={index} dir="auto">{part}</bdi>
+    return <span key={index}>{renderBidiText(part)}</span>
   })
 }
 
@@ -166,6 +191,29 @@ function renderMessageContent(content: string) {
       )
 
       index = nextIndex - 1
+      continue
+    }
+
+    if (/^#{1,3}\s+/.test(trimmed)) {
+      const level = /^#+/.exec(trimmed)?.[0].length ?? 2
+      const headingText = trimmed.replace(/^#{1,3}\s+/, '')
+      const headingClass = level === 1 ? 'text-base font-bold' : 'text-sm font-semibold'
+      nodes.push(
+        <div key={index} dir="auto" className={`mt-2 first:mt-0 ${headingClass}`}>
+          {renderInlineMarkdown(headingText)}
+        </div>
+      )
+      continue
+    }
+
+    if (/^\d+[.)]\s+/.test(trimmed)) {
+      const marker = /^\d+/.exec(trimmed)?.[0] ?? ''
+      nodes.push(
+        <div key={index} className="flex gap-2">
+          <span className="shrink-0 tabular-nums text-muted-foreground">{marker}.</span>
+          <span>{renderInlineMarkdown(trimmed.replace(/^\d+[.)]\s+/, ''))}</span>
+        </div>
+      )
       continue
     }
 

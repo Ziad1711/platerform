@@ -757,7 +757,7 @@ async function main() {
   check('A06', 'Tooltip exact lu depuis item.payload.valueLabel', () => {
     const source = fs.readFileSync(path.join(ROOT, 'components/assistant/assistant-chart-card.tsx'), 'utf8')
     assert(source.includes('item?.payload'), 'payload Recharts non lu')
-    assert(source.includes('<Tooltip formatter={renderTooltipValue}'), 'formatter non raccordé')
+    assert(source.includes('CompactTooltip') && source.includes('renderTooltipValue(entry.value'), 'infobulle compacte non raccordée')
     return 'payload.valueLabel'
   })
 

@@ -359,7 +359,10 @@ check('U28', 'sélection ferme le drawer, création accessible', () => {
 })
 
 check('U29', 'hauteur mobile, safe area et scroll unique', () => {
-  assert(PAGE.includes('visualViewport'), 'hauteur clavier non gérée')
+  const rootLayout = fs.readFileSync(path.join(ROOT, 'app/layout.tsx'), 'utf8')
+  const appLayout = fs.readFileSync(path.join(ROOT, 'app/(app)/layout-client.tsx'), 'utf8')
+  assert(rootLayout.includes('interactiveWidget') && rootLayout.includes('resizes-content'), 'clavier virtuel non géré (interactive-widget)')
+  assert(appLayout.includes('h-dvh'), 'hauteur viewport dynamique absente')
   assert(PAGE.includes('env(safe-area-inset-bottom)'), 'safe area absente')
   assert(PAGE.includes('overscroll-contain'), 'scroll contenu absent')
   assert(PAGE.includes('overflow-hidden'), 'débordement page non bloqué')
