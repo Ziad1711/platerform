@@ -10,6 +10,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const vm = require('node:vm')
+const React = require('react')
+const { renderToStaticMarkup } = require('react-dom/server')
 
 const ROOT = process.cwd()
 
@@ -395,6 +397,33 @@ check('U31', 'RTL : contenus en dir auto, graphiques en LTR', () => {
   const chart = fs.readFileSync('components/assistant/assistant-chart-card.tsx', 'utf8')
   assert(chart.includes('dir="ltr"'), 'graphique sans direction LTR')
   return 'bidirectionnel'
+})
+
+check('U34', 'DOM réel : RTL, chiffres isolés, tableau vérifié et français non inversé', () => {
+  const loadComponent = (filename) => {
+    const file = path.join(ROOT, 'components/assistant', filename)
+    const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
+    } }).outputText
+    const m = { exports: {} }
+    vm.runInThisContext(`(function(require,module,exports){${js}\n})`, { filename: file })((id) => id === 'react/jsx-runtime' ? require(id) : id === 'react' ? React : {}, m, m.exports)
+    return m.exports
+  }
+  const message = loadComponent('assistant-message-content.tsx')
+  const table = loadComponent('assistant-comparison-table.tsx')
+  const ar = '## المقارنة\n- رقم المعاملات 1 250 MAD (2025-10-01)\n1. النسبة -12.5% و Boutique Atlas'
+  assertEqual(message.messageDirection(ar), 'rtl', 'darija mixte')
+  assertEqual(message.messageDirection('## Analyse\nCA 1 250 MAD'), 'ltr', 'français')
+  const html = renderToStaticMarkup(React.createElement(message.default, { content: ar, direction: 'rtl' }))
+  assert(html.includes('dir="rtl"') && html.includes('lang="ar"') && html.includes('<h3'), 'structure RTL non rendue')
+  assert(html.includes('<bdi dir="ltr">1 250 MAD</bdi>') && html.includes('<bdi dir="ltr">-12.5%</bdi>'), 'montants/taux non isolés')
+  assert(html.includes('Boutique Atlas') && !html.includes('dangerouslySetInnerHTML'), 'nom boutique altéré ou HTML brut')
+  const comparison = renderToStaticMarkup(React.createElement(table.default, {
+    direction: 'rtl', table: { currentLabel: 'أكتوبر 2025', baselineLabel: 'أكتوبر 2026', rows: [{ label: 'الطلبات', current: '100', baseline: '120', delta: '-20' }] },
+  }))
+  assert(comparison.includes('<table dir="rtl"') && comparison.includes('<bdi dir="ltr">-20</bdi>'), 'tableau RTL ou écart incorrect')
+  assert(comparison.includes('overflow-x-auto') && comparison.includes('tabindex="0"'), 'tableau mobile non défilable')
+  return 'React SSR : titres, listes, montants et tableau'
 })
 
 check('U32', 'drawer au-dessus du bouton flottant SaaS', () => {

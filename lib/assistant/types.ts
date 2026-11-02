@@ -56,6 +56,8 @@ export type AssistantChartType = 'line' | 'bar' | 'pie' | 'area'
 
 export interface AssistantStructuredResponse {
   message_text: string
+  /** Valeurs publiées par le moteur de comparaison, jamais extraites du texte IA. */
+  comparison_table?: { currentLabel: string; baselineLabel: string; rows: Array<{ label: string; current: string; baseline: string; delta: string }> }
   conversation_title?: string
   suggestions?: string[]
   activity_steps?: Array<{ label: string; detail?: string }>

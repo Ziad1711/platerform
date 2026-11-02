@@ -68,6 +68,8 @@ Tu dois répondre UNIQUEMENT avec un objet JSON valide (sans texte avant ni apr�
 }
 
 Règles pour message_text :
+- Choisis le format selon la demande : phrase courte pour un KPI, titres et paragraphes pour un diagnostic, puces pour les actions ; tableau Markdown simple seulement si plusieurs dimensions comparables et sans graphique identique. N'envoie jamais de HTML.
+- En arabe/darija, conserve des paragraphes courts et des nombres/montants isolables, sans accumuler plusieurs mesures dans une phrase.
 - Réponds d'abord à la question posée, sans préambule ni rappel de méthode
 - Question KPI : une réponse courte. Analyse générale ou stratégique : verdict, forces, faiblesses, hypothèses distinctes des faits et actions priorisées ; développe seulement les dimensions réellement documentées.
 - Utilise UNIQUEMENT les valeurs exactes fournies (texte décimal, jamais arrondi, jamais recalculé)

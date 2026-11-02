@@ -1304,7 +1304,9 @@ async function main() {
   check('D-03d', 'Réponse finale : deux périodes et verdict basés sur le CA', () => {
     const text = comparisonReply.structuredResponse.message_text
     assert(text.includes('septembre 2025') && text.includes('septembre 2026'), 'périodes absentes')
-    assert(text.includes('1200 MAD') && text.includes('900 MAD') && text.includes('300 MAD'), 'écart perdu')
+    const table = comparisonReply.structuredResponse.comparison_table
+    assert(table?.rows.some((row) => row.current === '1200 MAD' && row.baseline === '900 MAD' && row.delta === '300 MAD'), 'écart perdu dans le tableau')
+    assert(!comparisonReply.structuredResponse.chart, 'graphique comparatif redondant')
     assert(text.includes('septembre 2025 est la meilleure période'), 'verdict CA erroné')
     assert(!text.includes('999999'), 'valeur non vérifiée')
     return 'comparaison publiée sans KPI inventé'
@@ -1324,8 +1326,9 @@ async function main() {
   }), { intent: 'period_comparison', userMessage: 'octobre 2025 ou octobre 2026', language: 'ar' })
   check('D-03e', 'Comparaison octobre darija : ratios calculés, structure et aucun chiffre IA inventé', () => {
     const text = divergenceReply.structuredResponse.message_text
-    assert(text.includes('##') && text.includes('\n- '), 'sections et puces manquantes')
-    assert(text.includes('80 %') && text.includes('50 %'), 'taux de livraison calculés incorrects')
+    assert(text.includes('##'), 'sections manquantes')
+    assert(divergenceReply.structuredResponse.comparison_table?.rows.length === 4, 'tableau comparatif absent')
+    assert(divergenceReply.structuredResponse.comparison_table.rows.some((row) => row.current === '80 %' && row.baseline === '50 %'), 'taux de livraison calculés incorrects')
     assert(text.includes('الطلبات ورقم المعاملات'), 'divergence commandes/CA absente')
     assert(!text.includes('999999'), 'montant inventé conservé')
     return 'comparaison octobre structurée et sans chiffre libre'

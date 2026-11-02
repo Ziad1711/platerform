@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Loader2,
@@ -19,6 +19,8 @@ import {
   X,
 } from 'lucide-react'
 import AssistantChartCard from '@/components/assistant/assistant-chart-card'
+import AssistantMessageContent, { messageDirection } from '@/components/assistant/assistant-message-content'
+import AssistantComparisonTable from '@/components/assistant/assistant-comparison-table'
 import AssistantWarnings from '@/components/assistant/assistant-warnings'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { useStore } from '@/lib/store-context'
@@ -88,158 +90,6 @@ interface WalletResponse {
   monthlyCredits: number
   creditsUsed: number
   remainingCredits: number
-}
-
-/**
- * Îlots LTR isolés du contexte RTL : chiffres (séparateurs de milliers et
- * décimales), pourcentages et montants préfixés par un symbole monétaire.
- * Garder ces séquences en `dir="ltr"` évite que les chiffres ne s'inversent
- * dans une phrase arabe ou mixte.
- */
-const BIDI_LTR_RUN = /((?:[€$£]\s?)?\d+(?:(?:[-/.,]\d+)|(?:[ \u00a0\u202f]\d{3}))*(?:[ \u00a0\u202f]?(?:MAD|DHS|DH|EUR|USD|%))?)/g
-
-/** Segments bidi : les groupes capturés (impairs) sont des îlots LTR. */
-function renderBidiText(text: string) {
-  const parts = text.split(BIDI_LTR_RUN)
-  if (parts.length === 1) return <bdi dir="auto">{text}</bdi>
-
-  return parts.map((part, index) => {
-    if (!part) return null
-    return index % 2 === 1 ? (
-      <bdi key={index} dir="ltr" className="[unicode-bidi:isolate]">
-        {part}
-      </bdi>
-    ) : (
-      <bdi key={index} dir="auto">{part}</bdi>
-    )
-  })
-}
-
-function renderInlineMarkdown(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-
-  return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return (
-        <strong key={index} className="font-semibold">
-          {renderBidiText(part.slice(2, -2))}
-        </strong>
-      )
-    }
-
-    return <span key={index}>{renderBidiText(part)}</span>
-  })
-}
-
-function isMarkdownSeparatorLine(line: string) {
-  return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line)
-}
-
-function parseTableCells(line: string) {
-  return line
-    .split('|')
-    .map((cell) => cell.trim())
-    .filter((cell, index, arr) => !(arr.length > 1 && cell === '' && (index === 0 || index === arr.length - 1)))
-}
-
-function renderMessageContent(content: string) {
-  const lines = content.split('\n')
-  const nodes: ReactNode[] = []
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]
-    const trimmed = line.trim()
-
-    const hasPotentialTable = trimmed.includes('|') && index + 1 < lines.length && isMarkdownSeparatorLine(lines[index + 1])
-
-    if (hasPotentialTable) {
-      const headerCells = parseTableCells(lines[index])
-      let nextIndex = index + 2
-      const rows: string[][] = []
-
-      while (nextIndex < lines.length && lines[nextIndex].includes('|')) {
-        const rowCells = parseTableCells(lines[nextIndex])
-        if (rowCells.length > 0) rows.push(rowCells)
-        nextIndex += 1
-      }
-
-      nodes.push(
-        <div key={`table-${index}`} dir="auto" className="mt-2 overflow-x-auto rounded-lg border border-border bg-card/90">
-          <table className="min-w-full text-xs">
-            <thead className="bg-secondary">
-              <tr>
-                {headerCells.map((cell, cellIndex) => (
-                  <th key={cellIndex} className="px-2 py-1.5 text-left font-semibold text-foreground border-b border-border">
-                    {renderInlineMarkdown(cell)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="odd:bg-card even:bg-secondary/60">
-                  {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="px-2 py-1.5 border-b border-gray-100 text-foreground">
-                      {renderInlineMarkdown(cell)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )
-
-      index = nextIndex - 1
-      continue
-    }
-
-    if (/^#{1,3}\s+/.test(trimmed)) {
-      const level = /^#+/.exec(trimmed)?.[0].length ?? 2
-      const headingText = trimmed.replace(/^#{1,3}\s+/, '')
-      const headingClass = level === 1 ? 'text-base font-bold' : 'text-sm font-semibold'
-      nodes.push(
-        <div key={index} dir="auto" className={`mt-2 first:mt-0 ${headingClass}`}>
-          {renderInlineMarkdown(headingText)}
-        </div>
-      )
-      continue
-    }
-
-    if (/^\d+[.)]\s+/.test(trimmed)) {
-      const marker = /^\d+/.exec(trimmed)?.[0] ?? ''
-      nodes.push(
-        <div key={index} dir="auto" className="flex min-w-0 gap-2">
-          <span dir="ltr" className="shrink-0 tabular-nums text-muted-foreground">{marker}.</span>
-          <span dir="auto" className="min-w-0">{renderInlineMarkdown(trimmed.replace(/^\d+[.)]\s+/, ''))}</span>
-        </div>
-      )
-      continue
-    }
-
-    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-      nodes.push(
-        <div key={index} dir="auto" className="flex min-w-0 gap-2">
-          <span className="shrink-0">•</span>
-          <span dir="auto" className="min-w-0">{renderInlineMarkdown(trimmed.slice(2))}</span>
-        </div>
-      )
-      continue
-    }
-
-    if (trimmed === '') {
-      nodes.push(<div key={index} className="h-2" />)
-      continue
-    }
-
-    nodes.push(
-      <div key={index} dir="auto">
-        {renderInlineMarkdown(line)}
-      </div>
-    )
-  }
-
-  return nodes
 }
 
 const SUGGESTIONS = [
@@ -1431,7 +1281,7 @@ export default function AssistantIAPage() {
                   else assistantMessageRefs.current.delete(msg.id)
                 }}
                 data-message-role={msg.role}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${msg.role === 'user' || messageDirection(msg.content) === 'rtl' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
                   className={`min-w-0 max-w-[92%] break-words rounded-2xl px-3 py-2.5 text-sm leading-6 border sm:max-w-[85%] sm:px-4 ${
@@ -1440,14 +1290,17 @@ export default function AssistantIAPage() {
                       : 'bg-card text-foreground border-border'
                   }`}
                 >
-                  <div dir="auto" className="space-y-1 text-start">{renderMessageContent(msg.content)}</div>
+                  <AssistantMessageContent content={msg.content} direction={messageDirection(msg.content)} />
+                  {msg.role === 'assistant' && msg.metadata?.structured_response?.comparison_table ? (
+                    <AssistantComparisonTable table={msg.metadata.structured_response.comparison_table} direction={messageDirection(msg.content)} />
+                  ) : null}
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.metrics_summary?.length ? (
-                    <div dir="ltr" className="mt-2.5 flex flex-wrap gap-1.5">
+                    <div dir={messageDirection(msg.content)} className="mt-2.5 flex flex-wrap gap-1.5">
                       {sanitizeMetricsSummary(msg.metadata.structured_response.metrics_summary).map((metric) => (
                         <span
                           key={`${metric.label}-${metric.value}`}
-                          className="inline-flex items-baseline gap-1 rounded-md border border-border bg-secondary/70 px-2 py-1"
+                          className="inline-flex min-w-0 items-baseline gap-1 rounded-md border border-border bg-secondary/70 px-2 py-1"
                         >
                           <bdi dir="auto" className="text-[10px] uppercase tracking-wide text-muted-foreground">{metric.label}</bdi>
                           <bdi dir="ltr" className="text-[12px] font-semibold text-foreground">{metric.value}</bdi>
@@ -1459,7 +1312,7 @@ export default function AssistantIAPage() {
                   {msg.role === 'assistant' &&
                   msg.metadata?.structured_response &&
                   hasUsableChart(msg.metadata.structured_response) ? (
-                    <AssistantChartCard response={msg.metadata.structured_response} />
+                    <AssistantChartCard response={msg.metadata.structured_response} language={messageDirection(msg.content) === 'rtl' ? 'ar' : 'fr'} />
                   ) : null}
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.warnings?.length ? (
@@ -1467,13 +1320,14 @@ export default function AssistantIAPage() {
                   ) : null}
 
                   {msg.role === 'assistant' && msg.metadata?.structured_response?.suggestions?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div dir={messageDirection(msg.content)} className="mt-3 flex flex-wrap gap-2">
                       {msg.metadata.structured_response.suggestions.slice(0, 5).map((suggestion) => (
                         <button
                           key={suggestion}
                           onClick={() => handleSend(suggestion)}
                           disabled={isAssistantBlocked || sendMessageMutation.isPending}
-                          className="text-[11px] px-2.5 py-1 rounded-full border bg-card hover:bg-secondary"
+                          dir="auto"
+                          className="text-start text-[11px] px-2.5 py-1 rounded-full border bg-card hover:bg-secondary"
                         >
                           {suggestion}
                         </button>

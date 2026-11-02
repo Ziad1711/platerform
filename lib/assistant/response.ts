@@ -480,6 +480,7 @@ export function buildDailyChart(
   envelopeCurrency: string | null,
   envelopeStoreId: string | null = '__single_scope__',
   rangeLabel?: string | null,
+  language: 'fr' | 'ar' = 'fr',
 ): ChartResult | null {
   const record = asRecord(daily)
   if (!record) return null
@@ -563,8 +564,8 @@ export function buildDailyChart(
 
   const period = rangeLabel ? ` — ${rangeLabel}` : ''
   return {
-    title: 'Évolution du chiffre d’affaires',
-    description: `CA réalisé par journée métier en ${currency}${period}. Les journées sans donnée interrompent la courbe.`,
+    title: language === 'ar' ? 'تطور رقم المعاملات' : 'Évolution du chiffre d’affaires',
+    description: language === 'ar' ? `رقم المعاملات حسب نهار الطلب بعملة ${currency}${period}. الأيام بلا معطيات كتقطع المنحنى.` : `CA réalisé par journée métier en ${currency}${period}. Les journées sans donnée interrompent la courbe.`,
     type: 'line',
     unit: 'currency',
     points,
@@ -636,6 +637,7 @@ export function buildComparisonChart(
   comparison: unknown,
   labels: { current?: string; baseline?: string } | null,
   envelopeCurrency: string | null,
+  language: 'fr' | 'ar' = 'fr',
 ): ChartResult | null {
   const record = asRecord(comparison)
   if (!record || record.kind !== 'periods') return null
@@ -665,8 +667,8 @@ export function buildComparisonChart(
     const unitCurrency = metric.unit === 'currency' ? currency : null
 
     return {
-      title: `Comparaison — ${metric.label}`,
-      description: `${currentLabel} comparé à ${baselineLabel}. Barres issues des valeurs vérifiées de chaque période.`,
+      title: language === 'ar' ? `مقارنة — ${metric.key === 'revenue' ? 'رقم المعاملات' : metric.key === 'orders' ? 'الطلبات' : metric.key === 'delivered' ? 'الطلبات المسلّمة' : 'مصاريف الإعلانات'}` : `Comparaison — ${metric.label}`,
+      description: language === 'ar' ? `${currentLabel} مقارنة مع ${baselineLabel}. القيم متحققة لكل فترة.` : `${currentLabel} comparé à ${baselineLabel}. Barres issues des valeurs vérifiées de chaque période.`,
       type: 'bar',
       unit: metric.unit,
       points: [
@@ -692,7 +694,7 @@ export function buildComparisonChart(
   return null
 }
 
-function chartToResponse(chart: ChartResult, currency: string | null): AssistantStructuredResponse {
+function chartToResponse(chart: ChartResult, currency: string | null, language: 'fr' | 'ar' = 'fr'): AssistantStructuredResponse {
   const xKey = chart.type === 'line' ? 'date' : 'name'
   return {
     message_text: '',
@@ -700,7 +702,7 @@ function chartToResponse(chart: ChartResult, currency: string | null): Assistant
     chart_type: chart.type,
     chart_unit: chart.unit,
     chart_title: chart.title,
-    chart_description: currency ? `${chart.description} Devise : ${currency}.` : chart.description,
+    chart_description: currency ? `${chart.description} ${language === 'ar' ? 'العملة' : 'Devise'} : ${currency}.` : chart.description,
     chart_data: chart.points.map((point) => ({
       [xKey]: point.label,
       value: point.value,
@@ -783,6 +785,7 @@ export function buildStructuredResponseFromContext(
   context: unknown,
 ): AssistantStructuredResponse {
   const record = asRecord(context) ?? {}
+  const language: 'fr' | 'ar' = record.language === 'ar' ? 'ar' : 'fr'
   const envelope = isEnvelope(record.envelope) ? record.envelope : null
   const currency = typeof record.currency === 'string' ? record.currency : envelope?.currency ?? null
 
@@ -816,17 +819,18 @@ export function buildStructuredResponseFromContext(
     envelope?.currency ?? null,
     envelopeStoreId,
     rangeLabel,
+    language,
   )
 
   const productChart = buildSectionChart(record.products, {
-    title: 'Produits par chiffre d’affaires',
-    description: `Classement borné${periodSuffix} : la somme des produits affichés n’est pas le CA total.`,
+    title: language === 'ar' ? 'المنتجات حسب رقم المعاملات' : 'Produits par chiffre d’affaires',
+    description: language === 'ar' ? `ترتيب محدود${periodSuffix} : مجموع المنتجات المعروضة ماشي رقم المعاملات الكلي.` : `Classement borné${periodSuffix} : la somme des produits affichés n’est pas le CA total.`,
     labelField: 'productName',
   })
 
   const cityChart = buildSectionChart(record.cities, {
-    title: 'Chiffre d’affaires par ville',
-    description: `Part du CA réalisé par ville${periodSuffix}.`,
+    title: language === 'ar' ? 'رقم المعاملات حسب المدينة' : 'Chiffre d’affaires par ville',
+    description: language === 'ar' ? `رقم المعاملات المحقق حسب المدينة${periodSuffix}.` : `Part du CA réalisé par ville${periodSuffix}.`,
     labelField: 'city',
   })
 
@@ -840,6 +844,7 @@ export function buildStructuredResponseFromContext(
         }
       : null,
     envelope?.currency ?? null,
+    language,
   )
 
   const priority: Partial<Record<AssistantIntent, Array<ChartResult | null>>> = {
@@ -859,7 +864,7 @@ export function buildStructuredResponseFromContext(
   return {
     ...base,
     warnings: Array.from(warnings),
-    ...chartToResponse(chart, currency),
+    ...chartToResponse(chart, currency, language),
     message_text: aiText,
     suggestions: DEFAULT_SUGGESTIONS,
     metrics_summary: base.metrics_summary,

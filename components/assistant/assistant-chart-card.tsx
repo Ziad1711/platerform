@@ -71,20 +71,22 @@ function compactLabel(value: unknown): string {
 }
 
 /** Journée métier `YYYY-MM-DD` → libellé lisible court (`12 nov.`). */
-function formatDateAxis(value: unknown): string {
+function formatDateAxis(value: unknown, language: 'fr' | 'ar' = 'fr'): string {
   const text = String(value ?? '')
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
   if (!match) return compactLabel(text)
   const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
+  if (language === 'ar') return new Intl.DateTimeFormat('ar-MA-u-nu-latn', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))))
   return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1] ?? match[2]}`
 }
 
 /** Journée métier → libellé complet pour l'infobulle (`12 novembre 2025`). */
-function formatDateTooltip(value: unknown): string {
+function formatDateTooltip(value: unknown, language: 'fr' | 'ar' = 'fr'): string {
   const text = String(value ?? '')
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
   if (!match) return text
   const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  if (language === 'ar') return new Intl.DateTimeFormat('ar-MA-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))))
   return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1] ?? match[2]} ${match[1]}`
 }
 
@@ -96,13 +98,15 @@ function CompactTooltip({
   active,
   payload,
   label,
+  language = 'fr',
 }: {
   active?: boolean
   payload?: Array<{ value?: unknown; name?: unknown; payload?: Record<string, unknown> }>
   label?: unknown
+  language?: 'fr' | 'ar'
 }) {
   if (!active || !payload || payload.length === 0) return null
-  const title = formatDateTooltip(label)
+  const title = formatDateTooltip(label, language)
   return (
     <div className="max-w-[16rem] rounded-md border border-border bg-background/95 px-2.5 py-1.5 text-xs shadow-sm">
       {title ? <div className="mb-0.5 font-medium text-muted-foreground">{title}</div> : null}
@@ -121,14 +125,15 @@ function CompactTooltip({
 }
 
 /** Nom de série lisible pour l'infobulle, à partir de l'unité du graphique. */
-function seriesNameForUnit(unit?: string): string {
+function seriesNameForUnit(unit?: string, language: 'fr' | 'ar' = 'fr'): string {
+  if (language === 'ar') return unit === 'currency' ? 'رقم المعاملات' : unit === 'count' ? 'الطلبات' : unit === 'percent' ? 'النسبة' : 'القيمة'
   if (unit === 'currency') return 'Chiffre d’affaires'
   if (unit === 'count') return 'Commandes'
   if (unit === 'percent') return 'Taux'
   return 'Valeur'
 }
 
-export default function AssistantChartCard({ response }: { response: AssistantStructuredResponse }) {
+export default function AssistantChartCard({ response, language = 'fr' }: { response: AssistantStructuredResponse; language?: 'fr' | 'ar' }) {
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null)
   if (!response.chart || !response.chart_data?.length) {
     return null
@@ -136,7 +141,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
 
   const xKey = getXAxisKey(response.chart_data)
   const valueKey = getPrimaryValueKey(response.chart_data)
-  const seriesName = seriesNameForUnit(response.chart_unit)
+  const seriesName = seriesNameForUnit(response.chart_unit, language)
 
   // Pas de graphique sans clé de valeur exploitable : un axe vide n'est pas un résultat.
   if (!valueKey) return null
@@ -148,7 +153,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
   } as const
 
   const tooltipProps = {
-    content: <CompactTooltip />,
+    content: <CompactTooltip language={language} />,
     cursor: { stroke: '#94a3b8', strokeDasharray: '3 3' },
     wrapperStyle: { outline: 'none', zIndex: 30 },
   } as const
@@ -158,15 +163,15 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
 
   return (
     <div dir="ltr" className="mt-3 min-w-0 max-w-full overflow-hidden rounded-xl border bg-card p-3">
-      {response.chart_title ? <h4 dir="auto" className="text-sm font-semibold text-foreground"><bdi dir="auto">{response.chart_title}</bdi></h4> : null}
-      {response.chart_description ? <p dir="auto" className="text-xs text-muted-foreground mt-1"><bdi dir="auto">{response.chart_description}</bdi></p> : null}
+      {response.chart_title ? <h4 dir="auto" className="text-sm font-semibold text-foreground">{response.chart_title}</h4> : null}
+      {response.chart_description ? <p dir="auto" className="text-xs text-muted-foreground mt-1">{response.chart_description}</p> : null}
 
       <div className="mt-3 h-56 w-full min-w-0 min-h-[14rem] sm:h-64" role="img" aria-label={response.chart_title || 'Graphique'}>
         <ResponsiveContainer width="100%" height="100%">
           {response.chart_type === 'line' ? (
             <LineChart data={response.chart_data} accessibilityLayer>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
+              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? (value) => formatDateAxis(value, language) : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
               <Tooltip {...tooltipProps} />
               <Line type="linear" name={seriesName} dataKey={valueKey} stroke="#2563eb" strokeWidth={2} dot={isDaily ? { r: 2 } : false} connectNulls={false} />
@@ -174,7 +179,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
           ) : response.chart_type === 'area' ? (
             <AreaChart data={response.chart_data} accessibilityLayer>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
+              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? (value) => formatDateAxis(value, language) : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
               <Tooltip {...tooltipProps} />
               <Area type="linear" name={seriesName} dataKey={valueKey} stroke="#2563eb" fill="#93c5fd" connectNulls={false} />
@@ -186,7 +191,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
                   <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip content={<CompactTooltip />} wrapperStyle={{ outline: 'none', zIndex: 30 }} />
+              <Tooltip content={<CompactTooltip language={language} />} wrapperStyle={{ outline: 'none', zIndex: 30 }} />
               <Legend />
             </PieChart>
           ) : (
@@ -194,7 +199,7 @@ export default function AssistantChartCard({ response }: { response: AssistantSt
               if (typeof event?.activeTooltipIndex === 'number') setSelectedPoint(event.activeTooltipIndex)
             }}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? formatDateAxis : compactLabel} />
+              <XAxis dataKey={xKey} {...axisProps} minTickGap={16} interval="preserveStartEnd" tickFormatter={isDaily ? (value) => formatDateAxis(value, language) : compactLabel} />
               <YAxis {...axisProps} width={44} tickFormatter={compactAxisValue} />
               <Tooltip {...tooltipProps} wrapperStyle={{ display: 'none' }} />
               <Bar name={seriesName} dataKey={valueKey} fill="#2563eb" radius={[6, 6, 0, 0]}>

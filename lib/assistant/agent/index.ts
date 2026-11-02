@@ -167,7 +167,8 @@ function filterSuggestions(
   list: ReadonlyArray<string> | undefined,
   language: 'fr' | 'ar',
 ): string[] {
-  const cleaned = (list ?? []).filter((item) => item.trim() && !UNAVAILABLE_SUGGESTION.test(item)).slice(0, 4)
+  const cleaned = (list ?? []).filter((item) => item.trim() && !UNAVAILABLE_SUGGESTION.test(item) &&
+    (language !== 'ar' || /[\u0621-\u064a\u066e-\u06d3]/.test(item))).slice(0, 4)
   if (cleaned.length > 0) return cleaned
   return language === 'ar'
     ? ['حلل الأداء ديالي', 'وريني المبيعات']
@@ -341,11 +342,13 @@ function buildTruthMessageText(input: {
     keyFigures.push(`${label} : ${formatTruthMetric(metric, truth.currency, state !== 'partial')}`)
   }
 
-  const factsLine = keyFigures.slice(0, 4).join(' · ')
+  const factsLine = language === 'ar'
+    ? keyFigures.slice(0, 4).map((figure) => `- ${figure}`).join('\n')
+    : keyFigures.slice(0, 4).join(' · ')
   const qualitativeHasFigures = /\d/.test(qualitative)
   const parts: string[] = []
 
-  if (factsLine && !qualitativeHasFigures) parts.push(`${scope} : ${factsLine}.`)
+  if (factsLine && !qualitativeHasFigures) parts.push(language === 'ar' ? `## ${scope}\n${factsLine}` : `${scope} : ${factsLine}.`)
   if (qualitative) parts.push(qualitative)
   if (state === 'partial') {
     parts.push(t.partial)
@@ -674,16 +677,14 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
   const todayBusinessDay = businessTodayIso(new Date())
   const isTodayComparison = Boolean(comparisonPair &&
     (comparisonPair.current.from === todayBusinessDay || comparisonPair.baseline.from === todayBusinessDay))
-  const comparisonText = comparableDeltas.slice(0, 5).map((item) => {
+  const comparisonRows = comparableDeltas.slice(0, 5).map((item) => {
     const labels = language === 'ar'
       ? { revenue: 'رقم المعاملات', orders: 'الطلبات', delivered: 'المسلّمة', adSpend: 'الإعلانات', contributionMargin: 'الهامش المساهم' }
       : { revenue: 'CA réalisé', orders: 'Commandes', delivered: 'Livrées', adSpend: 'Publicité', contributionMargin: 'Marge contributive' }
     const label = (labels as Record<string, string>)[item.metric] ?? item.metric
     const currency = ['revenue', 'adSpend', 'contributionMargin'].includes(item.metric) ? ` ${periodResult?.currency ?? ''}` : ''
-    return language === 'ar'
-      ? `- ${label}: ${item.current}${currency} مقابل ${item.baseline}${currency} (الفرق ${item.delta}${currency}).`
-      : `- ${label} : ${item.current}${currency} contre ${item.baseline}${currency} (écart ${item.delta}${currency}).`
-  }).join('\n')
+    return { label, current: `${item.current}${currency}`, baseline: `${item.baseline}${currency}`, delta: `${item.delta}${currency}` }
+  })
   const requestedComparison = Boolean(comparisonPair)
   const comparisonIsUsable = Boolean(comparisonPair && periodResult?.kind === 'periods' &&
     comparableDeltas.length > 0)
@@ -712,9 +713,16 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     Number(deliveredDelta.baseline) <= Number(ordersDelta.baseline)
   const comparisonRateLine = ratesValid && deliveryRates?.current && deliveryRates.baseline
     ? (language === 'ar'
-        ? `- نسبة التسليم (الطلبات المؤرخة بكل فترة حسب حالتها الحالية): ${deliveryRates.current} % مقابل ${deliveryRates.baseline} %.`
-        : `- Taux de livraison (cohortes de commandes datées, selon leur statut actuel) : ${deliveryRates.current} % contre ${deliveryRates.baseline} %.`)
+        ? 'نسبة التسليم: حسب حالة الطلبات الحالية، ماشي تاريخ التسليم.'
+        : 'Taux de livraison : statuts actuels des commandes datées, pas dates de livraison.')
     : ''
+  if (comparisonRateLine && deliveryRates?.current && deliveryRates.baseline) {
+    comparisonRows.push({
+      label: language === 'ar' ? 'نسبة التسليم' : 'Taux de livraison',
+      current: `${deliveryRates.current} %`, baseline: `${deliveryRates.baseline} %`,
+      delta: '—', // Aucun écart de taux calculé ni présenté comme un fait.
+    })
+  }
   const divergence = ordersDirection !== null && revenueDirection !== null && ordersDirection * revenueDirection < 0
     ? (language === 'ar'
         ? `الطلبات ورقم المعاملات مشاو فجهتين مختلفتين. ${deliveredDirection !== null && deliveredDirection * revenueDirection > 0 ? 'تطور الطلبات المسلّمة كيتماشى مع رقم المعاملات، ولكن ما كيثبتش السبب بوحدو.' : 'خاصنا نفحصو نسبة التسليم وقيمة الطلبات المسلّمة قبل ما نجزموا بالسبب.'}`
@@ -728,7 +736,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
         `${comparisonPair?.labels.current ?? 'Période A'} / ${comparisonPair?.labels.baseline ?? 'Période B'}`,
         verdict,
         `## ${language === 'ar' ? 'الأرقام المتحققة' : 'Chiffres vérifiés'}`,
-        comparisonText,
+        language === 'ar' ? 'القيم والفرق بين الفترتين فهاد الجدول.' : 'Valeurs et écarts vérifiés dans le tableau ci-dessous.',
         comparisonRateLine,
         divergence ? `## ${language === 'ar' ? 'شنو نستنتجو؟' : 'Interprétation'}\n${divergence}` : '',
         divergence ? `## ${language === 'ar' ? 'الخطوة الجاية' : 'Décision'}\n${language === 'ar' ? 'راجع حالات الطلبات وقيمة الطلبات المسلّمة قبل تغيير الميزانية أو طريقة التوصيل.' : 'Vérifier les statuts et la valeur des commandes livrées avant de modifier le budget ou la livraison.'}` : '',
@@ -793,6 +801,7 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     cities: citySection ?? null,
     comparison: toolData.getStoreComparison ?? null,
     comparisonLabels: comparisonPair?.labels ?? null,
+    language,
   })
 
   // Journalisation minimale : aucun contenu utilisateur, aucune donnée métier.
@@ -813,17 +822,30 @@ export async function runSecureAssistantAgent(input: RunSecureAgentInput): Promi
     ...fallbackStructured,
     conversation_title: llmOutput.conversation_title,
     message_text: outputText,
+    comparison_table: !blocked && comparisonIsUsable && comparisonRows.length > 0 ? {
+      currentLabel: comparisonPair?.labels.current ?? (language === 'ar' ? 'الفترة أ' : 'Période A'),
+      baselineLabel: comparisonPair?.labels.baseline ?? (language === 'ar' ? 'الفترة ب' : 'Période B'),
+      rows: comparisonRows,
+    } : undefined,
     suggestions: filterSuggestions(
       llmOutput.suggestions?.length ? llmOutput.suggestions : fallbackStructured.suggestions,
       language,
     ),
     warnings,
-    metrics_summary: summary.length > 0 ? summary : fallbackStructured.metrics_summary ?? [],
+    metrics_summary: comparisonIsUsable ? [] : summary.length > 0 ? summary : fallbackStructured.metrics_summary ?? [],
     activity_steps: activitySteps,
   }
 
   // Aucun graphique sur une donnée absente, interdite ou sans valeur vérifiée.
   if (blocked || (!figuresAvailable && !comparisonChartAvailable)) {
+    structuredResponse.chart = false
+    structuredResponse.chart_type = undefined
+    structuredResponse.chart_title = undefined
+    structuredResponse.chart_description = undefined
+    structuredResponse.chart_data = undefined
+  }
+  // Même métrique déjà lisible dans le tableau : pas de graphique redondant.
+  if (structuredResponse.comparison_table) {
     structuredResponse.chart = false
     structuredResponse.chart_type = undefined
     structuredResponse.chart_title = undefined
