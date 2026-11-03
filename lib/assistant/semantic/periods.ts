@@ -18,6 +18,7 @@ export type PeriodRelation =
   | 'same_month_previous_year'
   | 'same_window_previous_year'
   | 'previous_window'
+  | 'previous_period'
 
 export interface MonthRef {
   year: number
@@ -268,6 +269,8 @@ export function comparisonPeriodPlan(
 export function buildPeriodPlan(input: {
   months: MonthRef[]
   maxPeriods?: number
+  /** Comparaison explicitement demandée : autorise l'appariement intra-année. */
+  comparisonIntent?: boolean
 }): PeriodPlan {
   const max = Math.max(1, input.maxPeriods ?? MAX_PLAN_PERIODS)
   const months = input.months.slice(0, max)
@@ -341,6 +344,37 @@ export function buildPeriodPlan(input: {
     )
     if (!alreadyPaired) {
       pairs.push({ currentId: period.id, baselineId: baseline.id, relation: 'same_month_previous_year' })
+    }
+  }
+
+  // Deux mois distincts de la MÊME année : une comparaison explicite ne doit
+  // jamais être réduite à une seule période. L'ordre du texte fait foi : la
+  // première période citée est la période courante.
+  if (input.comparisonIntent === true) {
+    // Une période déjà appariée année-sur-année ne reçoit pas de second rôle :
+    // sinon un mois de référence deviendrait la période courante d'une
+    // comparaison non demandée.
+    const paired = new Set<string>()
+    for (const pair of pairs) {
+      paired.add(pair.currentId)
+      paired.add(pair.baselineId)
+    }
+    for (let index = 0; index < periods.length; index += 1) {
+      const period = periods[index]
+      if (period.year === null || period.months.length === 0) continue
+      if (paired.has(period.id)) continue
+      const next = periods
+        .slice(index + 1)
+        .find((other) =>
+          other.year === period.year &&
+          other.months.length > 0 &&
+          other.months[0].month !== period.months[0].month &&
+          !paired.has(other.id),
+        )
+      if (!next) continue
+      pairs.push({ currentId: period.id, baselineId: next.id, relation: 'previous_period' })
+      paired.add(period.id)
+      paired.add(next.id)
     }
   }
 

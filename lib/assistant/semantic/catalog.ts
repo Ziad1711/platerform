@@ -117,13 +117,23 @@ export function metricsVisibleFor(access: MetricAccess): KpiMetricAlias[] {
   return ALL_METRICS.filter((id) => isMetricAllowed(id, access))
 }
 
-/** Filtre une sélection en conservant l'ordre du catalogue. */
+/**
+ * Filtre une sélection en conservant **l'ordre demandé**.
+ *
+ * L'ordre est sémantique : la métrique citée par l'utilisateur doit rester en
+ * tête, sinon un plafond d'affichage peut l'évincer. On ne réordonne donc
+ * jamais selon le catalogue.
+ */
 export function restrictMetrics(
   selection: readonly KpiMetricAlias[],
   access: MetricAccess,
 ): KpiMetricAlias[] {
   const allowed = new Set(metricsVisibleFor(access))
-  return ALL_METRICS.filter((id) => allowed.has(id) && selection.includes(id))
+  const result: KpiMetricAlias[] = []
+  for (const metric of selection) {
+    if (allowed.has(metric) && !result.includes(metric)) result.push(metric)
+  }
+  return result
 }
 
 /* -------------------------------------------------------------------------- */

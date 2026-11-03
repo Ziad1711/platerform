@@ -148,6 +148,8 @@ export default function AssistantIAPage() {
   const [recording, setRecording] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
   const [transcribing, setTranscribing] = useState(false)
+  /** Audio terminé, en attente d'une action explicite (« envoyer »). */
+  const [voiceReady, setVoiceReady] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -169,10 +171,11 @@ export default function AssistantIAPage() {
   const recorderStreamRef = useRef<MediaStream | null>(null)
   const recorderChunksRef = useRef<Blob[]>([])
   const recorderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const recorderModeRef = useRef<'send' | 'insert'>('insert')
   const recorderCancelledRef = useRef(false)
   const recorderStartedAtRef = useRef(0)
   const transcribeAbortRef = useRef<AbortController | null>(null)
+  // Audio arrêté mais NON transcrit : seule une action explicite l'envoie.
+  const pendingAudioRef = useRef<{ blob: Blob; sessionId: number; seconds: number } | null>(null)
   // Verrous synchrones : deux clics ne peuvent ni ouvrir deux micros ni payer
   // deux transcriptions.
   const voiceStartLockRef = useRef(false)
@@ -637,26 +640,40 @@ export default function AssistantIAPage() {
     }
     transcribeAbortRef.current?.abort()
     transcribeAbortRef.current = null
+    pendingAudioRef.current = null
+    setVoiceReady(false)
     stopAudioGraph()
     setTranscribing(false)
     resetRecorderState()
   }, [resetRecorderState, stopAudioGraph])
 
-  const stopRecording = useCallback(
-    (mode: 'send' | 'insert') => {
-      const recorder = recorderRef.current
-      if (!recorder || recorder.state === 'inactive') return
-      recorderModeRef.current = mode
-      clearRecorderTimer()
-      setRecording(false)
-      try {
-        recorder.stop()
-      } catch {
-        resetRecorderState()
-      }
-    },
-    [clearRecorderTimer, resetRecorderState],
-  )
+  /**
+   * Arrêt de la capture : le microphone est libéré et l'audio est conservé
+   * localement. AUCUNE transcription, aucun envoi, aucun coût.
+   */
+  const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state === 'inactive') return
+    clearRecorderTimer()
+    setRecording(false)
+    try {
+      recorder.stop()
+    } catch {
+      resetRecorderState()
+    }
+  }, [clearRecorderTimer, resetRecorderState])
+
+  /**
+   * Envoi explicite : seule cette action déclenche la transcription, donc
+   * l'appel réseau et le coût associé.
+   */
+  function sendPendingRecording() {
+    const pending = pendingAudioRef.current
+    if (!pending) return
+    if (transcribeInFlightRef.current) return
+    setVoiceReady(false)
+    void transcribeAudio(pending.blob, 'send', pending.sessionId)
+  }
 
   // Départ de la page : arrêt du micro, minuteur et requête de transcription.
   useEffect(() => {
@@ -746,9 +763,13 @@ export default function AssistantIAPage() {
 
       setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
       setTimeout(() => inputRef.current?.focus(), 0)
+      pendingAudioRef.current = null
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
       if (sessionId === voiceSessionRef.current) {
+        // L'audio reste récupérable : une erreur réseau ne fait pas perdre la dictée.
+        pendingAudioRef.current = { blob, sessionId, seconds: recordSeconds }
+        setVoiceReady(true)
         setVoiceError(error instanceof Error ? error.message : 'Transcription impossible.')
       }
     } finally {
@@ -764,8 +785,10 @@ export default function AssistantIAPage() {
     // Verrou synchrone AVANT toute demande de permission : deux clics rapides
     // ne peuvent pas ouvrir deux flux micro.
     if (voiceStartLockRef.current) return
-    if (recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore) return
+    if (recording || transcribing || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore) return
     voiceStartLockRef.current = true
+    pendingAudioRef.current = null
+    setVoiceReady(false)
     setVoiceError(null)
 
     if (
@@ -819,7 +842,6 @@ export default function AssistantIAPage() {
       recorder.onstop = () => {
         const chunks = recorderChunksRef.current
         recorderChunksRef.current = []
-        const mode = recorderModeRef.current
         recorderRef.current = null
         stopTracks()
         stopAudioGraph()
@@ -837,6 +859,7 @@ export default function AssistantIAPage() {
           setVoiceError('Enregistrement vide : aucune parole détectée.')
           return
         }
+        const recordedSeconds = Math.max(0, Math.round((currentTimestamp() - recorderStartedAtRef.current) / 1000))
 
         // Conversion locale en WAV 16 kHz mono : la durée devient vérifiable
         // côté serveur, sans dépendre d'une valeur envoyée par le navigateur.
@@ -858,7 +881,14 @@ export default function AssistantIAPage() {
               wav.byteOffset,
               wav.byteOffset + wav.byteLength,
             ) as ArrayBuffer
-            await transcribeAudio(new Blob([wavBuffer], { type: 'audio/wav' }), mode, sessionId)
+            // L'audio est conservé localement, prêt à être envoyé : arrêter
+            // n'appelle ni la transcription ni le modèle.
+            pendingAudioRef.current = {
+              blob: new Blob([wavBuffer], { type: 'audio/wav' }),
+              sessionId,
+              seconds: recordedSeconds,
+            }
+            setVoiceReady(true)
           } catch {
             if (sessionId === voiceSessionRef.current) {
               setVoiceError('Enregistrement audio illisible : réessayez.')
@@ -876,7 +906,7 @@ export default function AssistantIAPage() {
       recorderTimerRef.current = setInterval(() => {
         const elapsed = Math.round((Date.now() - recorderStartedAtRef.current) / 1000)
         setRecordSeconds(elapsed)
-        if (elapsed >= MAX_AUDIO_SECONDS) stopRecording('insert')
+        if (elapsed >= MAX_AUDIO_SECONDS) stopRecording()
       }, 500)
     } catch (error) {
       stopTracks()
@@ -1407,20 +1437,20 @@ export default function AssistantIAPage() {
                 aria-label="Message à envoyer"
                 dir="auto"
                 className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-base leading-6 focus:outline-none ${
-                  recording || transcribing ? 'hidden' : ''
+                  recording || transcribing || voiceReady ? 'hidden' : ''
                 }`}
                 disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               />
 
-              {recording || transcribing ? (
+              {recording || transcribing || voiceReady ? (
                 <AssistantVoicePanel
-                  phase={transcribing ? 'transcribing' : 'recording'}
+                  phase={transcribing ? 'transcribing' : recording ? 'recording' : 'recorded'}
                   seconds={recordSeconds}
                   canvasRef={waveformCanvasRef}
                   probeText={input}
                   onCancel={cancelRecording}
-                  onStop={() => stopRecording('insert')}
-                  onSend={() => stopRecording('send')}
+                  onStop={stopRecording}
+                  onSend={sendPendingRecording}
                 />
               ) : null}
             </div>
@@ -1428,9 +1458,9 @@ export default function AssistantIAPage() {
             <button
               type="button"
               onClick={startRecording}
-              disabled={recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              disabled={recording || transcribing || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
-                recording || transcribing ? 'hidden' : ''
+                recording || transcribing || voiceReady ? 'hidden' : ''
               }`}
               title="Dicter un message"
               aria-label="Dicter un message"
@@ -1439,9 +1469,9 @@ export default function AssistantIAPage() {
             </button>
             <button
               onClick={() => handleSend(input)}
-              disabled={!input.trim() || recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              disabled={!input.trim() || recording || transcribing || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
-                recording || transcribing ? 'hidden' : ''
+                recording || transcribing || voiceReady ? 'hidden' : ''
               }`}
             >
               <Send className="w-4 h-4" />

@@ -8,7 +8,8 @@ import {
   listMessages,
 } from '@/lib/assistant/chat'
 import {
-  computeCreditsUsed,
+  resolveUsageBilling,
+  resolveUsageKind,
   ensureCreditsAvailable,
   estimateCreditsForRequest,
   releaseCreditReservation,
@@ -41,6 +42,7 @@ import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { runSecureAssistantAgent } from '@/lib/assistant/agent'
 import { runAnalyticEngine } from '@/lib/assistant/agent/engine'
 import { isEngineV2Enabled } from '@/lib/assistant/engine/policy'
+import { assertDistributedAdmission } from '@/lib/assistant/engine/admission'
 
 /** Longueur maximale d'un message utilisateur (caractères). */
 const MAX_MESSAGE_LENGTH = 2000
@@ -168,6 +170,10 @@ export async function POST(request: Request) {
     const slot = acquireAssistantSlot(user.id)
     if (!slot.ok) throw new Error(slot.code)
     slotKey = user.id
+
+    // Admission distribuée (opt-in) : borne le coût fournisseur entre instances.
+    // Sans la RPC déployée, le drapeau reste fermé et le comportement est inchangé.
+    await assertDistributedAdmission(supabase, { userId: user.id })
 
     // Périmètre explicite : une seule boutique par requête, jamais d'agrégation
     // implicite de plusieurs boutiques (devises et tenants différents).
@@ -537,9 +543,31 @@ export async function POST(request: Request) {
       request.signal.removeEventListener('abort', onClientAbort)
     }
 
+    // Une annulation survenue pendant l'analyse interdit toute finalisation :
+    // enregistrer une réponse après abandon créerait un tour fantôme.
+    if (controller.signal.aborted) {
+      if (creditReservation.status === 'reserved') {
+        await releaseCreditReservation(supabase, { requestId, attemptToken }).catch(() => false)
+      }
+      console.warn('[assistant] request_aborted_before_finalize', {
+        storeId: selectedStoreId,
+        deadline: deadlineReached,
+        client: clientDisconnected,
+        durationMs: Date.now() - startedAt,
+      })
+      throw new Error(deadlineReached ? 'ASSISTANT_TIMEOUT' : 'REQUEST_ABORTED')
+    }
+
     const providerResult = agentResult.providerUsage
 
-    const creditsUsed = computeCreditsUsed(providerResult.inputTokens, providerResult.outputTokens)
+    // Contrat de facturation : un usage nul ou inconnu n'est jamais converti en
+    // crédit. Une réponse déterministe (aucun appel fournisseur) est gratuite.
+    const billing = resolveUsageBilling({
+      kind: resolveUsageKind({ cancelled: false, providerName: providerResult.providerName }),
+      inputTokens: providerResult.inputTokens,
+      outputTokens: providerResult.outputTokens,
+    })
+    const creditsUsed = billing.creditsConsumed
     const walletSnapshot = toWalletSnapshot(wallet)
 
     // La consommation est réelle : elle doit être finalisée même si le solde a
@@ -612,6 +640,9 @@ export async function POST(request: Request) {
         creditsUsed,
         creditsConsumed: consumedCredits,
         creditsCharged: chargedCredits,
+        creditsBillable: billing.billable,
+        usageKnown: billing.usageKnown,
+        billingReason: billing.reason,
         inputTokens: providerResult.inputTokens,
         outputTokens: providerResult.outputTokens,
         providerName: providerResult.providerName,

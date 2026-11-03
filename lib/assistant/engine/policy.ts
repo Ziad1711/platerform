@@ -13,25 +13,61 @@
 export const ENGINE_V2_ENV = 'ASSISTANT_ENGINE_V2'
 export const HISTORY_DIRECT_FALLBACK_ENV = 'ASSISTANT_HISTORY_DIRECT_FALLBACK'
 export const DEEPENING_ENV = 'ASSISTANT_DEEPENING'
+export const PLANNER_ENV = 'ASSISTANT_PLANNER'
+export const DISTRIBUTED_ADMISSION_ENV = 'ASSISTANT_DISTRIBUTED_ADMISSION'
+
+/** Valeur unique qui ouvre une capacité : aucune variante implicite. */
+export const EXPLICIT_ENABLED = 'enabled'
 
 type EnvLike = Record<string, string | undefined>
 
-function readFlag(env: EnvLike, key: string, fallback: boolean): boolean {
-  const raw = String(env[key] ?? '').trim().toLowerCase()
-  if (raw === 'enabled' || raw === 'true' || raw === '1') return true
-  if (raw === 'disabled' || raw === 'false' || raw === '0') return false
-  return fallback
+function readRaw(env: EnvLike, key: string): string {
+  return String(env[key] ?? '').trim().toLowerCase()
 }
 
 /**
- * Moteur V2 : activé par défaut, désactivable sans redéploiement de logique.
+ * Drapeau strictement opt-in : seule la valeur exacte `enabled` l'active.
  *
- * Justification : il réutilise strictement les mêmes lecteurs sécurisés et
- * n'ajoute aucun accès SQL. Il n'élargit donc pas la surface de sécurité, ce qui
- * autorise l'activation par défaut, avec retour immédiat possible.
+ * `true`, `1`, `on`, `yes`, une faute de frappe ou une valeur absente laissent
+ * la capacité FERMÉE. C'est la règle du verrou de pilote (`access.ts`) et elle
+ * s'applique ici à toute activation de moteur ou d'admission.
+ */
+function readStrictFlag(env: EnvLike, key: string): boolean {
+  return readRaw(env, key) === EXPLICIT_ENABLED
+}
+
+/**
+ * Moteur V2 : **désactivé par défaut**.
+ *
+ * Le moteur introduit des lectures supplémentaires et une rédaction adossée aux
+ * faits : son activation est une décision d'exploitation explicite, jamais une
+ * conséquence de l'absence de configuration. Le moteur historique reste la voie
+ * de repli et la seule active tant que `ASSISTANT_ENGINE_V2` n'est pas `enabled`.
  */
 export function isEngineV2Enabled(env: EnvLike = process.env): boolean {
-  return readFlag(env, ENGINE_V2_ENV, true)
+  return readStrictFlag(env, ENGINE_V2_ENV)
+}
+
+/**
+ * Planification dynamique : `llm` (défaut) ou `deterministic`.
+ *
+ * Elle ne s'exécute que dans le moteur V2, lui-même opt-in. Toute autre valeur
+ * retombe sur le plan déterministe : un plan non compris n'est jamais exécuté.
+ */
+export function isPlannerLlmEnabled(env: EnvLike = process.env): boolean {
+  return readRaw(env, PLANNER_ENV) !== 'deterministic'
+}
+
+/**
+ * Admission distribuée : **désactivée par défaut**.
+ *
+ * Elle exige la fonction `rpc_assistant_assert_user_admission`, qui n'existe pas
+ * dans Production à ce jour (aucune migration dans cette mission). Tant que le
+ * drapeau est fermé, seule l'admission en mémoire du processus s'applique et
+ * l'absence de garantie inter-instances reste explicite.
+ */
+export function isDistributedAdmissionEnabled(env: EnvLike = process.env): boolean {
+  return readStrictFlag(env, DISTRIBUTED_ADMISSION_ENV)
 }
 
 /**
@@ -42,12 +78,12 @@ export function isEngineV2Enabled(env: EnvLike = process.env): boolean {
  * lectures non mesurées.
  */
 export function isHistoryDirectFallbackEnabled(env: EnvLike = process.env): boolean {
-  return readFlag(env, HISTORY_DIRECT_FALLBACK_ENV, false)
+  return readStrictFlag(env, HISTORY_DIRECT_FALLBACK_ENV)
 }
 
-/** Approfondissement borné (deuxième passe) : activé, mais plafonné. */
+/** Approfondissement borné (lecture des ventilations) : actif sauf désactivation. */
 export function isDeepeningEnabled(env: EnvLike = process.env): boolean {
-  return readFlag(env, DEEPENING_ENV, true)
+  return readRaw(env, DEEPENING_ENV) !== 'disabled'
 }
 
 export const NARRATIVE_ENV = 'ASSISTANT_NARRATIVE'
@@ -60,7 +96,7 @@ export const NARRATIVE_ENV = 'ASSISTANT_NARRATIVE'
  * les blocs calculés restent la seule source des valeurs.
  */
 export function isNarrativeEnabled(env: EnvLike = process.env): boolean {
-  return readFlag(env, NARRATIVE_ENV, true)
+  return readRaw(env, NARRATIVE_ENV) !== 'disabled'
 }
 
 export interface EngineBudgets {
