@@ -39,6 +39,8 @@ import {
 import { acquireAssistantSlot, releaseAssistantSlot } from '@/lib/assistant/rate-limit'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import { runSecureAssistantAgent } from '@/lib/assistant/agent'
+import { runAnalyticEngine } from '@/lib/assistant/agent/engine'
+import { isEngineV2Enabled } from '@/lib/assistant/engine/policy'
 
 /** Longueur maximale d'un message utilisateur (caractères). */
 const MAX_MESSAGE_LENGTH = 2000
@@ -469,27 +471,43 @@ export async function POST(request: Request) {
     }
 
     let agentResult: Awaited<ReturnType<typeof runSecureAssistantAgent>>
-    try {
-      agentResult = await runSecureAssistantAgent({
-        supabase,
+    const agentInput = {
+      supabase,
+      scopeStoreIds: targetStoreIds,
+      scopeContext: {
         scopeStoreIds: targetStoreIds,
-        scopeContext: {
-          scopeStoreIds: targetStoreIds,
-          displayStoreId: selectedStoreId,
-          displayStoreName: String(storeMeta.name || 'Store'),
-          displayCurrency: resolvedStoreCurrency,
-          userMainCurrency,
-        },
-        intent,
-        range,
-        userMessage: body.message,
-        conversationHistory: conversationalHistory,
-        providerModel: model,
-        language,
-        signal: controller.signal,
-        maxOutputTokens: plannedOutputTokens,
-        comparisonBaseline,
-      })
+        displayStoreId: selectedStoreId,
+        displayStoreName: String(storeMeta.name || 'Store'),
+        displayCurrency: resolvedStoreCurrency,
+        userMainCurrency,
+      },
+      intent,
+      range,
+      userMessage: body.message,
+      conversationHistory: conversationalHistory,
+      providerModel: model,
+      language,
+      signal: controller.signal,
+      maxOutputTokens: plannedOutputTokens,
+      comparisonBaseline,
+    }
+
+    try {
+      // Moteur V2 : périodes multiples, comparabilité par métrique, blocs typés.
+      // Un échec inattendu retombe sur le moteur historique, jamais sur une erreur.
+      const engineOutcome = isEngineV2Enabled()
+        ? await runAnalyticEngine(agentInput).catch(() => null)
+        : null
+
+      agentResult = engineOutcome
+        ? {
+            structuredResponse: {
+              ...engineOutcome.structuredResponse,
+              activity_steps: engineOutcome.activitySteps,
+            },
+            providerUsage: engineOutcome.providerUsage,
+          }
+        : await runSecureAssistantAgent(agentInput)
     } catch (agentError) {
       const rawCode = agentError instanceof Error ? agentError.message : ''
 

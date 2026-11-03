@@ -56,6 +56,12 @@ export type AssistantChartType = 'line' | 'bar' | 'pie' | 'area'
 
 export interface AssistantStructuredResponse {
   message_text: string
+  /**
+   * Réponse structurée en blocs typés (moteur V2).
+   * Absent pour les messages produits avant cette version : le client retombe
+   * alors sur `message_text`, ce qui préserve l'historique.
+   */
+  document?: import('@/lib/assistant/blocks/types').ResponseDocument
   /** Valeurs publiées par le moteur de comparaison, jamais extraites du texte IA. */
   comparison_table?: { currentLabel: string; baselineLabel: string; rows: Array<{ label: string; current: string; baseline: string; delta: string }> }
   conversation_title?: string
