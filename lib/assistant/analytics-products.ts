@@ -44,7 +44,7 @@ export interface ProductPerformanceRow {
  * total de CA, et le CA classé est contrôlé contre le V5.
  */
 export async function readProductSection(
-  { supabase, kpis }: SectionRequest,
+  { supabase, kpis, signal }: SectionRequest,
   limit = 5,
 ): Promise<SectionResult<ProductPerformanceRow>> {
   const source = 'rpc_dashboard_top_products'
@@ -69,7 +69,7 @@ export async function readProductSection(
     p_start_date: startUtc,
     p_end_date: endUtc,
     p_limit: boundedLimit,
-  })
+  }).abortSignal(signal as AbortSignal)
   if (error) {
     if (error.message?.includes('NO_ACCESS')) return forbidden('products', source, kpis)
     return unavailable('products', source, kpis, 'Lecture du classement produit indisponible.')
@@ -167,7 +167,7 @@ export interface RecentOrderRow {
  * ni montant additionné. L'identité du client n'est pas transmise.
  */
 export async function readRecentOrdersSection(
-  { supabase, kpis }: SectionRequest,
+  { supabase, kpis, signal }: SectionRequest,
   limit = 8,
 ): Promise<SectionResult<RecentOrderRow>> {
   const source = 'orders:limit'
@@ -181,6 +181,7 @@ export async function readRecentOrdersSection(
   const { data, error } = await supabase
     .from('orders')
     .select('id, store_id, status, order_date, total_selling_price, city')
+    .abortSignal(signal as AbortSignal)
     .in('store_id', storeIds)
     .gte('order_date', startUtc)
     .lt('order_date', endUtc)

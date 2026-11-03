@@ -675,9 +675,13 @@ export default function AssistantIAPage() {
     void transcribeAudio(pending.blob, 'send', pending.sessionId)
   }
 
-  // Départ de la page : arrêt du micro, minuteur et requête de transcription.
+  // Départ de la page : la session vocale est invalidée AVANT l'arrêt du micro,
+  // sinon un callback tardif (onstop, getUserMedia) pouvait encore agir.
   useEffect(() => {
     return () => {
+      voiceSessionRef.current += 1
+      recorderCancelledRef.current = true
+      pendingAudioRef.current = null
       clearRecorderTimer()
       if (recorderRef.current && recorderRef.current.state !== 'inactive') {
         try {
@@ -749,6 +753,10 @@ export default function AssistantIAPage() {
       }
 
       if (mode === 'send') {
+        // La dictée est consommée dès qu'une transcription exploitable existe :
+        // aucun renvoi ne doit pouvoir la rejouer.
+        pendingAudioRef.current = null
+        setVoiceReady(false)
         if (isAssistantBlocked || sendMessageMutation.isPending) {
           setInput(text)
           setVoiceError('Transcription placée dans le champ : l’envoi automatique est indisponible.')
@@ -815,6 +823,13 @@ export default function AssistantIAPage() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       })
+
+      // Permission accordée après une annulation ou un démontage : le flux est
+      // libéré immédiatement, aucune capture ne démarre.
+      if (sessionId !== voiceSessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       recorderStreamRef.current = stream
 
       const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']

@@ -202,6 +202,9 @@ export function percentOfCounts(
   if (denominator <= 0 || numerator < 0) return null
 
   const factor = BigInt(10) ** BigInt(fractionDigits)
-  const scaled = (BigInt(numerator) * BigInt(100) * factor) / BigInt(denominator)
+  const denominatorBig = BigInt(denominator)
+  // Arrondi commercial au plus proche (demi vers le haut) : une troncature
+  // affichait 90/110 = 81,81 % au lieu de 81,82 %.
+  const scaled = (BigInt(numerator) * BigInt(100) * factor + denominatorBig / BigInt(2)) / denominatorBig
   return render(scaled, fractionDigits)
 }

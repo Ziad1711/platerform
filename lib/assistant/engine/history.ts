@@ -157,10 +157,12 @@ export function assessWindow(
     return { ...empty, kind: 'no_coverage', coverage }
   }
 
-  // Population vide : prouvée seulement par un état `empty` du lecteur ou par
-  // une couverture complète. Une couverture partielle ne prouve pas l'absence.
-  const populationEmpty = kpis.stores.every((store) => (store.metrics.orders?.count ?? 0) === 0)
-  if (kpis.state === 'empty' && (fullyCoveredCoverage(coverage) || coverage === null)) {
+  // Population vide : prouvée seulement par un état `empty` du lecteur accompagné
+  // d'au moins une boutique lue, ou par une couverture complète. Une réponse sans
+  // aucune boutique ne prouve rien (périmètre perdu ou payload incomplet).
+  const populationEmpty = kpis.stores.length > 0 &&
+    kpis.stores.every((store) => (store.metrics.orders?.count ?? 0) === 0)
+  if (kpis.state === 'empty' && kpis.stores.length > 0 && (fullyCoveredCoverage(coverage) || coverage !== null)) {
     return {
       windowId: reading.windowId,
       kind: 'genuinely_empty',

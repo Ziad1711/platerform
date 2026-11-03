@@ -15,7 +15,7 @@ import { KPI_METRIC_ALIASES, type AnalyticsState } from '@/lib/assistant/analyti
 import type { AnalysisRequest } from '@/lib/assistant/semantic/request'
 import { periodDays, type AnalysisPeriod } from '@/lib/assistant/semantic/periods'
 import type { MetricDeltaResult } from '@/lib/assistant/semantic/comparability'
-import { divideDecimal, sumDecimalText } from '@/lib/assistant/semantic/decimal'
+import { divideDecimal, sumDecimalText, subtractDecimalText } from '@/lib/assistant/semantic/decimal'
 import { percentOfCounts } from '@/lib/assistant/analytics-decimal'
 import { METRIC_CATALOG, DERIVED_METRICS } from '@/lib/assistant/semantic/catalog'
 import type { WindowAssessment } from '@/lib/assistant/engine/history'
@@ -305,13 +305,6 @@ export function describeReserves(dict: Dictionary, deltas: readonly MetricDeltaR
   return messages
 }
 
-/** Différence d'affichage entre deux décimaux textuels. */
-function subtractForDisplay(current: string, baseline: string): string | null {
-  const diff = Number(current) - Number(baseline)
-  if (!Number.isFinite(diff)) return null
-  return diff.toFixed(2)
-}
-
 /**
  * Construit le tableau de comparaison.
  *
@@ -346,15 +339,24 @@ export function buildComparisonTable(input: ComparisonTableInput): TableBlock | 
       { derived: 'ordersPerDay', metric: 'totalOrders' },
       { derived: 'revenuePerDay', metric: 'revenue' },
     ]
+    // Une dérivée n'est comparable que si sa métrique source l'est : sinon un
+    // écart serait publié alors que le total reste côte à côte.
+    const sourceComparable = (metric: KpiMetricAlias): boolean => {
+      const source = input.deltas.find((delta) => delta.metric === metric)
+      if (!source) return false
+      return source.comparability.decision === 'comparable' ||
+        source.comparability.decision === 'comparable_with_reserve'
+    }
     for (const entry of perDay) {
       if (rows.length >= MAX_TABLE_ROWS) break
+      if (!sourceComparable(entry.metric)) continue
       const currentValue = readDerivedValue(input.currentReading, entry.metric, entry.derived, input.currentDays)
       const baselineValue = readDerivedValue(input.baselineReading, entry.metric, entry.derived, input.baselineDays)
       if (currentValue === null && baselineValue === null) continue
       const unit = DERIVED_METRICS[entry.derived].unit
       const currency = entry.metric === 'revenue' ? input.currency : null
       const delta = currentValue !== null && baselineValue !== null
-        ? subtractForDisplay(currentValue, baselineValue)
+        ? subtractDecimalText(currentValue, baselineValue)
         : null
       rows.push({
         key: entry.derived,
@@ -451,7 +453,21 @@ export const MAX_DIMENSION_COLUMNS = 4
 /** Lignes maximales publiées pour une dimension (budget de lecture : 20). */
 export const MAX_DIMENSION_ROWS = 6
 /** Tables de dimension maximales dans une réponse. */
-export const MAX_DIMENSION_TABLES = 2
+export const MAX_DIMENSION_TABLES = 3
+
+/** Clés de dimension dont la valeur est un montant (devise à afficher). */
+const MONEY_KEYS: ReadonlySet<string> = new Set([
+  'revenue', 'profit', 'commission', 'potential', 'earned', 'paid',
+  'totalRevenue', 'purchaseCost', 'deliveryCost', 'confirmationCost', 'contributionMargin',
+])
+
+/** Valeur d'une cellule de dimension : unité ajoutée seulement si elle est connue. */
+export function formatDimensionValue(key: string, value: unknown, currency: string | null): string {
+  if (value === null || value === undefined) return '—'
+  const text = String(value)
+  if (currency && MONEY_KEYS.has(key) && /^[+\-−]?\d/.test(text)) return `${text} ${currency}`
+  return text
+}
 
 /**
  * Table d'une dimension réellement lue (ville, produit, agent, statut…).
@@ -464,6 +480,9 @@ export function buildDimensionTable(input: {
   dict: Dictionary
   script: TextScript
   reading: DimensionReading
+  /** Période réellement lue (les ventilations portent sur la fenêtre courante). */
+  periodLabel?: string
+  currency?: string | null
 }): TableBlock | null {
   const section = input.reading.data
   const rows = Array.isArray(section?.rows) ? section!.rows : []
@@ -496,15 +515,17 @@ export function buildDimensionTable(input: {
     return {
       key: String(record.id ?? `${input.reading.dimension}-${index}`),
       cells: columns.map((column) => {
-        const value = record[column.key]
-        const text = value === null || value === undefined ? '—' : String(value)
+        const text = formatDimensionValue(column.key, record[column.key], input.currency ?? null)
         return { value: text, direction: column.direction } as TableCell
       }),
     }
   })
 
+  const baseTitle = translate(input.dict, `dim.title.${input.reading.dimension}`)
+  const title = baseTitle && input.periodLabel ? `${baseTitle} · ${input.periodLabel}` : baseTitle
+
   return {
-    title: translate(input.dict, `dim.title.${input.reading.dimension}`),
+    title,
     columns,
     rows: body,
     caption: section?.meta?.state === 'partial' ? translate(input.dict, 'absence.partial') : undefined,
@@ -735,18 +756,37 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
   }
 
   // 2. Ventilations réellement demandées et lues : elles doivent être visibles.
+  // La période courante est résolue MÊME sans comparaison : une question simple
+  // (« ma marge ce mois-ci ») doit publier ses KPI, pas un « aucune donnée ».
+  const primary = input.sections[0]
+  const fallbackPeriod = request.plan.periods[0] ?? null
+  const primaryCurrentPeriod = primary
+    ? findPeriod(primary.currentId)
+    : fallbackPeriod
+  const currentLabel = primaryCurrentPeriod
+    ? formatPeriodLabel(primaryCurrentPeriod, request.profile.locale)
+    : ''
+  const currentReading = primaryCurrentPeriod
+    ? input.readings.get(primaryCurrentPeriod.id)
+    : undefined
+
   const dimensionTables: TableBlock[] = []
+  let dimensionsTruncated = false
   for (const reading of input.dimensions) {
     if (reading.failure) continue
-    const table = buildDimensionTable({ dict, script, reading })
+    if (dimensionTables.length >= MAX_DIMENSION_TABLES) {
+      dimensionsTruncated = true
+      break
+    }
+    const table = buildDimensionTable({
+      dict,
+      script,
+      reading,
+      periodLabel: currentLabel,
+      currency: input.currency,
+    })
     if (table) dimensionTables.push(table)
-    if (dimensionTables.length >= MAX_DIMENSION_TABLES) break
   }
-
-  const primary = input.sections[0]
-  const currentReading = primary ? input.readings.get(primary.currentId) : undefined
-  const primaryCurrentPeriod = primary ? findPeriod(primary.currentId) : null
-  const currentLabel = primaryCurrentPeriod ? formatPeriodLabel(primaryCurrentPeriod, request.profile.locale) : ''
 
   // 3. KPI compacts : uniquement lorsqu'aucun tableau ne porte déjà les valeurs.
   const kpiItems = tables.length > 0 || dimensionTables.length > 0
@@ -787,6 +827,22 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     : translate(dict, 'summary.noFigures')
 
   const warnings = buildNotices(input, dict)
+
+  // Une capacité demandée et volontairement réduite doit être annoncée, jamais
+  // supprimée en silence.
+  const renderableDimensions = input.dimensions.filter((reading) => !reading.failure).length
+  const notRead = input.dimensions.filter((reading) => !reading.failure && !reading.data).length
+  if (dimensionsTruncated || notRead > 0) {
+    const message = translate(dict, 'limit.dimensionsTruncated', {
+      kept: String(dimensionTables.length),
+      total: String(renderableDimensions),
+    })
+    if (message && !warnings.includes(message)) warnings.push(message)
+  }
+  if (dimensionTables.length > 0 && input.sections.length > 1) {
+    const message = translate(dict, 'limit.dimensionScope', { period: currentLabel })
+    if (message && !warnings.includes(message)) warnings.push(message)
+  }
   const blocks: ResponseBlock[] = []
   blocks.push({ type: 'summary', text: summaryText })
   if (kpiItems.length > 0) blocks.push({ type: 'kpi', items: kpiItems })

@@ -162,6 +162,8 @@ export interface SectionRequest {
   supabase: SupabaseClient
   /** Lecture V5 déjà effectuée pour la même période et le même périmètre. */
   kpis: AnalyticsReaderResult
+  /** Annulation transmise aux lectures HTTP de la section, quand supportée. */
+  signal?: AbortSignal
 }
 
 /** Source KPI injectable : permet de partager une lecture entre plusieurs outils. */

@@ -184,6 +184,7 @@ export async function readAssistantKpis(
   supabase: SupabaseClient,
   storeIds: string[],
   range: BusinessRange,
+  options?: { signal?: AbortSignal },
 ): Promise<AnalyticsReaderResult> {
   assertBusinessRange(range)
   const unique = Array.from(new Set(storeIds))
@@ -212,6 +213,9 @@ export async function readAssistantKpis(
       // la couverture analytique passe après la stabilité PostgreSQL.
       includeDirect: false,
       rpc: KPI_READER_RPC_V2,
+      // Une annulation doit interrompre la lecture HTTP en cours : sans ce
+      // signal, un abandon continuait de consommer PostgreSQL.
+      signal: options?.signal,
     })
 
     const validation = validateKpiPayload(raw)

@@ -77,7 +77,12 @@ export function parseDynamicPlan(raw: unknown, context: PlannerContext): Dynamic
   if (!payload || typeof payload !== 'object') return null
 
   const record = payload as Record<string, unknown>
-  if (record.schema !== undefined && record.schema !== PLAN_SCHEMA_VERSION) return null
+  // Schéma strict : version obligatoire et aucune propriété inconnue. Un plan
+  // qui contient `sql`, `filters` ou `storeIds` n'est pas « partiellement
+  // valide » : il est refusé en entier.
+  if (record.schema !== PLAN_SCHEMA_VERSION) return null
+  const allowedTopLevel = new Set(['schema', 'operations', 'needsSeries', 'rationale'])
+  if (Object.keys(record).some((key) => !allowedTopLevel.has(key))) return null
   if (!Array.isArray(record.operations)) return null
   if (record.operations.length === 0 || record.operations.length > MAX_PLANNED_OPERATIONS) return null
 
@@ -90,6 +95,13 @@ export function parseDynamicPlan(raw: unknown, context: PlannerContext): Dynamic
     if (!operation || typeof operation !== 'object') return null
     const entry = operation as Record<string, unknown>
     const kind = String(entry.kind ?? '')
+    const allowedKeys = kind === 'metric'
+      ? new Set(['kind', 'metric'])
+      : kind === 'dimension'
+        ? new Set(['kind', 'dimension'])
+        : null
+    if (!allowedKeys) return null
+    if (Object.keys(entry).some((key) => !allowedKeys.has(key))) return null
 
     if (kind === 'metric') {
       const metric = String(entry.metric ?? '') as KpiMetricAlias
@@ -146,8 +158,90 @@ export function buildPlannerPrompt(input: {
   ].join('\n')
 }
 
+/** Dimensions supplémentaires maximales demandées lors de l'approfondissement. */
+export const MAX_DEEPENING_DIMENSIONS = 2
+
 /**
- * Demande un plan au fournisseur.
+ * Seconde passe réellement guidée par les résultats.
+ *
+ * Le modèle reçoit les faits déjà calculés et les opérations déjà exécutées ; il
+ * peut demander **au plus deux** ventilations supplémentaires, validées et
+ * bornées par le backend. Aucune boucle : un seul appel, aucune récursion.
+ */
+export async function requestDeepeningPlan(input: {
+  message: string
+  locale: AssistantLocale
+  facts: readonly string[]
+  executedDimensions: readonly AnalysisDimension[]
+  context: PlannerContext
+  model: string
+  signal?: AbortSignal
+  provider?: {
+    chat: (request: {
+      model: string
+      systemPrompt: string
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>
+      signal?: AbortSignal
+      maxOutputTokens?: number
+    }) => Promise<AssistantProviderOutput>
+  }
+}): Promise<PlannerUsage> {
+  if (input.signal?.aborted) throw new Error('ASSISTANT_ABORTED')
+  if (input.facts.length === 0) return { plan: null, usage: null, reason: 'disabled' }
+
+  const remaining = input.context.allowedDimensions.filter(
+    (dimension) => !input.executedDimensions.includes(dimension),
+  )
+  if (remaining.length === 0) return { plan: null, usage: null, reason: 'disabled' }
+
+  const systemPrompt = [
+    'Tu analyses des résultats déjà calculés. Tu ne peux que demander des ventilations supplémentaires.',
+    'Interdiction absolue : aucun nombre, aucun SQL, aucune table, aucun budget, aucune métrique.',
+    `Dimensions encore disponibles : ${remaining.join(', ')}.`,
+    `Maximum ${MAX_DEEPENING_DIMENSIONS} dimensions, uniquement si elles éclairent la question.`,
+    'Si les résultats suffisent, renvoie une liste vide.',
+    'Réponds uniquement en JSON valide :',
+    '{"schema":1,"operations":[{"kind":"dimension","dimension":"<id>"}],"needsSeries":false,"rationale":"..."}',
+  ].join('\n')
+
+  const userPrompt = [
+    `Question : ${input.message.slice(0, 400)}`,
+    'Faits vérifiés :',
+    ...input.facts.slice(0, 16).map((fact) => `- ${fact}`),
+  ].join('\n')
+
+  try {
+    const provider = input.provider ??
+      (await import('@/lib/assistant/providers')).getAssistantProvider()
+    const result = await provider.chat({
+      model: input.model,
+      systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      signal: input.signal,
+      maxOutputTokens: 200,
+    })
+    if (input.signal?.aborted) throw new Error('ASSISTANT_ABORTED')
+
+    // Une liste vide est une réponse valide : aucun approfondissement demandé.
+    const parsed = parseDynamicPlan(result.text, { allowedMetrics: [], allowedDimensions: remaining })
+    if (parsed && parsed.metrics.length === 0 && parsed.dimensions.length === 0) {
+      return { plan: null, usage: result, reason: 'ok' }
+    }
+    return {
+      plan: parsed,
+      usage: result,
+      reason: parsed ? 'ok' : 'invalid',
+    }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ''
+    if (input.signal?.aborted || code.includes('_ABORTED') || code === 'ASSISTANT_ABORTED') {
+      throw new Error('ASSISTANT_ABORTED')
+    }
+    return { plan: null, usage: null, reason: 'provider_failed' }
+  }
+}
+/**
+ * Demande un plan initial au fournisseur.
  *
  * Toute erreur fournisseur ou réponse invalide produit `plan: null` et laisse
  * la main au plan déterministe. Une annulation est propagée, jamais convertie

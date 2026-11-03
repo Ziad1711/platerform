@@ -37,7 +37,7 @@ import { resolveDictionary, translate } from '@/lib/assistant/blocks/i18n'
 import { sanitizePublicText, sanitizeWarnings } from '@/lib/assistant/blocks/sanitize'
 import type { ResponseDocument } from '@/lib/assistant/blocks/types'
 import { getAssistantProvider } from '@/lib/assistant/providers'
-import { requestDynamicPlan, type DynamicPlan } from '@/lib/assistant/agent/planner'
+import { requestDeepeningPlan, requestDynamicPlan, MAX_DEEPENING_DIMENSIONS, type DynamicPlan } from '@/lib/assistant/agent/planner'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import type { RunSecureAgentInput, RunSecureAgentOutput, AgentStep } from '@/lib/assistant/agent/types'
 
@@ -134,6 +134,8 @@ function emptyUsage() {
     providerName: 'engine',
     modelName: 'deterministic',
     providerCostUsd: 0,
+    // Aucun appel fournisseur : zéro token est ici une valeur connue.
+    usageKnown: true,
   }
 }
 
@@ -161,18 +163,19 @@ export async function requestNarrative(input: {
   model: string
   signal?: AbortSignal
   maxOutputTokens?: number
-}): Promise<{ text: string; usage: RunSecureAgentOutput['providerUsage'] }> {
+}): Promise<{ text: string; claims: NarrativeClaim[]; usage: RunSecureAgentOutput['providerUsage'] }> {
   const systemPrompt = [
     'Tu es un analyste e-commerce COD.',
     NARRATIVE_HINT[input.request.profile.locale] ?? NARRATIVE_HINT.fr,
     'Interdiction absolue : aucun nombre, aucun montant, aucun pourcentage.',
     'Interdiction absolue : aucune cause, aucune explication causale, aucune hypothèse présentée comme un fait.',
-    'Appuie chaque phrase sur les faits fournis ; ne propose que des constats et des vérifications à faire.',
-    'Réponds uniquement en JSON valide : {"summary":"..."}.',
+    'Chaque phrase doit s appuyer sur les faits fournis.',
+    'Déclare chaque variation que tu affirmes dans "claims" en reprenant l identifiant de métrique fourni.',
+    'Réponds uniquement en JSON valide : {"summary":"...","claims":[{"metric":"<id>","direction":"up|down|flat"}]}',
   ].join('\n')
 
   const userPrompt = [
-    'Faits vérifiés (format : indicateur | période=valeur | écart) :',
+    'Faits vérifiés (première colonne = identifiant de métrique) :',
     ...input.facts.map((fact) => `- ${fact}`),
     `Question : ${input.request.question.slice(0, 400)}`,
   ].join('\n')
@@ -184,11 +187,12 @@ export async function requestNarrative(input: {
       systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
       signal: input.signal,
-      maxOutputTokens: Math.min(input.maxOutputTokens ?? 160, 200),
+      maxOutputTokens: Math.min(input.maxOutputTokens ?? 160, 240),
     })
     if (input.signal?.aborted) throw new Error('ASSISTANT_ABORTED')
     return {
       text: extractNarrative(result.text),
+      claims: extractNarrativeClaims(result.text),
       usage: {
         text: result.text,
         inputTokens: result.inputTokens,
@@ -196,6 +200,7 @@ export async function requestNarrative(input: {
         providerName: result.providerName,
         modelName: result.modelName,
         providerCostUsd: result.providerCostUsd,
+        usageKnown: result.usageKnown,
       },
     }
   } catch (error) {
@@ -205,7 +210,8 @@ export async function requestNarrative(input: {
     if (input.signal?.aborted || code === 'ASSISTANT_ABORTED' || code.endsWith('_ABORTED')) {
       throw new Error('ASSISTANT_ABORTED')
     }
-    return { text: '', usage: emptyUsage() }
+    const partial = (error as { usage?: RunSecureAgentOutput['providerUsage'] }).usage
+    return { text: '', claims: [], usage: partial ?? emptyUsage() }
   }
 }
 
@@ -277,17 +283,21 @@ export function choosePrimaryPair(
  */
 export function applyDynamicPlan(base: AnalysisRequest, plan: DynamicPlan | null): AnalysisRequest {
   if (!plan) return base
+  // Ordre de priorité : demandes explicites → plan → sélection par défaut.
+  // Un plan ne peut jamais faire disparaître une demande utilisateur.
   const merged: AnalysisRequest['metrics'] = []
-  for (const metric of [...plan.metrics, ...base.requestedMetrics, ...base.metrics]) {
+  for (const metric of [...base.requestedMetrics, ...plan.metrics, ...base.metrics]) {
     if (!merged.includes(metric) && isMetricAllowed(metric, base.access)) merged.push(metric)
   }
-  const dimensions = plan.dimensions.length > 0
-    ? plan.dimensions.filter((dimension) => isDimensionSupported(dimension))
-    : base.dimensions
+  // Dimensions : union des demandes explicites et des propositions du plan.
+  const dimensions: AnalysisRequest['dimensions'] = []
+  for (const dimension of [...base.dimensions, ...plan.dimensions]) {
+    if (isDimensionSupported(dimension) && !dimensions.includes(dimension)) dimensions.push(dimension)
+  }
   return {
     ...base,
     metrics: merged.length > 0 ? merged : base.metrics,
-    dimensions,
+    dimensions: dimensions.length > 0 ? dimensions : base.dimensions,
     needsSeries: base.needsSeries || plan.needsSeries,
   }
 }
@@ -347,7 +357,9 @@ export function buildFactsDigest(input: {
       if (delta.current === null && delta.baseline === null) continue
       const label = translate(dict, `metric.${delta.metric}`)
       const direction = delta.direction ?? 'na'
-      lines.push(`${label} | ${currentLabel}=${delta.current ?? 'n/a'} | ${baselineLabel}=${delta.baseline ?? 'n/a'} | ecart=${delta.delta ?? 'n/a'} (${direction})`)
+      // L'identifiant de métrique figure en tête : les affirmations de la
+      // narration sont vérifiées contre ces identifiants, pas contre du texte.
+      lines.push(`${delta.metric} | ${label} | ${currentLabel}=${delta.current ?? 'n/a'} | ${baselineLabel}=${delta.baseline ?? 'n/a'} | ecart=${delta.delta ?? 'n/a'} (${direction})`)
       if (lines.length >= 24) return lines
     }
   }
@@ -355,21 +367,89 @@ export function buildFactsDigest(input: {
 }
 
 /** Marqueurs causaux : jamais acceptés sans démonstration. */
-const CAUSAL_MARKER = /(?:parce\s+que|à\s+cause|a\s+cause|en\s+raison|caus[ée]e?s?|explique[nt]?|dû\s+à|due\s+to|because|caused|explains|بسبب|لأن|يعود\s+إلى)/i
+const CAUSAL_MARKER = /(?:parce\s+que|à\s+cause|a\s+cause|en\s+raison|caus[ée]e?s?|explique[nt]?|dû\s+à|due\s+to|because|caused|explains|drove|driven|led\s+to|resulted\s+in|بسبب|لأن|يعود\s+إلى)/i
+
+/** Vocabulaire directionnel : une affirmation de variation doit être justifiée. */
+const DIRECTIONAL_MARKER = /(?:hausse|baisse|progress|recul|chute|effondr|stable|augment|diminu|increase|decrease|rise|fall|declin|grew|grow|ارتفع|انخفض|تراجع|زاد|نقص)/i
+
+export interface NarrativeClaim {
+  metric: string
+  direction: 'up' | 'down' | 'flat'
+}
+
+/** Extrait les affirmations structurées d'une réponse de narration. */
+export function extractNarrativeClaims(raw: string): NarrativeClaim[] {
+  const text = String(raw ?? '').trim()
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return []
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1)) as { claims?: unknown }
+    if (!Array.isArray(parsed.claims)) return []
+    const claims: NarrativeClaim[] = []
+    for (const entry of parsed.claims) {
+      if (!entry || typeof entry !== 'object') continue
+      const record = entry as Record<string, unknown>
+      const metric = typeof record.metric === 'string' ? record.metric : ''
+      const direction = record.direction === 'up' || record.direction === 'down' || record.direction === 'flat'
+        ? record.direction
+        : null
+      if (metric && direction) claims.push({ metric, direction })
+      if (claims.length >= 6) break
+    }
+    return claims
+  } catch {
+    return []
+  }
+}
 
 /**
- * Une narration est publiable seulement si elle reste factuelle.
+ * Une narration est publiable seulement si ses affirmations sont vérifiables.
  *
- * Contraintes : aucun chiffre (ils vivent dans les blocs), aucune causalité non
- * démontrée, aucun code interne, et au moins un fait disponible.
+ * Contraintes : aucun chiffre, aucun code interne, aucun marqueur causal, et
+ * toute affirmation de variation doit être couverte par une affirmation
+ * structurée dont la direction correspond au fait calculé. Un texte sans
+ * affirmation mais avec un vocabulaire directionnel est refusé.
  */
-export function isGroundedNarrative(text: string, facts: readonly string[]): boolean {
+export function isGroundedNarrative(
+  text: string,
+  facts: readonly string[],
+  options?: { claims?: readonly NarrativeClaim[]; directions?: Readonly<Record<string, string | null>> },
+): boolean {
   const candidate = String(text ?? '').trim()
   if (!candidate || candidate.length > 360) return false
   if (facts.length === 0) return false
   if (/\d/.test(candidate)) return false
   if (CAUSAL_MARKER.test(candidate)) return false
-  return sanitizePublicText(candidate).removedCode === false
+  if (sanitizePublicText(candidate).removedCode) return false
+
+  const claims = options?.claims ?? []
+  const directions = options?.directions ?? {}
+  for (const claim of claims) {
+    if (!(claim.metric in directions)) return false
+    const actual = directions[claim.metric]
+    if (actual !== claim.direction) return false
+  }
+
+  // Une variation évoquée sans affirmation structurée n'est pas vérifiable.
+  if (DIRECTIONAL_MARKER.test(candidate) && claims.length === 0) return false
+  return true
+}
+
+/** Directions réellement calculées, par métrique du plan. */
+export function buildFactDirections(
+  sections: readonly ComparisonSection[],
+): Record<string, 'up' | 'down' | 'flat' | null> {
+  const directions: Record<string, 'up' | 'down' | 'flat' | null> = {}
+  for (const section of sections) {
+    for (const delta of section.deltas) {
+      if (delta.direction === null) continue
+      // La première comparaison publiée fait foi ; les suivantes ne doivent pas
+      // écraser silencieusement une direction déjà établie.
+      if (!(delta.metric in directions)) directions[delta.metric] = delta.direction
+    }
+  }
+  return directions
 }
 
 /** Libellé de période, identique à celui des blocs. */
@@ -420,10 +500,15 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
 
   if (deterministic.clarification) return clarificationOutcome(deterministic)
 
+  // Budget et échéance démarrés AVANT toute dépense : planification comprise.
+  const tracker = createBudgetTracker()
+  let budgetExceeded = false
+
   // 2. Planification dynamique bornée : le modèle propose, le backend dispose.
   let plannerUsage: RunSecureAgentOutput['providerUsage'] | null = null
   let plan: DynamicPlan | null = null
   if (isPlannerLlmEnabled()) {
+    tracker.assertTime()
     const planned = await requestDynamicPlan({
       message: input.userMessage,
       locale: deterministic.profile.locale,
@@ -435,6 +520,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
       model: input.providerModel,
       signal: input.signal,
     })
+    tracker.assertTime()
     plan = planned.plan
     plannerUsage = planned.usage
     activitySteps.push({
@@ -451,9 +537,6 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
     label: 'Périodes',
     detail: `${request.plan.periods.length} fenêtre(s), ${request.plan.pairs.length} correspondance(s)`,
   })
-
-  const tracker = createBudgetTracker()
-  let budgetExceeded = false
 
   // Bornage strict : le plan ne peut pas dépasser le budget de lectures.
   const windows = planWindows(request.plan).slice(0, ENGINE_MAX_WINDOWS)
@@ -494,18 +577,21 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
     ? readings.get(primarySection.currentId)
     : (request.plan.periods[0] ? readings.get(request.plan.periods[0].id) : undefined)
 
-  // Approfondissement borné : une ventilation n'est lue que si elle est
-  // demandée, que la fenêtre principale existe et que le budget le permet.
+  // 1re passe : ventilations explicitement demandées (ou proposées au plan).
+  // Une dimension au-delà du budget est conservée sans données pour être
+  // annoncée, jamais supprimée en silence.
   const dimensions: DimensionReading[] = []
-  if (primaryReading && scopedRequest.dimensions.length > 0 && isDeepeningEnabled()) {
+  const requestedDimensions = scopedRequest.dimensions
+  if (primaryReading && requestedDimensions.length > 0 && isDeepeningEnabled()) {
     const nothingPublished = primarySection
       ? primarySection.deltas.every((delta) => delta.current === null && delta.baseline === null)
       : false
-    for (const dimension of scopedRequest.dimensions.slice(0, DEFAULT_BUDGETS.maxDimensions)) {
+    for (const [index, dimension] of requestedDimensions.entries()) {
       if (input.signal?.aborted) throw new Error('ASSISTANT_ABORTED')
-      if (!tracker.canContinue()) {
-        budgetExceeded = true
-        break
+      if (index >= DEFAULT_BUDGETS.maxDimensions || !tracker.canContinue()) {
+        budgetExceeded = budgetExceeded || !tracker.canContinue()
+        dimensions.push({ dimension, windowId: primaryReading.windowId, data: null, failure: null })
+        continue
       }
       if (!isDimensionSupported(dimension)) {
         // Capacité non exposée : elle est signalée, jamais inventée.
@@ -519,6 +605,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
           dimension,
           reading: primaryReading,
           tracker,
+          signal: input.signal,
         }))
       } catch (error) {
         if (error instanceof EngineBudgetError) {
@@ -527,6 +614,70 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
         }
         throw error
       }
+    }
+  }
+
+  const facts = buildFactsDigest({ request: scopedRequest, readings, sections })
+  const directions = buildFactDirections(sections)
+
+  // 2e passe réellement guidée par les résultats : le modèle reçoit les faits
+  // déjà calculés et peut demander au maximum deux ventilations supplémentaires.
+  let deepeningUsage: RunSecureAgentOutput['providerUsage'] | null = null
+  const executedDimensions = dimensions.filter((reading) => reading.data !== null).map((reading) => reading.dimension)
+  if (
+    isPlannerLlmEnabled() && isDeepeningEnabled() && primaryReading &&
+    facts.length > 0 && executedDimensions.length < 5 && tracker.canContinue()
+  ) {
+    try {
+      const deepened = await requestDeepeningPlan({
+        message: input.userMessage,
+        locale: scopedRequest.profile.locale,
+        facts,
+        executedDimensions,
+        context: {
+          allowedMetrics: [],
+          allowedDimensions: ['city', 'product', 'agent', 'status', 'confirmation'],
+        },
+        model: input.providerModel,
+        signal: input.signal,
+      })
+      deepeningUsage = deepened.usage
+      if (deepened.plan) {
+        for (const dimension of deepened.plan.dimensions.slice(0, MAX_DEEPENING_DIMENSIONS)) {
+          if (executedDimensions.includes(dimension)) continue
+          if (input.signal?.aborted) throw new Error('ASSISTANT_ABORTED')
+          if (!tracker.canContinue()) {
+            budgetExceeded = true
+            break
+          }
+          try {
+            tracker.consumeDeepening()
+            dimensions.push(await readDimension({
+              supabase: input.supabase,
+              dimension,
+              reading: primaryReading,
+              tracker,
+              signal: input.signal,
+            }))
+            executedDimensions.push(dimension)
+          } catch (error) {
+            if (error instanceof EngineBudgetError) {
+              budgetExceeded = true
+              break
+            }
+            throw error
+          }
+        }
+        activitySteps.push({
+          label: 'Approfondissement',
+          detail: `${deepened.plan.dimensions.length} ventilation(s) demandée(s) après lecture`,
+        })
+      }
+    } catch (error) {
+      // Un approfondissement impossible ne doit jamais annuler une analyse déjà
+      // calculée ; une annulation, elle, est propagée.
+      if (error instanceof Error && error.message === 'ASSISTANT_ABORTED') throw error
+      if (error instanceof EngineBudgetError) budgetExceeded = true
     }
   }
 
@@ -550,10 +701,9 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
   })
 
   // Rédaction optionnelle adossée aux faits : le texte ne remplace le résumé
-  // déterministe que s'il reste strictement factuel (aucun chiffre, aucune
-  // causalité non démontrée, aucun code interne).
+  // déterministe que si ses affirmations sont vérifiables (aucun chiffre,
+  // aucune causalité, chaque variation confirmée par un fait calculé).
   let structured = toStructuredResponse(composed, scopedRequest)
-  const facts = buildFactsDigest({ request: scopedRequest, readings, sections })
   let narrativeUsage: RunSecureAgentOutput['providerUsage'] | null = null
 
   if (isNarrativeEnabled() && facts.length > 0) {
@@ -569,7 +719,10 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
       : null
     if (narrative) {
       narrativeUsage = narrative.usage
-      if (narrative.text && isGroundedNarrative(narrative.text, facts)) {
+      if (narrative.text && isGroundedNarrative(narrative.text, facts, {
+        claims: narrative.claims,
+        directions,
+      })) {
         structured = applyNarrative(structured, narrative.text)
       }
     }
@@ -577,7 +730,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
 
   return {
     structuredResponse: structured,
-    providerUsage: mergeUsage(plannerUsage, narrativeUsage),
+    providerUsage: mergeUsage(plannerUsage, deepeningUsage, narrativeUsage),
     activitySteps,
   }
 }
@@ -597,6 +750,8 @@ export function mergeUsage(
     providerName: last.providerName,
     modelName: last.modelName,
     providerCostUsd: real.reduce((sum, usage) => sum + usage.providerCostUsd, 0),
+    // Un seul appel non mesuré suffit : le total n'est plus connu.
+    usageKnown: real.every((usage) => usage.usageKnown !== false),
   }
 }
 

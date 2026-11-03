@@ -49,6 +49,11 @@ function ComposedTable({ table, direction }: { table: TableBlock; direction: 'lt
       aria-label={table.columns.map((column) => column.label).join(' · ')}
       className="mt-2 max-w-full overflow-x-auto rounded-lg border border-border bg-card/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
+      {table.title ? (
+        <p className="border-b border-border/60 px-2 py-1.5 text-[11px] font-semibold text-foreground/90">
+          {renderBidiText(table.title)}
+        </p>
+      ) : null}
       <table className="w-full min-w-[20rem] border-collapse text-xs">
         <thead className="bg-secondary/80">
           <tr>
