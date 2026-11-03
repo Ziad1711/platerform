@@ -731,7 +731,7 @@ check('R04', 'taux multi-boutiques : pondéré par les numérateurs', () => {
     { currency: 'MAD', metrics: { deliveryRate: { value: '90.00', unit: 'percent', state: 'complete', numerator: 90, denominator: 100 } } },
   ]
   const snapshot = compose.readMetricFromReading({ kpis: { stores } }, 'deliveryRate')
-  assertEqual(snapshot.value, '81.81', 'recalcul 90 / 110')
+  assertEqual(snapshot.value, '81.82', 'recalcul 90 / 110, arrondi commercial')
   assertEqual(snapshot.unit, 'percent', 'unité conservée')
 })
 
@@ -873,12 +873,41 @@ check('R12', 'anglais et formulations mixtes : dimensions reconnues', () => {
   assertEqual(request.detectDimensions('ch7al men commande f Casablanca').length, 0, 'aucune dimension inventée')
 })
 
-check('R13', 'narration : causalité et chiffres refusés', () => {
+check('R13', 'narration : causalité, chiffres et affirmations non prouvées refusés', () => {
   const engine = loadTs('lib/assistant/agent/engine.ts')
-  const facts = ['Commandes | septembre 2026=412 | septembre 2025=398 | ecart=14 (up)']
+  const facts = ['revenue | CA réalisé | septembre 2026=412 | septembre 2025=398 | ecart=14 (up)']
+  const directions = { revenue: 'up' }
   assertEqual(engine.isGroundedNarrative('La baisse est causée par vos publicités.', facts), false, 'causalité refusée')
   assertEqual(engine.isGroundedNarrative('Les commandes sont à 412 cette période.', facts), false, 'chiffre refusé')
-  assertEqual(engine.isGroundedNarrative('Les volumes progressent sur la période comparée.', facts), true, 'constat factuel accepté')
+  assertEqual(
+    engine.isGroundedNarrative('Les ventes se sont effondrées.', facts, { claims: [], directions }),
+    false,
+    'affirmation directionnelle non déclarée refusée',
+  )
+  assertEqual(
+    engine.isGroundedNarrative('Les ventes se sont effondrées.', facts, {
+      claims: [{ metric: 'revenue', direction: 'down' }],
+      directions,
+    }),
+    false,
+    'direction contraire aux faits refusée',
+  )
+  assertEqual(
+    engine.isGroundedNarrative('Le chiffre d’affaires progresse sur la période comparée.', facts, {
+      claims: [{ metric: 'revenue', direction: 'up' }],
+      directions,
+    }),
+    true,
+    'affirmation confirmée par les faits acceptée',
+  )
+  assertEqual(
+    engine.isGroundedNarrative('Advertising drove the decline.', facts, {
+      claims: [{ metric: 'revenue', direction: 'down' }],
+      directions,
+    }),
+    false,
+    'causalité anglaise refusée',
+  )
   assertEqual(engine.isGroundedNarrative('Les volumes progressent.', []), false, 'aucun fait = aucune narration')
 })
 
@@ -913,6 +942,142 @@ check('R16', 'périmètre de boutiques : uniquement celui autorisé', async () =
   const source = fs.readFileSync(path.resolve(ROOT, 'lib/assistant/agent/engine.ts'), 'utf8')
   assert(!/\.from\(\s*['"]/.test(source), 'aucune lecture de table directe')
   assert(!/\.rpc\(/.test(source), 'aucun appel RPC direct dans le moteur')
+})
+
+check('R17', 'question simple : les KPI sont publiés sans comparaison', async () => {
+  const outcome = await runEngine('Quelle est ma marge en septembre 2026 ?')
+  const blocks = outcome.structuredResponse.document.blocks
+  const kpi = blocks.find((block) => block.type === 'kpi')
+  assert(kpi, 'bloc KPI présent')
+  assert(kpi.items.some((item) => item.id === 'contributionMargin'), 'marge publiée')
+  assert(blocks[0].text !== 'Aucune valeur chiffrée fiable ne peut être publiée pour cette demande.', 'pas de faux vide')
+})
+
+check('R18', 'le plan ne peut ni effacer ni déclasser une demande explicite', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  const base = request.buildAnalysisRequest({
+    message: 'Mon CA par ville et produit en septembre 2026',
+    intent: 'dashboard_summary',
+    resolvedRange: { from: '2026-09-01', to: '2026-10-01' },
+    access: 'full',
+    maxPeriods: 6,
+  })
+  assertEqual(base.dimensions.join(','), 'city,product', 'dimensions demandées')
+  const planned = engine.applyDynamicPlan(base, {
+    schema: 1,
+    metrics: ['purchaseCost', 'deliveryCost', 'confirmationCost', 'totalOrders', 'adSpend'],
+    dimensions: ['agent'],
+    needsSeries: false,
+    rationale: '',
+  })
+  assertEqual(planned.dimensions.join(','), 'city,product,agent', 'demandes conservées puis enrichies')
+
+  const margin = request.buildAnalysisRequest({
+    message: 'Quelle est ma marge ce mois-ci ?',
+    intent: 'business_overview',
+    resolvedRange: { from: '2026-10-01', to: '2026-11-01' },
+    access: 'full',
+    maxPeriods: 6,
+  })
+  const withPlan = engine.applyDynamicPlan(margin, {
+    schema: 1,
+    metrics: ['purchaseCost', 'deliveryCost', 'confirmationCost'],
+    dimensions: [],
+    needsSeries: false,
+    rationale: '',
+  })
+  assertEqual(withPlan.metrics[0], 'contributionMargin', 'métrique demandée toujours en tête')
+})
+
+check('R19', 'schéma de plan strict : version et propriétés inconnues refusées', () => {
+  const planner = loadTs('lib/assistant/agent/planner.ts')
+  const context = { allowedMetrics: ['revenue'], allowedDimensions: ['city'] }
+  assertEqual(planner.parseDynamicPlan({ operations: [{ kind: 'metric', metric: 'revenue' }] }, context), null, 'version absente')
+  assertEqual(
+    planner.parseDynamicPlan({ schema: 1, operations: [{ kind: 'metric', metric: 'revenue', sql: 'x' }] }, context),
+    null,
+    'propriété inconnue dans une opération',
+  )
+  assertEqual(
+    planner.parseDynamicPlan({ schema: 1, operations: [{ kind: 'metric', metric: 'revenue' }], storeIds: ['x'] }, context),
+    null,
+    'propriété inconnue au niveau racine',
+  )
+  assertEqual(
+    planner.parseDynamicPlan({ schema: 1, operations: [{ kind: 'sql', query: 'select 1' }] }, context),
+    null,
+    'opération inconnue',
+  )
+  const valid = planner.parseDynamicPlan({ schema: 1, operations: [{ kind: 'metric', metric: 'revenue' }] }, context)
+  assert(valid && valid.metrics[0] === 'revenue', 'plan valide accepté')
+})
+
+check('R20', 'dérivées : aucun écart quand la source n’est pas comparable', () => {
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  const comparability = loadTs('lib/assistant/semantic/comparability.ts')
+  const dict = i18n.resolveDictionary('fr', 'latin')
+  const metricOf = (value, unit = 'decimal') => ({
+    value: String(value), count: unit === 'count' ? Number(value) : null, unit,
+    state: 'complete', definition: '', numerator: null, denominator: null,
+  })
+  const store = (revenue) => ({
+    storeId: 's', currency: 'MAD', access: 'full', definitionVersion: 1, state: 'complete', days: [],
+    metrics: { orders: metricOf('100', 'count'), revenue: metricOf(revenue) },
+    coverage: { days_total: 30, days_aggregate: 30, days_direct: 0, days_dirty: 0, days_missing: 0, days_incompatible: 0, days_partial: 0 },
+  })
+  const reading = (windowId, revenue) => ({
+    windowId, range: { from: '2026-09-01', to: '2026-10-01' }, failure: null,
+    kpis: { state: 'complete', stores: [store(revenue)], issues: [], limits: [] },
+  })
+  const source = (metrics, version, days = 30) => ({ metrics, definitionVersion: version, days, state: 'complete' })
+  const deltas = [
+    comparability.computeMetricDelta({
+      metric: 'revenue',
+      current: source({ revenue: metricOf('100') }, 2),
+      baseline: source({ revenue: metricOf('80') }, 1, 31),
+      access: 'full',
+    }),
+    comparability.computeMetricDelta({
+      metric: 'totalOrders',
+      current: source({ totalOrders: metricOf('100', 'count') }, 1),
+      baseline: source({ totalOrders: metricOf('90', 'count') }, 1, 31),
+      access: 'full',
+    }),
+  ]
+  const table = compose.buildComparisonTable({
+    dict, script: 'latin', currentLabel: 'septembre 2026', baselineLabel: 'septembre 2025',
+    currentDays: 30, baselineDays: 31, currency: 'MAD',
+    currentReading: reading('p0', '100'), baselineReading: reading('p1', '80'), deltas,
+  })
+  const revenueRow = table.rows.find((row) => row.key === 'revenue')
+  const revenuePerDay = table.rows.find((row) => row.key === 'revenuePerDay')
+  assertEqual(revenueRow.cells[3].value, '—', 'total non comparable : pas d’écart')
+  assertEqual(revenuePerDay, undefined, 'dérivée non comparable absente')
+  assert(table.rows.find((row) => row.key === 'ordersPerDay'), 'dérivée comparable conservée')
+})
+
+check('R21', 'aucune population vide prouvée sans boutique lue', () => {
+  const history = loadTs('lib/assistant/engine/history.ts')
+  const assessment = history.assessWindow({
+    windowId: 'p0', range: { from: '2026-09-01', to: '2026-10-01' }, failure: null,
+    kpis: { state: 'empty', stores: [], issues: [], limits: [] },
+  })
+  assert(assessment.kind !== 'genuinely_empty', 'absence non prouvée sans boutique')
+})
+
+check('R22', 'usage fournisseur inconnu : non facturé et marqué inconnu', () => {
+  const credits = loadTs('lib/assistant/credits.ts')
+  const billing = credits.resolveUsageBilling({ kind: 'provider', inputTokens: 0, outputTokens: 0, usageKnown: false })
+  assertEqual(billing.billable, false, 'aucun débit sur usage inconnu')
+  assertEqual(billing.usageKnown, false, 'usage inconnu conservé')
+})
+
+check('R24', 'pourcentage : arrondi commercial, pas troncature', () => {
+  const decimal = loadTs('lib/assistant/analytics-decimal.ts')
+  assertEqual(decimal.percentOfCounts(90, 110), '81.82', '90 / 110 arrondi')
+  assertEqual(decimal.percentOfCounts(1, 3), '33.33', '1 / 3 arrondi')
+  assertEqual(decimal.percentOfCounts(0, 10), '0', 'zéro réel affiché sans décimale inutile')
+  assertEqual(decimal.percentOfCounts(1, 0), null, 'dénominateur nul refusé')
 })
 
 const passed = results.filter((result) => result.pass).length

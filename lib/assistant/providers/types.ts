@@ -15,6 +15,16 @@ export interface AssistantProviderOutput {
   providerName: string
   modelName: string
   providerCostUsd: number
+  /**
+   * `false` quand la réponse ne contient aucune mesure d'usage exploitable.
+   * Un usage inconnu ne doit jamais être lu comme « zéro token ».
+   */
+  usageKnown?: boolean
+}
+
+/** Échec fournisseur porteur de l'usage réellement consommé, s'il est connu. */
+export interface ProviderCallError extends Error {
+  usage?: AssistantProviderOutput
 }
 
 export interface AssistantProvider {

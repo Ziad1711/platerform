@@ -68,7 +68,7 @@ function guardFailure<Row>(
  * Tunnel de confirmation (`order_counts_as_confirmed`), bornes `[from, to[`.
  * Une période sans commande renvoie des zéros réels, pas une absence.
  */
-export async function readConfirmationSection({ supabase, kpis }: SectionRequest): Promise<SectionResult<ConfirmationRow>> {
+export async function readConfirmationSection({ supabase, kpis, signal }: SectionRequest): Promise<SectionResult<ConfirmationRow>> {
   const source = 'rpc_dashboard_confirmation_counters'
   if (kpis.state === 'forbidden') return forbidden('confirmation', source, kpis)
   const storeIds = authorizedStoreIds(kpis)
@@ -85,7 +85,7 @@ export async function readConfirmationSection({ supabase, kpis }: SectionRequest
     p_store_ids: storeIds,
     p_start_date: startUtc,
     p_end_date: endUtc,
-  })
+  }).abortSignal(signal as AbortSignal)
   if (error) {
     if (error.message?.includes('NO_ACCESS')) return forbidden('confirmation', source, kpis)
     return unavailable('confirmation', source, kpis, 'Lecture du tunnel de confirmation indisponible.')
@@ -173,7 +173,7 @@ export interface AgentPerformanceRow {
  * - troncature détectée par une lecture de `MAX_DETAIL_GROUPS + 1` lignes ;
  * - commissions publiées uniquement si toutes les boutiques sont `full`.
  */
-export async function readAgentSection({ supabase, kpis }: SectionRequest): Promise<SectionResult<AgentPerformanceRow>> {
+export async function readAgentSection({ supabase, kpis, signal }: SectionRequest): Promise<SectionResult<AgentPerformanceRow>> {
   const source = 'rpc_dashboard_confirmation_performance'
   if (kpis.state === 'forbidden') return forbidden('agents', source, kpis)
   const storeIds = authorizedStoreIds(kpis)
@@ -190,6 +190,7 @@ export async function readAgentSection({ supabase, kpis }: SectionRequest): Prom
 
   const { data, error } = await supabase
     .rpc(source, { p_store_ids: storeIds, p_start_date: startUtc, p_end_date: inclusiveEnd })
+    .abortSignal(signal as AbortSignal)
     .limit(MAX_DETAIL_GROUPS + 1)
   if (error) {
     if (error.message?.includes('NO_ACCESS')) return forbidden('agents', source, kpis)
@@ -299,7 +300,7 @@ export interface CityPerformanceRow {
  * devise exigée (la RPC ne renvoie pas `store_id`, donc aucune fusion
  * inter-boutiques devises ne peut être garantie).
  */
-export async function readCitySection({ supabase, kpis }: SectionRequest): Promise<SectionResult<CityPerformanceRow>> {
+export async function readCitySection({ supabase, kpis, signal }: SectionRequest): Promise<SectionResult<CityPerformanceRow>> {
   const source = 'rpc_dashboard_city_performance'
   if (kpis.state === 'forbidden') return forbidden('cities', source, kpis)
   const storeIds = authorizedStoreIds(kpis)
@@ -317,6 +318,7 @@ export async function readCitySection({ supabase, kpis }: SectionRequest): Promi
   const { startUtc, endUtc } = rangeInstants(kpis.range)
   const { data, error } = await supabase
     .rpc(source, { p_store_ids: storeIds, p_start_date: startUtc, p_end_date: endUtc })
+    .abortSignal(signal as AbortSignal)
     .limit(MAX_DETAIL_GROUPS + 1)
   if (error) {
     if (error.message?.includes('NO_ACCESS')) return forbidden('cities', source, kpis)

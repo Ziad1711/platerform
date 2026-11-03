@@ -91,7 +91,7 @@ async function readWindowOnce(
   try {
     // `readAssistantKpis` valide le payload (zod) et conserve les états.
     // Aucun repli direct implicite : la stratégie est décidée en amont.
-    const kpis = await readAssistantKpis(supabase, [...storeIds], window.range)
+    const kpis = await readAssistantKpis(supabase, [...storeIds], window.range, { signal })
     return {
       windowId: window.id,
       range: window.range,
@@ -163,6 +163,7 @@ export async function readDimension(input: {
   reading: WindowReading
   tracker: BudgetTracker
   limit?: number
+  signal?: AbortSignal
 }): Promise<DimensionReading> {
   const { dimension, reading, tracker } = input
   const base: DimensionReading = {
@@ -172,6 +173,7 @@ export async function readDimension(input: {
     failure: null,
   }
 
+  if (input.signal?.aborted) return { ...base, failure: 'gateway_unavailable' }
   if (!reading.kpis || reading.failure) {
     return { ...base, failure: reading.failure ?? 'unknown' }
   }
@@ -180,7 +182,7 @@ export async function readDimension(input: {
   tracker.consumeDimension()
   tracker.consumeOperation()
 
-  const request = { supabase: input.supabase, kpis: reading.kpis }
+  const request = { supabase: input.supabase, kpis: reading.kpis, signal: input.signal }
   const limit = Math.max(1, Math.min(input.limit ?? 10, tracker.budgets.maxRowsPerDimension))
 
   try {

@@ -79,28 +79,47 @@ export class OpenAIProvider implements AssistantProvider {
 
     const payload = await response.json()
     const text = payload?.choices?.[0]?.message?.content
-    if (!text || typeof text !== 'string') {
-      throw new Error('OPENAI_EMPTY_RESPONSE')
+    // Mesure d'usage lue AVANT toute sortie : une réponse sans texte exploitable
+    // a peut-être consommé des tokens, et cet usage ne doit pas être perdu.
+    const hasUsage = payload?.usage !== null && typeof payload?.usage === 'object'
+    const inputTokens = hasUsage ? Number(payload?.usage?.prompt_tokens) : 0
+    const outputTokens = hasUsage ? Number(payload?.usage?.completion_tokens) : 0
+    const usageKnown = hasUsage && Number.isFinite(inputTokens) && Number.isFinite(outputTokens)
+    const usage = {
+      text: typeof text === 'string' ? text : '',
+      inputTokens: usageKnown ? inputTokens : 0,
+      outputTokens: usageKnown ? outputTokens : 0,
+      providerName: 'openai',
+      modelName: input.model,
+      providerCostUsd: 0,
+      usageKnown,
     }
 
-    const inputTokens = Number(payload?.usage?.prompt_tokens || 0)
-    const outputTokens = Number(payload?.usage?.completion_tokens || 0)
+    if (!text || typeof text !== 'string') {
+      const error = new Error('OPENAI_EMPTY_RESPONSE') as Error & { usage?: typeof usage }
+      error.usage = usage
+      throw error
+    }
+
     const pricing = pricingFor(input.model)
 
-    const providerCostUsd = Number(
-      (
-        (inputTokens / 1_000_000) * pricing.inputPerMillion +
-        (outputTokens / 1_000_000) * pricing.outputPerMillion
-      ).toFixed(6)
-    )
+    const providerCostUsd = usageKnown
+      ? Number(
+          (
+            (inputTokens / 1_000_000) * pricing.inputPerMillion +
+            (outputTokens / 1_000_000) * pricing.outputPerMillion
+          ).toFixed(6)
+        )
+      : 0
 
     return {
       text,
-      inputTokens,
-      outputTokens,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
       providerName: 'openai',
       modelName: input.model,
       providerCostUsd,
+      usageKnown,
     }
   }
 }

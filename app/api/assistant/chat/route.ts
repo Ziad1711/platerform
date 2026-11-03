@@ -140,6 +140,8 @@ function resolveAiThreadTitle(raw?: string | null) {
 export async function POST(request: Request) {
   const startedAt = Date.now()
   let slotKey: string | null = null
+  /** Nettoyage de l'échéance : exécuté seulement APRÈS la finalisation. */
+  let deadlineCleanup: (() => void) | null = null
   let registryAttempt: { requestId: string; attemptToken: string } | null = null
   let requestSupabase: Awaited<ReturnType<typeof requireAuthenticatedUser>>['supabase'] | null = null
 
@@ -173,7 +175,7 @@ export async function POST(request: Request) {
 
     // Admission distribuée (opt-in) : borne le coût fournisseur entre instances.
     // Sans la RPC déployée, le drapeau reste fermé et le comportement est inchangé.
-    await assertDistributedAdmission(supabase, { userId: user.id })
+    await assertDistributedAdmission({ userId: user.id })
 
     // Périmètre explicite : une seule boutique par requête, jamais d'agrégation
     // implicite de plusieurs boutiques (devises et tenants différents).
@@ -498,12 +500,20 @@ export async function POST(request: Request) {
       comparisonBaseline,
     }
 
+    // L'échéance et l'écoute de déconnexion restent actives jusqu'à la
+    // finalisation : les libérer trop tôt permettait d'écrire une réponse après
+    // abandon.
+    deadlineCleanup = () => {
+      clearTimeout(deadlineTimer)
+      request.signal.removeEventListener('abort', onClientAbort)
+    }
+
     try {
       // Moteur V2 : périodes multiples, comparabilité par métrique, blocs typés.
-      // Un échec inattendu retombe sur le moteur historique, jamais sur une erreur.
-      const engineOutcome = isEngineV2Enabled()
-        ? await runAnalyticEngine(agentInput).catch(() => null)
-        : null
+      // Aucun repli silencieux vers V1 : un abandon, un dépassement ou une erreur
+      // du moteur ne doit jamais produire une seconde dépense fournisseur ni
+      // effacer l'usage déjà consommé.
+      const engineOutcome = isEngineV2Enabled() ? await runAnalyticEngine(agentInput) : null
 
       agentResult = engineOutcome
         ? {
@@ -538,9 +548,6 @@ export async function POST(request: Request) {
         durationMs: Date.now() - startedAt,
       })
       throw controlled
-    } finally {
-      clearTimeout(deadlineTimer)
-      request.signal.removeEventListener('abort', onClientAbort)
     }
 
     // Une annulation survenue pendant l'analyse interdit toute finalisation :
@@ -566,6 +573,8 @@ export async function POST(request: Request) {
       kind: resolveUsageKind({ cancelled: false, providerName: providerResult.providerName }),
       inputTokens: providerResult.inputTokens,
       outputTokens: providerResult.outputTokens,
+      // Un usage non mesuré reste inconnu : jamais converti en « zéro connu ».
+      usageKnown: providerResult.usageKnown !== false,
     })
     const creditsUsed = billing.creditsConsumed
     const walletSnapshot = toWalletSnapshot(wallet)
@@ -674,6 +683,8 @@ export async function POST(request: Request) {
       { status: publicError.status }
     )
   } finally {
+    deadlineCleanup?.()
+    deadlineCleanup = null
     if (slotKey) releaseAssistantSlot(slotKey)
   }
 }
