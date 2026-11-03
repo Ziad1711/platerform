@@ -1080,6 +1080,299 @@ check('R24', 'pourcentage : arrondi commercial, pas troncature', () => {
   assertEqual(decimal.percentOfCounts(1, 0), null, 'dénominateur nul refusé')
 })
 
+/* -------------------------------------------------------------------------- */
+/* 11. Contre-exemples de l'audit final (P1)                                   */
+/* -------------------------------------------------------------------------- */
+
+const PROVIDERS_MODULE = path.resolve(ROOT, 'lib/assistant/providers/index.ts').replace(/\\/g, '/')
+
+/** Remplace le fournisseur du cache, puis restaure l'état initial. */
+async function withProvider(provider, run) {
+  const original = cache.get(PROVIDERS_MODULE)
+  cache.set(PROVIDERS_MODULE, { getAssistantProvider: () => provider })
+  try {
+    return await run()
+  } finally {
+    if (original) cache.set(PROVIDERS_MODULE, original)
+    else cache.delete(PROVIDERS_MODULE)
+  }
+}
+
+function failingProvider(usage) {
+  return {
+    chat: async () => {
+      const error = new Error('OPENAI_EMPTY_RESPONSE')
+      error.usage = usage
+      throw error
+    },
+  }
+}
+
+const FINAL_FACTS = [
+  'revenue | CA réalisé | septembre 2026=412 | aout 2026=500 | ecart=-88 (down)',
+  'totalOrders | Commandes | septembre 2026=120 | aout 2026=100 | ecart=20 (up)',
+]
+
+/**
+ * Sérialise les contrôles qui partagent le fournisseur simulé et les variables
+ * d'environnement : un test d'annulation ne doit jamais interrompre un autre.
+ */
+let serialChain = Promise.resolve()
+function serial(task) {
+  const next = serialChain.then(task, task)
+  serialChain = next.then(() => undefined, () => undefined)
+  return next
+}
+
+/** Restaure une variable d'environnement, y compris son absence d'origine. */
+function restoreEnv(name, value) {
+  if (typeof value === 'string') process.env[name] = value
+  else delete process.env[name]
+}
+
+check('X01', 'narration : une phrase contraire au fait calculé est refusée', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  const claims = [{ metric: 'totalOrders', direction: 'up' }]
+  assertEqual(
+    engine.isGroundedNarrative('Le chiffre d’affaires est en hausse.', FINAL_FACTS, { claims }),
+    false,
+    'direction contraire refusée malgré un claim valide',
+  )
+  assertEqual(
+    engine.isGroundedNarrative('Le chiffre d’affaires recule et les commandes progressent.', FINAL_FACTS),
+    true,
+    'constats conformes acceptés',
+  )
+})
+
+check('X02', 'narration : causalité refusée même avec un claim valide', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  assertEqual(
+    engine.isGroundedNarrative('Le chiffre d’affaires baisse grâce aux publicités.', FINAL_FACTS, {
+      claims: [{ metric: 'revenue', direction: 'down' }],
+    }),
+    false,
+    'cause non prouvée refusée',
+  )
+})
+
+check('X03', 'narration : appréciation ou métrique absente du digest refusée', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  assertEqual(engine.isGroundedNarrative('Tous les clients sont satisfaits.', FINAL_FACTS), false, 'appréciation sans donnée')
+  assertEqual(engine.isGroundedNarrative('Les marges progressent.', FINAL_FACTS), false, 'métrique absente du digest')
+})
+
+check('X04', 'narration : repli déterministe construit sur les faits', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  const fallback = engine.buildFactNarrative(FINAL_FACTS, 'fr', 'latin')
+  assert(fallback.length > 0, 'synthèse produite')
+  assertEqual(engine.isGroundedNarrative(fallback, FINAL_FACTS), true, 'repli vérifiable')
+  return fallback
+})
+
+check('X05', 'planner : usage mesuré conservé sur réponse vide', async () => {
+  const planner = loadTs('lib/assistant/agent/planner.ts')
+  const usage = {
+    text: '', inputTokens: 600, outputTokens: 40, providerName: 'openai',
+    modelName: 'gpt-5.4-mini', providerCostUsd: 0.00063, usageKnown: true, usageState: 'failed',
+  }
+  const outcome = await planner.requestDynamicPlan({
+    message: 'Mes ventes', locale: 'fr',
+    context: { allowedMetrics: ['revenue'], allowedDimensions: ['city'] },
+    financialAccess: 'full', model: 'mock', provider: failingProvider(usage),
+  })
+  assert(outcome.usage, 'usage conservé malgré l’échec')
+  assertEqual(outcome.usage.inputTokens, 600, 'tokens entrants conservés')
+  assertEqual(outcome.usage.outputTokens, 40, 'tokens sortants conservés')
+  assertEqual(outcome.usage.usageState, 'failed', 'échec classé')
+  const deepening = await planner.requestDeepeningPlan({
+    message: 'Mes ventes', locale: 'fr', facts: ['revenue | CA réalisé | septembre 2026=412'],
+    executedDimensions: [], context: { allowedMetrics: [], allowedDimensions: ['city'] },
+    model: 'mock', provider: failingProvider(usage),
+  })
+  assertEqual(deepening.usage?.inputTokens, 600, 'approfondissement : usage conservé')
+})
+
+check('X06', 'engine : consommation d’un appel échoué jamais offerte', () => serial(async () => {
+  const previousPlanner = process.env.ASSISTANT_PLANNER
+  const previousNarrative = process.env.ASSISTANT_NARRATIVE
+  process.env.ASSISTANT_PLANNER = 'llm'
+  process.env.ASSISTANT_NARRATIVE = 'disabled'
+  try {
+    const outcome = await withProvider(failingProvider({
+      text: '', inputTokens: 600, outputTokens: 40, providerName: 'openai',
+      modelName: 'gpt-5.4-mini', providerCostUsd: 0.00063, usageKnown: true, usageState: 'failed',
+    }), () => runEngine('Montre mes ventes', { intent: 'dashboard_summary' }))
+
+    assertEqual(outcome.providerUsage.inputTokens, 1200, 'deux appels échoués cumulés')
+    assertEqual(outcome.providerUsage.outputTokens, 80, 'sorties cumulées')
+    assertEqual(outcome.providerUsage.usageState, 'failed', 'échec classé')
+    assertEqual(outcome.providerUsage.usageKnown, true, 'usage connu conservé')
+
+    const credits = loadTs('lib/assistant/credits.ts')
+    const providerFailed = credits.resolveProviderFailed(outcome.providerUsage)
+    assertEqual(providerFailed, false, 'échec mesuré non classé comme gratuit')
+    const billing = credits.resolveUsageBilling({
+      kind: credits.resolveUsageKind({
+        cancelled: false,
+        providerName: outcome.providerUsage.providerName,
+        providerFailed,
+      }),
+      inputTokens: outcome.providerUsage.inputTokens,
+      outputTokens: outcome.providerUsage.outputTokens,
+      usageKnown: outcome.providerUsage.usageKnown !== false,
+    })
+    assertEqual(billing.billable, true, 'consommation connue facturable')
+    assert(billing.creditsConsumed > 0, 'aucune gratuité accidentelle')
+    return `${outcome.providerUsage.inputTokens}/${outcome.providerUsage.outputTokens} tokens, ${billing.creditsConsumed} crédit(s)`
+  } finally {
+    restoreEnv('ASSISTANT_PLANNER', previousPlanner)
+    restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
+  }
+}))
+
+check('X07', 'usage partiel : un succès et un échec restent cumulés', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  const merged = engine.mergeUsage(
+    { text: '', inputTokens: 600, outputTokens: 40, providerName: 'openai', modelName: 'm', providerCostUsd: 0.001, usageKnown: true, usageState: 'failed' },
+    { text: 'ok', inputTokens: 100, outputTokens: 20, providerName: 'openai', modelName: 'm', providerCostUsd: 0.0002, usageKnown: true, usageState: 'measured' },
+  )
+  assertEqual(merged.inputTokens, 700, 'entrée cumulée')
+  assertEqual(merged.outputTokens, 60, 'sortie cumulée')
+  assertEqual(merged.usageState, 'partial', 'tour partiel')
+  assertEqual(merged.usageKnown, true, 'usage connu')
+})
+
+check('X08', 'KPI explicites : aucune métrique demandée perdue', () => serial(async () => {
+  const outcome = await runEngine(
+    'Donne le chiffre d’affaires, les commandes, les commandes livrées, annulées et retournées',
+    { intent: 'dashboard_summary' },
+  )
+  const kpi = outcome.structuredResponse.document.blocks.find((block) => block.type === 'kpi')
+  assert(kpi, 'bloc KPI publié')
+  const ids = kpi.items.map((item) => item.id)
+  for (const expected of ['revenue', 'totalOrders', 'deliveredOrders', 'cancelledOrders', 'returnedOrders']) {
+    assert(ids.includes(expected), `métrique demandée absente : ${expected}`)
+  }
+  return ids.join(',')
+}))
+
+check('X09', 'CA + détail par ville : le total global reste publié', () => serial(async () => {
+  const outcome = await runEngine('Donne le chiffre d’affaires et le détail par ville', { intent: 'dashboard_summary' })
+  const blocks = outcome.structuredResponse.document.blocks
+  const kpi = blocks.find((block) => block.type === 'kpi')
+  assert(kpi && kpi.items.some((item) => item.id === 'revenue'), 'KPI global conservé')
+  assert(JSON.stringify(blocks).includes('Casablanca'), 'ventilation publiée')
+}))
+
+check('X10', 'question simple : approfondissement réellement déclenché', () => serial(async () => {
+  const previousPlanner = process.env.ASSISTANT_PLANNER
+  const previousNarrative = process.env.ASSISTANT_NARRATIVE
+  process.env.ASSISTANT_PLANNER = 'llm'
+  process.env.ASSISTANT_NARRATIVE = 'disabled'
+  const prompts = []
+  const provider = {
+    chat: async (request) => {
+      prompts.push(request.messages[0].content)
+      const plan = prompts.length === 1
+        ? { schema: 1, operations: [], needsSeries: false, rationale: '' }
+        : { schema: 1, operations: [{ kind: 'dimension', dimension: 'city' }], needsSeries: false, rationale: '' }
+      return {
+        text: JSON.stringify(plan), inputTokens: 10, outputTokens: 5,
+        providerName: 'mock', modelName: 'mock', providerCostUsd: 0, usageKnown: true, usageState: 'measured',
+      }
+    },
+  }
+  try {
+    const outcome = await withProvider(provider, () => runEngine('Analyse mes ventes', { intent: 'dashboard_summary' }))
+    assertEqual(prompts.length, 2, 'deux passes fournisseur')
+    assert(prompts[1].includes('Faits vérifiés'), 'seconde passe guidée par les faits')
+    assert(JSON.stringify(outcome.structuredResponse.document).includes('Casablanca'), 'ventilation publiée')
+  } finally {
+    restoreEnv('ASSISTANT_PLANNER', previousPlanner)
+    restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
+  }
+}))
+
+check('X11', 'annulation pendant une opération asynchrone : aucune finalisation', () => serial(async () => {
+  const previousPlanner = process.env.ASSISTANT_PLANNER
+  const previousNarrative = process.env.ASSISTANT_NARRATIVE
+  process.env.ASSISTANT_PLANNER = 'llm'
+  process.env.ASSISTANT_NARRATIVE = 'disabled'
+  const controller = new AbortController()
+  try {
+    // 1. Annulation pendant la planification (fournisseur dynamique).
+    let code = ''
+    try {
+      await withProvider({
+        chat: async () => {
+          controller.abort()
+          throw new Error('OPENAI_ABORTED')
+        },
+      }, () => runEngine('Compare septembre 2026 et octobre 2026', { signal: controller.signal }))
+    } catch (error) {
+      code = error instanceof Error ? error.message : String(error)
+    }
+    assertEqual(code, 'ASSISTANT_ABORTED', 'abandon propagé, aucune finalisation')
+
+    // 2. Annulation déjà signalée au moment de la rédaction : le fournisseur
+    //    n'est jamais sollicité pour publier une réponse.
+    const engine = loadTs('lib/assistant/agent/engine.ts')
+    const aborted = new AbortController()
+    aborted.abort()
+    let narrativeCode = ''
+    try {
+      await engine.requestNarrative({
+        request: { profile: { locale: 'fr', script: 'latin', direction: 'ltr' }, question: 'Mes ventes' },
+        facts: ['revenue | CA réalisé | septembre 2026=412'],
+        model: 'mock',
+        signal: aborted.signal,
+      })
+    } catch (error) {
+      narrativeCode = error instanceof Error ? error.message : String(error)
+    }
+    assertEqual(narrativeCode, 'ASSISTANT_ABORTED', 'rédaction abandonnée')
+  } finally {
+    restoreEnv('ASSISTANT_PLANNER', previousPlanner)
+    restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
+  }
+}))
+
+check('X12', 'échec sans mesure : toujours gratuit (politique conservée)', () => {
+  const credits = loadTs('lib/assistant/credits.ts')
+  assertEqual(
+    credits.resolveProviderFailed({ usageState: 'failed', usageKnown: false, inputTokens: 0, outputTokens: 0 }),
+    true,
+    'échec non mesuré classé comme échec',
+  )
+  const billing = credits.resolveUsageBilling({
+    kind: credits.resolveUsageKind({ cancelled: false, providerName: 'openai', providerFailed: true }),
+    inputTokens: 0,
+    outputTokens: 0,
+    usageKnown: false,
+  })
+  assertEqual(billing.billable, false, 'aucun débit sans mesure')
+  assertEqual(billing.creditsConsumed, 0, 'consommation nulle')
+})
+
+check('X13', 'engine : narration non prouvée remplacée par une synthèse factuelle', () => serial(async () => {
+  const previousPlanner = process.env.ASSISTANT_PLANNER
+  const previousNarrative = process.env.ASSISTANT_NARRATIVE
+  process.env.ASSISTANT_PLANNER = 'deterministic'
+  process.env.ASSISTANT_NARRATIVE = 'enabled'
+  try {
+    const outcome = await runEngine('Compare septembre 2026 et octobre 2026')
+    const summary = outcome.structuredResponse.document.blocks[0].text
+    assert(!/contrast/i.test(summary), 'texte du modèle non vérifié refusé')
+    assert(/CA réalisé/.test(summary), 'synthèse construite sur les faits')
+    assert(!/\d/.test(summary), 'aucun chiffre dans la synthèse')
+    return summary
+  } finally {
+    restoreEnv('ASSISTANT_PLANNER', previousPlanner)
+    restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
+  }
+}))
+
 const passed = results.filter((result) => result.pass).length
 const failedCount = results.length - passed
 

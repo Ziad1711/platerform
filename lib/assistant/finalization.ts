@@ -51,6 +51,12 @@ export interface FinalizeTurnInput {
   fingerprint: string
   /** Jeton de tentative (fencing) retourné par le registre, si activé. */
   attemptToken?: string | null
+  /**
+   * Signal d'annulation de la requête. Il n'est consulté **qu'avant** l'écriture
+   * irréversible : une fois la transaction validée, aucune annulation n'est
+   * revendiquée ni tentée rétroactivement.
+   */
+  signal?: AbortSignal
   intent: string
   userMessage: string
   assistantContent: string
@@ -90,10 +96,24 @@ function buildUsageRow(input: FinalizeTurnInput) {
   }
 }
 
+/**
+ * Refuse toute finalisation après annulation observée.
+ *
+ * Le contrôle est fait avant chaque écriture : il empêche un tour fantôme et un
+ * débit consécutif à un abandon. Il ne prétend jamais annuler une transaction
+ * déjà validée.
+ */
+function assertNotAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new Error('ASSISTANT_ABORTED')
+}
+
 export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<FinalizeTurnResult> {
   // Mode pilote : la finalisation séquentielle (non atomique) est interdite.
   // Aucun repli ne peut donc facturer hors de la transaction unique.
   assertAtomicFinalizationRequired(ASSISTANT_FINALIZE_ATOMIC_ENABLED)
+
+  // Point de non-retour : une annulation déjà observée interdit toute écriture.
+  assertNotAborted(input.signal)
 
   if (ASSISTANT_FINALIZE_ATOMIC_ENABLED) {
     // Écriture fiable : client backend dédié, jamais le client utilisateur.
@@ -102,6 +122,10 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
     if (ASSISTANT_IDEMPOTENCY_REGISTRY_ENABLED && !input.attemptToken) {
       throw new Error('IDEMPOTENCY_TOKEN_MISMATCH')
     }
+
+    // Dernière vérification avant la RPC : au-delà, la transaction est engagée
+    // et aucune annulation ne peut plus être affirmée.
+    assertNotAborted(input.signal)
 
     const { data, error } = await backend.rpc(ASSISTANT_FINALIZE_RPC, {
       p_user_id: input.userId,
@@ -171,6 +195,9 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
   }
 
   let warning: string | null = null
+
+  // Chemin séquentiel : même exigence, aucun message écrit après annulation.
+  assertNotAborted(input.signal)
 
   await addMessage(
     input.supabase,

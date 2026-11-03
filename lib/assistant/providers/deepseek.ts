@@ -47,27 +47,29 @@ export class DeepSeekProvider implements AssistantProvider {
     const inputTokens = hasUsage ? Number(payload?.usage?.prompt_tokens) : 0
     const outputTokens = hasUsage ? Number(payload?.usage?.completion_tokens) : 0
     const usageKnown = hasUsage && Number.isFinite(inputTokens) && Number.isFinite(outputTokens)
+    // Coût calculé avant toute sortie : un texte absent ne doit pas effacer la
+    // dépense réelle de l'appel.
+    const providerCostUsd = usageKnown
+      ? Number(
+          ((inputTokens / 1000) * COST_PER_1K_INPUT + (outputTokens / 1000) * COST_PER_1K_OUTPUT).toFixed(6)
+        )
+      : 0
     const usage = {
       text: typeof text === 'string' ? text : '',
       inputTokens: usageKnown ? inputTokens : 0,
       outputTokens: usageKnown ? outputTokens : 0,
       providerName: 'deepseek',
       modelName: input.model,
-      providerCostUsd: 0,
+      providerCostUsd,
       usageKnown,
+      usageState: usageKnown ? ('measured' as const) : ('unknown' as const),
     }
 
     if (!text || typeof text !== 'string') {
-      const error = new Error('DEEPSEEK_EMPTY_RESPONSE') as Error & { usage?: typeof usage }
-      error.usage = usage
+      const error = new Error('_EMPTY_RESPONSE') as Error & { usage?: AssistantProviderOutput }
+      error.usage = { ...usage, usageState: 'failed' }
       throw error
     }
-
-    const providerCostUsd = usageKnown
-      ? Number(
-          ((inputTokens / 1000) * COST_PER_1K_INPUT + (outputTokens / 1000) * COST_PER_1K_OUTPUT).toFixed(6)
-        )
-      : 0
 
     return {
       text,
@@ -77,6 +79,7 @@ export class DeepSeekProvider implements AssistantProvider {
       modelName: input.model,
       providerCostUsd,
       usageKnown,
+      usageState: usage.usageState,
     }
   }
 }

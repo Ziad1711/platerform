@@ -10,6 +10,7 @@ import {
 import {
   resolveUsageBilling,
   resolveUsageKind,
+  resolveProviderFailed,
   ensureCreditsAvailable,
   estimateCreditsForRequest,
   releaseCreditReservation,
@@ -569,8 +570,15 @@ export async function POST(request: Request) {
 
     // Contrat de facturation : un usage nul ou inconnu n'est jamais converti en
     // crédit. Une réponse déterministe (aucun appel fournisseur) est gratuite.
+    // Un échec fournisseur mesuré reste facturé selon la règle existante ; seul
+    // un échec sans mesure est classé `provider_failed` (gratuit).
+    const providerFailed = resolveProviderFailed(providerResult)
     const billing = resolveUsageBilling({
-      kind: resolveUsageKind({ cancelled: false, providerName: providerResult.providerName }),
+      kind: resolveUsageKind({
+        cancelled: false,
+        providerName: providerResult.providerName,
+        providerFailed,
+      }),
       inputTokens: providerResult.inputTokens,
       outputTokens: providerResult.outputTokens,
       // Un usage non mesuré reste inconnu : jamais converti en « zéro connu ».
@@ -621,6 +629,9 @@ export async function POST(request: Request) {
       creditsUsed,
       provider: providerResult,
       nextTitle,
+      // Le signal n'est consulté qu'avant l'écriture irréversible : après la
+      // validation, aucune annulation n'est revendiquée.
+      signal: controller.signal,
     })
 
     // Consommation et débit réels : le portefeuille affiché ne bouge que du

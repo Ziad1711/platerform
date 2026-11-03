@@ -109,6 +109,26 @@ export function resolveUsageKind(input: {
   return 'provider'
 }
 
+/**
+ * Un échec fournisseur ne doit jamais rendre gratuite une consommation mesurée.
+ *
+ * La règle « échec sans réponse ⇒ rien n'est facturé » reste intacte : elle
+ * s'applique aux échecs **sans mesure**. Dès qu'un token réel a été compté par
+ * le fournisseur, le tour est classé `provider` et suit la règle de facturation
+ * mesurée, sans nouvelle tarification.
+ */
+export function resolveProviderFailed(input: {
+  usageState?: string | null
+  usageKnown?: boolean
+  inputTokens?: number | null
+  outputTokens?: number | null
+}): boolean {
+  if (input.usageState !== 'failed') return false
+  const measured = MEASURED_INTEGER(input.inputTokens) && MEASURED_INTEGER(input.outputTokens) &&
+    ((input.inputTokens ?? 0) > 0 || (input.outputTokens ?? 0) > 0)
+  return !(measured && input.usageKnown !== false)
+}
+
 export function estimateCreditsForPrompt(parts: string[], expectedOutputTokens = 500) {
   const inputChars = parts.join(' ').length
   const estimatedInputTokens = Math.ceil(inputChars / 4)

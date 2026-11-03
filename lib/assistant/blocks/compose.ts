@@ -236,15 +236,29 @@ export function readDerivedValue(
   return divideDecimal(snapshot.value, days, 2)
 }
 
-/** KPI compacts : uniquement les métriques publiées, quatre au maximum. */
+/**
+ * KPI compacts : uniquement les métriques publiées.
+ *
+ * Le plafond est **adaptatif** : il ne peut jamais être inférieur au nombre
+ * d'indicateurs explicitement demandés, sinon une demande (« CA, commandes,
+ * livrées, annulées et retournées ») perdrait une métrique en silence.
+ */
 export function buildKpiItems(
   dict: Dictionary,
   reading: WindowReading | undefined,
   metrics: readonly KpiMetricAlias[],
+  options?: { max?: number; requested?: readonly KpiMetricAlias[] },
 ): KpiItem[] {
+  const requested = options?.requested ?? []
+  const limit = Math.max(MAX_KPI_ITEMS, requested.length, Math.trunc(options?.max ?? 0))
+  // Ordre de priorité : demandes explicites → reste de la sélection.
+  const ordered = [
+    ...metrics.filter((metric) => requested.includes(metric)),
+    ...metrics.filter((metric) => !requested.includes(metric)),
+  ]
   const items: KpiItem[] = []
-  for (const metric of metrics) {
-    if (items.length >= MAX_KPI_ITEMS) break
+  for (const metric of ordered) {
+    if (items.length >= limit) break
     const snapshot = readMetricFromReading(reading, metric)
     if (snapshot.value === null) continue
     items.push({
@@ -272,6 +286,10 @@ export interface ComparisonTableInput {
   currentDays: number
   baselineDays: number
   currency: string | null
+  /** Indicateurs explicitement demandés : jamais évincés par le plafond. */
+  requestedMetrics?: readonly KpiMetricAlias[]
+  /** Plafond explicite ; le plafond effectif reste au moins le nombre demandé. */
+  maxRows?: number
   /** Titre du bloc (comparaison courante), déjà localisé par l'appelant. */
   title?: string
 }
@@ -315,9 +333,17 @@ export function describeReserves(dict: Dictionary, deltas: readonly MetricDeltaR
  */
 export function buildComparisonTable(input: ComparisonTableInput): TableBlock | null {
   const rows: TableBlock['rows'] = []
+  const requested = input.requestedMetrics ?? []
+  const limit = Math.max(MAX_TABLE_ROWS, requested.length, Math.trunc(input.maxRows ?? 0))
+  // Les indicateurs demandés passent en tête : un plafond ne peut donc jamais
+  // évincer la métrique qui a motivé la question.
+  const ordered = [
+    ...input.deltas.filter((delta) => requested.includes(delta.metric)),
+    ...input.deltas.filter((delta) => !requested.includes(delta.metric)),
+  ]
 
-  for (const delta of input.deltas) {
-    if (rows.length >= MAX_TABLE_ROWS) break
+  for (const delta of ordered) {
+    if (rows.length >= limit) break
     if (delta.current === null && delta.baseline === null) continue
     const unit = METRIC_CATALOG[delta.metric].unit
     const currency = unit === 'decimal' ? input.currency : null
@@ -334,7 +360,7 @@ export function buildComparisonTable(input: ComparisonTableInput): TableBlock | 
 
   // Durées différentes : un total brut n'est pas interprétable seul.
   const needsNormalization = input.deltas.some((delta) => delta.comparability.needsDurationNormalization)
-  if (needsNormalization && rows.length < MAX_TABLE_ROWS) {
+  if (needsNormalization && rows.length < limit) {
     const perDay: Array<{ derived: 'ordersPerDay' | 'revenuePerDay'; metric: KpiMetricAlias }> = [
       { derived: 'ordersPerDay', metric: 'totalOrders' },
       { derived: 'revenuePerDay', metric: 'revenue' },
@@ -348,7 +374,7 @@ export function buildComparisonTable(input: ComparisonTableInput): TableBlock | 
         source.comparability.decision === 'comparable_with_reserve'
     }
     for (const entry of perDay) {
-      if (rows.length >= MAX_TABLE_ROWS) break
+      if (rows.length >= limit) break
       if (!sourceComparable(entry.metric)) continue
       const currentValue = readDerivedValue(input.currentReading, entry.metric, entry.derived, input.currentDays)
       const baselineValue = readDerivedValue(input.baselineReading, entry.metric, entry.derived, input.baselineDays)
@@ -751,6 +777,8 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
       baselineDays: periodDays(baselinePeriod),
       currency: input.currency,
       title: sectionTitle(dict, currentLabel, baselineLabel),
+      requestedMetrics: request.requestedMetrics,
+      maxRows: request.requestedMetrics.length,
     })
     if (table) tables.push(table)
   }
@@ -788,10 +816,23 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     if (table) dimensionTables.push(table)
   }
 
-  // 3. KPI compacts : uniquement lorsqu'aucun tableau ne porte déjà les valeurs.
-  const kpiItems = tables.length > 0 || dimensionTables.length > 0
+  // 3. KPI compacts : publiés dès qu'aucune comparaison ne porte déjà les
+  // valeurs. Une ventilation ne remplace jamais le total global : demander
+  // « CA et détail par ville » doit afficher le CA global ET le détail.
+  const requestedSet = new Set(request.requestedMetrics)
+  const kpiRequested = request.requestedMetrics.filter(
+    (metric) => !tables.some((table) => table.rows.some((row) => row.key === metric)),
+  )
+  const kpiMetrics = tables.length > 0
     ? []
-    : buildKpiItems(dict, currentReading, request.metrics)
+    : [
+        ...kpiRequested,
+        ...request.metrics.filter((metric) => !requestedSet.has(metric)),
+      ]
+  const kpiItems = buildKpiItems(dict, currentReading, kpiMetrics, {
+    requested: request.requestedMetrics,
+    max: Math.max(MAX_KPI_ITEMS, request.requestedMetrics.length),
+  })
 
   // 4. Graphique : uniquement pour une période simple et une série réelle.
   const chart = (tables.length === 0 && request.needsSeries)
@@ -827,6 +868,35 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     : translate(dict, 'summary.noFigures')
 
   const warnings = buildNotices(input, dict)
+
+  // Aucune demande explicite ne peut disparaître à cause d'un plafond : ce qui
+  // n'est pas publié est signalé dans la langue de l'utilisateur.
+  const publishedMetrics = new Set<string>([
+    ...kpiItems.map((item) => item.id),
+    ...tables.flatMap((table) => table.rows.map((row) => row.key)),
+  ])
+  for (const metric of request.requestedMetrics) {
+    if (publishedMetrics.has(metric)) continue
+    const message = translate(dict, 'limit.metricUnavailable', { metric: metricLabel(dict, metric) })
+    if (message && !warnings.includes(message)) warnings.push(message)
+  }
+  if (kpiMetrics.length > kpiItems.length && kpiItems.length > 0) {
+    const message = translate(dict, 'limit.kpiTruncated', {
+      kept: String(kpiItems.length),
+      total: String(kpiMetrics.length),
+    })
+    if (message && !warnings.includes(message)) warnings.push(message)
+  }
+  const visibleDeltas = input.sections.reduce((sum, section) => sum
+    + section.deltas.filter((delta) => delta.current !== null || delta.baseline !== null).length, 0)
+  const publishedRows = tables.reduce((sum, table) => sum + table.rows.length, 0)
+  if (publishedRows > 0 && visibleDeltas > publishedRows) {
+    const message = translate(dict, 'limit.tableRowsTruncated', {
+      kept: String(publishedRows),
+      total: String(visibleDeltas),
+    })
+    if (message && !warnings.includes(message)) warnings.push(message)
+  }
 
   // Une capacité demandée et volontairement réduite doit être annoncée, jamais
   // supprimée en silence.

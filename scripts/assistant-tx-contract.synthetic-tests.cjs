@@ -467,6 +467,47 @@ async function runContractTests() {
     return 'aucune clôture'
   })
 
+  await checkAsync('T13b', 'annulation avant finalisation : aucune RPC, aucune écriture', async () => {
+    let rpcCalls = 0
+    const { finalization } = loadAtomicFinalization(async () => {
+      rpcCalls += 1
+      return { data: null, error: null }
+    })
+    const controller = new AbortController()
+    controller.abort()
+    let code = null
+    try {
+      await finalization.finalizeAssistantTurn({ ...baseInput, signal: controller.signal })
+    } catch (error) {
+      code = error instanceof Error ? error.message : 'unknown'
+    }
+    assertEqual(code, 'ASSISTANT_ABORTED', 'abandon refusé avant écriture')
+    assertEqual(rpcCalls, 0, 'aucune transaction engagée')
+    return code
+  })
+
+  await checkAsync('T13c', 'annulation pendant la RPC : aucune annulation rétroactive revendiquée', async () => {
+    const controller = new AbortController()
+    const { finalization } = loadAtomicFinalization(async () => {
+      // La transaction est déjà engagée : le signal ne peut plus l’annuler.
+      controller.abort()
+      return {
+        data: [{
+          credit_status: 'charged',
+          credits_consumed: 4,
+          credits_charged: 4,
+          assistant_message: { id: 'msg' },
+          replayed: false,
+        }],
+        error: null,
+      }
+    })
+    const result = await finalization.finalizeAssistantTurn({ ...baseInput, signal: controller.signal })
+    assertEqual(result.atomic, true, 'transaction validée')
+    assertEqual(result.creditsCharged, 4, 'débit réel conservé, aucune annulation affirmée')
+    return `${result.creditStatus}/${result.creditsCharged}`
+  })
+
   process.env.ASSISTANT_CREDIT_RESERVATION = 'enabled'
   const credits = createLoader()('lib/assistant/credits.ts')
 
