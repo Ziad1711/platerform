@@ -46,6 +46,31 @@ export interface PlannerUsage {
   reason: 'ok' | 'disabled' | 'invalid' | 'provider_failed' | 'cancelled'
 }
 
+/**
+ * Usage réellement consommé par un appel qui a échoué.
+ *
+ * Un fournisseur peut lever une erreur **après** avoir mesuré ses tokens (réponse
+ * vide, contenu illisible). Cet usage est conservé et classé `failed` : il ne
+ * disparaît ni ne devient un « zéro token ».
+ */
+export function partialProviderUsage(error: unknown): AssistantProviderOutput | null {
+  const usage = (error as { usage?: AssistantProviderOutput } | null)?.usage
+  if (!usage || typeof usage !== 'object') return null
+  const inputTokens = Number(usage.inputTokens)
+  const outputTokens = Number(usage.outputTokens)
+  const providerCostUsd = Number(usage.providerCostUsd)
+  return {
+    text: typeof usage.text === 'string' ? usage.text : '',
+    inputTokens: Number.isFinite(inputTokens) && inputTokens >= 0 ? inputTokens : 0,
+    outputTokens: Number.isFinite(outputTokens) && outputTokens >= 0 ? outputTokens : 0,
+    providerName: typeof usage.providerName === 'string' && usage.providerName ? usage.providerName : 'unknown',
+    modelName: typeof usage.modelName === 'string' ? usage.modelName : '',
+    providerCostUsd: Number.isFinite(providerCostUsd) && providerCostUsd >= 0 ? providerCostUsd : 0,
+    usageKnown: usage.usageKnown !== false,
+    usageState: 'failed',
+  }
+}
+
 const FINANCIAL_METRICS: ReadonlySet<KpiMetricAlias> = new Set<KpiMetricAlias>([
   'purchaseCost', 'deliveryCost', 'confirmationCost', 'contributionMargin',
 ])
@@ -237,7 +262,7 @@ export async function requestDeepeningPlan(input: {
     if (input.signal?.aborted || code.includes('_ABORTED') || code === 'ASSISTANT_ABORTED') {
       throw new Error('ASSISTANT_ABORTED')
     }
-    return { plan: null, usage: null, reason: 'provider_failed' }
+    return { plan: null, usage: partialProviderUsage(error), reason: 'provider_failed' }
   }
 }
 /**
@@ -290,6 +315,6 @@ export async function requestDynamicPlan(input: {
     if (input.signal?.aborted || code.includes('_ABORTED') || code === 'ASSISTANT_ABORTED') {
       throw new Error('ASSISTANT_ABORTED')
     }
-    return { plan: null, usage: null, reason: 'provider_failed' }
+    return { plan: null, usage: partialProviderUsage(error), reason: 'provider_failed' }
   }
 }

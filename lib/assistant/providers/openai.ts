@@ -85,24 +85,9 @@ export class OpenAIProvider implements AssistantProvider {
     const inputTokens = hasUsage ? Number(payload?.usage?.prompt_tokens) : 0
     const outputTokens = hasUsage ? Number(payload?.usage?.completion_tokens) : 0
     const usageKnown = hasUsage && Number.isFinite(inputTokens) && Number.isFinite(outputTokens)
-    const usage = {
-      text: typeof text === 'string' ? text : '',
-      inputTokens: usageKnown ? inputTokens : 0,
-      outputTokens: usageKnown ? outputTokens : 0,
-      providerName: 'openai',
-      modelName: input.model,
-      providerCostUsd: 0,
-      usageKnown,
-    }
-
-    if (!text || typeof text !== 'string') {
-      const error = new Error('OPENAI_EMPTY_RESPONSE') as Error & { usage?: typeof usage }
-      error.usage = usage
-      throw error
-    }
-
+    // Le coût est calculé AVANT toute sortie d'erreur : une réponse vide a
+    // consommé des tokens, et cet usage mesuré ne doit jamais être perdu.
     const pricing = pricingFor(input.model)
-
     const providerCostUsd = usageKnown
       ? Number(
           (
@@ -111,6 +96,23 @@ export class OpenAIProvider implements AssistantProvider {
           ).toFixed(6)
         )
       : 0
+    const usage = {
+      text: typeof text === 'string' ? text : '',
+      inputTokens: usageKnown ? inputTokens : 0,
+      outputTokens: usageKnown ? outputTokens : 0,
+      providerName: 'openai',
+      modelName: input.model,
+      providerCostUsd,
+      usageKnown,
+      usageState: usageKnown ? ('measured' as const) : ('unknown' as const),
+    }
+
+    if (!text || typeof text !== 'string') {
+      const error = new Error('_EMPTY_RESPONSE') as Error & { usage?: AssistantProviderOutput }
+      // L'appel a bien eu lieu : l'usage reste mesuré, l'état signale l'échec.
+      error.usage = { ...usage, usageState: 'failed' }
+      throw error
+    }
 
     return {
       text,
@@ -120,6 +122,7 @@ export class OpenAIProvider implements AssistantProvider {
       modelName: input.model,
       providerCostUsd,
       usageKnown,
+      usageState: usage.usageState,
     }
   }
 }
