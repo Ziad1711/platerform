@@ -1429,7 +1429,7 @@ export default function AssistantIAPage() {
               type="button"
               onClick={startRecording}
               disabled={recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
                 recording || transcribing ? 'hidden' : ''
               }`}
               title="Dicter un message"
@@ -1440,7 +1440,7 @@ export default function AssistantIAPage() {
             <button
               onClick={() => handleSend(input)}
               disabled={!input.trim() || recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
-              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
                 recording || transcribing ? 'hidden' : ''
               }`}
             >
