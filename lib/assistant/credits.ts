@@ -3,8 +3,110 @@ import { createClient } from '@/lib/supabase/server'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
+/**
+ * Crédits d'une requête.
+ *
+ * Un usage strictement nul ne produit **aucun** crédit : l'ancien plancher à
+ * `1` transformait un échec fournisseur (0 token) en débit réel. Le plancher ne
+ * subsiste que pour un usage non nul, afin de conserver la tarification
+ * commerciale existante (1 crédit minimum par échange consommé).
+ */
 export function computeCreditsUsed(inputTokens: number, outputTokens: number) {
-  return Math.max(1, Math.ceil((Math.max(0, inputTokens) + Math.max(0, outputTokens)) / 25))
+  const input = Math.max(0, Math.trunc(Number(inputTokens) || 0))
+  const output = Math.max(0, Math.trunc(Number(outputTokens) || 0))
+  const total = input + output
+  if (total <= 0) return 0
+  return Math.max(1, Math.ceil(total / 25))
+}
+
+/**
+ * Nature réelle d'un tour de conversation, telle que décidée par l'orchestrateur.
+ *
+ * - `provider`      : le fournisseur a répondu, usage mesuré ;
+ * - `deterministic` : réponse calculée localement, aucun appel fournisseur ;
+ * - `provider_failed`: appel tenté, aucune réponse exploitable ;
+ * - `cancelled`     : requête abandonnée (timeout, déconnexion) avant réponse.
+ */
+export type AssistantUsageKind = 'provider' | 'deterministic' | 'provider_failed' | 'cancelled'
+
+export interface AssistantUsageInput {
+  kind: AssistantUsageKind
+  inputTokens?: number | null
+  outputTokens?: number | null
+  /** `false` dès qu'une valeur de token n'est pas un entier mesuré. */
+  usageKnown?: boolean
+}
+
+export interface AssistantUsageBilling {
+  kind: AssistantUsageKind
+  /** Consommation réelle retenue pour le journal (jamais inventée). */
+  creditsConsumed: number
+  /** `true` seulement si un débit est justifié par un usage mesuré. */
+  billable: boolean
+  /** `false` quand les tokens sont inconnus : à ne jamais lire comme « zéro ». */
+  usageKnown: boolean
+  reason: 'measured' | 'no_provider_call' | 'no_usage' | 'usage_unknown' | 'cancelled'
+}
+
+const MEASURED_INTEGER = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+/**
+ * Décide ce qui est consommé et ce qui est facturable.
+ *
+ * Règles conservatrices, sans nouvelle tarification :
+ * 1. annulation ⇒ rien n'est consommé ni facturé ;
+ * 2. réponse déterministe ⇒ aucun crédit (aucun appel fournisseur) ;
+ * 3. fournisseur avec usage mesuré ⇒ crédits calculés sur les tokens réels ;
+ * 4. fournisseur avec usage inconnu ⇒ rien n'est facturé, la consommation reste
+ *    nulle mais `usageKnown = false` interdit de la présenter comme un zéro ;
+ * 5. échec fournisseur sans réponse ⇒ rien n'est facturé.
+ */
+export function resolveUsageBilling(input: AssistantUsageInput): AssistantUsageBilling {
+  if (input.kind === 'cancelled') {
+    return { kind: input.kind, creditsConsumed: 0, billable: false, usageKnown: false, reason: 'cancelled' }
+  }
+  if (input.kind === 'deterministic') {
+    return { kind: input.kind, creditsConsumed: 0, billable: false, usageKnown: true, reason: 'no_provider_call' }
+  }
+  if (input.kind === 'provider_failed') {
+    return { kind: input.kind, creditsConsumed: 0, billable: false, usageKnown: input.usageKnown === true, reason: 'no_usage' }
+  }
+
+  const measured = MEASURED_INTEGER(input.inputTokens) && MEASURED_INTEGER(input.outputTokens)
+  if (input.usageKnown === false || !measured) {
+    return { kind: input.kind, creditsConsumed: 0, billable: false, usageKnown: false, reason: 'usage_unknown' }
+  }
+
+  const creditsConsumed = computeCreditsUsed(input.inputTokens ?? 0, input.outputTokens ?? 0)
+  if (creditsConsumed === 0) {
+    return { kind: input.kind, creditsConsumed: 0, billable: false, usageKnown: true, reason: 'no_usage' }
+  }
+  return { kind: input.kind, creditsConsumed, billable: true, usageKnown: true, reason: 'measured' }
+}
+
+/** Un usage fournisseur réellement mesuré (jamais un repli interne). */
+export function isMeasuredProviderUsage(usage: {
+  providerName?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+}): boolean {
+  const provider = String(usage.providerName ?? '').trim().toLowerCase()
+  if (!provider || provider === 'engine' || provider === 'none') return false
+  return MEASURED_INTEGER(usage.inputTokens) && MEASURED_INTEGER(usage.outputTokens)
+}
+
+/** Nature du tour, déduite du résultat réellement produit par l'orchestrateur. */
+export function resolveUsageKind(input: {
+  cancelled: boolean
+  providerName?: string | null
+  providerFailed?: boolean
+}): AssistantUsageKind {
+  if (input.cancelled) return 'cancelled'
+  if (input.providerFailed) return 'provider_failed'
+  const provider = String(input.providerName ?? '').trim().toLowerCase()
+  if (!provider || provider === 'engine' || provider === 'none') return 'deterministic'
+  return 'provider'
 }
 
 export function estimateCreditsForPrompt(parts: string[], expectedOutputTokens = 500) {

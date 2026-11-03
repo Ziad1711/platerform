@@ -62,12 +62,20 @@ function loadTs(relativePath) {
 }
 
 const results = []
+/** Contrôles asynchrones : attendus avant l'impression du rapport. */
+const pendingChecks = []
 function check(id, name, run) {
+  const pass = (detail) => results.push({ id, name, pass: true, detail: detail ?? '' })
+  const fail = (error) => results.push({ id, name, pass: false, detail: error instanceof Error ? error.message : String(error) })
   try {
-    const detail = run()
-    results.push({ id, name, pass: true, detail: detail ?? '' })
+    const value = run()
+    if (value && typeof value.then === 'function') {
+      pendingChecks.push(value.then(pass).catch(fail))
+      return
+    }
+    pass(value)
   } catch (error) {
-    results.push({ id, name, pass: false, detail: error instanceof Error ? error.message : String(error) })
+    fail(error)
   }
 }
 function assert(condition, message) {
@@ -399,9 +407,13 @@ check('B02', 'plafond de temps appliqué', () => {
   assertEqual(tracker.canContinue(), false, 'poursuite impossible')
 })
 
-check('B03', 'drapeaux : moteur actif, repli direct inactif par défaut', () => {
-  assertEqual(policy.isEngineV2Enabled({}), true, 'moteur V2 actif par défaut')
-  assertEqual(policy.isEngineV2Enabled({ ASSISTANT_ENGINE_V2: 'disabled' }), false, 'désactivation possible')
+check('B03', 'drapeaux : moteur V2 strictement opt-in, repli direct fermé', () => {
+  assertEqual(policy.isEngineV2Enabled({}), false, 'moteur V2 fermé sans configuration')
+  for (const value of ['true', '1', 'on', 'yes', 'typo', 'ENABLED?', '', 'disabled']) {
+    assertEqual(policy.isEngineV2Enabled({ ASSISTANT_ENGINE_V2: value }), false, `valeur « ${value} » refusée`)
+  }
+  assertEqual(policy.isEngineV2Enabled({ ASSISTANT_ENGINE_V2: 'enabled' }), true, 'activation explicite')
+  assertEqual(policy.isEngineV2Enabled({ ASSISTANT_ENGINE_V2: ' ENABLED ' }), true, 'casse et espaces tolérés')
   assertEqual(policy.isHistoryDirectFallbackEnabled({}), false, 'repli direct désactivé par défaut')
   assertEqual(
     policy.isHistoryDirectFallbackEnabled({ ASSISTANT_HISTORY_DIRECT_FALLBACK: 'enabled' }),
@@ -411,6 +423,14 @@ check('B03', 'drapeaux : moteur actif, repli direct inactif par défaut', () => 
   assertEqual(policy.isNarrativeEnabled({}), true, 'rédaction active (parité de facturation)')
   assertEqual(policy.isNarrativeEnabled({ ASSISTANT_NARRATIVE: 'disabled' }), false, 'rédaction désactivable')
   assertEqual(policy.isDeepeningEnabled({}), true, 'approfondissement actif')
+  assertEqual(policy.isDistributedAdmissionEnabled({}), false, 'admission distribuée fermée par défaut')
+  assertEqual(
+    policy.isDistributedAdmissionEnabled({ ASSISTANT_DISTRIBUTED_ADMISSION: 'true' }),
+    false,
+    'admission distribuée : seule la valeur enabled ouvre',
+  )
+  assertEqual(policy.isPlannerLlmEnabled({ ASSISTANT_PLANNER: 'deterministic' }), false, 'plan déterministe')
+  assertEqual(policy.isPlannerLlmEnabled({}), true, 'plan LLM dans le moteur V2 (opt-in)')
 })
 
 /* -------------------------------------------------------------------------- */
@@ -571,6 +591,171 @@ check('G05', 'durées différentes : lignes normalisées ajoutées au tableau', 
   assert(table.caption && table.caption.length > 0, 'réserve rappelée en légende')
 })
 
+/* -------------------------------------------------------------------------- */
+/* 10. Contre-exemples de l'audit NO-GO                                       */
+/* -------------------------------------------------------------------------- */
+
+// Planificateur désactivé pour ces contrôles : aucun appel réseau n'est possible.
+process.env.ASSISTANT_PLANNER = 'deterministic'
+
+function aliasMetrics(overrides = {}) {
+  const contract = loadTs('lib/assistant/analytics-contract.ts')
+  const metrics = {}
+  for (const [alias, name] of Object.entries(contract.KPI_METRIC_ALIASES)) {
+    const unit = alias === 'deliveryRate' ? 'percent' : String(alias).includes('Orders') ? 'count' : 'decimal'
+    const base = unit === 'percent'
+      ? { value: '75.00', numerator: 75, denominator: 100 }
+      : unit === 'count'
+        ? { value: '100', count: 100 }
+        : { value: '1000.00' }
+    metrics[name] = {
+      ...base, unit, state: 'complete', definition: '',
+      numerator: base.numerator ?? null, denominator: base.denominator ?? null,
+      ...(overrides[alias] ?? {}),
+    }
+  }
+  return metrics
+}
+
+function engineWindow(window, values = {}) {
+  const metrics = aliasMetrics(values)
+  const store = {
+    storeId: 'store-a', currency: 'MAD', timeZone: 'Africa/Casablanca', access: 'full',
+    definitionVersion: 1, revision: '1', lastRebuildAt: null, state: 'complete', days: [],
+    metrics,
+    coverage: { days_total: 30, days_aggregate: 30, days_direct: 0, days_dirty: 0, days_missing: 0, days_incompatible: 0, days_partial: 0 },
+  }
+  return {
+    windowId: window.id, range: window.range, failure: null, durationMs: 1,
+    kpis: {
+      contractVersion: 2, state: 'complete', range: window.range, source: 'test',
+      generatedAt: null, limits: [], issues: [], stores: [store],
+    },
+  }
+}
+
+let dimensionCalls = 0
+let capturedStoreIds = []
+cache.set(
+  path.resolve(ROOT, 'lib/assistant/engine/executor.ts').replace(/\\/g, '/'),
+  {
+    readWindows: async ({ windows, storeIds }) => {
+      capturedStoreIds = [...storeIds]
+      const map = new Map()
+      windows.forEach((window, index) => {
+        map.set(window.id, engineWindow(window, index === 0 ? {} : { totalOrders: { value: '80', count: 80 } }))
+      })
+      return map
+    },
+    readDimension: async ({ dimension, reading }) => {
+      dimensionCalls += 1
+      return {
+        dimension,
+        windowId: reading.windowId,
+        data: { meta: { state: 'complete' }, rows: [{ city: 'Casablanca', orders: 12, revenue: '1500.00' }] },
+        failure: null,
+      }
+    },
+    isDimensionSupported: () => true,
+  },
+)
+cache.set(
+  path.resolve(ROOT, 'lib/assistant/providers/index.ts').replace(/\\/g, '/'),
+  {
+    getAssistantProvider: () => ({
+      chat: async () => ({
+        text: '{"summary":"Les deux periodes evoluent de facon contrastee."}',
+        inputTokens: 12, outputTokens: 6,
+        providerName: 'mock', modelName: 'mock', providerCostUsd: 0,
+      }),
+    }),
+  },
+)
+
+async function runEngine(message, extra = {}) {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  return engine.runAnalyticEngine({
+    supabase: {}, scopeStoreIds: ['store-a'], scopeContext: {}, intent: 'period_comparison',
+    range: { start: '2026-09-01', end: '2026-11-01' },
+    userMessage: message, conversationHistory: [], providerModel: 'mock', language: 'fr',
+    ...extra,
+  })
+}
+
+check('R01', 'quatre périodes : trois comparaisons réellement publiées', async () => {
+  const outcome = await runEngine('Compare septembre et octobre 2026 avec septembre et octobre 2025')
+  const tables = outcome.structuredResponse.document.blocks.filter((block) => block.type === 'table')
+  assertEqual(tables.length, 3, 'deux comparaisons mensuelles + le bilan combiné')
+  const titles = tables.map((block) => block.table.title).join(' | ')
+  assert(/septembre 2026/i.test(titles), 'comparaison septembre')
+  assert(/octobre 2026/i.test(titles), 'comparaison octobre')
+  return titles
+})
+
+check('R02', 'deux mois de la même année : vraie comparaison, ordre du texte', () => {
+  const built = request.buildAnalysisRequest({
+    message: 'Compare septembre 2026 avec octobre 2026',
+    intent: 'period_comparison',
+    resolvedRange: { from: '2026-09-01', to: '2026-11-01' },
+    access: 'full',
+    maxPeriods: 6,
+  })
+  assertEqual(built.plan.pairs.length, 1, 'une comparaison intra-année')
+  assertEqual(built.plan.pairs[0].relation, 'previous_period', 'relation dédiée')
+
+  const reversed = request.buildAnalysisRequest({
+    message: 'Compare octobre 2025 avec octobre 2026',
+    intent: 'period_comparison',
+    resolvedRange: { from: '2025-10-01', to: '2026-11-01' },
+    access: 'full',
+    maxPeriods: 6,
+  })
+  const pair = reversed.plan.pairs[0]
+  const current = reversed.plan.periods.find((period) => period.id === pair.currentId)
+  assertEqual(current.year, 2025, 'la période citée en premier reste la période courante')
+})
+
+check('R03', 'écart négatif : le signe est conservé', () => {
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  assertEqual(compose.formatDelta('-12', 'decimal', 'MAD'), '−12 MAD', 'baisse en montant')
+  assertEqual(compose.formatDelta('12', 'decimal', 'MAD'), '+12 MAD', 'hausse en montant')
+  assertEqual(compose.formatDelta('0', 'count', null), '0', 'zéro neutre')
+  assertEqual(compose.formatDelta('3.50', 'percent', null), '+3.50 pts', 'taux en points')
+  assertEqual(compose.formatDelta(null, 'decimal', 'MAD'), '—', 'valeur absente')
+})
+
+check('R04', 'taux multi-boutiques : pondéré par les numérateurs', () => {
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  const stores = [
+    { currency: 'MAD', metrics: { deliveryRate: { value: '0.00', unit: 'percent', state: 'complete', numerator: 0, denominator: 10 } } },
+    { currency: 'MAD', metrics: { deliveryRate: { value: '90.00', unit: 'percent', state: 'complete', numerator: 90, denominator: 100 } } },
+  ]
+  const snapshot = compose.readMetricFromReading({ kpis: { stores } }, 'deliveryRate')
+  assertEqual(snapshot.value, '81.81', 'recalcul 90 / 110')
+  assertEqual(snapshot.unit, 'percent', 'unité conservée')
+})
+
+check('R05', 'métrique explicitement demandée : la marge reste en tête', () => {
+  const built = request.buildAnalysisRequest({
+    message: 'Quelle est ma marge ce mois-ci ?',
+    intent: 'business_overview',
+    resolvedRange: { from: '2026-10-01', to: '2026-11-01' },
+    access: 'full',
+    maxPeriods: 6,
+  })
+  assertEqual(built.metrics[0], 'contributionMargin', 'la métrique demandée passe en premier')
+  assert(built.requestedMetrics.includes('contributionMargin'), 'demande conservée')
+})
+
+check('R06', 'ventilation demandée : réellement rendue, jamais lue pour rien', async () => {
+  dimensionCalls = 0
+  const outcome = await runEngine('Compare septembre et octobre 2026 avec septembre et octobre 2025 par ville')
+  const payload = JSON.stringify(outcome.structuredResponse.document)
+  assert(dimensionCalls > 0, 'la dimension a été lue')
+  assert(payload.includes('Casablanca'), 'la ventilation apparaît dans la réponse')
+  return `${dimensionCalls} lecture(s)`
+})
+
 check('N01', 'narration sûre : aucun chiffre, aucun code', () => {
   const engine = loadTs('lib/assistant/agent/engine.ts')
   assertEqual(engine.isSafeNarrative('Les commandes progressent sur la periode comparee.'), true, 'texte sûr')
@@ -596,15 +781,149 @@ check('N02', 'narration appliquée au résumé seul', () => {
   assertEqual(next.message_text, 'nouveau resume qualitatif', 'texte aligné')
 })
 
-/* -------------------------------------------------------------------------- */
-/* Rapport                                                                    */
-/* -------------------------------------------------------------------------- */
+check('R07', 'timeout technique ≠ absence de données', () => {
+  const history = loadTs('lib/assistant/engine/history.ts')
+  const timeout = history.assessWindow({
+    windowId: 'p0', range: { from: '2026-09-01', to: '2026-10-01' }, failure: null, durationMs: 1,
+    kpis: { state: 'missing', stores: [], issues: ['KPI_READER_TIMEOUT'], limits: [] },
+  })
+  assertEqual(timeout.kind, 'source_unavailable', 'timeout reconnu comme panne')
+  assertEqual(timeout.comparable, false, 'aucune comparaison sur une panne')
+
+  const noAggregate = history.assessWindow({
+    windowId: 'p1', range: { from: '2025-09-01', to: '2025-10-01' }, failure: null, durationMs: 1,
+    kpis: { state: 'missing', stores: [], issues: [], limits: [] },
+  })
+  assertEqual(noAggregate.kind, 'no_coverage', 'absence d’agrégat distincte')
+})
+
+check('R08', 'population vide prouvée seulement avec couverture complète', () => {
+  const history = loadTs('lib/assistant/engine/history.ts')
+  const store = (missingDays) => ({
+    storeId: 's', currency: 'MAD', access: 'full', definitionVersion: 1, state: 'partial',
+    metrics: { orders: { value: '0', count: 0, unit: 'count', state: 'complete' } },
+    days: [],
+    coverage: { days_total: 30, days_aggregate: 30 - missingDays, days_direct: 0, days_dirty: 0, days_missing: missingDays, days_incompatible: 0, days_partial: 0 },
+  })
+  const partial = history.assessWindow({
+    windowId: 'p', range: { from: '2026-09-01', to: '2026-10-01' }, failure: null, durationMs: 1,
+    kpis: { state: 'partial', stores: [store(5)], issues: [], limits: [] },
+  })
+  assertEqual(partial.kind, 'coverage_partial', 'couverture partielle non concluante')
+
+  const full = history.assessWindow({
+    windowId: 'p', range: { from: '2026-09-01', to: '2026-10-01' }, failure: null, durationMs: 1,
+    kpis: { state: 'partial', stores: [store(0)], issues: [], limits: [] },
+  })
+  assertEqual(full.kind, 'genuinely_empty', 'couverture complète : zéro réel')
+})
+
+check('R09', 'cohorte immature : réserve explicite', () => {
+  const comparability = loadTs('lib/assistant/semantic/comparability.ts')
+  const side = (endsAt) => ({
+    metrics: { deliveredOrders: metric(90) }, state: 'complete', days: 30,
+    definitionVersion: 1, endsAt,
+  })
+  const decision = comparability.decideMetricComparability({
+    metric: 'deliveredOrders',
+    current: side('2026-10-31'),
+    baseline: side('2025-10-31'),
+    access: 'full',
+    today: '2026-10-30',
+  })
+  assert(decision.reasons.includes('reason.cohort_immature'), 'réserve de maturité')
+  assertEqual(decision.decision, 'comparable_with_reserve', 'pas de refus global')
+})
+
+check('R10', 'crédits : usage nul ou inconnu jamais facturé', () => {
+  const credits = loadTs('lib/assistant/credits.ts')
+  assertEqual(credits.computeCreditsUsed(0, 0), 0, 'échec fournisseur : aucun crédit')
+  assertEqual(credits.computeCreditsUsed(10, 40), 2, 'usage mesuré facturable')
+
+  const deterministic = credits.resolveUsageBilling({ kind: 'deterministic' })
+  assertEqual(deterministic.billable, false, 'réponse déterministe gratuite')
+  const unknown = credits.resolveUsageBilling({ kind: 'provider', inputTokens: null, outputTokens: null, usageKnown: false })
+  assertEqual(unknown.billable, false, 'usage inconnu non facturé')
+  assertEqual(unknown.usageKnown, false, 'usage inconnu ≠ zéro')
+  const cancelled = credits.resolveUsageBilling({ kind: 'cancelled', inputTokens: 500, outputTokens: 100 })
+  assertEqual(cancelled.creditsConsumed, 0, 'annulation non facturée')
+  const measured = credits.resolveUsageBilling({ kind: 'provider', inputTokens: 500, outputTokens: 100, usageKnown: true })
+  assertEqual(measured.billable, true, 'usage mesuré facturé')
+  assertEqual(measured.creditsConsumed, 24, 'calcul sur tokens réels')
+})
+
+
+check('R11', 'annulation propagée : aucune analyse finalisée', async () => {
+  const controller = new AbortController()
+  controller.abort()
+  let thrown = ''
+  try {
+    await runEngine('Compare septembre et octobre 2026 avec septembre et octobre 2025', { signal: controller.signal })
+  } catch (error) {
+    thrown = error instanceof Error ? error.message : String(error)
+  }
+  assertEqual(thrown, 'ASSISTANT_ABORTED', 'abandon explicite')
+})
+
+check('R12', 'anglais et formulations mixtes : dimensions reconnues', () => {
+  assertEqual(request.detectDimensions('Show revenue by city and product').join(','), 'city,product', 'anglais')
+  assertEqual(request.detectDimensions('CA par ville et statut').join(','), 'city,status', 'français')
+  assertEqual(request.detectMetrics('Quel est mon chiffre d’affaires ?')[0], 'revenue', 'métrique française')
+  assertEqual(request.detectMetrics('show me the revenue')[0], 'revenue', 'métrique anglaise')
+  assertEqual(request.detectDimensions('ch7al men commande f Casablanca').length, 0, 'aucune dimension inventée')
+})
+
+check('R13', 'narration : causalité et chiffres refusés', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  const facts = ['Commandes | septembre 2026=412 | septembre 2025=398 | ecart=14 (up)']
+  assertEqual(engine.isGroundedNarrative('La baisse est causée par vos publicités.', facts), false, 'causalité refusée')
+  assertEqual(engine.isGroundedNarrative('Les commandes sont à 412 cette période.', facts), false, 'chiffre refusé')
+  assertEqual(engine.isGroundedNarrative('Les volumes progressent sur la période comparée.', facts), true, 'constat factuel accepté')
+  assertEqual(engine.isGroundedNarrative('Les volumes progressent.', []), false, 'aucun fait = aucune narration')
+})
+
+check('R14', 'arrêt vocal sans transcription, envoi explicite', () => {
+  const voice = loadTs('lib/assistant/voice-state.ts')
+  let state = voice.initialVoiceState()
+  state = voice.reduceVoice(state, { type: 'start' })
+  state = voice.reduceVoice(state, { type: 'stop' })
+  assertEqual(state.phase, 'recorded', 'arrêt = prêt à envoyer')
+  assertEqual(voice.canSend(state), true, 'envoi possible')
+  assertEqual(voice.isBusy(state), false, 'aucune transcription lancée')
+  state = voice.reduceVoice(state, { type: 'send' })
+  assertEqual(state.phase, 'transcribing', 'seul l’envoi transcrit')
+  const cancelled = voice.reduceVoice(voice.reduceVoice(voice.initialVoiceState(), { type: 'start' }), { type: 'cancel' })
+  assertEqual(cancelled.phase, 'idle', 'annulation nettoie la session')
+})
+
+check('R15', 'cibles tactiles vocales : 44 px réels', () => {
+  const source = fs.readFileSync(path.resolve(ROOT, 'components/assistant/assistant-voice-panel.tsx'), 'utf8')
+  const buttons = source.match(/className="[^"]*inline-flex[^"]*rounded-full[^"]*"/g) ?? []
+  assertEqual(buttons.length, 3, 'trois boutons dans le panneau')
+  for (const button of buttons) {
+    assert(/\bh-11\b/.test(button) && /\bw-11\b/.test(button), `cible trop petite : ${button}`)
+    assert(!/\bh-9\b/.test(button) && !/\bw-9\b/.test(button), `classe 36 px résiduelle : ${button}`)
+  }
+})
+
+check('R16', 'périmètre de boutiques : uniquement celui autorisé', async () => {
+  capturedStoreIds = []
+  await runEngine('Compare septembre et octobre 2026 avec septembre et octobre 2025')
+  assertEqual(capturedStoreIds.join(','), 'store-a', 'aucune boutique hors périmètre')
+  const source = fs.readFileSync(path.resolve(ROOT, 'lib/assistant/agent/engine.ts'), 'utf8')
+  assert(!/\.from\(\s*['"]/.test(source), 'aucune lecture de table directe')
+  assert(!/\.rpc\(/.test(source), 'aucun appel RPC direct dans le moteur')
+})
 
 const passed = results.filter((result) => result.pass).length
 const failedCount = results.length - passed
 
-for (const result of results) {
-  console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.id} ${result.name}${result.detail ? ` — ${result.detail}` : ''}`)
-}
-console.log(`\n${passed}/${results.length} PASS — ${failedCount} FAIL`)
-process.exit(failedCount === 0 ? 0 : 1)
+Promise.all(pendingChecks).then(() => {
+  const finalPassed = results.filter((result) => result.pass).length
+  const finalFailed = results.length - finalPassed
+  for (const result of results) {
+    console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.id} ${result.name}${result.detail ? ` — ${result.detail}` : ''}`)
+  }
+  console.log(`\n${finalPassed}/${results.length} PASS — ${finalFailed} FAIL`)
+  process.exitCode = finalFailed === 0 ? 0 : 1
+})

@@ -55,6 +55,7 @@ export default function AssistantVoicePanel({
   const labels = {
     label: translate(dict, 'voice.label'),
     status: translate(dict, 'voice.transcribing'),
+    ready: translate(dict, 'voice.ready'),
     cancel: translate(dict, 'voice.cancel'),
     stop: translate(dict, 'voice.stop'),
     send: translate(dict, 'voice.send'),
@@ -72,12 +73,12 @@ export default function AssistantVoicePanel({
         onClick={onCancel}
         aria-label={labels.cancel}
         title={labels.cancel}
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <X className="h-4 w-4" />
       </button>
 
-      <div className="relative flex h-9 min-w-0 flex-1 items-center">
+      <div className="relative flex h-11 min-w-0 flex-1 items-center">
         <canvas
           ref={canvasRef}
           aria-hidden
@@ -88,7 +89,7 @@ export default function AssistantVoicePanel({
           aria-live="polite"
           className="pointer-events-none absolute inset-y-0 end-0 flex items-center rounded bg-card/80 px-1 text-[11px] font-medium tabular-nums text-foreground/80"
         >
-          {transcribing ? labels.status : formatDuration(seconds)}
+          {transcribing ? labels.status : ready ? `${formatDuration(seconds)} · ${labels.ready}` : formatDuration(seconds)}
         </span>
       </div>
 
@@ -98,7 +99,7 @@ export default function AssistantVoicePanel({
         disabled={!recording}
         aria-label={labels.stop}
         title={labels.stop}
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-card text-primary transition-colors hover:bg-primary/10 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-card text-primary transition-colors hover:bg-primary/10 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <Square className="h-3.5 w-3.5" />
       </button>
@@ -109,7 +110,7 @@ export default function AssistantVoicePanel({
         disabled={!ready || transcribing}
         aria-label={labels.send}
         title={labels.send}
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <Send className="h-4 w-4" />
       </button>

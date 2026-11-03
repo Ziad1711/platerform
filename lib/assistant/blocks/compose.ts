@@ -16,6 +16,7 @@ import type { AnalysisRequest } from '@/lib/assistant/semantic/request'
 import { periodDays, type AnalysisPeriod } from '@/lib/assistant/semantic/periods'
 import type { MetricDeltaResult } from '@/lib/assistant/semantic/comparability'
 import { divideDecimal, sumDecimalText } from '@/lib/assistant/semantic/decimal'
+import { percentOfCounts } from '@/lib/assistant/analytics-decimal'
 import { METRIC_CATALOG, DERIVED_METRICS } from '@/lib/assistant/semantic/catalog'
 import type { WindowAssessment } from '@/lib/assistant/engine/history'
 import type { DimensionReading, WindowReading } from '@/lib/assistant/engine/executor'
@@ -29,6 +30,7 @@ import {
   type ResponseDocument,
   type TableBlock,
   type TableCell,
+  type TableColumn,
 } from '@/lib/assistant/blocks/types'
 
 /** Longueur maximale d'une série affichable sans agrégation. */
@@ -68,13 +70,26 @@ export function formatMetricValue(input: {
   return input.value
 }
 
-/** Formatage d'une variation, signe explicite. */
+/** Formatage d'une variation, signe explicite et unité correcte. */
 export function formatDelta(delta: string | null, unit: 'count' | 'decimal' | 'percent', currency: string | null): string {
   if (delta === null) return '—'
-  const sign = delta.startsWith('-') ? '' : '+'
-  const magnitude = delta.startsWith('-') ? delta.slice(1) : delta
+  const negative = delta.startsWith('-') || delta.startsWith('\u2212')
+  const magnitude = negative || delta.startsWith('+') ? delta.slice(1) : delta
   const formatted = formatMetricValue({ value: magnitude, unit, currency })
-  return `${sign}${formatted === '—' ? '' : formatted}`
+  if (formatted === '—') return '—'
+  // Un écart de pourcentage se lit en points : « +3 pts » n'est pas « +3 % ».
+  if (unit === 'percent') {
+    const zero = /^0(?:[.,]0+)?$/.test(magnitude)
+    return zero ? `0 ${translateDeltaPoints()}` : `${negative ? '−' : '+'}${magnitude} ${translateDeltaPoints()}`
+  }
+  const zero = /^0(?:[.,]0+)?$/.test(magnitude)
+  if (zero) return formatted
+  return `${negative ? '−' : '+'}${formatted}`
+}
+
+/** Unité d'un écart de taux, localisée par le dictionnaire de la réponse. */
+function translateDeltaPoints(): string {
+  return 'pts'
 }
 
 /**
@@ -162,6 +177,28 @@ export function readMetricFromReading(
   const values: string[] = []
   let worst: AnalyticsState = 'complete'
 
+  // Un taux ne s'additionne JAMAIS : il se recalcule sur les numérateurs et
+  // dénominateurs. Deux boutiques à 0/10 et 90/100 donnent 81,82 %, pas 90 %.
+  if (unit === 'percent') {
+    let numerator = 0
+    let denominator = 0
+    for (const store of kpis.stores) {
+      const metricValue = store.metrics[name]
+      if (!metricValue || metricValue.state === 'missing' ||
+          metricValue.state === 'forbidden' || metricValue.state === 'unavailable') {
+        return { value: null, unit, state: metricValue?.state ?? 'missing', currency }
+      }
+      if (metricValue.numerator === null || metricValue.denominator === null) {
+        return { value: null, unit, state: 'partial', currency }
+      }
+      numerator += metricValue.numerator
+      denominator += metricValue.denominator
+      if (metricValue.state === 'partial' && worst === 'complete') worst = 'partial'
+    }
+    const value = percentOfCounts(numerator, denominator)
+    return { value, unit, state: value === null ? 'partial' : worst, currency }
+  }
+
   for (const store of kpis.stores) {
     const metricValue = store.metrics[name]
     if (!metricValue || metricValue.value === null ||
@@ -235,6 +272,8 @@ export interface ComparisonTableInput {
   currentDays: number
   baselineDays: number
   currency: string | null
+  /** Titre du bloc (comparaison courante), déjà localisé par l'appelant. */
+  title?: string
 }
 
 /** Clés de réserve localisées, dédupliquées et dans un ordre stable. */
@@ -242,6 +281,7 @@ export function describeReserves(dict: Dictionary, deltas: readonly MetricDeltaR
   const order = [
     'reason.access_denied',
     'reason.definition_differs',
+    'reason.cohort_immature',
     'reason.coverage_partial',
     'reason.duration_differs',
     'reason.stale',
@@ -333,6 +373,7 @@ export function buildComparisonTable(input: ComparisonTableInput): TableBlock | 
   const reserves = describeReserves(input.dict, input.deltas)
 
   return {
+    title: input.title,
     columns: [
       {
         key: 'metric',
@@ -402,15 +443,95 @@ export function buildChartBlock(input: ChartInput): ChartBlock | null {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Dimensions réellement lues                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Colonnes maximales d'une table de dimension. */
+export const MAX_DIMENSION_COLUMNS = 4
+/** Lignes maximales publiées pour une dimension (budget de lecture : 20). */
+export const MAX_DIMENSION_ROWS = 6
+/** Tables de dimension maximales dans une réponse. */
+export const MAX_DIMENSION_TABLES = 2
+
+/**
+ * Table d'une dimension réellement lue (ville, produit, agent, statut…).
+ *
+ * Les colonnes sont déduites des clés que le catalogue sait nommer : une clé
+ * inconnue est ignorée plutôt que publiée en identifiant technique. Aucune
+ * valeur n'est recomposée ici, elles viennent toutes de la section validée.
+ */
+export function buildDimensionTable(input: {
+  dict: Dictionary
+  script: TextScript
+  reading: DimensionReading
+}): TableBlock | null {
+  const section = input.reading.data
+  const rows = Array.isArray(section?.rows) ? section!.rows : []
+  if (rows.length === 0) return null
+
+  const labelFor = (key: string): string => {
+    const dimension = translate(input.dict, `dim.${key}`)
+    if (dimension) return dimension
+    return translate(input.dict, `metric.${key}`)
+  }
+
+  const columns: TableColumn[] = []
+  for (const [key, value] of Object.entries(rows[0] as Record<string, unknown>)) {
+    if (value === null || typeof value === 'object') continue
+    const label = labelFor(key)
+    if (!label) continue
+    const numeric = typeof value === 'number' || /^[+\-−]?\d/.test(String(value).trim())
+    columns.push({
+      key,
+      label,
+      direction: numeric ? 'ltr' : (input.script === 'arabic' ? 'rtl' : 'ltr'),
+      align: numeric ? 'end' : 'start',
+    })
+    if (columns.length >= MAX_DIMENSION_COLUMNS) break
+  }
+  if (columns.length === 0) return null
+
+  const body = rows.slice(0, MAX_DIMENSION_ROWS).map((row, index) => {
+    const record = row as Record<string, unknown>
+    return {
+      key: String(record.id ?? `${input.reading.dimension}-${index}`),
+      cells: columns.map((column) => {
+        const value = record[column.key]
+        const text = value === null || value === undefined ? '—' : String(value)
+        return { value: text, direction: column.direction } as TableCell
+      }),
+    }
+  })
+
+  return {
+    title: translate(input.dict, `dim.title.${input.reading.dimension}`),
+    columns,
+    rows: body,
+    caption: section?.meta?.state === 'partial' ? translate(input.dict, 'absence.partial') : undefined,
+  }
+}
+
+/** Libellé de section comparative : « septembre 2026 vs septembre 2025 ». */
+function sectionTitle(dict: Dictionary, currentLabel: string, baselineLabel: string): string {
+  return translate(dict, 'title.comparisonPair', { current: currentLabel, baseline: baselineLabel })
+}
+
+/* -------------------------------------------------------------------------- */
 /* Assemblage du document                                                     */
 /* -------------------------------------------------------------------------- */
+
+export interface ComparisonSection {
+  currentId: string
+  baselineId: string
+  deltas: readonly MetricDeltaResult[]
+}
 
 export interface ComposeInput {
   request: AnalysisRequest
   readings: Map<string, WindowReading>
   assessments: Map<string, WindowAssessment>
-  deltas: readonly MetricDeltaResult[]
-  primaryPair: { currentId: string; baselineId: string } | null
+  /** Toutes les comparaisons demandées, dans l'ordre du plan. */
+  sections: readonly ComparisonSection[]
   dimensions: readonly DimensionReading[]
   currency: string | null
   budgetExceeded?: boolean
@@ -420,7 +541,9 @@ export interface ComposedResponse {
   document: ResponseDocument
   warnings: string[]
   kpiItems: KpiItem[]
+  /** Premier tableau publié (compatibilité) ; `tables` contient tout. */
   table: TableBlock | null
+  tables: TableBlock[]
   chart: ChartBlock | null
   /** Texte de repli : recherche et copie, sans dupliquer les blocs chiffrés. */
   text: string
@@ -499,14 +622,47 @@ function isNegativeMetric(metric: KpiMetricAlias): boolean {
     metric === 'deliveryCost' || metric === 'confirmationCost'
 }
 
-/** Notices : réserves de comparaison + qualification d'absence + budget. */
+/** Notices : réserves de comparaison + qualification d'absence + limites. */
 function buildNotices(input: ComposeInput, dict: Dictionary): string[] {
-  const notices: string[] = [...describeReserves(dict, input.deltas)]
+  const notices: string[] = []
+
+  // Réserves de TOUTES les comparaisons publiées, dédupliquées.
+  for (const section of input.sections) {
+    for (const message of describeReserves(dict, section.deltas)) {
+      if (message && !notices.includes(message)) notices.push(message)
+    }
+  }
 
   for (const assessment of input.assessments.values()) {
     if (assessment.kind === 'known' || assessment.kind === 'coverage_partial') continue
     const key = `absence.${absenceSuffix(assessment.kind)}`
     const message = translate(dict, key)
+    if (message && !notices.includes(message)) notices.push(message)
+  }
+
+  // Un indicateur explicitement demandé et non publiable doit être expliqué :
+  // le remplacer silencieusement par un autre serait une réponse trompeuse.
+  const primary = input.sections[0]
+  if (primary) {
+    const reading = input.readings.get(primary.currentId)
+    for (const metric of input.request.requestedMetrics) {
+      const delta = primary.deltas.find((item) => item.metric === metric)
+      const published = delta
+        ? delta.current !== null || delta.baseline !== null
+        : readMetricFromReading(reading, metric).value !== null
+      if (published) continue
+      const message = translate(dict, 'limit.metricUnavailable', { metric: metricLabel(dict, metric) })
+      if (message && !notices.includes(message)) notices.push(message)
+    }
+  }
+
+  if (input.request.netProfitRequested) {
+    const message = translate(dict, 'limit.netProfit')
+    if (message && !notices.includes(message)) notices.push(message)
+  }
+
+  if (input.dimensions.some((reading) => reading.failure !== null)) {
+    const message = translate(dict, 'limit.dimensionUnavailable')
     if (message && !notices.includes(message)) notices.push(message)
   }
 
@@ -535,7 +691,8 @@ function absenceSuffix(kind: string): string {
  * Compose la réponse finale.
  *
  * Le format découle de la demande :
- * - comparaison exploitable → tableau (jamais doublé par des badges KPI) ;
+ * - comparaisons exploitables → un tableau PAR comparaison demandée (aucune
+ *   période n'est supprimée), puis les ventilations réellement lues ;
  * - période simple avec série suffisante → KPI compacts + graphique ;
  * - sinon → réponse courte, texte et notice uniquement.
  */
@@ -544,65 +701,97 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
   const dict = resolveDictionary(request.profile.locale, request.profile.script)
   const script = request.profile.script
 
-  const currentId = input.primaryPair?.currentId ?? request.plan.periods[0]?.id ?? null
-  const baselineId = input.primaryPair?.baselineId ?? null
-  const currentPeriod = request.plan.periods.find((period) => period.id === currentId) ??
-    request.plan.groups.find((period) => period.id === currentId) ?? null
-  const baselinePeriod = baselineId
-    ? request.plan.periods.find((period) => period.id === baselineId) ??
-      request.plan.groups.find((period) => period.id === baselineId) ?? null
-    : null
+  const findPeriod = (id: string | null) =>
+    id
+      ? request.plan.periods.find((period) => period.id === id) ??
+        request.plan.groups.find((period) => period.id === id) ?? null
+      : null
 
-  const currentLabel = currentPeriod ? formatPeriodLabel(currentPeriod, request.profile.locale) : ''
-  const baselineLabel = baselinePeriod ? formatPeriodLabel(baselinePeriod, request.profile.locale) : ''
+  const tables: TableBlock[] = []
+  const sectionLabels: Array<{ currentLabel: string; baselineLabel: string }> = []
 
-  const currentReading = currentId ? input.readings.get(currentId) : undefined
-  const baselineReading = baselineId ? input.readings.get(baselineId) : undefined
-  const currentDays = currentPeriod ? periodDays(currentPeriod) : 0
-  const baselineDays = baselinePeriod ? periodDays(baselinePeriod) : 0
+  // 1. Une comparaison par paire demandée : rien n'est fusionné ni supprimé.
+  for (const section of input.sections) {
+    const currentPeriod = findPeriod(section.currentId)
+    const baselinePeriod = findPeriod(section.baselineId)
+    if (!currentPeriod || !baselinePeriod) continue
+    const currentLabel = formatPeriodLabel(currentPeriod, request.profile.locale)
+    const baselineLabel = formatPeriodLabel(baselinePeriod, request.profile.locale)
+    sectionLabels.push({ currentLabel, baselineLabel })
+    const table = buildComparisonTable({
+      dict,
+      script,
+      deltas: section.deltas,
+      currentLabel,
+      baselineLabel,
+      currentReading: input.readings.get(section.currentId),
+      baselineReading: input.readings.get(section.baselineId),
+      currentDays: periodDays(currentPeriod),
+      baselineDays: periodDays(baselinePeriod),
+      currency: input.currency,
+      title: sectionTitle(dict, currentLabel, baselineLabel),
+    })
+    if (table) tables.push(table)
+  }
 
-  const blocks: ResponseBlock[] = []
-  const warnings = buildNotices(input, dict)
+  // 2. Ventilations réellement demandées et lues : elles doivent être visibles.
+  const dimensionTables: TableBlock[] = []
+  for (const reading of input.dimensions) {
+    if (reading.failure) continue
+    const table = buildDimensionTable({ dict, script, reading })
+    if (table) dimensionTables.push(table)
+    if (dimensionTables.length >= MAX_DIMENSION_TABLES) break
+  }
 
-  // 1. Tableau comparatif : prioritaire dès qu'un écart est interprétable.
-  const table = baselinePeriod
-    ? buildComparisonTable({
-        dict,
-        script,
-        deltas: input.deltas,
-        currentLabel,
-        baselineLabel,
-        currentReading,
-        baselineReading,
-        currentDays,
-        baselineDays,
-        currency: input.currency,
-      })
-    : null
+  const primary = input.sections[0]
+  const currentReading = primary ? input.readings.get(primary.currentId) : undefined
+  const primaryCurrentPeriod = primary ? findPeriod(primary.currentId) : null
+  const currentLabel = primaryCurrentPeriod ? formatPeriodLabel(primaryCurrentPeriod, request.profile.locale) : ''
 
-  // 2. KPI compacts : jamais en doublon d'un tableau couvrant les mêmes valeurs.
-  const kpiItems = table ? [] : buildKpiItems(dict, currentReading, request.metrics)
+  // 3. KPI compacts : uniquement lorsqu'aucun tableau ne porte déjà les valeurs.
+  const kpiItems = tables.length > 0 || dimensionTables.length > 0
+    ? []
+    : buildKpiItems(dict, currentReading, request.metrics)
 
-  // 3. Graphique : uniquement pour une période simple et une série réelle.
-  const chart = (!baselinePeriod && request.needsSeries)
+  // 4. Graphique : uniquement pour une période simple et une série réelle.
+  const chart = (tables.length === 0 && request.needsSeries)
     ? buildChartBlock({ dict, reading: currentReading, titleKey: 'chart.title.orders', series: 'orders' })
     : null
 
-  const insights = baselinePeriod ? buildInsights({ dict, deltas: input.deltas, currentLabel, baselineLabel }) : []
-  const recommendations = buildRecommendations({ dict, deltas: input.deltas, currentReading, currency: input.currency })
+  const primaryDeltas = primary?.deltas ?? []
+  const insights = primary
+    ? buildInsights({
+        dict,
+        deltas: primaryDeltas,
+        currentLabel: sectionLabels[0]?.currentLabel ?? '',
+        baselineLabel: sectionLabels[0]?.baselineLabel ?? '',
+      })
+    : []
+  const recommendations = buildRecommendations({
+    dict,
+    deltas: primaryDeltas,
+    currentReading,
+    currency: input.currency,
+  })
 
-  const hasFigures = Boolean(table) || kpiItems.length > 0 || Boolean(chart)
+  const hasFigures = tables.length > 0 || dimensionTables.length > 0 ||
+    kpiItems.length > 0 || Boolean(chart)
 
   // Résumé : qualitatif, jamais un doublon des chiffres des blocs.
   const summaryText = hasFigures
-    ? (baselinePeriod
-        ? translate(dict, 'summary.comparison', { current: currentLabel, baseline: baselineLabel })
+    ? (sectionLabels.length > 0
+        ? sectionLabels.length === 1
+          ? translate(dict, 'summary.comparison', sectionLabels[0])
+          : translate(dict, 'summary.comparisons', { count: String(sectionLabels.length) })
         : translate(dict, 'summary.single', { period: currentLabel }))
-    : warnings[0] ?? translate(dict, 'summary.noFigures')
+    : translate(dict, 'summary.noFigures')
 
+  const warnings = buildNotices(input, dict)
+  const blocks: ResponseBlock[] = []
   blocks.push({ type: 'summary', text: summaryText })
   if (kpiItems.length > 0) blocks.push({ type: 'kpi', items: kpiItems })
-  if (table) blocks.push({ type: 'table', table })
+  for (const table of tables) blocks.push({ type: 'table', table })
+  for (const table of dimensionTables) blocks.push({ type: 'table', table })
   if (chart) blocks.push({ type: 'chart', chart })
   if (insights.length > 0) {
     blocks.push({ type: 'insights', title: translate(dict, 'title.verdict'), items: insights })
@@ -619,7 +808,7 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     })
   }
 
-  const presentation: ResponseDocument['presentation'] = table
+  const presentation: ResponseDocument['presentation'] = tables.length > 0 || dimensionTables.length > 0
     ? 'table'
     : chart && kpiItems.length > 0
       ? 'mixed'
@@ -642,7 +831,8 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     document,
     warnings,
     kpiItems,
-    table,
+    table: tables[0] ?? dimensionTables[0] ?? null,
+    tables: [...tables, ...dimensionTables],
     chart,
     text,
   }

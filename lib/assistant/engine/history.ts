@@ -85,6 +85,38 @@ function aggregateCoverage(kpis: AnalyticsReaderResult): AnalyticsCoverage | nul
   )
 }
 
+/**
+ * Cause technique derrière un état `missing`.
+ *
+ * Le lecteur V5 ne lève pas : il renvoie `missing` en conservant le code dans
+ * `issues`. Sans cette lecture, un timeout PostgreSQL était présenté comme une
+ * simple absence d'agrégat — l'utilisateur pouvait lire « aucune donnée » alors
+ * que la source était injoignable.
+ */
+export function classifyReaderIssues(issues: readonly string[]): DataAbsenceKind | null {
+  const codes = issues.map((issue) => String(issue ?? '').toUpperCase())
+  if (codes.some((code) => code.includes('NO_ACCESS') || code.includes('FORBIDDEN') || code.includes('UNAUTHENTICATED'))) {
+    return 'access_denied'
+  }
+  if (codes.some((code) => code.includes('BAD_RANGE') || code.includes('RANGE_TOO_LARGE'))) {
+    return 'range_rejected'
+  }
+  if (codes.some((code) => code.includes('TIMEOUT') || code.includes('READER_FAILED') || code.includes('UNAVAILABLE'))) {
+    return 'source_unavailable'
+  }
+  return null
+}
+
+/** Couverture réellement complète : aucune journée manquante, partielle ou sale. */
+function fullyCoveredCoverage(coverage: AnalyticsCoverage | null): boolean {
+  if (!coverage) return false
+  return coverage.days_total > 0 &&
+    coverage.days_missing === 0 &&
+    coverage.days_partial === 0 &&
+    coverage.days_dirty === 0 &&
+    coverage.days_incompatible === 0
+}
+
 export function assessWindow(
   reading: WindowReading | undefined,
   options?: { budgetExceeded?: boolean },
@@ -114,11 +146,21 @@ export function assessWindow(
   if (kpis.state === 'forbidden') {
     return { ...empty, kind: 'access_denied', coverage }
   }
+
+  // Une cause technique prime sur toute lecture d'absence : elle est prouvée.
+  const technical = classifyReaderIssues(kpis.issues)
+  if (technical && !hasValues) {
+    return { ...empty, kind: technical, coverage }
+  }
+
   if (kpis.state === 'missing') {
     return { ...empty, kind: 'no_coverage', coverage }
   }
+
+  // Population vide : prouvée seulement par un état `empty` du lecteur ou par
+  // une couverture complète. Une couverture partielle ne prouve pas l'absence.
   const populationEmpty = kpis.stores.every((store) => (store.metrics.orders?.count ?? 0) === 0)
-  if (kpis.state === 'empty' || (populationEmpty && coverage !== null && coverage.days_total > 0)) {
+  if (kpis.state === 'empty' && (fullyCoveredCoverage(coverage) || coverage === null)) {
     return {
       windowId: reading.windowId,
       kind: 'genuinely_empty',
@@ -128,7 +170,17 @@ export function assessWindow(
       comparable: true,
     }
   }
-  if (kpis.state === 'partial') {
+  if (populationEmpty && fullyCoveredCoverage(coverage)) {
+    return {
+      windowId: reading.windowId,
+      kind: 'genuinely_empty',
+      hasValues: false,
+      publishedMetrics: metrics,
+      coverage,
+      comparable: true,
+    }
+  }
+  if (kpis.state === 'partial' || (populationEmpty && !fullyCoveredCoverage(coverage))) {
     return {
       windowId: reading.windowId,
       kind: 'coverage_partial',

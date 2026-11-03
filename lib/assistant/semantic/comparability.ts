@@ -35,12 +35,15 @@ export type ComparabilityReasonKey =
   | 'reason.metric_missing'
   | 'reason.access_denied'
   | 'reason.stale'
+  | 'reason.cohort_immature'
 
 export interface PeriodSideInput {
   metrics: Partial<Record<KpiMetricAlias, AnalyticsMetric | null>>
   state: AnalyticsState
   days: number
   definitionVersion: number | null
+  /** Fin de fenêtre (borne haute exclue, journée métier ISO). */
+  endsAt?: string | null
 }
 
 export interface MetricComparability {
@@ -53,6 +56,24 @@ export interface MetricComparability {
   durationDiffers: boolean
   /** Un indicateur normalisé par jour doit accompagner le total. */
   needsDurationNormalization: boolean
+  /** Cohorte encore ouverte : les livraisons peuvent encore arriver. */
+  immatureCohort: boolean
+}
+
+/** Une cohorte est immature lorsqu'elle se termine moins de 7 jours avant aujourd'hui. */
+export const COHORT_IMMATURE_DAYS = 7
+
+const DAY_MS = 86_400_000
+
+function endsWithinDays(endsAt: string | null | undefined, today: string | null | undefined, days: number): boolean {
+  if (!endsAt || !today) return false
+  const endExclusive = Date.parse(`${endsAt}T00:00:00.000Z`)
+  const todayStart = Date.parse(`${today}T00:00:00.000Z`)
+  if (!Number.isFinite(endExclusive) || !Number.isFinite(todayStart)) return false
+  // `endsAt` est exclusif : la dernière journée couverte est `endsAt - 1 jour`.
+  const lastCovered = endExclusive - DAY_MS
+  const gap = (todayStart - lastCovered) / DAY_MS
+  return gap >= 0 && gap <= days
 }
 
 /** Une métrique publiée sans valeur ne peut jamais produire d'écart. */
@@ -71,12 +92,20 @@ export function decideMetricComparability(input: {
   baseline: PeriodSideInput
   access: MetricAccess
   stale?: boolean
+  /** Journée métier courante : sert uniquement à qualifier une cohorte ouverte. */
+  today?: string | null
 }): MetricComparability {
   const { metric, current, baseline, access } = input
   const definition = METRIC_CATALOG[metric]
   const daysCurrent = current.days
   const daysBaseline = baseline.days
   const durationDiffers = daysCurrent > 0 && daysBaseline > 0 && daysCurrent !== daysBaseline
+  // Une cohorte récente n'est pas un résultat définitif : les livraisons peuvent
+  // encore changer le numérateur. La comparer reste possible, mais sous réserve.
+  const immatureCohort = definition.cohortSensitive === true && (
+    endsWithinDays(current.endsAt, input.today, COHORT_IMMATURE_DAYS) ||
+    endsWithinDays(baseline.endsAt, input.today, COHORT_IMMATURE_DAYS)
+  )
 
   const base: Omit<MetricComparability, 'decision' | 'reasons'> = {
     metric,
@@ -84,6 +113,7 @@ export function decideMetricComparability(input: {
     daysBaseline,
     durationDiffers,
     needsDurationNormalization: durationDiffers && definition.durationSensitivity === 'total',
+    immatureCohort,
   }
 
   if (!isMetricAllowed(metric, access) ||
@@ -112,6 +142,8 @@ export function decideMetricComparability(input: {
 
   if (input.stale) reasons.push('reason.stale')
 
+  if (immatureCohort) reasons.push('reason.cohort_immature')
+
   const partial = currentValue!.state === 'partial' || baselineValue!.state === 'partial' ||
     current.state === 'partial' || baseline.state === 'partial'
   if (partial) reasons.push('reason.coverage_partial')
@@ -139,6 +171,7 @@ export function computeMetricDelta(input: {
   baseline: PeriodSideInput
   access: MetricAccess
   stale?: boolean
+  today?: string | null
 }): MetricDeltaResult {
   const comparability = decideMetricComparability(input)
   const currentMetric = input.current.metrics[input.metric]
@@ -171,6 +204,7 @@ export function decideComparability(input: {
   baseline: PeriodSideInput
   access: MetricAccess
   stale?: boolean
+  today?: string | null
 }): MetricDeltaResult[] {
   return input.metrics.map((metric) =>
     computeMetricDelta({
@@ -179,6 +213,7 @@ export function decideComparability(input: {
       baseline: input.baseline,
       access: input.access,
       stale: input.stale,
+      today: input.today,
     }),
   )
 }

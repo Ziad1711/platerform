@@ -28,8 +28,10 @@ inadvertance.
 
 | Élément | État |
 |---|---|
-| `scripts/assistant-tx-contract.synthetic-tests.cjs` | exécuté — 36/36 PASS (contrats TS + invariants SQL statiques) |
-| `scripts/assistant-analytics-p1.synthetic-tests.cjs` | exécuté — 41/41 PASS |
+| `scripts/assistant-tx-contract.synthetic-tests.cjs` | exécuté — 37/37 PASS (contrats TS + invariants SQL statiques) |
+| `scripts/assistant-analytics-p1.synthetic-tests.cjs` | exécuté — 103/103 PASS |
+| `scripts/assistant-engine-v3.synthetic-tests.cjs` | exécuté — 55/55 PASS (dont 16 contre-exemples de l'audit NO-GO) |
+| `scripts/assistant-ui-regressions.synthetic-tests.cjs` | exécuté — 35/35 PASS |
 | `scripts/assistant-final-targeted-tests.cjs` | exécuté — 47/47 PASS (registre, invariants, verrou global, allowlist, suppression de boutique, détachement du registre) |
 | `MANIFEST.sha256` | 4 fichiers SQL autorisés, empreintes vérifiées (`sha256sum -c`) |
 | `../PILOT-PRIVATE-RUNBOOK.md` | pilote privé : sauvegardes, ordre, contrôles, fermeture, rollback (non exécuté) |

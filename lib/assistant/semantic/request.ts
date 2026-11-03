@@ -53,10 +53,14 @@ export interface AnalysisRequest {
   profile: CommunicationProfile
   plan: PeriodPlan
   metrics: KpiMetricAlias[]
+  /** Indicateurs explicitement nommés par l'utilisateur, dans l'ordre du texte. */
+  requestedMetrics: KpiMetricAlias[]
   dimensions: AnalysisDimension[]
   access: MetricAccess
   /** Série journalière réellement utile (tendance, pas un total). */
   needsSeries: boolean
+  /** « Bénéfice net » demandé : indicateur non défini, à expliquer explicitement. */
+  netProfitRequested: boolean
   clarification: AnalysisClarification | null
 }
 
@@ -66,20 +70,59 @@ export interface AnalysisRequest {
  * demandées dans le même message.
  */
 const DIMENSION_VOCABULARY: ReadonlyArray<{ dimension: AnalysisDimension; pattern: RegExp }> = [
-  { dimension: 'city', pattern: /(?:villes?|مدن|مدينة|المدن|المدينة)/i },
-  { dimension: 'product', pattern: /(?:produits?|articles?|منتوج|منتجات|المنتجات)/i },
-  { dimension: 'agent', pattern: /(?:agents?|موظف|الموظف|الوكلاء|وكيل)/i },
+  { dimension: 'city', pattern: /(?:villes?|city|cities|مدن|مدينة|المدن|المدينة)/i },
+  { dimension: 'product', pattern: /(?:produits?|articles?|products?|items?|منتوج|منتجات|المنتجات)/i },
+  { dimension: 'agent', pattern: /(?:agents?|staff|employees?|موظف|الموظف|الوكلاء|وكيل)/i },
   { dimension: 'confirmation', pattern: /(?:confirm|تأكيد|التأكيد|أكد)/i },
-  { dimension: 'campaign', pattern: /(?:campagnes?|الحملة|حملات)/i },
-  { dimension: 'expense', pattern: /(?:dépenses?|depenses?|charges?|مصاريف|المصاريف)/i },
-  { dimension: 'stock', pattern: /(?:stock|مخزون|المخزون)/i },
-  { dimension: 'delivery', pattern: /(?:livraison|transporteur|توصيل|التوصيل)/i },
-  { dimension: 'supplier', pattern: /(?:fournisseur|مورد|المورد)/i },
-  { dimension: 'status', pattern: /(?:statuts?|حالة|الحالات)/i },
+  { dimension: 'campaign', pattern: /(?:campagnes?|campaigns?|الحملة|حملات)/i },
+  { dimension: 'expense', pattern: /(?:dépenses?|depenses?|charges?|expenses?|مصاريف|المصاريف)/i },
+  { dimension: 'stock', pattern: /(?:stock|inventory|مخزون|المخزون)/i },
+  { dimension: 'delivery', pattern: /(?:livraison|transporteur|delivery|shipping|توصيل|التوصيل)/i },
+  { dimension: 'supplier', pattern: /(?:fournisseur|suppliers?|vendor|مورد|المورد)/i },
+  { dimension: 'status', pattern: /(?:statuts?|status(?:es)?|حالة|الحالات)/i },
 ]
 
-const SERIES_REQUEST = /(?:tendance|évolution|evolution|chaque jour|par jour|quotidien|courbe|graphique|اتجاه|تطور|كل يوم|يومي|رسم)/i
-const PROFIT_REQUEST = /(?:marge|marges|profit|rentabilité|rentabilite|bénéfice|هامش|الهامش|ربح)/i
+/**
+ * Vocabulaire d'indicateurs : un mot reconnu désigne une métrique du catalogue,
+ * jamais un scénario. La langue ne change pas la capacité, seulement les mots.
+ */
+const METRIC_VOCABULARY: ReadonlyArray<{ metric: KpiMetricAlias; pattern: RegExp }> = [
+  { metric: 'revenueEstimated', pattern: /(?:ca estim|chiffre d.affaires estim|estimated revenue|الرقم المقدر)/i },
+  { metric: 'revenue', pattern: /(?:chiffre d.affaires?|\bca\b|revenus?|revenue|sales|turnover|الرقم|المبيعات|مداخيل)/i },
+  { metric: 'deliveryRate', pattern: /(?:taux de livraison|delivery rate|نسبة التسليم|معدل التسليم)/i },
+  { metric: 'deliveredOrders', pattern: /(?:livr[ée]es?|delivered|deliveries|تسليم|مسلمة|مسلم)/i },
+  { metric: 'returnedOrders', pattern: /(?:retours?|returned|returns?|مرتجع|إرجاع)/i },
+  { metric: 'cancelledOrders', pattern: /(?:annul[ée]?es?|cancell?ed|ملغاة|إلغاء)/i },
+  { metric: 'adSpend', pattern: /(?:publicit[ée]|adspend|ads?\b|ad spend|marketing spend|إعلان|الإعلانات)/i },
+  { metric: 'contributionMargin', pattern: /(?:marge|margin|profitability|هامش|الهامش)/i },
+  { metric: 'purchaseCost', pattern: /(?:co[uû]t d.achat|purchase cost|cogs|تكلفة الشراء)/i },
+  { metric: 'deliveryCost', pattern: /(?:co[uû]t de livraison|shipping cost|delivery cost|تكلفة التوصيل)/i },
+  { metric: 'confirmationCost', pattern: /(?:co[uû]t de confirmation|confirmation cost|تكلفة التأكيد)/i },
+  { metric: 'totalOrders', pattern: /(?:commandes?|orders?|طلبات|الطلبات)/i },
+]
+
+const SERIES_REQUEST = /(?:tendance|évolution|evolution|chaque jour|par jour|quotidien|courbe|graphique|trend|daily|over time|اتجاه|تطور|كل يوم|يومي|رسم)/i
+const PROFIT_REQUEST = /(?:marge|marges|profit|rentabilité|rentabilite|bénéfice|benefice|margin|هامش|الهامش|ربح)/i
+/** Bénéfice net : indicateur non défini par le contrat V5 (voir notice dédiée). */
+const NET_PROFIT_REQUEST = /(?:b[ée]n[ée]fice\s+net|profit\s+net|net\s+profit|صافي\s+الربح|الربح\s+الصافي)/i
+const COMPARISON_INTENT = /(?:compar|versus|\bvs\b|contre|par rapport|compared|compare|قارن|مقارنة|بالمقارنة)/i
+
+/** Indicateurs explicitement nommés, dans l'ordre du texte. */
+export function detectMetrics(message: string): KpiMetricAlias[] {
+  const text = String(message ?? '')
+  const found: Array<{ metric: KpiMetricAlias; index: number }> = []
+  for (const entry of METRIC_VOCABULARY) {
+    const match = entry.pattern.exec(text)
+    if (!match) continue
+    if (found.some((item) => item.metric === entry.metric)) continue
+    found.push({ metric: entry.metric, index: match.index })
+  }
+  return found.sort((a, b) => a.index - b.index).map((item) => item.metric)
+}
+
+export function isComparisonIntent(message: string): boolean {
+  return COMPARISON_INTENT.test(String(message ?? ''))
+}
 
 export function detectDimensions(message: string): AnalysisDimension[] {
   const text = String(message ?? '')
@@ -138,6 +181,7 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
   const months = monthMentions(message)
   const years = yearMentions(message)
   const relativeYears = resolveRelativeYears(message, currentYear)
+  const comparisonIntent = isComparisonIntent(message)
 
   let plan: PeriodPlan
   if (months.length > 0) {
@@ -145,6 +189,7 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
     plan = buildPeriodPlan({
       months: assignYears(months, years, fallbackYear),
       maxPeriods: input.maxPeriods,
+      comparisonIntent,
     })
   } else if (relativeYears.length >= 2) {
     plan = comparisonPeriodPlan(
@@ -158,7 +203,14 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
   }
 
   const wantsProfit = PROFIT_REQUEST.test(message)
-  const selection = wantsProfit ? PROFIT_METRICS : DEFAULT_METRICS
+  const requestedMetrics = detectMetrics(message)
+  const base = wantsProfit ? PROFIT_METRICS : DEFAULT_METRICS
+  // Un indicateur explicitement demandé passe en tête : le plafond d'affichage
+  // ne peut plus évincer la métrique qui a motivé la question.
+  const selection = [
+    ...requestedMetrics,
+    ...base.filter((metric) => !requestedMetrics.includes(metric)),
+  ]
   const restricted = restrictMetrics(selection, input.access)
 
   return {
@@ -167,9 +219,11 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
     profile,
     plan,
     metrics: restricted.length > 0 ? restricted : restrictMetrics(DEFAULT_METRICS, input.access),
+    requestedMetrics: restrictMetrics(requestedMetrics, input.access),
     dimensions: detectDimensions(message),
     access: input.access,
     needsSeries: SERIES_REQUEST.test(message) || plan.kind === 'single',
+    netProfitRequested: NET_PROFIT_REQUEST.test(message),
     clarification: input.clarificationRequired ? { key: 'clarify.period' } : null,
   }
 }

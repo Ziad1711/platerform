@@ -331,11 +331,12 @@ check('U23', 'durée jamais fournie par le navigateur', () => {
 })
 
 check('U24', 'onde flexible, cibles tactiles de 44 px', () => {
-  assert(VOICE_PANEL.includes('h-9 min-w-0 flex-1'), 'onde non flexible')
+  assert(VOICE_PANEL.includes('h-11 min-w-0 flex-1'), 'onde non flexible')
   assert(VOICE_PANEL.includes('h-11 w-full'), 'rangée vocale non compacte')
-  assert(VOICE_PANEL.includes('h-9 w-9'), 'cible tactile insuffisante')
-  assert(PAGE.includes("recording || transcribing ? 'hidden' : ''"), 'champ non masqué pendant l’enregistrement')
-  return 'onde élargie sans boutons externes'
+  assert(VOICE_PANEL.includes('h-11 w-11'), 'cible tactile insuffisante (44 px attendus)')
+  assert(!VOICE_PANEL.includes('h-9 w-9'), 'cible de 36 px encore présente')
+  assert(PAGE.includes("recording || transcribing || voiceReady ? 'hidden' : ''"), 'champ non masqué pendant la dictée')
+  return 'onde élargie, cibles 44 px'
 })
 
 check('U25', 'enregistrement aux couleurs Jisra, sans rouge décoratif', () => {
