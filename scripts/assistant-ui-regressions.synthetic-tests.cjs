@@ -301,21 +301,26 @@ check('U16', 'rendu : aucun montant interdit réintroduit', () => {
   return 'aucun chiffre'
 })
 
-check('U21', 'dictée intégrée au champ : aucune seconde barre', () => {
+const VOICE_PANEL = fs.readFileSync(path.join(ROOT, 'components/assistant/assistant-voice-panel.tsx'), 'utf8')
+const BLOCKS_COMPONENT = fs.readFileSync(path.join(ROOT, 'components/assistant/assistant-blocks.tsx'), 'utf8')
+
+check('U21', 'panneau vocal dédié, aucune superposition dans le champ', () => {
+  assert(PAGE.includes('AssistantVoicePanel'), 'panneau vocal non branché')
   assert(PAGE.includes('waveformCanvasRef'), 'onde sonore non branchée')
-  assert(PAGE.includes('role="group"'), 'groupe d’enregistrement absent')
-  assert(PAGE.includes('absolute inset-0'), 'superposition dans le champ absente')
+  assert(VOICE_PANEL.includes('role="group"'), 'groupe d’enregistrement absent')
+  assert(!PAGE.includes('absolute inset-0 flex items-center gap-2 rounded-lg px-3'), 'superposition héritée encore présente')
   assert(!PAGE.includes('mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200'), 'ancienne barre séparée encore présente')
-  return 'overlay intégré'
+  return 'panneau dédié'
 })
 
-check('U22', 'trois contrôles ordonnés : annuler, insérer, envoyer', () => {
-  const cancel = PAGE.indexOf('aria-label="Annuler l’enregistrement"')
-  const insert = PAGE.indexOf('aria-label="Arrêter et insérer le texte"')
-  const send = PAGE.indexOf('aria-label="Arrêter et envoyer"')
-  assert(cancel > -1 && insert > -1 && send > -1, 'contrôle manquant')
-  assert(cancel < insert && insert < send, 'ordre des contrôles incohérent')
-  return 'X → carré → envoyer'
+check('U22', 'quatre contrôles ordonnés : annuler, onde, arrêter, envoyer', () => {
+  const cancel = VOICE_PANEL.indexOf('labels.cancel')
+  const canvas = VOICE_PANEL.indexOf('<canvas')
+  const stop = VOICE_PANEL.indexOf('labels.stop')
+  const send = VOICE_PANEL.indexOf('labels.send')
+  assert(cancel > -1 && canvas > -1 && stop > -1 && send > -1, 'contrôle manquant')
+  assert(cancel < canvas && canvas < stop && stop < send, 'ordre des contrôles incohérent')
+  return 'X → onde → arrêter → envoyer'
 })
 
 check('U23', 'durée jamais fournie par le navigateur', () => {
@@ -325,26 +330,35 @@ check('U23', 'durée jamais fournie par le navigateur', () => {
   return 'WAV serveur'
 })
 
-check('U24', 'onde sonore : champ élargi pendant l’enregistrement', () => {
-  assert(PAGE.includes("recording ? 'hidden' : ''"), 'boutons externes occupent encore la largeur de l’onde')
-  assert(PAGE.includes('relative min-w-0 flex-1 rounded-lg border'), 'champ sans largeur flexible')
-  assert(PAGE.includes('h-8 min-w-0 flex-1 text-primary'), 'onde non flexible')
+check('U24', 'onde flexible, cibles tactiles de 44 px', () => {
+  assert(VOICE_PANEL.includes('h-9 min-w-0 flex-1'), 'onde non flexible')
+  assert(VOICE_PANEL.includes('h-11 w-full'), 'rangée vocale non compacte')
+  assert(VOICE_PANEL.includes('h-9 w-9'), 'cible tactile insuffisante')
+  assert(PAGE.includes("recording || transcribing ? 'hidden' : ''"), 'champ non masqué pendant l’enregistrement')
   return 'onde élargie sans boutons externes'
 })
 
 check('U25', 'enregistrement aux couleurs Jisra, sans rouge décoratif', () => {
-  assert(!PAGE.includes('border-red-300'), 'bordure rouge encore présente')
-  assert(!PAGE.includes('bg-red-500'), 'point d’enregistrement rouge')
-  assert(!PAGE.includes('#dc2626'), 'onde rouge codée en dur')
-  assert(PAGE.includes('text-primary'), 'couleur de thème absente de l’onde')
+  assert(!VOICE_PANEL.includes('border-red-300'), 'bordure rouge encore présente')
+  assert(!VOICE_PANEL.includes('bg-red-500'), 'point d’enregistrement rouge')
+  assert(!VOICE_PANEL.includes('#dc2626'), 'onde rouge codée en dur')
+  assert(VOICE_PANEL.includes('text-primary'), 'couleur de thème absente de l’onde')
   return 'thème Jisra'
 })
 
-check('U26', 'alignement de l’enregistrement dans le champ', () => {
-  assert(PAGE.includes('items-center gap-2 rounded-lg px-3'), 'ligne non alignée')
-  assert(PAGE.includes('w-9 shrink-0 text-center'), 'durée non stabilisée')
-  assert(PAGE.includes('h-8 min-w-0 flex-1 text-primary'), 'onde non centrée')
+check('U26', 'alignement et compacité du compositeur', () => {
+  assert(VOICE_PANEL.includes('items-center gap-2'), 'ligne non alignée')
+  assert(VOICE_PANEL.includes('tabular-nums'), 'durée non stabilisée')
+  assert(PAGE.includes('text-base leading-6'), 'police de saisie sous 16 px (zoom iOS)')
+  assert(PAGE.includes('Math.min(132'), 'croissance du champ non plafonnée')
   return 'aligné'
+})
+
+check('U29', 'rendu des blocs : tableaux et valeurs LTR', () => {
+  assert(BLOCKS_COMPONENT.includes('role="region"'), 'tableau sans région accessible')
+  assert(/dir=\"ltr\"/.test(BLOCKS_COMPONENT), 'valeurs non isolées en LTR')
+  assert(!/<[a-z]+[^>]*dangerouslySetInnerHTML/.test(BLOCKS_COMPONENT), 'HTML brut injecté')
+  return 'blocs sûrs'
 })
 
 check('U27', 'drawer mobile : hamburger, overlay et glissement', () => {

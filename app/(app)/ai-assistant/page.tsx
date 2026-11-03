@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Loader2,
   MessageSquare,
   Menu,
   Mic,
@@ -13,12 +12,13 @@ import {
   Plus,
   Send,
   Sparkles,
-  Square,
   Trash2,
   Wallet,
   X,
 } from 'lucide-react'
 import AssistantChartCard from '@/components/assistant/assistant-chart-card'
+import AssistantBlocks from '@/components/assistant/assistant-blocks'
+import AssistantVoicePanel from '@/components/assistant/assistant-voice-panel'
 import AssistantMessageContent, { messageDirection } from '@/components/assistant/assistant-message-content'
 import AssistantComparisonTable from '@/components/assistant/assistant-comparison-table'
 import AssistantWarnings from '@/components/assistant/assistant-warnings'
@@ -39,12 +39,6 @@ function currentTimestamp(): number {
 }
 
 /** Durée d'enregistrement affichée `mm:ss`. */
-function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
-
 interface ThreadItem {
   id: string
   title: string | null
@@ -514,6 +508,18 @@ export default function AssistantIAPage() {
   // Hauteur gérée par `h-dvh` + `interactive-widget=resizes-content` (viewport
   // dynamique) : le clavier virtuel redimensionne le layout, la grille `h-full`
   // reste ancrée au bas réellement visible. Aucun calcul JS de hauteur à maintenir.
+
+  /**
+   * Champ de saisie compact : une ligne au repos, croissance jusqu'à un plafond
+   * puis défilement interne. Aucune hauteur fixe, donc aucun espace réservé
+   * au-dessus des boutons. La mesure est faite après chaque changement de texte.
+   */
+  useEffect(() => {
+    const element = inputRef.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(132, Math.max(40, element.scrollHeight))}px`
+  }, [input])
 
   const closeThreads = useCallback(() => {
     setPanel(null)
@@ -1290,12 +1296,16 @@ export default function AssistantIAPage() {
                       : 'bg-card text-foreground border-border'
                   }`}
                 >
-                  <AssistantMessageContent content={msg.content} direction={messageDirection(msg.content)} />
-                  {msg.role === 'assistant' && msg.metadata?.structured_response?.comparison_table ? (
+                  {msg.role === 'assistant' && msg.metadata?.structured_response?.document ? (
+                    <AssistantBlocks document={msg.metadata.structured_response.document} />
+                  ) : (
+                    <AssistantMessageContent content={msg.content} direction={messageDirection(msg.content)} />
+                  )}
+                  {msg.role === 'assistant' && !msg.metadata?.structured_response?.document && msg.metadata?.structured_response?.comparison_table ? (
                     <AssistantComparisonTable table={msg.metadata.structured_response.comparison_table} direction={messageDirection(msg.content)} />
                   ) : null}
 
-                  {msg.role === 'assistant' && msg.metadata?.structured_response?.metrics_summary?.length ? (
+                  {msg.role === 'assistant' && !msg.metadata?.structured_response?.document && msg.metadata?.structured_response?.metrics_summary?.length ? (
                     <div dir={messageDirection(msg.content)} className="mt-2.5 flex flex-wrap gap-1.5">
                       {sanitizeMetricsSummary(msg.metadata.structured_response.metrics_summary).map((metric) => (
                         <span
@@ -1311,11 +1321,11 @@ export default function AssistantIAPage() {
 
                   {msg.role === 'assistant' &&
                   msg.metadata?.structured_response &&
-                  hasUsableChart(msg.metadata.structured_response) ? (
+                  !msg.metadata?.structured_response?.document && hasUsableChart(msg.metadata.structured_response) ? (
                     <AssistantChartCard response={msg.metadata.structured_response} language={messageDirection(msg.content) === 'rtl' ? 'ar' : 'fr'} />
                   ) : null}
 
-                  {msg.role === 'assistant' && msg.metadata?.structured_response?.warnings?.length ? (
+                  {msg.role === 'assistant' && !msg.metadata?.structured_response?.document && msg.metadata?.structured_response?.warnings?.length ? (
                     <AssistantWarnings warnings={msg.metadata.structured_response.warnings} />
                   ) : null}
 
@@ -1393,76 +1403,25 @@ export default function AssistantIAPage() {
                   }
                 }}
                 placeholder="Posez votre question business..."
-                rows={2}
+                rows={1}
                 aria-label="Message à envoyer"
                 dir="auto"
-                className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-sm focus:outline-none ${
-                  recording || transcribing ? 'invisible' : ''
+                className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-base leading-6 focus:outline-none ${
+                  recording || transcribing ? 'hidden' : ''
                 }`}
                 disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               />
 
-              {recording ? (
-                <div
-                  role="group"
-                  aria-label="Enregistrement en cours"
-                  className="absolute inset-0 flex items-center gap-2 rounded-lg px-3"
-                >
-                  <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                  </span>
-                  <canvas
-                    ref={waveformCanvasRef}
-                    aria-hidden
-                    className="h-8 min-w-0 flex-1 text-primary"
-                  />
-                  <span
-                    role="status"
-                    aria-live="polite"
-                    className="w-9 shrink-0 text-center text-[11px] font-medium tabular-nums text-foreground/80"
-                  >
-                    {formatDuration(recordSeconds)}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={cancelRecording}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary"
-                      title="Annuler l’enregistrement"
-                      aria-label="Annuler l’enregistrement"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => stopRecording('insert')}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-primary/30 bg-card text-primary hover:bg-primary/10"
-                      title="Arrêter et insérer le texte"
-                      aria-label="Arrêter et insérer le texte"
-                    >
-                      <Square className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => stopRecording('send')}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-white hover:bg-primary/90"
-                      title="Arrêter et envoyer"
-                      aria-label="Arrêter et envoyer"
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ) : transcribing ? (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="absolute inset-0 flex items-center gap-2 rounded-lg px-3"
-                >
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">Transcription en cours…</span>
-                </div>
+              {recording || transcribing ? (
+                <AssistantVoicePanel
+                  phase={transcribing ? 'transcribing' : 'recording'}
+                  seconds={recordSeconds}
+                  canvasRef={waveformCanvasRef}
+                  probeText={input}
+                  onCancel={cancelRecording}
+                  onStop={() => stopRecording('insert')}
+                  onSend={() => stopRecording('send')}
+                />
               ) : null}
             </div>
 
@@ -1471,7 +1430,7 @@ export default function AssistantIAPage() {
               onClick={startRecording}
               disabled={recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
-                recording ? 'hidden' : ''
+                recording || transcribing ? 'hidden' : ''
               }`}
               title="Dicter un message"
               aria-label="Dicter un message"
@@ -1482,7 +1441,7 @@ export default function AssistantIAPage() {
               onClick={() => handleSend(input)}
               disabled={!input.trim() || recording || transcribing || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
-                recording ? 'hidden' : ''
+                recording || transcribing ? 'hidden' : ''
               }`}
             >
               <Send className="w-4 h-4" />
