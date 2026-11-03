@@ -242,13 +242,16 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
 
 
 
-  const { data: legacyData, isLoading: legacyLoading } = useQuery<KpiResult>({
-    queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
-    enabled: !isStoresLoading && mode !== 'v5' && rollout.resolved,
-    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
-    queryFn: async () => {
-      const fetchMetrics = async (range: BusinessRange): Promise<KpiData> => {
-        const storeIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
+  // Totaux courants et comparaison sont deux lectures DISTINCTES :
+  // - les totaux sont publiés dès que la période courante répond ;
+  // - la comparaison ne démarre qu'après (aucun appel réseau supplémentaire ni
+  //   changement d'ordre) et n'apparaît qu'une fois disponible ;
+  // - une période sans passé distinct (« Toujours ») n'en déclenche aucune.
+  const legacyScopedStoreIds = currentStoreId ? [currentStoreId] : accessibleStoreIds
+  const legacyHasPrevious = !sameBusinessRange(legacyPreviousRange, legacyRange)
+
+  const fetchLegacyMetrics = async (range: BusinessRange): Promise<KpiData> => {
+        const storeIds = legacyScopedStoreIds
         const { start, end } = businessRangeToInstants(range)
 
         if (storeIds.length === 0) {
@@ -382,38 +385,64 @@ export default function KpiCards({ variant = 'primary', source }: KpiCardsProps)
           marginRate,
         }
 
-      }
+  }
 
-      // Lot 1 (O2) : une période précédente strictement identique à la période
-      // courante ne justifie pas un second appel réseau ; les variations restent
-      // calculées sur les mêmes valeurs.
-      const current = await fetchMetrics(legacyRange)
-      const previous = sameBusinessRange(legacyPreviousRange, legacyRange)
-        ? current
-        : await fetchMetrics(legacyPreviousRange)
-      const currentCharges = current.purchaseCost + current.deliveryCost + current.confirmationCost
-      const previousCharges = previous.purchaseCost + previous.deliveryCost + previous.confirmationCost
-
-      return {
-        ...current,
-        changes: {
-          orders: calcPctChange(current.orders, previous.orders),
-          deliveredOrders: calcPctChange(current.deliveredOrders, previous.deliveredOrders),
-          revenue: calcPctChange(current.revenue, previous.revenue),
-          charges: calcPctChange(currentCharges, previousCharges),
-          adSpend: calcPctChange(current.adSpend, previous.adSpend),
-          adCost: calcPctChange(current.adCost, previous.adCost),
-          profit: calcPctChange(current.profit, previous.profit),
-          deliveryCost: calcPctChange(current.deliveryCost, previous.deliveryCost),
-          cpl: calcPctChange(current.cpl, previous.cpl),
-          cpa: calcPctChange(current.cpa, previous.cpa),
-          confirmationCost: calcPctChange(current.confirmationCost, previous.confirmationCost),
-          roas: calcPctChange(current.roas, previous.roas),
-          marginRate: calcPctChange(current.marginRate, previous.marginRate),
-        },
-      }
-    },
+  const legacyCurrent = useQuery<KpiData>({
+    queryKey: ['dashboard-kpis', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
+    enabled: !isStoresLoading && mode !== 'v5' && rollout.resolved,
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
+    queryFn: () => fetchLegacyMetrics(legacyRange),
   })
+
+  const legacyPrevious = useQuery<KpiData>({
+    // Même préfixe `dashboard-kpis` que les totaux : les invalidations existantes
+    // (mutations, ventes, confirmation, livraison) couvrent aussi cette clé.
+    queryKey: ['dashboard-kpis', 'previous', currentStoreId, selectedPeriod, customStartDate, customEndDate, accessibleStoreIds, mode, rollout.accessFingerprint],
+    // Lecture séquentielle conservée : la comparaison démarre seulement après les
+    // totaux courants, donc même nombre d'appels et même ordre qu'auparavant.
+    enabled:
+      !isStoresLoading &&
+      mode !== 'v5' &&
+      rollout.resolved &&
+      legacyHasPrevious &&
+      legacyCurrent.isSuccess,
+    staleTime: DASHBOARD_ANALYTICS_STALE_MS,
+    queryFn: () => fetchLegacyMetrics(legacyPreviousRange),
+  })
+
+  // Totaux affichés sans attendre la comparaison ; variations seulement quand les
+  // deux périodes sont disponibles (sinon `null` : aucun badge). « Toujours »
+  // compare la période à elle-même, exactement comme avant : variations nulles.
+  const legacyData = useMemo<KpiResult | undefined>(() => {
+    const current = legacyCurrent.data
+    if (!current) return undefined
+    const previous = legacyHasPrevious ? legacyPrevious.data : current
+    if (!previous) return { ...current, changes: null }
+    const currentCharges = current.purchaseCost + current.deliveryCost + current.confirmationCost
+    const previousCharges = previous.purchaseCost + previous.deliveryCost + previous.confirmationCost
+
+    return {
+      ...current,
+      changes: {
+        orders: calcPctChange(current.orders, previous.orders),
+        deliveredOrders: calcPctChange(current.deliveredOrders, previous.deliveredOrders),
+        revenue: calcPctChange(current.revenue, previous.revenue),
+        charges: calcPctChange(currentCharges, previousCharges),
+        adSpend: calcPctChange(current.adSpend, previous.adSpend),
+        adCost: calcPctChange(current.adCost, previous.adCost),
+        profit: calcPctChange(current.profit, previous.profit),
+        deliveryCost: calcPctChange(current.deliveryCost, previous.deliveryCost),
+        cpl: calcPctChange(current.cpl, previous.cpl),
+        cpa: calcPctChange(current.cpa, previous.cpa),
+        confirmationCost: calcPctChange(current.confirmationCost, previous.confirmationCost),
+        roas: calcPctChange(current.roas, previous.roas),
+        marginRate: calcPctChange(current.marginRate, previous.marginRate),
+      },
+    }
+  }, [legacyCurrent.data, legacyPrevious.data, legacyHasPrevious])
+
+  // Le squelette ne dépend plus de la comparaison.
+  const legacyLoading = legacyCurrent.isLoading
 
 
   const kpiData = v5Enabled ? v5Result : legacyData

@@ -23,6 +23,12 @@ import { hasPermission } from '@/lib/auth/permissions'
 import StoreSelector from '@/components/dashboard/store-selector'
 import { JisraMark } from '@/components/logo'
 import { describeQuotaError } from '@/lib/billing/quota'
+import {
+  nowMs,
+  recordSalesRead,
+  scheduleSalesCountProbe,
+  type SalesReadScope,
+} from '@/lib/performance/sales-read-timing'
 import { toast } from 'sonner'
 
 const OZONE_PROVIDER_ID = '5f806347-45f1-481a-901d-2eb98b20b3a8'
@@ -885,34 +891,95 @@ export default function VentesPage() {
         .order('order_date', { ascending: false })
         .range((currentPage - 1) * PAGE_SIZE, (currentPage * PAGE_SIZE) - 1)
 
-      if (currentStoreId) {
-        query = query.eq('store_id', currentStoreId)
-      } else if (accessibleStoreIds.length > 0) {
-        query = query.in('store_id', accessibleStoreIds)
+      // Une seule définition des filtres : la page et la sonde de comptage
+      // lisent strictement le même périmètre. Type structurel minimal pour
+      // conserver exactement les mêmes appels PostgREST, sans `any`.
+      type FilterableQuery = {
+        eq: (column: string, value: string) => FilterableQuery
+        in: (column: string, values: readonly string[]) => FilterableQuery
+        or: (filters: string) => FilterableQuery
       }
 
-      if (search) {
-        query = query.or(`customer_name.ilike.%${search}%,phone.ilike.%${search}%,tracking_number.ilike.%${search}%`)
+      const applyListFilters = <T,>(builder: T): T => {
+        let next = builder as unknown as FilterableQuery
+        if (currentStoreId) {
+          next = next.eq('store_id', currentStoreId)
+        } else if (accessibleStoreIds.length > 0) {
+          next = next.in('store_id', accessibleStoreIds)
+        }
+        if (search) {
+          next = next.or(`customer_name.ilike.%${search}%,phone.ilike.%${search}%,tracking_number.ilike.%${search}%`)
+        }
+        if (statusFilter !== 'all') {
+          next = next.eq('status', statusFilter)
+        }
+        return next as unknown as T
       }
 
-      if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter)
-      }
+      query = applyListFilters(query)
 
       // Une lecture abandonnée (recherche, page, filtre ou boutique changés) est
       // une annulation, jamais une panne métier.
+      const readScope: SalesReadScope = currentStoreId ? 'single-store' : 'multi-store'
+      const startedAt = nowMs()
+      const baseSample = {
+        scope: readScope,
+        page: currentPage,
+        pageSize: PAGE_SIZE,
+        hasSearch: Boolean(search),
+        statusFilter,
+      }
+
       let response: Awaited<typeof query>
       try {
         response = await query
       } catch (error) {
-        if (signal.aborted) throw new CancelledError()
+        if (signal.aborted) {
+          recordSalesRead({
+            kind: 'page',
+            ...baseSample,
+            rows: 0,
+            totalCount: null,
+            durationMs: nowMs() - startedAt,
+            outcome: 'aborted',
+          })
+          throw new CancelledError()
+        }
+        recordSalesRead({
+          kind: 'page',
+          ...baseSample,
+          rows: 0,
+          totalCount: null,
+          durationMs: nowMs() - startedAt,
+          outcome: 'error',
+        })
         throw error
       }
-      if (signal.aborted) throw new CancelledError()
+      if (signal.aborted) {
+        recordSalesRead({
+          kind: 'page',
+          ...baseSample,
+          rows: 0,
+          totalCount: null,
+          durationMs: nowMs() - startedAt,
+          outcome: 'aborted',
+        })
+        throw new CancelledError()
+      }
 
       const { data, error, count } = response
 
-      if (error) throw error
+      if (error) {
+        recordSalesRead({
+          kind: 'page',
+          ...baseSample,
+          rows: 0,
+          totalCount: null,
+          durationMs: nowMs() - startedAt,
+          outcome: 'error',
+        })
+        throw error
+      }
 
       const normalizedData = (data || []).map((order: any) => ({
         ...order,
@@ -921,6 +988,44 @@ export default function VentesPage() {
           product_variant_id: item?.product_variant_id || null,
         })),
       }))
+
+      // Relevé de page enregistré immédiatement : il ne dépend pas de la sonde.
+      recordSalesRead({
+        kind: 'page',
+        ...baseSample,
+        rows: normalizedData.length,
+        totalCount: count ?? null,
+        durationMs: nowMs() - startedAt,
+        outcome: 'ok',
+      })
+
+      // Sonde opt-in, planifiée après le rendu : annulable avec la lecture
+      // principale, jamais attendue, et toute erreur reste confinée ici.
+      scheduleSalesCountProbe(async () => {
+        if (signal.aborted) return
+
+        const countStartedAt = nowMs()
+        try {
+          const { count: probeCount, error: probeError } = await applyListFilters(
+            supabase.from('orders').select('id', { count: 'exact', head: true }).abortSignal(signal)
+          )
+          recordSalesRead({
+            kind: 'count',
+            ...baseSample,
+            totalCount: probeError ? null : probeCount ?? null,
+            durationMs: probeError || signal.aborted ? null : nowMs() - countStartedAt,
+            outcome: signal.aborted ? 'aborted' : probeError ? 'error' : 'ok',
+          })
+        } catch {
+          recordSalesRead({
+            kind: 'count',
+            ...baseSample,
+            totalCount: null,
+            durationMs: null,
+            outcome: signal.aborted ? 'aborted' : 'error',
+          })
+        }
+      })
 
       return {
         data: normalizedData,
