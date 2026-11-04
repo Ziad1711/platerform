@@ -1,5 +1,34 @@
 # Runbook — pilote privé du chatbot IA (préparé, NON exécuté)
 
+## Candidat Astra — révision indépendante requise
+
+Le candidat local conserve les quatre fenêtres des comparaisons elliptiques,
+persiste le contexte analytique et publie un registre de preuves commun aux
+KPI, tableaux, graphiques, tendances et recommandations. Les conclusions sont
+rendues depuis un catalogue vérifiable ; le modèle sélectionne et ordonne les
+constats, décompositions et hypothèses, sans publier son texte libre.
+
+`ASSISTANT_SEMANTIC_PLANNER=enabled` est une capacité **opt-in**, non activée
+par cette mission. Sans elle, les périodes déterministes et la mémoire serveur
+restent utilisables, sans accepter les périodes proposées par le fournisseur.
+Rollback interprétation : retirer ce flag. Rollback du candidat : revenir au
+commit précédent ou fermer `ASSISTANT_ENABLED`, sans effacer les conversations.
+Les champs `document.evidence` et `document.analysis` sont additifs ; les anciens
+documents restent lisibles. Ne pas désactiver les protections atomiques pour
+contourner une erreur.
+
+Limites de qualification : les suites locales sans réseau ne prouvent ni la
+qualité de GPT en direct, ni les RLS installées, ni une transaction PostgreSQL
+multi-connexions. Les tests de callbacks exécutent les fonctions réelles de la
+page avec réseau/micro simulés. La fixture Chromium reprend l'expression de
+placement du JSX réel ; ce n'est pas une session authentifiée ni Safari/iPhone.
+Ces validations restent BLOCKED avant un GO Production.
+
+Les logs locaux complets de cette mission sont dans le répertoire temporaire
+système (`astra-*.log`). Le lint global du dépôt échoue hors du périmètre ; ne
+pas confondre lint ciblé réussi et lint global réussi. Aucun nettoyage transversal
+ni activation d'admission distribuée n'est autorisé par ce runbook.
+
 Statut : **procédure préparée localement**. Aucune sauvegarde, aucune migration,
 aucun déploiement, aucun appel fournisseur n'a été exécuté pour produire ce
 document. Chaque étape ci-dessous exige une autorisation explicite.
