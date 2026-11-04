@@ -28,6 +28,7 @@ import { useMobileNavigation } from '@/lib/assistant/mobile-navigation'
 import { resolveRetryRequestId } from '@/lib/assistant/retry-key'
 import { decideAutoScroll, hasUsableChart, mergeDisplayMessages, sanitizeMetricsSummary } from '@/lib/assistant/chat-ui'
 import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS } from '@/lib/assistant/transcription-limits'
+import { initialVoiceState, reduceVoice } from '@/lib/assistant/voice-state'
 import { encodeWav } from '@/lib/assistant/audio-wav'
 
 /** Longueur maximale d'un message de chat (alignée sur la route serveur). */
@@ -146,6 +147,7 @@ export default function AssistantIAPage() {
   const setThreadsOpen = (open: boolean) => setPanel(open ? 'conversations' : null)
   const [loadingStepIndex, setLoadingStepIndex] = useState(0)
   const [recording, setRecording] = useState(false)
+  const [encodingAudio, setEncodingAudio] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
   const [transcribing, setTranscribing] = useState(false)
   /** Audio terminé, en attente d'une action explicite (« envoyer »). */
@@ -180,8 +182,11 @@ export default function AssistantIAPage() {
   // deux transcriptions.
   const voiceStartLockRef = useRef(false)
   const voiceSessionRef = useRef(0)
+  const voiceStateRef = useRef(initialVoiceState())
   const voiceRequestIdRef = useRef<string | null>(null)
   const transcribeInFlightRef = useRef(false)
+  const sendAfterStopRef = useRef<number | null>(null)
+  const encodingSessionRef = useRef<number | null>(null)
   const sendingRef = useRef(false)
   // Onde sonore réellement alimentée par le microphone.
   const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -629,6 +634,13 @@ export default function AssistantIAPage() {
   const cancelRecording = useCallback(() => {
     // Invalide immédiatement tout callback tardif (onstop, réponse réseau).
     voiceSessionRef.current += 1
+    voiceStateRef.current = reduceVoice(voiceStateRef.current, { type: 'cancel' })
+    transcribeInFlightRef.current = false
+    voiceStartLockRef.current = false
+    sendAfterStopRef.current = null
+    encodingSessionRef.current = null
+    setEncodingAudio(false)
+    setVoiceError(null)
     recorderCancelledRef.current = true
     const recorder = recorderRef.current
     if (recorder && recorder.state !== 'inactive') {
@@ -655,10 +667,17 @@ export default function AssistantIAPage() {
     const recorder = recorderRef.current
     if (!recorder || recorder.state === 'inactive') return
     clearRecorderTimer()
+    if (!voiceStateRef.current.sendAfterStop) {
+      voiceStateRef.current = reduceVoice(voiceStateRef.current, { type: 'stop' })
+    }
+    encodingSessionRef.current = voiceSessionRef.current
+    setEncodingAudio(true)
     setRecording(false)
     try {
       recorder.stop()
     } catch {
+      encodingSessionRef.current = null
+      setEncodingAudio(false)
       resetRecorderState()
     }
   }, [clearRecorderTimer, resetRecorderState])
@@ -668,6 +687,14 @@ export default function AssistantIAPage() {
    * l'appel réseau et le coût associé.
    */
   function sendPendingRecording() {
+    if (transcribeInFlightRef.current || encodingSessionRef.current !== null) return
+    const recorder = recorderRef.current
+    if (recorder?.state === 'recording') {
+      voiceStateRef.current = reduceVoice(voiceStateRef.current, { type: 'send' })
+      sendAfterStopRef.current = voiceSessionRef.current
+      stopRecording()
+      return
+    }
     const pending = pendingAudioRef.current
     if (!pending) return
     if (transcribeInFlightRef.current) return
@@ -706,6 +733,12 @@ export default function AssistantIAPage() {
     voiceStoreRef.current = currentStoreId
   }, [currentStoreId, cancelRecording])
 
+  const voiceThreadRef = useRef(selectedThreadId)
+  useEffect(() => {
+    if (voiceThreadRef.current !== selectedThreadId) cancelRecording()
+    voiceThreadRef.current = selectedThreadId
+  }, [selectedThreadId, cancelRecording])
+
   async function transcribeAudio(blob: Blob, mode: 'send' | 'insert', sessionId: number) {
     if (sessionId !== voiceSessionRef.current) return
     if (transcribeInFlightRef.current) return
@@ -715,6 +748,7 @@ export default function AssistantIAPage() {
     }
 
     transcribeInFlightRef.current = true
+    voiceStateRef.current = reduceVoice(voiceStateRef.current, { type: 'send' })
     setTranscribing(true)
     setVoiceError(null)
     const controller = new AbortController()
@@ -746,6 +780,13 @@ export default function AssistantIAPage() {
       const text = String((data as { text?: unknown } | null)?.text ?? '').trim()
       if (!text) throw new Error('Aucune parole détectée dans l’enregistrement.')
 
+      // La transcription est terminée AVANT la soumission analytique.
+      pendingAudioRef.current = null
+      setVoiceReady(false)
+      setTranscribing(false)
+      voiceStateRef.current = reduceVoice(voiceStateRef.current, { type: 'transcribed' })
+      transcribeAbortRef.current = null
+
       if (text.length > MAX_TRANSCRIPT_LENGTH) {
         setInput(text.slice(0, MAX_TRANSCRIPT_LENGTH))
         setVoiceError('Transcription longue : vérifiez le texte avant de l’envoyer.')
@@ -757,7 +798,7 @@ export default function AssistantIAPage() {
         // aucun renvoi ne doit pouvoir la rejouer.
         pendingAudioRef.current = null
         setVoiceReady(false)
-        if (isAssistantBlocked || sendMessageMutation.isPending) {
+        if (isAssistantBlocked || sendMessageMutation.isPending || sendingRef.current) {
           setInput(text)
           setVoiceError('Transcription placée dans le champ : l’envoi automatique est indisponible.')
           return
@@ -776,12 +817,15 @@ export default function AssistantIAPage() {
       if (error instanceof Error && error.name === 'AbortError') return
       if (sessionId === voiceSessionRef.current) {
         // L'audio reste récupérable : une erreur réseau ne fait pas perdre la dictée.
+        voiceStateRef.current = reduceVoice(voiceStateRef.current, {
+          type: 'failed', message: error instanceof Error ? error.message : 'Transcription impossible.',
+        })
         pendingAudioRef.current = { blob, sessionId, seconds: recordSeconds }
         setVoiceReady(true)
         setVoiceError(error instanceof Error ? error.message : 'Transcription impossible.')
       }
     } finally {
-      transcribeInFlightRef.current = false
+      if (sessionId === voiceSessionRef.current) transcribeInFlightRef.current = false
       if (sessionId === voiceSessionRef.current) {
         setTranscribing(false)
         transcribeAbortRef.current = null
@@ -793,7 +837,7 @@ export default function AssistantIAPage() {
     // Verrou synchrone AVANT toute demande de permission : deux clics rapides
     // ne peuvent pas ouvrir deux flux micro.
     if (voiceStartLockRef.current) return
-    if (recording || transcribing || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore) return
+    if (recording || transcribing || encodingAudio || encodingSessionRef.current !== null || transcribeInFlightRef.current || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore) return
     voiceStartLockRef.current = true
     pendingAudioRef.current = null
     setVoiceReady(false)
@@ -811,10 +855,12 @@ export default function AssistantIAPage() {
       return
     }
 
+    const startingSession = voiceSessionRef.current + 1
     try {
       // Nouvelle session : tout callback d'une dictée précédente devient obsolète.
-      const sessionId = voiceSessionRef.current + 1
+      const sessionId = startingSession
       voiceSessionRef.current = sessionId
+      voiceStateRef.current = reduceVoice(initialVoiceState(sessionId - 1), { type: 'start' })
       voiceRequestIdRef.current =
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
@@ -850,12 +896,15 @@ export default function AssistantIAPage() {
       recorderChunksRef.current = []
       recorderStartedAtRef.current = currentTimestamp()
 
+      const sessionChunks: Blob[] = []
       recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) recorderChunksRef.current.push(event.data)
+        if (sessionId === voiceSessionRef.current && event.data && event.data.size > 0) sessionChunks.push(event.data)
       }
 
       recorder.onstop = () => {
-        const chunks = recorderChunksRef.current
+        // Aucune référence partagée ne doit être touchée par un ancien micro.
+        if (sessionId !== voiceSessionRef.current) return
+        const chunks = sessionChunks
         recorderChunksRef.current = []
         recorderRef.current = null
         stopTracks()
@@ -871,6 +920,8 @@ export default function AssistantIAPage() {
 
         const recorded = new Blob(chunks, { type: chunks[0]?.type || mimeType || 'audio/webm' })
         if (recorded.size === 0) {
+          encodingSessionRef.current = null
+          setEncodingAudio(false)
           setVoiceError('Enregistrement vide : aucune parole détectée.')
           return
         }
@@ -882,9 +933,13 @@ export default function AssistantIAPage() {
           try {
             const encoded = await recorded.arrayBuffer()
             const decoder = new AudioContextCtor()
-            const decoded = await decoder.decodeAudioData(encoded)
-            const wav = encodeWav(decoded)
-            await decoder.close()
+            const wav = await (async () => {
+              try {
+                return encodeWav(await decoder.decodeAudioData(encoded))
+              } finally {
+                await decoder.close().catch(() => undefined)
+              }
+            })()
 
             if (sessionId !== voiceSessionRef.current) return
             if (wav.byteLength > MAX_AUDIO_BYTES) {
@@ -903,10 +958,21 @@ export default function AssistantIAPage() {
               sessionId,
               seconds: recordedSeconds,
             }
-            setVoiceReady(true)
+            voiceStateRef.current = reduceVoice(voiceStateRef.current, { type: 'encoded' })
+            if (sendAfterStopRef.current === sessionId) {
+              sendAfterStopRef.current = null
+              void transcribeAudio(pendingAudioRef.current.blob, 'send', sessionId)
+            } else {
+              setVoiceReady(true)
+            }
           } catch {
             if (sessionId === voiceSessionRef.current) {
               setVoiceError('Enregistrement audio illisible : réessayez.')
+            }
+          } finally {
+            if (sessionId === voiceSessionRef.current) {
+              encodingSessionRef.current = null
+              setEncodingAudio(false)
             }
           }
         })()
@@ -924,6 +990,7 @@ export default function AssistantIAPage() {
         if (elapsed >= MAX_AUDIO_SECONDS) stopRecording()
       }, 500)
     } catch (error) {
+      if (startingSession !== voiceSessionRef.current) return
       stopTracks()
       stopAudioGraph()
       const name = error instanceof DOMException ? error.name : ''
@@ -933,7 +1000,7 @@ export default function AssistantIAPage() {
           : 'Micro indisponible sur cet appareil.',
       )
     } finally {
-      voiceStartLockRef.current = false
+      if (startingSession === voiceSessionRef.current) voiceStartLockRef.current = false
     }
   }
 
@@ -1332,7 +1399,8 @@ export default function AssistantIAPage() {
                   else assistantMessageRefs.current.delete(msg.id)
                 }}
                 data-message-role={msg.role}
-                className={`flex ${msg.role === 'user' || messageDirection(msg.content) === 'rtl' ? 'justify-end' : 'justify-start'}`}
+                dir="ltr"
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
                   className={`min-w-0 max-w-[92%] break-words rounded-2xl px-3 py-2.5 text-sm leading-6 border sm:max-w-[85%] sm:px-4 ${
@@ -1442,7 +1510,7 @@ export default function AssistantIAPage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    if (input.trim() && !recording && !transcribing && !isAssistantBlocked && !sendMessageMutation.isPending) {
+                    if (input.trim() && !recording && !transcribing && !encodingAudio && !isAssistantBlocked && !sendMessageMutation.isPending) {
                       handleSend(input)
                     }
                   }
@@ -1452,14 +1520,14 @@ export default function AssistantIAPage() {
                 aria-label="Message à envoyer"
                 dir="auto"
                 className={`w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-base leading-6 focus:outline-none ${
-                  recording || transcribing || voiceReady ? 'hidden' : ''
+                  recording || transcribing || encodingAudio || voiceReady ? 'hidden' : ''
                 }`}
                 disabled={isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               />
 
-              {recording || transcribing || voiceReady ? (
+              {recording || transcribing || encodingAudio || voiceReady ? (
                 <AssistantVoicePanel
-                  phase={transcribing ? 'transcribing' : recording ? 'recording' : 'recorded'}
+                  phase={transcribing ? 'transcribing' : encodingAudio ? 'encoding' : recording ? 'recording' : 'recorded'}
                   seconds={recordSeconds}
                   canvasRef={waveformCanvasRef}
                   probeText={input}
@@ -1473,9 +1541,9 @@ export default function AssistantIAPage() {
             <button
               type="button"
               onClick={startRecording}
-              disabled={recording || transcribing || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              disabled={recording || transcribing || encodingAudio || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground hover:bg-secondary disabled:opacity-50 ${
-                recording || transcribing || voiceReady ? 'hidden' : ''
+                recording || transcribing || encodingAudio || voiceReady ? 'hidden' : ''
               }`}
               title="Dicter un message"
               aria-label="Dicter un message"
@@ -1484,9 +1552,9 @@ export default function AssistantIAPage() {
             </button>
             <button
               onClick={() => handleSend(input)}
-              disabled={!input.trim() || recording || transcribing || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
+              disabled={!input.trim() || recording || transcribing || encodingAudio || voiceReady || isAssistantBlocked || sendMessageMutation.isPending || !hasStore}
               className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 ${
-                recording || transcribing || voiceReady ? 'hidden' : ''
+                recording || transcribing || encodingAudio || voiceReady ? 'hidden' : ''
               }`}
             >
               <Send className="w-4 h-4" />

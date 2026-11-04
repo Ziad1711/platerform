@@ -37,9 +37,15 @@ function loadTs(relativePath) {
 }
 
 const results = []
+const pending = []
 function check(id, name, run) {
   try {
     const detail = run()
+    if (detail && typeof detail.then === 'function') {
+      pending.push(detail.then((value) => results.push({ id, name, pass: true, detail: value ?? '' }))
+        .catch((error) => results.push({ id, name, pass: false, detail: error.message })))
+      return
+    }
     results.push({ id, name, pass: true, detail: detail ?? '' })
   } catch (error) {
     results.push({ id, name, pass: false, detail: error instanceof Error ? error.message : String(error) })
@@ -335,7 +341,7 @@ check('U24', 'onde flexible, cibles tactiles de 44 px', () => {
   assert(VOICE_PANEL.includes('h-11 w-full'), 'rangée vocale non compacte')
   assert(VOICE_PANEL.includes('h-11 w-11'), 'cible tactile insuffisante (44 px attendus)')
   assert(!VOICE_PANEL.includes('h-9 w-9'), 'cible de 36 px encore présente')
-  assert(PAGE.includes("recording || transcribing || voiceReady ? 'hidden' : ''"), 'champ non masqué pendant la dictée')
+  assert(PAGE.includes("recording || transcribing || encodingAudio || voiceReady ? 'hidden' : ''"), 'champ non masqué pendant la dictée et la conversion')
   return 'onde élargie, cibles 44 px'
 })
 
@@ -447,6 +453,111 @@ check('U32', 'drawer au-dessus du bouton flottant SaaS', () => {
   return 'z-index'
 })
 
+check('ASTRA-VOICE', 'fonction de transcription réelle : statut nettoyé avant chat, réponse tardive ignorée', async () => {
+  const source = ts.createSourceFile('page.tsx', PAGE, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX)
+  let found
+  const visit = (node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === 'transcribeAudio') found = node; ts.forEachChild(node, visit) }
+  visit(source)
+  assert(found, 'fonction réelle trouvée dans le composant')
+  const code = ts.transpileModule(found.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
+  const voice = loadTs('lib/assistant/voice-state.ts')
+  let transcribing = false, submitted = 0, resolveChat
+  const context = {
+    voiceSessionRef: { current: 1 }, transcribeInFlightRef: { current: false },
+    voiceStateRef: { current: { phase: 'recorded', sessionId: 1, error: null } },
+    pendingAudioRef: { current: {} }, transcribeAbortRef: { current: null }, voiceRequestIdRef: { current: 'test-id' },
+    currentStoreId: 'store-a', recordSeconds: 3, MAX_AUDIO_BYTES: 10000, MAX_TRANSCRIPT_LENGTH: 2000,
+    setTranscribing: (value) => { transcribing = value }, setVoiceReady: () => {}, setVoiceError: () => {},
+    setInput: () => {}, reduceVoice: voice.reduceVoice, isAssistantBlocked: false, sendMessageMutation: { isPending: false }, sendingRef: { current: false },
+    AbortController, Blob, FormData, crypto: require('node:crypto').webcrypto, setTimeout,
+    readApiError: () => 'error', inputRef: { current: null },
+    fetch: async () => ({ ok: true, json: async () => ({ text: 'Analyse ces mois' }) }),
+    handleSend: async () => { assertEqual(transcribing, false, 'statut terminé avant soumission'); submitted++; await new Promise((resolve) => { resolveChat = resolve }) },
+  }
+  vm.createContext(context); vm.runInContext(code, context)
+  const run = context.transcribeAudio(new Blob(['audio']), 'send', 1)
+  for (let i = 0; i < 10 && !resolveChat; i++) await Promise.resolve()
+  assertEqual(submitted, 1, 'une seule soumission')
+  assertEqual(transcribing, false, 'pas de transcription persistante pendant le chat')
+  resolveChat(); await run
+  let resolveResponse
+  context.fetch = () => new Promise((resolve) => { resolveResponse = resolve })
+  const late = context.transcribeAudio(new Blob(['audio']), 'send', 1)
+  context.voiceSessionRef.current = 2
+  resolveResponse({ ok: true, json: async () => ({ text: 'Texte obsolète' }) })
+  await late
+  assertEqual(submitted, 1, 'changement de contexte : aucune soumission tardive')
+  return 'fonction React réelle exécutée, réseau et chat simulés'
+})
+
+check('ASTRA-SEND', 'envoi direct réel : arrêt demandé une fois, conversion attendue', () => {
+  const source = ts.createSourceFile('page.tsx', PAGE, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX)
+  let found
+  const visit = (node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === 'sendPendingRecording') found = node; ts.forEachChild(node, visit) }
+  visit(source)
+  const voice = loadTs('lib/assistant/voice-state.ts')
+  let stopped = 0, transcribed = 0
+  const context = {
+    transcribeInFlightRef: { current: false }, encodingSessionRef: { current: null },
+    recorderRef: { current: { state: 'recording' } }, voiceSessionRef: { current: 1 },
+    voiceStateRef: { current: { phase: 'recording', sessionId: 1, error: null } },
+    sendAfterStopRef: { current: null }, pendingAudioRef: { current: null }, reduceVoice: voice.reduceVoice,
+    setVoiceReady: () => {}, transcribeAudio: () => { transcribed++ },
+    stopRecording: () => { stopped++; context.encodingSessionRef.current = 1 },
+  }
+  const code = ts.transpileModule(found.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  vm.createContext(context); vm.runInContext(code, context)
+  context.sendPendingRecording(); context.sendPendingRecording()
+  assertEqual(stopped, 1, 'un seul arrêt malgré double clic')
+  assertEqual(transcribed, 0, 'pas de transcription avant conversion')
+  assertEqual(context.sendAfterStopRef.current, 1, 'intention attachée à la session')
+})
+
+check('ASTRA-RTL', 'vraie rangée JSX : rôle seul, direction et position indépendantes', () => {
+  const source = ts.createSourceFile('page.tsx', PAGE, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX)
+  let row
+  const visit = (node) => {
+    if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some((prop) => prop.name?.text === 'data-message-role')) row = node
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  const classAttr = row.openingElement.attributes.properties.find((prop) => prop.name?.text === 'className')
+  const expression = classAttr.initializer.expression.getText(source)
+  for (const role of ['user', 'assistant']) for (const content of ['Bonjour', 'واش شحال']) {
+    const className = vm.runInNewContext(expression, { msg: { role, content } })
+    const html = renderToStaticMarkup(React.createElement('div', { dir: 'ltr', className }, React.createElement('span', { dir: 'auto' }, content)))
+    assert(html.includes(role === 'user' ? 'justify-end' : 'justify-start'), 'rôle indépendant de la langue')
+  }
+})
+
+check('ASTRA-PERMISSION', 'permission micro tardive : flux libéré après changement de conversation', async () => {
+  const source = ts.createSourceFile('page.tsx', PAGE, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX)
+  let found
+  const visit = (node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === 'startRecording') found = node; ts.forEachChild(node, visit) }
+  visit(source)
+  const voice = loadTs('lib/assistant/voice-state.ts')
+  let grant, tracksStopped = 0, recordingStarted = 0
+  const context = {
+    voiceStartLockRef: { current: false }, voiceSessionRef: { current: 0 }, voiceStateRef: { current: voice.initialVoiceState() },
+    pendingAudioRef: { current: null }, encodingSessionRef: { current: null }, transcribeInFlightRef: { current: false }, voiceRequestIdRef: { current: null },
+    recording: false, transcribing: false, encodingAudio: false, voiceReady: false, isAssistantBlocked: false,
+    sendMessageMutation: { isPending: false }, hasStore: true, initialVoiceState: voice.initialVoiceState, reduceVoice: voice.reduceVoice,
+    setVoiceReady: () => {}, setVoiceError: () => {}, setRecording: () => { recordingStarted++ },
+    navigator: { mediaDevices: { getUserMedia: () => new Promise((resolve) => { grant = resolve }) } },
+    MediaRecorder: function () { recordingStarted++ }, window: { AudioContext: function () {} },
+    crypto: require('node:crypto').webcrypto,
+  }
+  const code = ts.transpileModule(found.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  vm.createContext(context); vm.runInContext(code, context)
+  const run = context.startRecording()
+  context.voiceSessionRef.current++
+  grant({ getTracks: () => [{ stop: () => { tracksStopped++ } }] })
+  await run
+  assertEqual(tracksStopped, 1, 'micro libéré')
+  assertEqual(recordingStarted, 0, 'aucune capture démarrée dans le nouveau contexte')
+})
+
+Promise.all(pending).then(() => {
 console.log('\n=== Tests de régression — interface assistant ===\n')
 for (const entry of results) {
   console.log(`${entry.pass ? 'PASS' : 'FAIL'}  ${entry.id.padEnd(4)} ${entry.name}${entry.detail ? ` — ${entry.detail}` : ''}`)
@@ -454,3 +565,4 @@ for (const entry of results) {
 const failures = results.filter((entry) => !entry.pass)
 console.log(`\nTotal : ${results.length - failures.length}/${results.length} PASS\n`)
 process.exit(failures.length === 0 ? 0 : 1)
+})
