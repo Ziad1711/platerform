@@ -20,6 +20,7 @@ export default function LivraisonPage() {
   const [isCreatingVoucher, setIsCreatingVoucher] = useState(false)
   const [citySearch, setCitySearch] = useState('')
   const [cityPage, setCityPage] = useState(1)
+  const [voucherPage, setVoucherPage] = useState(1)
   const [voucherLabelVersions, setVoucherLabelVersions] = useState<Record<string, 'v1' | 'v2' | 'v3'>>({})
 
   // Modal ForceLog
@@ -620,36 +621,6 @@ export default function LivraisonPage() {
         </div>
       ) : (
         <>
-          {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-xs text-muted-foreground">Sociétés</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">{deliveryCompanies.length}</div>
-            </div>
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-xs text-muted-foreground">Colis confirmés</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">{confirmedParcels.length}</div>
-            </div>
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-xs text-muted-foreground">Bons Rapid</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">
-                {allVouchers.filter(v => v.provider === 'rapid-delivery').length}
-              </div>
-            </div>
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-xs text-muted-foreground">Bons OZONE</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">
-                {allVouchers.filter(v => v.provider === 'ozone').length}
-              </div>
-            </div>
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-xs text-muted-foreground">Bons Maroc Go</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">
-                {allVouchers.filter(v => v.provider === 'maroc-go-delivery').length}
-              </div>
-            </div>
-          </div>
-
           {/* Colis confirmés avec bouton de création */}
           <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -842,11 +813,18 @@ export default function LivraisonPage() {
           </div>
 
           {/* Bons de ramassage unifiés */}
-          {allVouchers.length > 0 && (
+          {allVouchers.length > 0 && (() => {
+            const VOUCHERS_PAGE_SIZE = 10
+            const vouchersTotalPages = Math.max(1, Math.ceil(allVouchers.length / VOUCHERS_PAGE_SIZE))
+            const vouchersCurrentPage = Math.min(voucherPage, vouchersTotalPages)
+            const vouchersStart = (vouchersCurrentPage - 1) * VOUCHERS_PAGE_SIZE
+            const pagedVouchers = allVouchers.slice(vouchersStart, vouchersStart + VOUCHERS_PAGE_SIZE)
+
+            return (
             <div className="rounded-xl border bg-card p-3 sm:p-4 space-y-3">
               <h2 className="text-base sm:text-lg font-semibold text-foreground">Bons de ramassage</h2>
               <div className="space-y-2">
-                  {allVouchers.map((voucher: any) => {
+                  {pagedVouchers.map((voucher: any) => {
                   const isOzone = voucher.provider === 'ozone'
                   const isRapid = voucher.provider === 'rapid-delivery'
                   const isForceLog = voucher.provider === 'forcelog'
@@ -1041,8 +1019,33 @@ export default function LivraisonPage() {
                   )
                 })}
               </div>
+
+              {vouchersTotalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={vouchersCurrentPage <= 1}
+                    onClick={() => setVoucherPage(vouchersCurrentPage - 1)}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Précédent
+                  </button>
+                  <span className="text-xs text-muted-foreground px-2">Page {vouchersCurrentPage} / {vouchersTotalPages}</span>
+                  <button
+                    type="button"
+                    disabled={vouchersCurrentPage >= vouchersTotalPages}
+                    onClick={() => setVoucherPage(vouchersCurrentPage + 1)}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Suivant
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+            )
+          })()}
 
           {/* Sociétés de livraison */}
           {deliveryCompanies.length > 0 && (
