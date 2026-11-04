@@ -15,6 +15,7 @@
 import type { RefObject } from 'react'
 import { Send, Square, X } from 'lucide-react'
 import type { VoicePhase } from '@/lib/assistant/voice-state'
+import { canSend } from '@/lib/assistant/voice-state'
 import { detectCommunicationProfile } from '@/lib/assistant/semantic/locale'
 import { resolveDictionary, translate } from '@/lib/assistant/blocks/i18n'
 
@@ -55,6 +56,7 @@ export default function AssistantVoicePanel({
   const labels = {
     label: translate(dict, 'voice.label'),
     status: translate(dict, 'voice.transcribing'),
+    encoding: translate(dict, 'voice.encoding'),
     ready: translate(dict, 'voice.ready'),
     cancel: translate(dict, 'voice.cancel'),
     stop: translate(dict, 'voice.stop'),
@@ -89,7 +91,7 @@ export default function AssistantVoicePanel({
           aria-live="polite"
           className="pointer-events-none absolute inset-y-0 end-0 flex items-center rounded bg-card/80 px-1 text-[11px] font-medium tabular-nums text-foreground/80"
         >
-          {transcribing ? labels.status : ready ? `${formatDuration(seconds)} · ${labels.ready}` : formatDuration(seconds)}
+          {transcribing ? labels.status : phase === 'encoding' ? labels.encoding : ready ? `${formatDuration(seconds)} · ${labels.ready}` : formatDuration(seconds)}
         </span>
       </div>
 
@@ -107,7 +109,7 @@ export default function AssistantVoicePanel({
       <button
         type="button"
         onClick={onSend}
-        disabled={!ready || transcribing}
+        disabled={!canSend({ phase, error: null, sessionId: 0 })}
         aria-label={labels.send}
         title={labels.send}
         className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"

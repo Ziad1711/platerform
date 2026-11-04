@@ -27,9 +27,23 @@ const table = { currentLabel: 'أكتوبر 2025', baselineLabel: 'أكتوبر 
   { label: 'نسبة التسليم', current: '80 %', baseline: '50 %', delta: '—' },
 ] }
 const div = (props, ...children) => React.createElement('div', props, ...children)
-const bubble = (content, extra) => div({ className: 'mx-3 my-4 max-w-[92%] rounded-2xl border p-3 text-sm leading-6 sm:max-w-[85%]' },
-  React.createElement(Message.default, { content, direction: Message.messageDirection(content) }), extra)
+// Reprendre la rangée du vrai composant : ne pas masquer un défaut du layout
+// par une fixture qui repositionnerait elle-même les messages.
+const source = ts.createSourceFile('page.tsx', fs.readFileSync(path.join(root, 'app/(app)/ai-assistant/page.tsx'), 'utf8'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX)
+let row
+const visit = (node) => {
+  if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some((prop) => prop.name?.text === 'data-message-role')) row = node
+  ts.forEachChild(node, visit)
+}
+visit(source)
+if (!row) throw new Error('Rangée assistant introuvable')
+const attr = row.openingElement.attributes.properties.find((prop) => prop.name?.text === 'className')
+const rowClass = new Function('msg', `return ${attr.initializer.expression.getText(source)}`)
+const bubble = (content, extra, role = 'assistant') => div({ dir: 'ltr', 'data-message-role': role, className: rowClass({ role, content }) },
+  div({ className: 'mx-3 my-4 max-w-[92%] rounded-2xl border p-3 text-sm leading-6 sm:max-w-[85%]' },
+    React.createElement(Message.default, { content, direction: Message.messageDirection(content) }), extra))
 const html = renderToStaticMarkup(div({ className: 'mx-auto max-w-[700px] overflow-hidden' },
+  bubble('قارن هاد الشهور مع 2025', null, 'user'),
   bubble(ar, React.createElement(Table, { table, direction: 'rtl' })),
   bubble(fr),
   bubble('## Résumé\n- Première observation en français, puis: الطلبات كثيرة و 1 250 MAD.'),

@@ -9,7 +9,7 @@
  * transitions vérifiables sans navigateur.
  */
 
-export type VoicePhase = 'idle' | 'recording' | 'recorded' | 'transcribing' | 'error'
+export type VoicePhase = 'idle' | 'recording' | 'encoding' | 'recorded' | 'transcribing' | 'error'
 
 export interface VoiceState {
   phase: VoicePhase
@@ -17,11 +17,13 @@ export interface VoiceState {
   error: string | null
   /** Identifiant de session : invalide les callbacks tardifs. */
   sessionId: number
+  sendAfterStop?: boolean
 }
 
 export type VoiceEvent =
   | { type: 'start' }
   | { type: 'stop' }
+  | { type: 'encoded' }
   | { type: 'send' }
   | { type: 'cancel' }
   | { type: 'transcribed' }
@@ -39,9 +41,9 @@ export function canStop(state: VoiceState): boolean {
   return state.phase === 'recording'
 }
 
-/** Envoi autorisé uniquement sur un enregistrement terminé non envoyé. */
+/** Envoyer pendant la capture programme l'envoi après encodage. */
 export function canSend(state: VoiceState): boolean {
-  return state.phase === 'recorded' || state.phase === 'error'
+  return state.phase === 'recording' || state.phase === 'recorded' || state.phase === 'error'
 }
 
 export function isRecording(state: VoiceState): boolean {
@@ -49,7 +51,7 @@ export function isRecording(state: VoiceState): boolean {
 }
 
 export function isBusy(state: VoiceState): boolean {
-  return state.phase === 'recording' || state.phase === 'transcribing'
+  return state.phase === 'recording' || state.phase === 'encoding' || state.phase === 'transcribing'
 }
 
 export function reduceVoice(state: VoiceState, event: VoiceEvent): VoiceState {
@@ -60,10 +62,15 @@ export function reduceVoice(state: VoiceState, event: VoiceEvent): VoiceState {
 
     case 'stop':
       if (!canStop(state)) return state
-      return { ...state, phase: 'recorded', error: null }
+      return { ...state, phase: 'encoding', sendAfterStop: false, error: null }
+
+    case 'encoded':
+      if (state.phase !== 'encoding') return state
+      return { ...state, phase: state.sendAfterStop ? 'transcribing' : 'recorded', error: null }
 
     case 'send':
       if (!canSend(state)) return state
+      if (state.phase === 'recording') return { ...state, phase: 'encoding', sendAfterStop: true, error: null }
       return { ...state, phase: 'transcribing', error: null }
 
     case 'cancel':
@@ -86,6 +93,7 @@ export function reduceVoice(state: VoiceState, event: VoiceEvent): VoiceState {
 export function voiceStatusKey(state: VoiceState): string {
   switch (state.phase) {
     case 'recording': return 'voice.recording'
+    case 'encoding': return 'voice.encoding'
     case 'recorded': return 'voice.ready'
     case 'transcribing': return 'voice.transcribing'
     case 'error': return 'voice.failed'
