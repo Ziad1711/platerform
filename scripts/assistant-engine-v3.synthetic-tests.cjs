@@ -1836,6 +1836,24 @@ check('AG09', 'agent indisponible : repli annoncé, jamais silencieux', () => se
   }
 }))
 
+check('AG10', 'finalisation : cause RPC conservée, jamais masquée en générique', () => {
+  const finalizeError = loadTs('lib/assistant/finalize-error.ts')
+  assertEqual(finalizeError.toFinalizeError('IDEMPOTENCY_TOKEN_MISMATCH').message, 'IDEMPOTENCY_TOKEN_MISMATCH', 'cause connue conservée')
+  assertEqual(finalizeError.toFinalizeError('FORBIDDEN_STORE').message, 'FORBIDDEN_STORE', 'refus boutique conservé')
+  assertEqual(finalizeError.toFinalizeError('DEADLOCK_DETECTED').message, 'FINALIZE_RPC_FAILED', 'cause inconnue bornée')
+  assertEqual(finalizeError.toFinalizeError('').message, 'FINALIZE_RPC_FAILED', 'message vide borné')
+
+  // Le mapping public reste vérifié à la source : `security.ts` importe des
+  // modules Next indisponibles hors runtime, on ne le charge donc pas ici.
+  const source = fs.readFileSync(path.join(ROOT, 'lib/assistant/security.ts'), 'utf8')
+  for (const code of ['IDEMPOTENCY_LEASE_LOST', 'IDEMPOTENCY_TOKEN_MISMATCH', 'FORBIDDEN_STORE']) {
+    assert(source.includes(`${code}:`), `message public présent : ${code}`)
+  }
+  assert(source.includes("if (message === 'IDEMPOTENCY_LEASE_LOST') return 409"), 'statut 409 pour bail perdu')
+  assert(source.includes("if (message === 'IDEMPOTENCY_REPLAY_UNAVAILABLE') return 409"), 'statut 409 pour rejeu indisponible')
+  assert(source.includes('FINALIZE_RPC_FAILED:'), 'repli générique conservé')
+})
+
 const passed = results.filter((result) => result.pass).length
 const failedCount = results.length - passed
 

@@ -350,6 +350,10 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
   IDEMPOTENCY_IN_PROGRESS: 'Cette demande est déjà en cours de traitement.',
   IDEMPOTENCY_LEASE_LOST: 'Cette tentative a expiré. Relancez la demande.',
   IDEMPOTENCY_TOKEN_MISMATCH: 'Tentative invalide : jeton de réservation absent ou obsolète.',
+  IDEMPOTENCY_REPLAY_UNAVAILABLE: 'La réponse précédente est introuvable. Relancez la demande.',
+  INVALID_FINGERPRINT: 'Demande invalide. Rechargez la page et réessayez.',
+  INVALID_MESSAGE_CONTENT: 'Message vide ou invalide.',
+  INVALID_METADATA: 'Demande invalide. Rechargez la page et réessayez.',
   ASSISTANT_DISABLED: 'L’assistant IA est temporairement indisponible.',
   ASSISTANT_NOT_ALLOWED: 'L’assistant IA n’est pas encore ouvert à votre compte.',
   ASSISTANT_PILOT_CONFIG_INCOMPLETE:
@@ -422,6 +426,10 @@ export function getErrorStatus(error: unknown) {
   if (message === 'IDEMPOTENCY_IN_PROGRESS') return 409
   if (message === 'IDEMPOTENCY_LEASE_LOST') return 409
   if (message === 'IDEMPOTENCY_TOKEN_MISMATCH') return 409
+  if (message === 'IDEMPOTENCY_REPLAY_UNAVAILABLE') return 409
+  if (message === 'INVALID_FINGERPRINT') return 400
+  if (message === 'INVALID_MESSAGE_CONTENT') return 400
+  if (message === 'INVALID_METADATA') return 400
   if (message === 'ASSISTANT_DISABLED') return 503
   if (message === 'ASSISTANT_NOT_ALLOWED') return 403
   if (message === 'ASSISTANT_PILOT_CONFIG_INCOMPLETE') return 503

@@ -107,6 +107,13 @@ function assertNotAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error('ASSISTANT_ABORTED')
 }
 
+/**
+ * Codes d'erreur de la RPC de finalisation : la définition et la traduction
+ * vivent dans `finalize-error.ts`, sans dépendance, pour rester testables.
+ */
+import { toFinalizeError } from '@/lib/assistant/finalize-error'
+export { FINALIZE_RPC_CODES, toFinalizeError } from '@/lib/assistant/finalize-error'
+
 export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<FinalizeTurnResult> {
   // Mode pilote : la finalisation séquentielle (non atomique) est interdite.
   // Aucun repli ne peut donc facturer hors de la transaction unique.
@@ -145,8 +152,16 @@ export async function finalizeAssistantTurn(input: FinalizeTurnInput): Promise<F
 
     if (error) {
       // Aucune reprise séquentielle : une atomicité exigée ne se dégrade pas.
-      console.error('[assistant] finalize_rpc_failed', { code: error.code || 'unknown' })
-      throw new Error('FINALIZE_RPC_FAILED')
+      // La cause réelle se trouve dans `error.message` (RAISE ... errcode P0001) :
+      // elle est journalisée de façon bornée puis conservée si elle est connue.
+      const rpcMessage = String(error.message || '').slice(0, 160)
+      console.error('[assistant] finalize_rpc_failed', {
+        sqlstate: String(error.code || 'unknown'),
+        message: rpcMessage,
+        details: String((error as { details?: unknown }).details ?? '').slice(0, 160),
+        hint: String((error as { hint?: unknown }).hint ?? '').slice(0, 160),
+      })
+      throw toFinalizeError(rpcMessage)
     }
 
     const rawRow = Array.isArray(data) ? data[0] : data
