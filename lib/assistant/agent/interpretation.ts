@@ -17,6 +17,7 @@ import { businessDateParts, businessTodayIso, BUSINESS_TIME_ZONE } from '@/lib/d
 import {
   MAX_PLAN_PERIODS,
   buildPeriodPlan,
+  mentionsPreviousYear,
   periodDays,
   type AnalysisPeriod,
   type PeriodPair,
@@ -224,6 +225,15 @@ export function parseInterpretation(
   const plan = planFromPayload(value.periods, value.comparisons)
   if (!plan) return null
 
+  // Garde-fou de cohérence : une année de référence est citée mais le plan ne
+  // couvre qu'une seule année calendaire → le modèle a omis la comparaison
+  // demandée. On refuse pour laisser le chemin déterministe (désormais correct)
+  // produire les deux années, plutôt que publier une comparaison même-année.
+  if (mentionsPreviousYear(message) && plan.periods.every((period) => period.year !== null)) {
+    const years = new Set(plan.periods.map((period) => period.year))
+    if (years.size < 2) return null
+  }
+
   return {
     profile,
     intent: 'analysis',
@@ -256,6 +266,9 @@ export function buildInterpretationPrompt(input: {
     'Tu ne calcules rien, tu n’inventes aucune donnée, tu ne produis aucun SQL ni nom de table.',
     'Périodes : {kind:"month",year,month} ou {kind:"range",from,to} avec to exclusif.',
     'Conserve TOUTES les périodes citées, y compris « mêmes mois », et résous les relances depuis l’historique.',
+    'Références d’année en darija/arabe : هاد العام / هاد السنة / هذا العام = année en cours ; ديك العام / ديك السنة / العام اللي فات / العام الفايت / العام الماضي = année précédente.',
+    'Si la demande compare « ces mois de cette année » avec « ceux de l’année dernière », produis les périodes des DEUX années (mêmes mois × 2) et une comparaison par mois + un agrégat.',
+    'Si le mois ou l’année reste ambigu, renseigne clarify au lieu de deviner.',
     'Si une période reste ambiguë, renseigne clarify (courte question) au lieu de deviner.',
     'Ne mélange jamais les deux conventions dans une même réponse.',
     'comparisons[i] = {current, baseline} référencent les index du tableau periods.',

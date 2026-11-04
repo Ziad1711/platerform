@@ -1836,6 +1836,37 @@ check('AG09', 'agent indisponible : repli annoncé, jamais silencieux', () => se
   }
 }))
 
+check('ASTRA19', 'darija : « هاد العام » vs « ديك العام » = quatre fenêtres', () => {
+  for (const message of [
+    'سلام عفاك دير ليا تحليل ما بين الشهرين ديال سبتمبر وأكتوبر ديال هاد العام مقارنة مع ديال ديك العام',
+    'قارن ليا سبتمبر وأكتوبر ديال هاد العام مع ديال العام الفايت',
+    'قارن ليا سبتمبر وأكتوبر ديال هاد السنة مع ديال ديك السنة',
+  ]) {
+    const built = request.buildAnalysisRequest({
+      message,
+      intent: 'period_comparison',
+      resolvedRange: { from: '2026-01-01', to: '2026-11-04' },
+      access: 'full',
+      maxPeriods: 6,
+      now: new Date('2026-11-04T12:00:00.000Z'),
+    })
+    assertEqual(built.plan.periods.length, 4, `quatre fenêtres (obtenu ${built.plan.periods.length}) : ${message}`)
+    assertEqual(built.plan.pairs.length, 3, `trois correspondances (obtenu ${built.plan.pairs.length}) : ${message}`)
+  }
+})
+
+check('AG11', 'agent : un plan d’une seule année est refusé si l’année précédente est citée', () => {
+  const twoPeriods = {
+    ...AGENT_PAYLOAD,
+    periods: [{ kind: 'month', year: 2026, month: 9 }, { kind: 'month', year: 2026, month: 10 }],
+    comparisons: [{ current: 0, baseline: 1 }],
+  }
+  assertEqual(interpretation.parseInterpretation(JSON.stringify(twoPeriods), 'full', DARIJA_MESSAGE), null, 'plan mono-année refusé')
+  const full = interpretation.parseInterpretation(JSON.stringify(AGENT_PAYLOAD), 'full', DARIJA_MESSAGE)
+  assert(full !== null, 'plan sur deux années accepté')
+  assertEqual(full.plan.periods.length, 4, 'quatre fenêtres conservées')
+})
+
 check('AG10', 'finalisation : cause RPC conservée, jamais masquée en générique', () => {
   const finalizeError = loadTs('lib/assistant/finalize-error.ts')
   assertEqual(finalizeError.toFinalizeError('IDEMPOTENCY_TOKEN_MISMATCH').message, 'IDEMPOTENCY_TOKEN_MISMATCH', 'cause connue conservée')

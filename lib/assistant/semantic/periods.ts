@@ -103,8 +103,8 @@ const MONTH_ALIASES: ReadonlyArray<{ month: number; pattern: RegExp }> = (() => 
  * optionnel (`اللي` / `لي`) et l'année courante accepte ses deux démonstratifs
  * (`هاد` / `هذا`) : ce sont des variantes orthographiques, pas des phrases.
  */
-const RELATIVE_YEAR_BACK = /(?:l['’]ann[ée]e derni[eè]re|l['’]an dernier|ann[ée]e pr[ée]c[ée]dente|العام\s+(?:ال)?لي\s+فات|العام\s+الماضي|السنه\s+الماضيه|السنه\s+(?:ال)?لي\s+فاتت|last year)/
-const RELATIVE_YEAR_CURRENT = /(?:cette ann[ée]e|ann[ée]e en cours|هاد\s+العام|هذا\s+العام|هذه\s+السنه|السنه\s+الحاليه|this year)/
+const RELATIVE_YEAR_BACK = /(?:l['’]ann[ée]e derni[eè]re|l['’]an dernier|ann[ée]e pr[ée]c[ée]dente|العام\s+(?:ال)?لي\s+فات|العام\s+الماضي|العام\s+الفايت|ديك\s+العام|ديك\s+السنه|السنه\s+الماضيه|السنه\s+(?:ال)?لي\s+فاتت|السنه\s+الفايته|last year)/
+const RELATIVE_YEAR_CURRENT = /(?:cette ann[ée]e|ann[ée]e en cours|هاد\s+العام|هاد\s+السنه|هذا\s+العام|هذي\s+السنه|هذه\s+السنه|السنه\s+الحاليه|this year)/
 
 /** L'utilisateur situe la demande sur l'année en cours. */
 export function mentionsCurrentYear(message: string): boolean {
