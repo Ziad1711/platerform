@@ -66,7 +66,7 @@ export class DeepSeekProvider implements AssistantProvider {
     }
 
     if (!text || typeof text !== 'string') {
-      const error = new Error('_EMPTY_RESPONSE') as Error & { usage?: AssistantProviderOutput }
+      const error = new Error('DEEPSEEK_EMPTY_RESPONSE') as Error & { usage?: AssistantProviderOutput }
       error.usage = { ...usage, usageState: 'failed' }
       throw error
     }

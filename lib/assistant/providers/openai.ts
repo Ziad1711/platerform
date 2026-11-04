@@ -108,7 +108,7 @@ export class OpenAIProvider implements AssistantProvider {
     }
 
     if (!text || typeof text !== 'string') {
-      const error = new Error('_EMPTY_RESPONSE') as Error & { usage?: AssistantProviderOutput }
+      const error = new Error('OPENAI_EMPTY_RESPONSE') as Error & { usage?: AssistantProviderOutput }
       // L'appel a bien eu lieu : l'usage reste mesuré, l'état signale l'échec.
       error.usage = { ...usage, usageState: 'failed' }
       throw error

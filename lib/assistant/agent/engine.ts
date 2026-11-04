@@ -173,7 +173,8 @@ export async function requestNarrative(input: {
     'Chaque phrase doit nommer un indicateur présent dans les faits.',
     'Si une phrase exprime une variation, elle doit reprendre exactement la direction indiquée entre parenthèses.',
     'Aucune phrase ne peut affirmer un fait absent des faits fournis.',
-    'Réponds uniquement en JSON valide : {"summary":"...","observations":[{"metric":"<id>","direction":"up|down|flat"}],"hypotheses":[],"recommendations":[]}',
+    'Sélectionne uniquement les observations utiles ; le serveur rédige le texte depuis les faits.',
+    'Réponds uniquement en JSON : {"observations":[{"metric":"<id>","direction":"up|down|flat"}]}',
   ].join('\n')
 
   const userPrompt = [
@@ -386,15 +387,6 @@ export function buildFactsDigest(input: {
   return lines
 }
 
-/** Marqueurs causaux : jamais acceptés sans démonstration. */
-const CAUSAL_MARKER = /(?:parce\s+que|à\s+cause|a\s+cause|en\s+raison|caus[ée]e?s?|explique[nt]?|dû\s+à|due\s+to|because|caused|explains|drove|driven|led\s+to|resulted\s+in|gr[âa]ce|merci\s+à|thanks\s+to|بسبب|لأن|يعود\s+إلى)/i
-
-/**
- * Vocabulaire évaluatif : une appréciation sans indicateur identifié n'est pas
- * un fait. Elle est refusée faute de preuve dans le digest.
- */
-const EVALUATIVE_MARKER = /(?:satisfai|content|rentable|performan|efficace|sain|excellent|mauvais|faible|inquietant|rassurant|prometteur|problematique|satisfied|healthy|strong|weak|profitable|risky|مربح|مرض|قوي|ضعيف)/
-
 export interface NarrativeClaim {
   metric: string
   direction: 'up' | 'down' | 'flat'
@@ -440,37 +432,6 @@ export interface NarrativeFact {
   direction: 'up' | 'down' | 'flat' | null
 }
 
-/** Normalisation de comparaison : minuscules, sans accents, tokens séparés. */
-function normalizeForMatch(value: string): string {
-  return String(value ?? '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[’'`´]/g, ' ')
-    .replace(/[^a-z0-9\u0600-\u06ff]+/g, ' ')
-    .trim()
-}
-
-/**
- * Synonymes métier : permettent de reconnaître un indicateur nommé dans une
- * phrase publiée. Aucun synonyme ne crée de correspondance avec une donnée
- * absente : la phrase est alors refusée faute de preuve.
- */
-const METRIC_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
-  revenue: ['chiffre d affaires', 'ca', 'turnover', 'revenue', 'sales', 'les ventes', 'ventes', 'رقم المعاملات', 'المبيعات'],
-  revenueEstimated: ['ca estime', 'revenue estimate'],
-  totalOrders: ['commandes', 'nombre de commandes', 'volume', 'orders', 'الطلبات'],
-  deliveredOrders: ['livrees', 'livraisons', 'delivered', 'المسلّمة'],
-  returnedOrders: ['retours', 'retournees', 'returned', 'المرتجعة'],
-  cancelledOrders: ['annulations', 'annulees', 'cancelled', 'canceled', 'الملغاة'],
-  adSpend: ['publicitaires', 'publicite', 'depenses publicitaires', 'ad spend', 'ads', 'الإعلانات'],
-  deliveryRate: ['taux de livraison', 'delivery rate', 'نسبة التسليم'],
-  purchaseCost: ['cout achat', 'cout des achats', 'purchase cost', 'تكلفة الشراء'],
-  deliveryCost: ['cout livraison', 'cout de livraison', 'delivery cost', 'تكلفة التوصيل'],
-  confirmationCost: ['cout confirmation', 'cout de confirmation', 'confirmation cost', 'تكلفة التأكيد'],
-  contributionMargin: ['marge', 'marge contributive', 'margin', 'contribution margin', 'الهامش'],
-}
-
 /** Lecture d'une ligne de digest. Une ligne non conforme est ignorée. */
 export function parseNarrativeFacts(facts: readonly string[]): NarrativeFact[] {
   const parsed: NarrativeFact[] = []
@@ -488,91 +449,40 @@ export function parseNarrativeFacts(facts: readonly string[]): NarrativeFact[] {
   return parsed
 }
 
-/** Directions évoquées par une phrase, dans l'ordre d'apparition. */
-function detectDirections(normalized: string): Array<'up' | 'down' | 'flat'> {
-  const found: Array<{ index: number; direction: 'up' | 'down' | 'flat' }> = []
-  const patterns: ReadonlyArray<{ direction: 'up' | 'down' | 'flat'; pattern: RegExp }> = [
-    { direction: 'up', pattern: /(hausse|augment|croiss|progress|amelior|increase|grew|grow|rising|higher|ارتفع|زاد|نمو|تحسن)/ },
-    { direction: 'down', pattern: /(baisse|recul|chute|diminu|effondr|degrad|decrease|declin|fall|fell|lower|انخفض|تراجع|نقص)/ },
-    { direction: 'flat', pattern: /(stable|inchang|stagn|flat|unchanged|ثابت|مستقر)/ },
-  ]
-  for (const entry of patterns) {
-    const match = entry.pattern.exec(normalized)
-    if (match) found.push({ index: match.index, direction: entry.direction })
-  }
-  return found.sort((a, b) => a.index - b.index).map((entry) => entry.direction)
-}
-
-/** Un indicateur est-il nommé dans la phrase ? Libellé localisé ou synonyme. */
-function factMentioned(normalized: string, fact: NarrativeFact): boolean {
-  const padded = ` ${normalized} `
-  const label = normalizeForMatch(fact.label)
-  if (label && padded.includes(` ${label} `)) return true
-  const synonyms = METRIC_SYNONYMS[fact.metric] ?? []
-  return synonyms.some((synonym) => padded.includes(` ${normalizeForMatch(synonym)} `))
-}
-
-function splitSentences(value: string): string[] {
-  return value
-    .split(/(?<=[.!?…؟])\s+|\n+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
-}
-
 /**
- * Une phrase est publiable si chacune de ses affirmations est couverte par un
- * fait du digest : un indicateur réellement nommé, et une variation identique à
- * celle qui a été calculée.
- */
-function isSentenceGrounded(sentence: string, facts: readonly NarrativeFact[]): boolean {
-  const normalized = normalizeForMatch(sentence)
-  if (!normalized) return false
-  const mentioned = facts.filter((fact) => factMentioned(normalized, fact))
-  // Toute phrase doit nommer un indicateur réellement calculé : une transition
-  // sans donnée (« la situation évolue », « les clients sont satisfaits ») n'est
-  // pas un constat vérifiable et ne peut donc pas être publiée.
-  if (mentioned.length === 0) return false
-  const directions = detectDirections(normalized)
-  // Sans variation calculée, une appréciation (« faibles », « satisfaits ») reste
-  // une évaluation non prouvée : elle est refusée.
-  if (directions.length === 0) return !EVALUATIVE_MARKER.test(normalized)
-  return directions.every((direction) => mentioned.some((fact) => fact.direction === direction))
-}
-
-/**
- * Une narration est publiable seulement si ses affirmations sont vérifiables.
- *
-
- *
- * Le contrat de vérification ne repose **jamais** sur les revendications du
- * modèle : chaque phrase est confrontée au digest des faits calculés. Les
- * revendications déclarées ne servent qu'à un contrôle de cohérence
- * supplémentaire — elles ne peuvent ni prouver ni excuser une phrase fausse.
+ * Seules les phrases rendues par le serveur depuis un fait identifié sont
+ * publiables. Aucun rapprochement lexical ni claim ne valide du texte libre.
  */
 export function isGroundedNarrative(
   text: string,
   facts: readonly string[],
-  options?: { claims?: readonly NarrativeClaim[]; directions?: Readonly<Record<string, string | null>> },
+  _options?: { claims?: readonly NarrativeClaim[]; directions?: Readonly<Record<string, string | null>> },
 ): boolean {
-  const candidate = String(text ?? '').trim()
+  // Argument historique conservé pour les appelants V1 ; jamais une preuve.
+  void _options
+  const candidate = text.trim()
   if (!candidate || candidate.length > 360) return false
-  if (facts.length === 0) return false
-  if (/\d/.test(candidate)) return false
-  if (CAUSAL_MARKER.test(candidate)) return false
-  if (sanitizePublicText(candidate).removedCode) return false
-
-  const parsed = parseNarrativeFacts(facts)
-  if (parsed.length === 0) return false
-
-  // Contrôle supplémentaire : une revendication contredit un fait ⇒ refus.
-  for (const claim of options?.claims ?? []) {
-    const fact = parsed.find((entry) => entry.metric === claim.metric && entry.direction !== null)
-    if (!fact || fact.direction !== claim.direction) return false
+  const allowed = new Set<string>()
+  for (const locale of ['fr', 'ar', 'darija', 'en'] as const) {
+    for (const script of ['latin', 'arabic'] as const) {
+      const dict = resolveDictionary(locale, script)
+      for (const fact of unambiguousNarrativeFacts(facts)) {
+        allowed.add(translate(dict, `narrative.${fact.direction}`, { metric: fact.label }))
+      }
+    }
   }
+  // Chaque phrase doit correspondre intégralement à un constat autorisé.
+  const sentences = candidate.match(/[^.!?؟]+[.!?؟]/g) ?? []
+  return sentences.length > 0 && sentences.map((sentence) => sentence.trim()).join(' ') === candidate &&
+    sentences.every((sentence) => allowed.has(sentence.trim()))
+}
 
-  const sentences = splitSentences(candidate)
-  if (sentences.length === 0) return false
-  return sentences.every((sentence) => isSentenceGrounded(sentence, parsed))
+/** Une direction contradictoire entre paires ne peut devenir un constat global. */
+function unambiguousNarrativeFacts(facts: readonly string[]): NarrativeFact[] {
+  const parsed = parseNarrativeFacts(facts)
+  return parsed.filter((fact, index) => fact.direction !== null &&
+    parsed.findIndex((other) => other.metric === fact.metric) === index &&
+    parsed.every((other) => other.metric !== fact.metric || other.direction === fact.direction))
 }
 
 /** Synthèse déterministe construite uniquement sur les faits calculés. */
@@ -583,7 +493,7 @@ export function buildFactNarrative(
 ): string {
   const dict = resolveDictionary(locale, script)
   const phrases: string[] = []
-  for (const fact of parseNarrativeFacts(facts)) {
+  for (const fact of unambiguousNarrativeFacts(facts)) {
     if (phrases.length >= 3) break
     if (fact.direction === null) continue
     const key = fact.direction === 'up'
@@ -681,9 +591,12 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
       model: input.providerModel,
       signal: input.signal,
     })
-    tracker.assertTime()
-    plan = planned.plan
     plannerUsage = planned.usage
+    if (!tracker.canContinue()) {
+      const limited = failureOutcome(profile.locale, profile.script, 'absence.budget')
+      return { ...limited, providerUsage: mergeUsage(plannerUsage) }
+    }
+    plan = planned.plan
     activitySteps.push({
       label: 'Plan',
       detail: plan
@@ -877,6 +790,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
         signal: input.signal,
         maxOutputTokens: input.maxOutputTokens,
       })
+      narrativeUsage = narrative.usage
       // La rédaction consomme le même budget que la planification et les
       // lectures : un dépassement est une limite publiée, jamais un plantage.
       tracker.assertTime()
@@ -888,16 +802,16 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
     }
 
     if (narrative) {
-      narrativeUsage = narrative.usage
-      if (narrative.text && isGroundedNarrative(narrative.text, facts, { claims: narrative.claims })) {
-        structured = applyNarrative(structured, narrative.text)
-      } else {
-        // Conclusion libre non démontrable : formulation déterministe issue des
-        // faits, jamais une phrase du modèle non vérifiée.
-        const fallback = buildFactNarrative(facts, scopedRequest.profile.locale, scopedRequest.profile.script)
-        if (fallback && isGroundedNarrative(fallback, facts)) {
-          structured = applyNarrative(structured, fallback)
-        }
+      const eligible = unambiguousNarrativeFacts(facts)
+      const selected = eligible.filter((fact) => narrative.claims.some((claim) =>
+        claim.metric === fact.metric && claim.direction === fact.direction))
+      const selectedIds = new Set(selected.map((fact) => fact.metric))
+      const selectedFacts = selected.length > 0
+        ? facts.filter((fact) => selectedIds.has(fact.split('|')[0].trim()))
+        : facts
+      const fallback = buildFactNarrative(selectedFacts, scopedRequest.profile.locale, scopedRequest.profile.script)
+      if (fallback && isGroundedNarrative(fallback, facts)) {
+        structured = applyNarrative(structured, fallback)
       }
     }
 
