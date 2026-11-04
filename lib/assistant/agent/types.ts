@@ -30,6 +30,7 @@ export interface AgentScopeContext {
 }
 
 export interface RunSecureAgentInput {
+  requestId?: string
   supabase: SupabaseServerClient
   /** Stores réellement passés aux tools (scope multi-store) */
   scopeStoreIds: string[]
@@ -39,6 +40,7 @@ export interface RunSecureAgentInput {
   range: AnalyticsRange
   userMessage: string
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+  previousAnalysis?: import('@/lib/assistant/blocks/types').ResponseDocument['analysis']
   providerModel: string
   /** Langue de la demande : pilote la langue de réponse. */
   language?: 'fr' | 'ar'

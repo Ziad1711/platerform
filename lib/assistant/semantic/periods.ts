@@ -169,12 +169,27 @@ export function assignYears(
   if (years.length === 0) return months.map((month) => ({ year: fallbackYear, month: month.month }))
 
   const boundaries = [...years].sort((a, b) => a.index - b.index)
-  return months.map((month) => {
-    const next = boundaries.find((candidate) => candidate.index > month.index)
-    if (next) return { year: next.year, month: month.month }
-    // Après la dernière année citée : la dernière année connue s'applique.
-    return { year: boundaries[boundaries.length - 1].year, month: month.month }
+  // La position du premier groupe détermine la convention (« 2026 : sept… »
+  // ou « sept… 2026 »). Ne pas attribuer un mois à l'année du groupe suivant.
+  const yearFirst = boundaries[0].index < months[0].index
+  const assigned = months.map((month) => {
+    const boundary = yearFirst
+      ? [...boundaries].reverse().find((candidate) => candidate.index < month.index)
+      : boundaries.find((candidate) => candidate.index > month.index)
+    return { year: boundary?.year ?? boundaries[boundaries.length - 1].year, month: month.month }
   })
+  // Une année citée sans répétition des mois référence le groupe de mois.
+  // Conservation structurelle, indépendante de la langue et des mots « mêmes mois ».
+  const mentionedYears = [...new Set(boundaries.map((entry) => entry.year))]
+  const representedYears = new Set(assigned.map((entry) => entry.year))
+  const monthNumbers = [...new Set(assigned.map((entry) => entry.month))]
+  for (const year of mentionedYears) {
+    if (!representedYears.has(year)) {
+      assigned.push(...monthNumbers.map((month) => ({ year, month })))
+    }
+  }
+  return assigned.filter((entry, index, all) =>
+    all.findIndex((other) => other.year === entry.year && other.month === entry.month) === index)
 }
 
 /** Années cibles lorsque seules des clés relatives sont citées. */
@@ -273,7 +288,8 @@ export function buildPeriodPlan(input: {
   comparisonIntent?: boolean
 }): PeriodPlan {
   const max = Math.max(1, input.maxPeriods ?? MAX_PLAN_PERIODS)
-  const months = input.months.slice(0, max)
+  const months = input.months
+  if (months.length > max) throw new Error('PLAN_PERIOD_LIMIT')
   if (months.length === 0) {
     throw new Error('PLAN_NO_PERIOD')
   }
@@ -326,24 +342,28 @@ export function buildPeriodPlan(input: {
   }
   const usableGroups = groups.length === yearKeys.length ? groups : []
 
-  // Correspondances : même mois, année différente ; la plus proche antérieure
-  // est préférée pour rester une comparaison année sur année.
+  // Chaque année est comparée à la plus proche antérieure du même mois.
   const pairs: PeriodPair[] = []
   for (const period of periods) {
     const month = period.months[0]?.month
     if (!month || period.year === null) continue
     const candidates = periods.filter(
-      (other) => other.id !== period.id && other.months[0]?.month === month && other.year !== period.year,
+      (other) => other.id !== period.id && other.months[0]?.month === month &&
+        other.year !== null && other.year < period.year!,
     )
     if (candidates.length === 0) continue
-    const baseline = candidates.sort((a, b) => Math.abs((a.year ?? 0) - period.year!) - Math.abs((b.year ?? 0) - period.year!))[0]
+    const baseline = candidates.sort((a, b) => (b.year ?? 0) - (a.year ?? 0))[0]
     const alreadyPaired = pairs.some(
       (pair) =>
         (pair.currentId === period.id && pair.baselineId === baseline.id) ||
         (pair.currentId === baseline.id && pair.baselineId === period.id),
     )
     if (!alreadyPaired) {
-      pairs.push({ currentId: period.id, baselineId: baseline.id, relation: 'same_month_previous_year' })
+      pairs.push({
+        currentId: (period.year! > baseline.year! ? period : baseline).id,
+        baselineId: (period.year! > baseline.year! ? baseline : period).id,
+        relation: 'same_month_previous_year',
+      })
     }
   }
 

@@ -252,14 +252,15 @@ check('C05', 'définitions différentes : côte à côte', () => {
   assert(result.comparability.reasons.includes('reason.definition_differs'), 'raison définitions')
 })
 
-check('C06', 'couverture partielle : réserve explicite', () => {
+check('C06', 'couverture partielle : valeurs conservées sans faux écart', () => {
   const result = comparability.computeMetricDelta({
     metric: 'totalOrders',
     current: side({ totalOrders: metric(100, 'partial') }, 30, 1, 'partial'),
     baseline: side({ totalOrders: metric(90) }, 30),
     access: 'full',
   })
-  assertEqual(result.comparability.decision, 'comparable_with_reserve', 'décision')
+  assertEqual(result.comparability.decision, 'side_by_side_only', 'populations non alignées')
+  assertEqual(result.delta, null, 'aucune variation interprétable')
   assert(result.comparability.reasons.includes('reason.coverage_partial'), 'raison couverture')
 })
 
@@ -348,14 +349,18 @@ check('V01', 'arrêter ne déclenche jamais l’envoi', () => {
   state = voice.reduceVoice(state, { type: 'start' })
   assertEqual(state.phase, 'recording', 'enregistrement')
   state = voice.reduceVoice(state, { type: 'stop' })
+  assertEqual(state.phase, 'encoding', 'conversion locale avant disponibilité')
+  state = voice.reduceVoice(state, { type: 'encoded' })
   assertEqual(state.phase, 'recorded', 'arrêt = prêt à envoyer, pas envoi')
   assertEqual(voice.canSend(state), true, 'envoi possible après arrêt')
 })
 
-check('V02', 'envoi impossible pendant l’enregistrement', () => {
+check('V02', 'envoyer pendant la capture attend la conversion puis transcrit', () => {
   const state = voice.reduceVoice(voice.initialVoiceState(1), { type: 'start' })
-  assertEqual(voice.canSend(state), false, 'envoi refusé pendant l’enregistrement')
-  assertEqual(voice.reduceVoice(state, { type: 'send' }).phase, 'recording', 'aucun changement')
+  assertEqual(voice.canSend(state), true, 'envoi accessible pendant la capture')
+  const stopping = voice.reduceVoice(state, { type: 'send' })
+  assertEqual(stopping.phase, 'encoding', 'aucun appel avant conversion')
+  assertEqual(voice.reduceVoice(stopping, { type: 'encoded' }).phase, 'transcribing', 'transcription après conversion')
 })
 
 check('V03', 'annulation invalide la session (callbacks tardifs ignorés)', () => {
@@ -369,6 +374,7 @@ check('V03', 'annulation invalide la session (callbacks tardifs ignorés)', () =
 check('V04', 'transcription puis retour au repos', () => {
   let state = voice.reduceVoice(voice.initialVoiceState(0), { type: 'start' })
   state = voice.reduceVoice(state, { type: 'stop' })
+  state = voice.reduceVoice(state, { type: 'encoded' })
   state = voice.reduceVoice(state, { type: 'send' })
   assertEqual(state.phase, 'transcribing', 'transcription')
   state = voice.reduceVoice(state, { type: 'transcribed' })
@@ -712,7 +718,7 @@ check('R02', 'deux mois de la même année : vraie comparaison, ordre du texte',
   })
   const pair = reversed.plan.pairs[0]
   const current = reversed.plan.periods.find((period) => period.id === pair.currentId)
-  assertEqual(current.year, 2025, 'la période citée en premier reste la période courante')
+  assertEqual(current.year, 2026, 'la comparaison année-sur-année utilise une référence antérieure')
 })
 
 check('R03', 'écart négatif : le signe est conservé', () => {
@@ -916,6 +922,7 @@ check('R14', 'arrêt vocal sans transcription, envoi explicite', () => {
   let state = voice.initialVoiceState()
   state = voice.reduceVoice(state, { type: 'start' })
   state = voice.reduceVoice(state, { type: 'stop' })
+  state = voice.reduceVoice(state, { type: 'encoded' })
   assertEqual(state.phase, 'recorded', 'arrêt = prêt à envoyer')
   assertEqual(voice.canSend(state), true, 'envoi possible')
   assertEqual(voice.isBusy(state), false, 'aucune transcription lancée')
@@ -1366,8 +1373,9 @@ check('X13', 'engine : narration non prouvée remplacée par une synthèse factu
     const outcome = await runEngine('Compare septembre 2026 et octobre 2026')
     const summary = outcome.structuredResponse.document.blocks[0].text
     assert(!/contrast/i.test(summary), 'texte du modèle non vérifié refusé')
-    assert(/CA réalisé/.test(summary), 'synthèse construite sur les faits')
-    assert(!/\d/.test(summary), 'aucun chiffre dans la synthèse')
+    const document = outcome.structuredResponse.document
+    assert(loadTs('lib/assistant/blocks/compose.ts').validateDocumentEvidence(document), 'tous les blocs sont prouvés')
+    assert(document.blocks.some((block) => block.type === 'analysis'), 'analyse contextualisée conservée')
     return summary
   } finally {
     restoreEnv('ASSISTANT_PLANNER', previousPlanner)
@@ -1402,7 +1410,7 @@ check('Y02', 'moteur : texte trompeur jamais publié malgré des observations va
       inputTokens: 600, outputTokens: 40, providerName: 'mock', modelName: 'mock', providerCostUsd: 0.001, usageKnown: true,
     }) }, () => runEngine('Compare septembre 2026 et octobre 2026'))
     assert(!out.structuredResponse.message_text.includes('satisfaits'), 'assertion libre absente')
-    assertEqual(out.structuredResponse.message_text, 'Commandes : en hausse.', 'phrase construite par le serveur')
+    assert(loadTs('lib/assistant/blocks/compose.ts').validateDocumentEvidence(out.structuredResponse.document), 'phrases construites depuis les preuves')
     assertEqual(out.providerUsage.inputTokens, 600, 'appel simulé réellement utilisé')
   } finally {
     restoreEnv('ASSISTANT_PLANNER', previousPlanner)
@@ -1441,6 +1449,214 @@ check('Y03', 'budget : usage conservé après planner ou narration hors délai',
     restoreEnv('ASSISTANT_PLANNER', previousPlanner)
     restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
   }
+}))
+
+check('ASTRA01', 'les mêmes mois conservent les deux années sans répétition', () => {
+  for (const message of [
+    'Compare septembre et octobre 2026 avec les mêmes mois de 2025',
+    'قارن شتنبر وأكتوبر 2026 مع نفس الشهور ديال 2025',
+    'Compare 2026: September and October with 2025: the same months',
+  ]) {
+    const assigned = periods.assignYears(periods.monthMentions(message), periods.yearMentions(message), 2026)
+    const plan = periods.buildPeriodPlan({ months: assigned, comparisonIntent: true })
+    assertEqual(plan.periods.length, 4, message)
+    assertEqual(plan.pairs.length, 3, 'deux comparaisons mensuelles et un agrégat')
+    for (const pair of plan.pairs) {
+      const all = [...plan.periods, ...plan.groups]
+      assert(all.find((p) => p.id === pair.currentId).year > all.find((p) => p.id === pair.baselineId).year, 'référence antérieure')
+    }
+  }
+})
+
+check('ASTRA02', 'le plafond refuse au lieu de supprimer une période', () => {
+  let refused = false
+  try {
+    periods.buildPeriodPlan({ months: Array.from({ length: 7 }, (_, i) => ({ year: 2026, month: i + 1 })) })
+  } catch (error) { refused = error.message === 'PLAN_PERIOD_LIMIT' }
+  assert(refused, 'demande hors budget explicitement refusée')
+})
+
+check('ASTRA03', 'plan vide autorisé pour terminer l’approfondissement', () => {
+  const planner = loadTs('lib/assistant/agent/planner.ts')
+  const plan = planner.parseDynamicPlan({ schema: 1, operations: [], needsSeries: false }, { allowedMetrics: [], allowedDimensions: [] })
+  assert(plan && plan.dimensions.length === 0, 'aucun détail supplémentaire')
+})
+
+check('ASTRA04', 'planner : fenêtres et comparaisons contrôlées, SQL refusé', () => {
+  const planner = loadTs('lib/assistant/agent/planner.ts')
+  const context = { allowedMetrics: ['revenue'], allowedDimensions: [] }
+  const payload = {
+    schema: 1, operations: [{ kind: 'metric', metric: 'revenue' }], needsSeries: false,
+    periods: [
+      { id: 'p0', from: '2026-09-01', to: '2026-10-01' },
+      { id: 'p1', from: '2025-09-01', to: '2025-10-01' },
+    ], comparisons: [{ currentId: 'p0', baselineId: 'p1' }],
+  }
+  assertEqual(planner.parseDynamicPlan(payload, context).periodPlan.periods.length, 2, 'plan accepté')
+  assertEqual(planner.parseDynamicPlan({ ...payload, sql: 'select 1' }, context), null, 'SQL interdit')
+  assertEqual(planner.parseDynamicPlan({ ...payload, comparisons: [] }, context), null, 'fenêtres orphelines interdites')
+  assertEqual(planner.parseDynamicPlan(payload, { ...context, semanticPeriods: false }), null, 'rollback respecte le flag')
+  assertEqual(policy.isSemanticPlannerEnabled({}), false, 'nouvelle capacité fermée sans activation')
+  assertEqual(policy.isSemanticPlannerEnabled({ ASSISTANT_SEMANTIC_PLANNER: 'enabled' }), true, 'activation explicite')
+})
+
+check('ASTRA05', 'question réelle abrégée : quatre périodes jusque dans le document', () => serial(async () => {
+  const outcome = await runEngine('Compare septembre et octobre 2026 avec les mêmes mois de 2025')
+  const doc = outcome.structuredResponse.document
+  assertEqual(doc.analysis.periodPlan.periods.length, 4, 'mémoire conserve les fenêtres')
+  const tables = doc.blocks.filter((block) => block.type === 'table')
+  assertEqual(tables.length, 3, 'toutes les comparaisons publiées')
+  assert(tables.some((block) => /2025/.test(block.table.title)), 'référence visible')
+}))
+
+check('ASTRA06', 'baisse publiée : aucun verdict attribué à la mauvaise période', () => serial(async () => {
+  const outcome = await runEngine('Compare octobre 2026 avec septembre 2026')
+  const insights = outcome.structuredResponse.document.blocks.filter((block) => block.type === 'analysis')
+  assert(insights.length > 0, 'constat publié')
+  assert(insights.every((block) => block.claims.every((claim) => !/meilleur|plus faible/.test(claim.text))), 'direction descriptive uniquement')
+}))
+
+check('ASTRA07', 'exécuteur réel : un budget épuisé conserve les fenêtres déjà lues', () => serial(async () => {
+  const modulePath = path.resolve(ROOT, 'lib/assistant/engine/executor.ts').replace(/\\/g, '/')
+  const readerPath = path.resolve(ROOT, 'lib/assistant/analytics-reader.ts').replace(/\\/g, '/')
+  const savedExecutor = cache.get(modulePath)
+  const savedReader = cache.get(readerPath)
+  cache.delete(modulePath)
+  cache.set(readerPath, { readAssistantKpis: async (_client, _stores, range) => ({ state: 'empty', range, stores: [], issues: [] }) })
+  try {
+    const executor = loadTs('lib/assistant/engine/executor.ts')
+    const tracker = policy.createBudgetTracker({ ...policy.DEFAULT_BUDGETS, maxConcurrentReads: 1, maxWindowReads: 1 })
+    const windows = [0, 1, 2].map((index) => ({ id: `p${index}`, range: { from: '2026-09-01', to: '2026-10-01' } }))
+    const readings = await executor.readWindows({ supabase: {}, storeIds: ['store-a'], windows, tracker })
+    assertEqual(readings.size, 3, 'chaque fenêtre possède un résultat explicite')
+    assert(readings.get('p0').kpis !== null, 'première lecture conservée')
+    assertEqual(readings.get('p1').budgetExceeded, true, 'lecture restante non exécutée')
+  } finally {
+    if (savedExecutor) cache.set(modulePath, savedExecutor); else cache.delete(modulePath)
+    if (savedReader) cache.set(readerPath, savedReader); else cache.delete(readerPath)
+  }
+}))
+
+check('ASTRA08', 'années relatives avec mois : aucune référence perdue', () => {
+  const built = request.buildAnalysisRequest({
+    message: 'Compare septembre et octobre cette année avec les mêmes mois de l’année dernière',
+    intent: 'period_comparison', resolvedRange: { from: '2026-09-01', to: '2026-11-01' },
+    access: 'full', maxPeriods: 6, now: new Date('2026-11-04T12:00:00Z'),
+  })
+  assertEqual(built.plan.periods.length, 4, 'deux mois dans chacune des années')
+})
+
+check('ASTRA09', 'colonne valide après une première ligne nulle : aucune disparition', () => {
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  const table = compose.buildDimensionTable({
+    dict: i18n.resolveDictionary('fr', 'latin'), script: 'latin', currency: 'MAD',
+    reading: { dimension: 'product', windowId: 'p0', failure: null, data: {
+      meta: { state: 'partial', limits: ['Classement limité : la somme ne représente pas le total.'] },
+      rows: [{ productName: 'A', revenue: null, profit: null }, { productName: 'B', revenue: '150', profit: '40' }],
+    } },
+  })
+  assert(table.columns.some((column) => column.key === 'revenue'), 'colonne CA conservée')
+  assert(table.caption.includes('hors publicité'), 'définition du profit jointe au tableau')
+})
+
+check('ASTRA10', 'registre partagé : chiffres et conclusions falsifiés refusés', () => serial(async () => {
+  const { structuredResponse } = await runEngine('Compare septembre et octobre 2026 avec les mêmes mois de 2025')
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  const document = structuredResponse.document
+  assert(compose.validateDocumentEvidence(document), 'document réel prouvé')
+  const altered = structuredClone(document)
+  altered.blocks.find((block) => block.type === 'table').table.rows[0].cells[1].value = '999999'
+  assertEqual(compose.validateDocumentEvidence(altered), false, 'mauvais chiffre refusé')
+  const contradiction = structuredClone(document)
+  contradiction.blocks.find((block) => block.type === 'analysis').claims[0].text = 'La baisse prouve que les clients sont satisfaits.'
+  assertEqual(compose.validateDocumentEvidence(contradiction), false, 'cause et contradiction refusées')
+  for (const fact of document.evidence) {
+    assert(fact.storeIds.length && fact.range.from && fact.population && fact.provenance.length, 'provenance complète')
+  }
+}))
+
+check('ASTRA11', 'parcours multilingue moteur et composant React réels', () => serial(async () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const Blocks = loadTs('components/assistant/assistant-blocks.tsx').default
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  for (const question of [
+    'Compare septembre et octobre 2026 avec les mêmes mois de 2025',
+    'قارن شتنبر وأكتوبر 2026 مع نفس الشهور ديال 2025',
+    'قارن سبتمبر وأكتوبر 2026 مع نفس الشهور في 2025',
+    'Compare September and October 2026 with the same months of 2025',
+  ]) {
+    const outcome = await runEngine(question)
+    const document = outcome.structuredResponse.document
+    assertEqual(document.analysis.periodPlan.periods.length, 4, 'quatre fenêtres')
+    assert(compose.validateDocumentEvidence(document), 'preuve dans chaque langue')
+    const html = renderToStaticMarkup(React.createElement(Blocks, { document }))
+    assert(html.includes('2025') && html.includes('2026'), 'années visibles dans React')
+    assert(!html.includes('999999') && html.includes('data-analysis-kind'), 'analyse structurée rendue')
+  }
+}))
+
+check('ASTRA12', 'relance : ces mois et année précédente conservent métrique et contexte', () => serial(async () => {
+  const outcome = await runEngine('Compare le CA de septembre et octobre 2025 avec les mêmes mois de 2024')
+  const previousAnalysis = outcome.structuredResponse.document.analysis
+  for (const message of ['Et par ville pour ces mois ?', 'By city for these months']) {
+    const built = request.buildAnalysisRequest({ message, previousAnalysis,
+      intent: 'period_comparison', resolvedRange: { from: '2026-11-01', to: '2026-11-05' }, access: 'full', maxPeriods: 6 })
+    assertEqual(built.plan.periods[0].range.from, '2025-09-01', 'pas de retour à 2026')
+    assert(built.requestedMetrics.includes('revenue') && built.dimensions.includes('city'), 'métrique et dimension conservées')
+  }
+  const previousYear = request.buildAnalysisRequest({ message: 'Et ces mois de l’année précédente ?', previousAnalysis,
+    intent: 'period_comparison', resolvedRange: { from: '2026-11-01', to: '2026-11-05' }, access: 'full', maxPeriods: 6 })
+  assert(previousYear.plan.periods.some((period) => period.year === 2024), 'année précédente relative à 2025')
+}))
+
+check('ASTRA13', 'ventilations : contributions comparées sans transformer un top en total', () => serial(async () => {
+  const outcome = await runEngine('Compare septembre 2026 et octobre 2026 par ville')
+  const document = outcome.structuredResponse.document
+  assert(document.evidence.some((fact) => fact.kind === 'comparison' && fact.dimension === 'city'), 'même ville lue sur les deux fenêtres')
+  assert(document.evidence.filter((fact) => fact.kind === 'dimension').every((fact) => fact.population === 'dimension_population'), 'population identifiée')
+  assert(loadTs('lib/assistant/blocks/compose.ts').validateDocumentEvidence(document), 'preuve commune')
+}))
+
+check('ASTRA14', 'sélection explicative réelle : texte libre et indexes inventés ne sont jamais publiés', () => serial(async () => {
+  const oldPlanner = process.env.ASSISTANT_PLANNER, oldNarrative = process.env.ASSISTANT_NARRATIVE
+  process.env.ASSISTANT_PLANNER = 'deterministic'; process.env.ASSISTANT_NARRATIVE = 'enabled'
+  try {
+    const out = await withProvider({ chat: async (input) => {
+      assert(input.systemPrompt.includes('parcours explicatif'), 'vrai contrat explicatif transmis')
+      return { text: JSON.stringify({ selections: [0], summary: 'La publicité cause toutes les pertes.' }),
+        inputTokens: 50, outputTokens: 10, providerName: 'mock', modelName: 'mock', providerCostUsd: 0, usageKnown: true }
+    } }, () => runEngine('Compare septembre 2026 et octobre 2026'))
+    const analysis = out.structuredResponse.document.blocks.find((block) => block.type === 'analysis')
+    assertEqual(analysis.claims.length, 1, 'ordre et sélection du modèle appliqués')
+    assert(!out.structuredResponse.message_text.includes('cause'), 'aucune causalité libre')
+  } finally { restoreEnv('ASSISTANT_PLANNER', oldPlanner); restoreEnv('ASSISTANT_NARRATIVE', oldNarrative) }
+}))
+
+check('ASTRA15', 'registre : direction inversée, devise et périmètre altérés rejetés', () => serial(async () => {
+  const out = await runEngine('Compare septembre 2026 et octobre 2026')
+  const validate = loadTs('lib/assistant/blocks/compose.ts').validateDocumentEvidence
+  for (const mutation of [
+    (fact) => { fact.direction = fact.direction === 'up' ? 'down' : 'up' },
+    (fact) => { fact.parents.reverse() },
+  ]) {
+    const doc = structuredClone(out.structuredResponse.document)
+    mutation(doc.evidence.find((fact) => fact.kind === 'comparison' && fact.direction !== 'flat'))
+    assertEqual(validate(doc), false, 'comparaison falsifiée refusée')
+  }
+}))
+
+check('ASTRA16', 'décomposition vérifiée uniquement si l’identité comptable ferme', () => serial(async () => {
+  const out = await runEngine('Analyse ma marge en septembre 2026')
+  const compose = loadTs('lib/assistant/blocks/compose.ts')
+  const facts = structuredClone(out.structuredResponse.document.evidence)
+  const values = { revenue: '1000', purchaseCost: '200', deliveryCost: '100', confirmationCost: '50', adSpend: '150', contributionMargin: '500' }
+  for (const fact of facts) if (values[fact.metric]) fact.value = values[fact.metric]
+  const req = request.buildAnalysisRequest({ message: 'Ma marge en septembre 2026', intent: 'profit_analysis', access: 'full', maxPeriods: 6,
+    resolvedRange: { from: '2026-09-01', to: '2026-10-01' } })
+  assert(compose.buildEvidenceClaims(facts, req).some((claim) => claim.kind === 'decomposition'), 'identité exacte expliquée')
+  facts.find((fact) => fact.metric === 'contributionMargin').value = '501'
+  assert(!compose.buildEvidenceClaims(facts, req).some((claim) => claim.kind === 'decomposition'), 'écart non expliqué rejeté')
 }))
 
 const passed = results.filter((result) => result.pass).length

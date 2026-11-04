@@ -174,6 +174,13 @@ function BlockView({ block, direction }: { block: ResponseBlock; direction: 'ltr
         </div>
       )
 
+    case 'analysis':
+      return <section className="mt-2.5" aria-label={block.title}>
+        <p className="text-xs font-semibold">{block.title}</p>
+        <ul className="mt-1 list-disc space-y-1 ps-4">{block.claims.map((claim, index) =>
+          <li key={index} data-analysis-kind={claim.kind} className="text-[13px] leading-5">{renderBidiText(claim.text)}</li>)}</ul>
+      </section>
+
     case 'notice':
       return (
         <div className="mt-2.5 rounded-lg border border-amber-200/70 bg-amber-50/70 px-3 py-2">

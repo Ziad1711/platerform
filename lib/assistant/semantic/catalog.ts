@@ -106,6 +106,7 @@ export const PROFIT_METRICS: readonly KpiMetricAlias[] = [
   'contributionMargin',
   'purchaseCost',
   'deliveryCost',
+  'confirmationCost',
 ]
 
 export function isMetricAllowed(id: KpiMetricAlias, access: MetricAccess): boolean {

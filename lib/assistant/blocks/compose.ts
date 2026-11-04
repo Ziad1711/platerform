@@ -15,13 +15,15 @@ import { KPI_METRIC_ALIASES, type AnalyticsState } from '@/lib/assistant/analyti
 import type { AnalysisRequest } from '@/lib/assistant/semantic/request'
 import { periodDays, type AnalysisPeriod } from '@/lib/assistant/semantic/periods'
 import type { MetricDeltaResult } from '@/lib/assistant/semantic/comparability'
-import { divideDecimal, sumDecimalText, subtractDecimalText } from '@/lib/assistant/semantic/decimal'
+import { divideDecimal, sumDecimalText, subtractDecimalText, compareDecimalText } from '@/lib/assistant/semantic/decimal'
 import { percentOfCounts } from '@/lib/assistant/analytics-decimal'
 import { METRIC_CATALOG, DERIVED_METRICS } from '@/lib/assistant/semantic/catalog'
 import type { WindowAssessment } from '@/lib/assistant/engine/history'
 import type { DimensionReading, WindowReading } from '@/lib/assistant/engine/executor'
 import type { AssistantLocale, TextScript } from '@/lib/assistant/semantic/locale'
 import { resolveDictionary, translate, type Dictionary } from '@/lib/assistant/blocks/i18n'
+import { sanitizePublicText } from '@/lib/assistant/blocks/sanitize'
+import { validateEvidenceRegistry, type AnalysisEvidence, type EvidenceClaim } from '@/lib/assistant/fact-registry'
 import {
   RESPONSE_DOCUMENT_VERSION,
   type ChartBlock,
@@ -39,8 +41,6 @@ const MAX_SERIES_POINTS = 40
 const MAX_KPI_ITEMS = 4
 /** Nombre de lignes comparatives publiées. */
 const MAX_TABLE_ROWS = 6
-/** Nombre de recommandations : trois au maximum, jamais un catalogue. */
-const MAX_RECOMMENDATIONS = 3
 
 const LOCALE_TAGS: Record<AssistantLocale, string> = {
   fr: 'fr-FR',
@@ -414,7 +414,7 @@ export function buildComparisonTable(input: ComparisonTableInput): TableBlock | 
       { key: 'delta', label: translate(input.dict, 'table.delta'), direction: 'ltr', align: 'end' },
     ],
     rows,
-    caption: reserves.length > 0 ? reserves[0] : undefined,
+    caption: reserves.length > 0 ? reserves.join(' · ') : undefined,
   }
 }
 
@@ -521,8 +521,10 @@ export function buildDimensionTable(input: {
   }
 
   const columns: TableColumn[] = []
-  for (const [key, value] of Object.entries(rows[0] as Record<string, unknown>)) {
-    if (value === null || typeof value === 'object') continue
+  const keys = [...new Set(rows.flatMap((row) => Object.keys(row)))]
+  for (const key of keys) {
+    const value = rows.map((row) => row[key]).find((entry) => entry !== null && entry !== undefined)
+    if (value === undefined || typeof value === 'object') continue
     const label = labelFor(key)
     if (!label) continue
     const numeric = typeof value === 'number' || /^[+\-−]?\d/.test(String(value).trim())
@@ -550,11 +552,25 @@ export function buildDimensionTable(input: {
   const baseTitle = translate(input.dict, `dim.title.${input.reading.dimension}`)
   const title = baseTitle && input.periodLabel ? `${baseTitle} · ${input.periodLabel}` : baseTitle
 
+  const captions: string[] = []
+  if (section?.meta?.state === 'partial') captions.push(translate(input.dict, 'absence.partial'))
+  if (rows.length > body.length) captions.push(`${body.length} / ${rows.length}`)
+  // Une réserve de définition ou de classement accompagne toujours son tableau.
+  const sectionLimits = section?.meta?.limits ?? []
+  if (input.script === 'latin' && input.dict === resolveDictionary('fr', 'latin')) {
+    for (const limit of sectionLimits) {
+      const text = sanitizePublicText(limit).text
+      if (text) captions.push(text)
+    }
+  } else if (sectionLimits.length > 0) {
+    captions.push(translate(input.dict, 'limit.dimensionSubset'))
+  }
+  if (columns.some((column) => column.key === 'profit')) captions.push(translate(input.dict, 'limit.productProfit'))
   return {
     title,
     columns,
     rows: body,
-    caption: section?.meta?.state === 'partial' ? translate(input.dict, 'absence.partial') : undefined,
+    caption: captions.length > 0 ? captions.join(' · ') : undefined,
   }
 }
 
@@ -596,77 +612,220 @@ export interface ComposedResponse {
   text: string
 }
 
-/** Recommandations strictement adossées à un fait publié. */
-function buildRecommendations(input: {
-  dict: Dictionary
-  deltas: readonly MetricDeltaResult[]
-  currentReading?: WindowReading
-  currency: string | null
-}): string[] {
-  const { dict } = input
-  const items: string[] = []
-
-  const deliveryRate = input.deltas.find((delta) => delta.metric === 'deliveryRate')
-  const delivered = deliveryRate?.current ?? readMetricFromReading(input.currentReading, 'deliveryRate').value
-  if (delivered !== null && delivered !== undefined) {
-    const numeric = Number(delivered)
-    if (Number.isFinite(numeric) && numeric > 0 && numeric < 100) {
-      items.push(translate(dict, 'reco.deliveryRate', { value: `${delivered} %` }))
+/** Une seule collecte pour les tableaux, les raisonnements et les recommandations. */
+export function buildAnalysisEvidence(input: ComposeInput): AnalysisEvidence[] {
+  const facts: AnalysisEvidence[] = []
+  for (const [windowId, reading] of input.readings) {
+    if (!reading.kpis || reading.failure) continue
+    const stores = reading.kpis.stores
+    for (const metric of input.request.metrics) {
+      const snapshot = readMetricFromReading(reading, metric)
+      if (snapshot.value === null) continue
+      facts.push({
+        id: `${windowId}:metric:${metric}`, kind: 'metric', metric, value: snapshot.value,
+        unit: snapshot.unit, currency: snapshot.currency, storeIds: stores.map((store) => store.storeId),
+        windowId, range: reading.range, population: 'order_cohort', state: snapshot.state,
+        axis: 'order', definition: `${metric}; versions=${stores.map((store) => store.definitionVersion).join(',')}`,
+        numerator: snapshot.unit === 'percent' && stores.length === 1 ? stores[0].metrics[KPI_METRIC_ALIASES[metric]]?.numerator : null,
+        denominator: snapshot.unit === 'percent' && stores.length === 1 ? stores[0].metrics[KPI_METRIC_ALIASES[metric]]?.denominator : null,
+        coverage: stores.map((store) => ({ storeId: store.storeId, ...store.coverage })),
+        provenance: [reading.kpis.source], parents: [], reserves: reading.kpis.limits ?? [],
+      })
+    }
+    const days = stores.length === 1 ? stores[0].days ?? [] : []
+    for (const day of input.request.needsSeries && days.length <= MAX_SERIES_POINTS ? days : []) {
+      for (const [metric, value] of [['totalOrders', day.orders], ['revenue', day.revenue]] as const) {
+        if (value === null || (day.state !== 'complete' && day.state !== 'empty')) continue
+        facts.push({
+          id: `${windowId}:series:${metric}:${day.date}`, kind: 'series', metric, value: String(value),
+          unit: metric === 'revenue' ? 'decimal' : 'count', currency: metric === 'revenue' ? stores[0].currency : null,
+          storeIds: [stores[0].storeId], windowId, range: { from: day.date, to: new Date(Date.parse(`${day.date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10) },
+          population: 'order_cohort', state: day.state, coverage: { date: day.date, state: day.state },
+          axis: 'order', definition: `${metric}; version=${stores[0].definitionVersion}`,
+          provenance: [reading.kpis.source], parents: [], reserves: [],
+        })
+      }
     }
   }
-
-  const adSpend = readMetricFromReading(input.currentReading, 'adSpend')
-  const revenue = readMetricFromReading(input.currentReading, 'revenue')
-  if (adSpend.value !== null && revenue.value !== null && input.currency) {
-    items.push(translate(dict, 'reco.ads', {
-      value: formatMetricValue({ value: adSpend.value, unit: 'decimal', currency: input.currency }),
-      revenue: formatMetricValue({ value: revenue.value, unit: 'decimal', currency: input.currency }),
-    }))
-  }
-
-  const orders = input.deltas.find((delta) => delta.metric === 'totalOrders')
-  if (orders?.delta && orders.direction && orders.direction !== 'flat') {
-    const key = orders.direction === 'up' ? 'reco.ordersSpike' : 'reco.ordersDrop'
-    items.push(translate(dict, key, { delta: formatDelta(orders.delta, 'count', null) }))
-  }
-
-  return items.slice(0, MAX_RECOMMENDATIONS)
-}
-
-/** Constats qualitatifs : aucun chiffre, ils vivent déjà dans les blocs. */
-function buildInsights(input: {
-  dict: Dictionary
-  deltas: readonly MetricDeltaResult[]
-  currentLabel: string
-  baselineLabel: string
-}): string[] {
-  const items: string[] = []
-  const ranked = input.deltas
-    .filter((delta) => delta.delta !== null && delta.direction !== null)
-    .slice(0, 2)
-
-  for (const delta of ranked) {
-    const label = metricLabel(input.dict, delta.metric)
-    if (delta.direction === 'flat') {
-      items.push(translate(input.dict, 'verdict.equal', { metric: label }))
-      continue
+  for (const section of input.sections) {
+    for (const delta of section.deltas) {
+      const current = facts.find((fact) => fact.id === `${section.currentId}:metric:${delta.metric}`)
+      const baseline = facts.find((fact) => fact.id === `${section.baselineId}:metric:${delta.metric}`)
+      if (!current || !baseline || delta.delta === null || delta.direction === null) continue
+      facts.push({ ...current,
+        id: `${section.currentId}:${section.baselineId}:delta:${delta.metric}`, kind: 'comparison',
+        value: delta.delta, direction: delta.direction, baselineWindowId: section.baselineId,
+        coverage: { current: current.coverage, baseline: baseline.coverage },
+        parents: [current.id, baseline.id], reserves: delta.comparability.reasons,
+      })
     }
-    const better = delta.direction === 'up' &&
-      // Une hausse n'est pas toujours favorable : les annulations et retours
-      // se lisent à l'envers.
-      !isNegativeMetric(delta.metric)
-    items.push(translate(input.dict, better ? 'verdict.better' : 'verdict.worse', {
-      period: better ? input.currentLabel : input.baselineLabel,
-      metric: label,
-    }))
   }
-  return items
+  for (const reading of input.dimensions) {
+    const section = reading.data
+    const window = input.readings.get(reading.windowId)
+    if (!section || reading.failure || !window?.kpis || !['complete', 'partial', 'empty'].includes(section.meta.state)) continue
+    const kpis = window.kpis
+    if (section.meta.range && (section.meta.range.from !== window.range.from || section.meta.range.to !== window.range.to)) {
+      throw new Error('ASSISTANT_EVIDENCE_SCOPE_MISMATCH')
+    }
+    if (section.meta.access && Object.keys(section.meta.access).some((storeId) => !kpis.stores.some((store) => store.storeId === storeId))) {
+      throw new Error('ASSISTANT_EVIDENCE_SCOPE_MISMATCH')
+    }
+    section.rows.slice(0, 20).forEach((row, index) => {
+      const member = String(row.productName ?? row.city ?? row.agentName ?? row.name ?? index)
+      const memberId = String(row.productId ?? row.agentId ?? row.id ?? row.city ?? member)
+      for (const [metric, value] of Object.entries(row)) {
+        if (value === null || value === undefined || !/^-?\d+(?:\.\d+)?$/.test(String(value))) continue
+        if (/id$/i.test(metric) || !translate(resolveDictionary(input.request.profile.locale, input.request.profile.script), `dim.${metric}`) &&
+            !Object.prototype.hasOwnProperty.call(METRIC_CATALOG, metric)) continue
+        const money = MONEY_KEYS.has(metric)
+        if (money && kpis.stores.some((store) => store.access !== 'full')) continue
+        if (money && !input.currency) continue
+        facts.push({
+          id: `${reading.windowId}:${reading.dimension}:${index}:${metric}`, kind: 'dimension', metric,
+          value: String(value), unit: money ? 'decimal' : /rate/i.test(metric) ? 'percent' : 'count',
+          currency: money ? input.currency : null, storeIds: kpis.stores.map((store) => store.storeId),
+          windowId: reading.windowId, range: section.meta.range ?? window.range,
+          population: reading.dimension === 'product' ? 'ranked_subset' : reading.dimension === 'status' ? 'sample' : 'dimension_population',
+          state: section.meta.state, coverage: { window: kpis.stores.map((store) => store.coverage),
+            section: { state: section.meta.state, consistency: section.meta.consistency ?? [], limits: section.meta.limits ?? [] } },
+          provenance: [section.meta.source || reading.dimension], parents: [],
+          axis: 'order', definition: `${section.meta.section ?? reading.dimension}:${metric}; contract=${section.meta.contractVersion ?? 'unknown'}`,
+          dimension: reading.dimension, member, memberId, reserves: [...section.meta.limits ?? [], ...section.meta.notices ?? []],
+        })
+      }
+    })
+  }
+  for (const section of input.sections) {
+    const currentFacts = facts.filter((fact) => fact.kind === 'dimension' && fact.windowId === section.currentId && fact.state === 'complete')
+    for (const current of currentFacts) {
+      const baseline = facts.find((fact) => fact.kind === 'dimension' && fact.windowId === section.baselineId &&
+        fact.dimension === current.dimension && fact.memberId === current.memberId && fact.metric === current.metric && fact.state === 'complete')
+      if (!baseline || baseline.currency !== current.currency) continue
+      const value = subtractDecimalText(current.value, baseline.value)
+      const order = value === null ? null : compareDecimalText(value, '0')
+      if (value === null || order === null) continue
+      facts.push({ ...current, id: `${current.id}:vs:${baseline.id}`, kind: 'comparison', value,
+        baselineWindowId: section.baselineId, parents: [current.id, baseline.id],
+        direction: order > 0 ? 'up' : order < 0 ? 'down' : 'flat',
+        coverage: { current: current.coverage, baseline: baseline.coverage },
+        provenance: [...new Set([...current.provenance, ...baseline.provenance])],
+      })
+    }
+  }
+  if (!validateEvidenceRegistry(facts)) throw new Error('ASSISTANT_EVIDENCE_INVALID')
+  return facts
 }
 
-function isNegativeMetric(metric: KpiMetricAlias): boolean {
-  return metric === 'cancelledOrders' || metric === 'returnedOrders' ||
-    metric === 'adSpend' || metric === 'purchaseCost' ||
-    metric === 'deliveryCost' || metric === 'confirmationCost'
+/** Catalogue de phrases prouvées : le modèle choisit et ordonne, sans inventer. */
+export function buildEvidenceClaims(facts: readonly AnalysisEvidence[], request: Pick<AnalysisRequest, 'profile' | 'plan'>): EvidenceClaim[] {
+  const dict = resolveDictionary(request.profile.locale, request.profile.script)
+  const claims: EvidenceClaim[] = []
+  const label = (fact: AnalysisEvidence) => metricLabel(dict, fact.metric as KpiMetricAlias) ||
+    translate(dict, `dim.${fact.metric}`) || fact.metric
+  const period = (id: string) => {
+    const found = [...request.plan.periods, ...request.plan.groups].find((entry) => entry.id === id)
+    return found ? formatPeriodLabel(found, request.profile.locale) : ''
+  }
+  for (const fact of facts) {
+    if (fact.kind === 'metric' && fact.metric === 'revenue') {
+      const costs = ['purchaseCost', 'deliveryCost', 'confirmationCost', 'adSpend'].map((metric) =>
+        facts.find((entry) => entry.kind === 'metric' && entry.windowId === fact.windowId && entry.metric === metric))
+      const margin = facts.find((entry) => entry.kind === 'metric' && entry.windowId === fact.windowId && entry.metric === 'contributionMargin')
+      if (margin?.state === 'complete' && fact.state === 'complete' && costs.every((cost) => cost && cost.state === 'complete' && cost.currency === fact.currency)) {
+        const total = sumDecimalText(costs.map((cost) => cost!.value))
+        const calculated = total === null ? null : subtractDecimalText(fact.value, total)
+        if (calculated !== null && subtractDecimalText(calculated, margin.value)?.replace(/[-.0]/g, '') === '') {
+          claims.push({ kind: 'decomposition', evidenceIds: [fact.id, ...costs.map((cost) => cost!.id), margin.id],
+            text: translate(dict, 'analysis.decomposition', { period: period(fact.windowId),
+              revenue: formatMetricValue(fact), margin: formatMetricValue(margin) }) })
+        }
+      }
+    }
+    if (fact.kind === 'comparison') {
+      claims.push({ kind: 'trend', evidenceIds: [fact.id], text:
+        `${period(fact.windowId)} / ${period(fact.baselineWindowId!)}${fact.member ? ` · ${fact.member}` : ''} — ${translate(dict, `narrative.${fact.direction}`, { metric: label(fact) })}${fact.population !== 'order_cohort' ? ` ${translate(dict, 'limit.dimensionSubset')}` : ''}` })
+      if (fact.direction !== 'flat') claims.push({ kind: 'hypothesis', evidenceIds: [fact.id], text:
+        translate(dict, 'analysis.hypothesis', { metric: label(fact), period: period(fact.windowId) }) })
+    }
+    if (fact.kind === 'dimension') {
+      claims.push({ kind: 'fact', evidenceIds: [fact.id], text:
+        `${period(fact.windowId)} · ${fact.member} — ${label(fact)} : ${formatMetricValue(fact)}. ${translate(dict, 'limit.dimensionSubset')}` })
+    }
+    if (fact.kind === 'metric' && fact.metric === 'deliveryRate' && Number(fact.value) < 100) {
+      claims.push({ kind: 'recommendation', evidenceIds: [fact.id], text:
+        `${period(fact.windowId)} — ${translate(dict, 'reco.deliveryRate', { value: formatMetricValue(fact) })}` })
+    }
+  }
+  return claims.filter((claim) => Boolean(claim.text))
+}
+
+/** Le contrat publié est vérifié avant la finalisation financière. */
+export function validateDocumentEvidence(document: ResponseDocument): boolean {
+  if (!document.evidence || !validateEvidenceRegistry(document.evidence)) return false
+  const ids = new Set(document.evidence.map((fact) => fact.id))
+  const allowedClaims = document.analysis ? buildEvidenceClaims(document.evidence, {
+    profile: { locale: document.locale, script: document.script, direction: document.direction },
+    plan: document.analysis.periodPlan,
+  }) : []
+  const valid = (refs: readonly string[] | undefined) => Boolean(refs?.length) && refs!.every((id) => ids.has(id))
+  const matchingValue = (text: string, refs: readonly string[] | undefined) => valid(refs) && refs!.some((id) => {
+    const fact = document.evidence!.find((entry) => entry.id === id)!
+    const clean = text.replace(/−/g, '-').replace(/^\+/, '')
+    const raw = fact.value.replace(/^-0(?:\.0+)?$/, '0')
+    return clean === raw || clean === `${raw} %` || clean === `${raw} pts` || clean === `${raw} ${fact.currency}`
+  })
+  if (document.evidence.some((fact) => fact.kind === 'comparison' && (() => {
+    const [current, baseline] = fact.parents.map((id) => document.evidence!.find((entry) => entry.id === id)!)
+    const value = subtractDecimalText(current.value, baseline.value)
+    const order = value === null ? null : compareDecimalText(value, '0')
+    return value === null || subtractDecimalText(value, fact.value)?.replace(/[-.0]/g, '') !== '' ||
+      current.metric !== baseline.metric || current.currency !== baseline.currency ||
+      current.windowId !== fact.windowId || baseline.windowId !== fact.baselineWindowId ||
+      JSON.stringify(current.storeIds) !== JSON.stringify(baseline.storeIds) ||
+      fact.direction !== (order === 0 ? 'flat' : order === 1 ? 'up' : 'down')
+  })())) return false
+  if (document.evidence.some((fact) => fact.kind === 'derived' && (() => {
+    const parents = fact.parents.map((id) => document.evidence!.find((entry) => entry.id === id)!)
+    const normalized = parents.map((parent) => divideDecimal(parent.value, periodDays({
+      id: parent.windowId, range: parent.range, months: [], granularity: 'day', year: null, aggregated: false,
+    }), 2))
+    if (normalized.some((value) => value === null)) return true
+    const expected = normalized.length === 1 ? normalized[0] : normalized.length === 2
+      ? subtractDecimalText(normalized[0]!, normalized[1]!) : null
+    return expected === null || subtractDecimalText(expected, fact.value)?.replace(/[-.0]/g, '') !== ''
+  })())) return false
+  return document.blocks.every((block) => {
+    if (block.type === 'notice' || block.type === 'clarification') return true
+    if (!valid(block.evidenceIds)) return false
+    if (block.type === 'insights' || block.type === 'recommendations') return false
+    if (block.type === 'summary') {
+      if (!document.analysis) return false
+      const dict = resolveDictionary(document.locale, document.script)
+      const plan = document.analysis.periodPlan
+      const all = [...plan.periods, ...plan.groups]
+      const label = (id: string) => {
+        const period = all.find((entry) => entry.id === id)
+        return period ? formatPeriodLabel(period, document.locale) : ''
+      }
+      const expected = plan.pairs.length > 1
+        ? translate(dict, 'summary.comparisons', { count: String(plan.pairs.length) })
+        : plan.pairs.length === 1
+          ? translate(dict, 'summary.comparison', { current: label(plan.pairs[0].currentId), baseline: label(plan.pairs[0].baselineId) })
+          : translate(dict, 'summary.single', { period: label(plan.periods[0]?.id ?? '') })
+      return block.text === expected || block.text === translate(dict, 'summary.noFigures')
+    }
+    if (block.type === 'analysis') return block.claims.every((claim) => valid(claim.evidenceIds) &&
+      allowedClaims.some((allowed) => allowed.kind === claim.kind && allowed.text === claim.text &&
+        JSON.stringify(allowed.evidenceIds) === JSON.stringify(claim.evidenceIds)))
+    if (block.type === 'kpi') return block.items.every((item) => matchingValue(item.value, item.evidenceIds))
+    if (block.type === 'table') return block.table.rows.every((row) => row.cells.every((cell, index) =>
+      index === 0 || cell.value === '—' || !/^[+−-]?\d/.test(cell.value) || matchingValue(cell.value, cell.evidenceIds)))
+    if (block.type === 'chart') return block.chart.points.every((point) => valid(point.evidenceIds) &&
+      Object.values(point.values).every((value) => value === null || point.evidenceIds!.some((id) =>
+        Number(document.evidence!.find((fact) => fact.id === id)!.value) === value)))
+    return true
+  })
 }
 
 /** Notices : réserves de comparaison + qualification d'absence + limites. */
@@ -708,7 +867,9 @@ function buildNotices(input: ComposeInput, dict: Dictionary): string[] {
     if (message && !notices.includes(message)) notices.push(message)
   }
 
-  if (input.dimensions.some((reading) => reading.failure !== null)) {
+  if (input.dimensions.some((reading) => reading.failure !== null ||
+      reading.data?.meta.state === 'unavailable' || reading.data?.meta.state === 'forbidden' ||
+      reading.data?.meta.state === 'missing')) {
     const message = translate(dict, 'limit.dimensionUnavailable')
     if (message && !notices.includes(message)) notices.push(message)
   }
@@ -745,6 +906,7 @@ function absenceSuffix(kind: string): string {
  */
 export function composeDocument(input: ComposeInput): ComposedResponse {
   const { request } = input
+  const evidence = buildAnalysisEvidence(input)
   const dict = resolveDictionary(request.profile.locale, request.profile.script)
   const script = request.profile.script
 
@@ -780,7 +942,39 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
       requestedMetrics: request.requestedMetrics,
       maxRows: request.requestedMetrics.length,
     })
-    if (table) tables.push(table)
+    if (table) {
+      for (const row of table.rows) {
+        row.cells.forEach((cell, index) => {
+          if (index === 0 || cell.value === '—') return
+          const windowId = index === 2 ? section.baselineId : section.currentId
+          let fact = evidence.find((entry) => entry.id === (index === 3
+            ? `${section.currentId}:${section.baselineId}:delta:${row.key}` : `${windowId}:metric:${row.key}`))
+          // Les lignes normalisées sont calculées depuis une valeur exacte et
+          // le nombre de jours, jamais corroborées par leur seul texte affiché.
+          if (!fact && row.key.endsWith('PerDay')) {
+            const metric = row.key === 'ordersPerDay' ? 'totalOrders' : 'revenue'
+            const parents = index === 3
+              ? [section.currentId, section.baselineId].flatMap((id) => evidence.filter((entry) => entry.windowId === id && entry.kind === 'metric' && entry.metric === metric))
+              : evidence.filter((entry) => entry.id === `${windowId}:metric:${metric}`)
+            const currentPeriod = findPeriod(section.currentId)!
+            const baselinePeriod = findPeriod(section.baselineId)!
+            const current = parents.find((entry) => entry.windowId === section.currentId)
+            const baseline = parents.find((entry) => entry.windowId === section.baselineId)
+            const parent = parents[0]
+            const value = index === 3 && current && baseline
+              ? subtractDecimalText(divideDecimal(current.value, periodDays(currentPeriod), 2)!, divideDecimal(baseline.value, periodDays(baselinePeriod), 2)!)
+              : parent ? divideDecimal(parent.value, periodDays(findPeriod(windowId)!), 2) : null
+            if (parent && value !== null) {
+              fact = { ...parent, id: `${section.currentId}:${section.baselineId}:${index}:${row.key}`, kind: 'derived', value,
+                parents: parents.map((entry) => entry.id), metric: row.key }
+              evidence.push(fact)
+            }
+          }
+          cell.evidenceIds = fact ? [fact.id] : []
+        })
+      }
+      tables.push(table)
+    }
   }
 
   // 2. Ventilations réellement demandées et lues : elles doivent être visibles.
@@ -810,10 +1004,19 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
       dict,
       script,
       reading,
-      periodLabel: currentLabel,
+      periodLabel: findPeriod(reading.windowId)
+        ? formatPeriodLabel(findPeriod(reading.windowId)!, request.profile.locale)
+        : currentLabel,
       currency: input.currency,
     })
-    if (table) dimensionTables.push(table)
+    if (table) {
+      table.rows.forEach((row, rowIndex) => row.cells.forEach((cell, columnIndex) => {
+        const key = table.columns[columnIndex].key
+        const fact = evidence.find((entry) => entry.id === `${reading.windowId}:${reading.dimension}:${rowIndex}:${key}`)
+        if (fact) cell.evidenceIds = [fact.id]
+      }))
+      dimensionTables.push(table)
+    }
   }
 
   // 3. KPI compacts : publiés dès qu'aucune comparaison ne porte déjà les
@@ -833,27 +1036,19 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     requested: request.requestedMetrics,
     max: Math.max(MAX_KPI_ITEMS, request.requestedMetrics.length),
   })
+  for (const item of kpiItems) item.evidenceIds = [`${primaryCurrentPeriod?.id}:metric:${item.id}`]
 
   // 4. Graphique : uniquement pour une période simple et une série réelle.
   const chart = (tables.length === 0 && request.needsSeries)
-    ? buildChartBlock({ dict, reading: currentReading, titleKey: 'chart.title.orders', series: 'orders' })
-    : null
-
-  const primaryDeltas = primary?.deltas ?? []
-  const insights = primary
-    ? buildInsights({
-        dict,
-        deltas: primaryDeltas,
-        currentLabel: sectionLabels[0]?.currentLabel ?? '',
-        baselineLabel: sectionLabels[0]?.baselineLabel ?? '',
+    ? buildChartBlock({
+        dict, reading: currentReading,
+        titleKey: request.requestedMetrics.includes('revenue') ? 'chart.title.revenue' : 'chart.title.orders',
+        series: request.requestedMetrics.includes('revenue') ? 'revenue' : 'orders',
       })
-    : []
-  const recommendations = buildRecommendations({
-    dict,
-    deltas: primaryDeltas,
-    currentReading,
-    currency: input.currency,
-  })
+    : null
+  if (chart) for (const point of chart.points) point.evidenceIds = [
+    `${primaryCurrentPeriod?.id}:series:${chart.series[0].key === 'revenue' ? 'revenue' : 'totalOrders'}:${point.x}`,
+  ]
 
   const hasFigures = tables.length > 0 || dimensionTables.length > 0 ||
     kpiItems.length > 0 || Boolean(chart)
@@ -862,7 +1057,7 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
   const summaryText = hasFigures
     ? (sectionLabels.length > 0
         ? sectionLabels.length === 1
-          ? translate(dict, 'summary.comparison', sectionLabels[0])
+          ? translate(dict, 'summary.comparison', { current: sectionLabels[0].currentLabel, baseline: sectionLabels[0].baselineLabel })
           : translate(dict, 'summary.comparisons', { count: String(sectionLabels.length) })
         : translate(dict, 'summary.single', { period: currentLabel }))
     : translate(dict, 'summary.noFigures')
@@ -919,12 +1114,6 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
   for (const table of tables) blocks.push({ type: 'table', table })
   for (const table of dimensionTables) blocks.push({ type: 'table', table })
   if (chart) blocks.push({ type: 'chart', chart })
-  if (insights.length > 0) {
-    blocks.push({ type: 'insights', title: translate(dict, 'title.verdict'), items: insights })
-  }
-  if (recommendations.length > 0) {
-    blocks.push({ type: 'recommendations', title: translate(dict, 'title.recommendations'), items: recommendations })
-  }
   if (warnings.length > 0) {
     blocks.push({
       type: 'notice',
@@ -949,9 +1138,45 @@ export function composeDocument(input: ComposeInput): ComposedResponse {
     direction: request.profile.direction,
     presentation,
     blocks,
+    evidence,
+    analysis: {
+      schema: 1,
+      periodPlan: request.plan,
+      requestedMetrics: [...request.requestedMetrics],
+      requestedDimensions: [...request.dimensions],
+      windows: [...input.assessments].map(([id, assessment]) => ({
+        id, state: assessment.kind, publishedMetrics: [...assessment.publishedMetrics],
+      })),
+    },
   }
 
-  const text = [summaryText, ...insights].filter(Boolean).join(' ')
+  // Remplacer les producteurs de conclusions concurrents par le catalogue
+  // unique de constats et actions fondés sur les mêmes preuves que les chiffres.
+  const claims = buildEvidenceClaims(evidence, request)
+  const selected = [
+    ...claims.filter((claim) => claim.kind === 'trend').slice(0, 4),
+    ...claims.filter((claim) => claim.kind === 'decomposition').slice(0, 1),
+    ...['city', 'product', 'agent', 'confirmation', 'status'].flatMap((dimension) =>
+      claims.filter((claim) => claim.kind === 'fact' && claim.evidenceIds.some((id) =>
+        evidence.find((fact) => fact.id === id)?.dimension === dimension)).slice(0, 1)),
+    ...claims.filter((claim) => claim.kind === 'recommendation').slice(0, 2),
+  ]
+  // Les conclusions ne portent que sur des preuves effectivement publiées
+  // dans un bloc chiffré, ou explicitement citées dans l'analyse elle-même.
+  if (selected.length) document.blocks.push({ type: 'analysis', title: translate(dict, 'title.verdict'), claims: selected })
+  for (const block of document.blocks) {
+    if (block.type === 'kpi') block.evidenceIds = block.items.flatMap((item) => item.evidenceIds ?? [])
+    else if (block.type === 'table') block.evidenceIds = block.table.rows.flatMap((row) => row.cells.flatMap((cell) => cell.evidenceIds ?? []))
+    else if (block.type === 'chart') block.evidenceIds = block.chart.points.flatMap((point) => point.evidenceIds ?? [])
+    else if (block.type === 'analysis') block.evidenceIds = block.claims.flatMap((claim) => claim.evidenceIds)
+    else if (block.type === 'summary') block.evidenceIds = evidence.map((fact) => fact.id)
+  }
+  // Les tableaux purement descriptifs (ex. statuts textuels d'un échantillon)
+  // ne deviennent pas des preuves d'une métrique. Pas de chiffre non référencé.
+  document.blocks = document.blocks.filter((block) => block.type !== 'table' || (block.evidenceIds?.length ?? 0) > 0)
+  if (evidence.length > 0 && !validateDocumentEvidence(document)) throw new Error('ASSISTANT_DOCUMENT_UNGROUNDED')
+
+  const text = [summaryText, ...selected.map((claim) => claim.text)].filter(Boolean).join(' ')
 
   return {
     document,

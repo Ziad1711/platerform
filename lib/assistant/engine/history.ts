@@ -133,6 +133,7 @@ export function assessWindow(
   if (!reading) {
     return { ...empty, kind: options?.budgetExceeded ? 'budget_exceeded' : 'unknown' }
   }
+  if (reading.budgetExceeded) return { ...empty, kind: 'budget_exceeded' }
   if (reading.failure === 'isolation_failure') return { ...empty, kind: 'access_denied' }
   if (reading.failure === 'range_rejected') return { ...empty, kind: 'range_rejected' }
   if (reading.failure) return { ...empty, kind: 'source_unavailable' }

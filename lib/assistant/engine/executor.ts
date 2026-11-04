@@ -38,6 +38,7 @@ export interface WindowReading {
   kpis: AnalyticsReaderResult | null
   failure: ReadingFailureCode | null
   durationMs: number
+  budgetExceeded?: boolean
 }
 
 export interface ExecuteWindowsInput {
@@ -121,9 +122,19 @@ export async function readWindows(input: ExecuteWindowsInput): Promise<Map<strin
     for (;;) {
       const window = queue.shift()
       if (!window) return
-      tracker.assertTime()
-      tracker.consumeRead()
-      tracker.consumeOperation()
+      if (input.signal?.aborted) throw new Error('ASSISTANT_ABORTED')
+      try {
+        tracker.assertTime()
+        tracker.consumeRead()
+        tracker.consumeOperation()
+      } catch (error) {
+        if (!(error instanceof EngineBudgetError)) throw error
+        results.set(window.id, {
+          windowId: window.id, range: window.range, kpis: null,
+          failure: null, durationMs: 0, budgetExceeded: true,
+        })
+        continue
+      }
       const reading = await readWindowOnce(input.supabase, input.storeIds, window, input.signal)
       results.set(window.id, reading)
     }
@@ -181,6 +192,7 @@ export async function readDimension(input: {
 
   tracker.consumeDimension()
   tracker.consumeOperation()
+  tracker.consumeRead()
 
   const request = { supabase: input.supabase, kpis: reading.kpis, signal: input.signal }
   const limit = Math.max(1, Math.min(input.limit ?? 10, tracker.budgets.maxRowsPerDimension))
