@@ -893,7 +893,7 @@ check('R13', 'narration : causalité, chiffres et affirmations non prouvées ref
     'direction contraire aux faits refusée',
   )
   assertEqual(
-    engine.isGroundedNarrative('Le chiffre d’affaires progresse sur la période comparée.', facts, {
+    engine.isGroundedNarrative('CA réalisé : en hausse.', facts, {
       claims: [{ metric: 'revenue', direction: 'up' }],
       directions,
     }),
@@ -1089,11 +1089,13 @@ const PROVIDERS_MODULE = path.resolve(ROOT, 'lib/assistant/providers/index.ts').
 /** Remplace le fournisseur du cache, puis restaure l'état initial. */
 async function withProvider(provider, run) {
   const original = cache.get(PROVIDERS_MODULE)
-  cache.set(PROVIDERS_MODULE, { getAssistantProvider: () => provider })
+  const previousGetter = original?.getAssistantProvider
+  if (original) original.getAssistantProvider = () => provider
+  else cache.set(PROVIDERS_MODULE, { getAssistantProvider: () => provider })
   try {
     return await run()
   } finally {
-    if (original) cache.set(PROVIDERS_MODULE, original)
+    if (original) { original.getAssistantProvider = previousGetter; cache.set(PROVIDERS_MODULE, original) }
     else cache.delete(PROVIDERS_MODULE)
   }
 }
@@ -1139,7 +1141,7 @@ check('X01', 'narration : une phrase contraire au fait calculé est refusée', (
     'direction contraire refusée malgré un claim valide',
   )
   assertEqual(
-    engine.isGroundedNarrative('Le chiffre d’affaires recule et les commandes progressent.', FINAL_FACTS),
+    engine.isGroundedNarrative('CA réalisé : en baisse. Commandes : en hausse.', FINAL_FACTS),
     true,
     'constats conformes acceptés',
   )
@@ -1368,6 +1370,74 @@ check('X13', 'engine : narration non prouvée remplacée par une synthèse factu
     assert(!/\d/.test(summary), 'aucun chiffre dans la synthèse')
     return summary
   } finally {
+    restoreEnv('ASSISTANT_PLANNER', previousPlanner)
+    restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
+  }
+}))
+
+check('Y01', 'texte libre : métriques inversées, satisfaction et expansion toujours refusées', () => {
+  const engine = loadTs('lib/assistant/agent/engine.ts')
+  for (const text of [
+    'Le chiffre d’affaires augmente et les commandes baissent.',
+    'Le chiffre d’affaires baisse et tous les clients sont satisfaits.',
+    'Le chiffre d’affaires finance désormais une expansion internationale.',
+  ]) {
+    assertEqual(engine.isGroundedNarrative(text, FINAL_FACTS, {
+      claims: [{ metric: 'totalOrders', direction: 'up' }],
+    }), false, text)
+  }
+  const contradictory = [...FINAL_FACTS, 'revenue | CA réalisé | autre paire | ecart=1 (up)']
+  assert(!engine.buildFactNarrative(contradictory, 'fr', 'latin').includes('CA réalisé'), 'pas de direction globale ambiguë')
+})
+
+check('Y02', 'moteur : texte trompeur jamais publié malgré des observations valides', () => serial(async () => {
+  const previousPlanner = process.env.ASSISTANT_PLANNER
+  const previousNarrative = process.env.ASSISTANT_NARRATIVE
+  process.env.ASSISTANT_PLANNER = 'deterministic'
+  process.env.ASSISTANT_NARRATIVE = 'enabled'
+  try {
+    const out = await withProvider({ chat: async () => ({
+      text: JSON.stringify({ summary: 'Les commandes progressent et tous les clients sont satisfaits.',
+        observations: [{ metric: 'totalOrders', direction: 'up' }] }),
+      inputTokens: 600, outputTokens: 40, providerName: 'mock', modelName: 'mock', providerCostUsd: 0.001, usageKnown: true,
+    }) }, () => runEngine('Compare septembre 2026 et octobre 2026'))
+    assert(!out.structuredResponse.message_text.includes('satisfaits'), 'assertion libre absente')
+    assertEqual(out.structuredResponse.message_text, 'Commandes : en hausse.', 'phrase construite par le serveur')
+    assertEqual(out.providerUsage.inputTokens, 600, 'appel simulé réellement utilisé')
+  } finally {
+    restoreEnv('ASSISTANT_PLANNER', previousPlanner)
+    restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
+  }
+}))
+
+check('Y03', 'budget : usage conservé après planner ou narration hors délai', () => serial(async () => {
+  const originalNow = Date.now
+  const previousPlanner = process.env.ASSISTANT_PLANNER
+  const previousNarrative = process.env.ASSISTANT_NARRATIVE
+  let elapsed = 0
+  Date.now = () => originalNow() + elapsed
+  const provider = { chat: async () => {
+    elapsed = 21000
+    return { text: JSON.stringify({ schema: 1, operations: [], needsSeries: false, rationale: '' }),
+      inputTokens: 600, outputTokens: 40, providerName: 'openai', modelName: 'mock', providerCostUsd: 0.00063, usageKnown: true }
+  } }
+  try {
+    for (const phase of ['planner', 'narrative']) {
+      elapsed = 0
+      process.env.ASSISTANT_PLANNER = phase === 'planner' ? 'llm' : 'deterministic'
+      process.env.ASSISTANT_NARRATIVE = phase === 'narrative' ? 'enabled' : 'disabled'
+      const out = await withProvider(provider, () => runEngine('Compare septembre 2026 et octobre 2026'))
+      assertEqual(out.providerUsage.inputTokens, 600, `${phase}: entrée conservée`)
+      assertEqual(out.providerUsage.outputTokens, 40, `${phase}: sortie conservée`)
+      assertEqual(out.providerUsage.usageKnown, true, `${phase}: usage mesuré`)
+      assertEqual(out.providerUsage.providerCostUsd, 0.00063, `${phase}: coût conservé`)
+      assert((out.structuredResponse.warnings ?? []).some((w) => /budget/.test(w)), `${phase}: limite explicite`)
+      const credits = loadTs('lib/assistant/credits.ts')
+      const billing = credits.resolveUsageBilling({ kind: 'provider', ...out.providerUsage })
+      assert(billing.billable && billing.creditsConsumed > 0, `${phase}: aucune gratuité accidentelle`)
+    }
+  } finally {
+    Date.now = originalNow
     restoreEnv('ASSISTANT_PLANNER', previousPlanner)
     restoreEnv('ASSISTANT_NARRATIVE', previousNarrative)
   }
