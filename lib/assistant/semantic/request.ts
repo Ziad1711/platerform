@@ -9,6 +9,7 @@
  * foi, ce qui supprime les divergences entre la route et l'agent.
  */
 import type { BusinessRange } from '@/lib/dashboard/business-time'
+import { assertBusinessRange } from '@/lib/assistant/analytics-range'
 import { businessTodayIso, businessDateParts } from '@/lib/dashboard/business-time'
 import type { AssistantIntent } from '@/lib/assistant/types'
 import type { KpiMetricAlias } from '@/lib/assistant/analytics-contract'
@@ -16,6 +17,7 @@ import {
   DEFAULT_METRICS,
   PROFIT_METRICS,
   restrictMetrics,
+  METRIC_CATALOG,
   type MetricAccess,
 } from '@/lib/assistant/semantic/catalog'
 import {
@@ -145,6 +147,7 @@ export interface BuildAnalysisRequestInput {
   /** Clarification demandée par l'interprétation (période non résolue). */
   clarificationRequired?: boolean
   now?: Date
+  previousAnalysis?: import('@/lib/assistant/blocks/types').ResponseDocument['analysis']
 }
 
 function addOneDay(day: string): string {
@@ -182,15 +185,39 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
   const years = yearMentions(message)
   const relativeYears = resolveRelativeYears(message, currentYear)
   const comparisonIntent = isComparisonIntent(message)
+  const followUp = /(?:ces mois|ces p[ée]riodes|m[êe]mes mois|et par|et les|ann[ée]e pr[ée]c[ée]dente|previous year|those months|these months|same months|by city|by product|هاد الشهور|نفس الشهور|نفس الفترة|حسب المدينة|حسب المنتج|العام لي فات)/i.test(message)
+  const previous = input.previousAnalysis
+  const hasCurrentPeriod = /(?:ce mois|mois dernier|cette ann[ée]e|aujourd|hier|this month|last month|this year|today|yesterday|هاد الشهر|هاد العام|اليوم|البارح)/i.test(message)
 
   let plan: PeriodPlan
   if (months.length > 0) {
     const fallbackYear = years.length > 0 ? years[0].year : currentYear
+    const assigned = years.length === 0 && relativeYears.length > 0
+      ? relativeYears.flatMap((year) => months.map((month) => ({ year, month: month.month })))
+      : assignYears(months, years, fallbackYear)
+    // Années relatives et explicites appartiennent au même contrat temporel.
+    for (const year of relativeYears) {
+      if (assigned.some((month) => month.year === year)) continue
+      assigned.push(...[...new Set(months.map((month) => month.month))].map((month) => ({ year, month })))
+    }
     plan = buildPeriodPlan({
-      months: assignYears(months, years, fallbackYear),
+      months: assigned,
       maxPeriods: input.maxPeriods,
       comparisonIntent,
     })
+  } else if (previous?.schema === 1 && followUp && !hasCurrentPeriod && previous.periodPlan.periods.length <= input.maxPeriods) {
+    // La mémoire vient du document serveur, et ses bornes sont revalidées.
+    const prior = previous.periodPlan
+    for (const period of [...prior.periods, ...prior.groups]) assertBusinessRange(period.range)
+    plan = structuredClone(prior)
+    if (relativeYears.length === 1 && prior.periods.every((period) => period.months.length > 0)) {
+      // Une relance sur l'année précédente est relative aux périodes analysées,
+      // pas à l'horloge serveur (historique 2025 → référence 2024).
+      const latest = Math.max(...prior.periods.map((period) => period.year ?? 0))
+      const selected = prior.periods.filter((period) => period.year === latest)
+      const months = selected.flatMap((period) => period.months)
+      plan = buildPeriodPlan({ months: [...months, ...months.map((month) => ({ ...month, year: month.year - 1 }))], maxPeriods: input.maxPeriods, comparisonIntent: true })
+    }
   } else if (relativeYears.length >= 2) {
     plan = comparisonPeriodPlan(
       yearWindow(relativeYears[0], input.resolvedRange, now),
@@ -203,7 +230,11 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
   }
 
   const wantsProfit = PROFIT_REQUEST.test(message)
-  const requestedMetrics = detectMetrics(message)
+  const explicitMetrics = detectMetrics(message)
+  const requestedMetrics = explicitMetrics.length === 0 && followUp && previous
+    ? restrictMetrics(previous.requestedMetrics.filter((metric): metric is KpiMetricAlias =>
+        Object.prototype.hasOwnProperty.call(METRIC_CATALOG, metric)), input.access)
+    : explicitMetrics
   const base = wantsProfit ? PROFIT_METRICS : DEFAULT_METRICS
   // Un indicateur explicitement demandé passe en tête : le plafond d'affichage
   // ne peut plus évincer la métrique qui a motivé la question.
@@ -220,7 +251,9 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
     plan,
     metrics: restricted.length > 0 ? restricted : restrictMetrics(DEFAULT_METRICS, input.access),
     requestedMetrics: restrictMetrics(requestedMetrics, input.access),
-    dimensions: detectDimensions(message),
+    dimensions: detectDimensions(message).length > 0 ? detectDimensions(message)
+      : followUp && previous ? previous.requestedDimensions.filter((dimension): dimension is AnalysisDimension =>
+          DIMENSION_VOCABULARY.some((entry) => entry.dimension === dimension)) : [],
     access: input.access,
     needsSeries: SERIES_REQUEST.test(message) || plan.kind === 'single',
     netProfitRequested: NET_PROFIT_REQUEST.test(message),

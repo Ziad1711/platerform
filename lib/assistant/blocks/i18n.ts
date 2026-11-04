@@ -13,6 +13,8 @@ import type { AssistantLocale } from '@/lib/assistant/semantic/locale'
 export type Dictionary = Readonly<Record<string, string>>
 
 const FR: Dictionary = {
+  'analysis.decomposition': '{period} : le CA réalisé de {revenue}, diminué des achats, de la livraison, de la confirmation et de la publicité, donne une marge contributive de {margin}. Ce n’est pas un bénéfice net.',
+  'analysis.hypothesis': 'Hypothèse à vérifier pour {metric} ({period}) : contrôler la couverture et le mix des commandes. Aucune cause n’est établie par cette variation seule.',
   /* ---- Indicateurs ---- */
   'metric.totalOrders': 'Commandes',
   'metric.deliveredOrders': 'Livrées',
@@ -72,6 +74,8 @@ const FR: Dictionary = {
   'limit.netProfit': "Le bénéfice net n'est pas défini par le contrat analytique actuel : la marge contributive est publiée à la place, sans charges fixes déduites.",
   'limit.metricUnavailable': '{metric} n’est pas publié pour cette période.',
   'limit.dimensionUnavailable': 'La ventilation demandée n’a pas pu être lue : aucune valeur de détail n’est publiée.',
+  'limit.productProfit': 'Profit produit : ventes moins achats, hors publicité, livraison et confirmation.',
+  'limit.dimensionSubset': 'Détail limité : ces lignes ne représentent pas nécessairement le total de la période.',
   'limit.dimensionsTruncated': '{kept} ventilation(s) affichée(s) sur {total} : les autres sont omises.',
   'limit.dimensionScope': 'Ventilations calculées sur {period} uniquement, pas sur chaque période comparée.',
   'limit.kpiTruncated': '{kept} indicateur(s) affiché(s) sur {total} : les autres sont omis.',
@@ -143,6 +147,7 @@ const FR: Dictionary = {
   /* ---- Vocal ---- */
   'voice.label': 'Enregistrement vocal',
   'voice.recording': 'Enregistrement en cours',
+  'voice.encoding': 'Préparation de l’audio…',
   'voice.ready': 'Enregistrement prêt',
   'voice.transcribing': 'Transcription en cours…',
   'voice.cancel': 'Annuler l’enregistrement',
@@ -208,6 +213,8 @@ const AR: Dictionary = {
 }
 
 const AR_REST: Dictionary = {
+  'analysis.decomposition': '{period}: المبيعات المحققة {revenue} ناقص المشتريات والتوصيل والتأكيد والإعلانات تعطي هامش مساهمة {margin}. هذا ليس ربحًا صافيًا.',
+  'analysis.hypothesis': 'فرضية للتحقق بخصوص {metric} ({period}): راجع التغطية وتوزيع الطلبات. هذا الفرق وحده لا يثبت أي سبب.',
   ...AR,
   'reason.coverage_partial': 'التغطية جزئية على جزء من الفترة.',
   'reason.duration_differs': 'مدتان مختلفتان ({currentDays} و {baselineDays} يومًا).',
@@ -221,6 +228,8 @@ const AR_REST: Dictionary = {
   'limit.netProfit': 'الربح الصافي غير محدد في عقد التحليلات الحالي: يُعرض هامش المساهمة بدلًا منه، قبل الخصم الثابت.',
   'limit.metricUnavailable': '{metric} غير منشور لهذه الفترة.',
   'limit.dimensionUnavailable': 'لم يتم قراءة التوزيع المطلوب: لا تُنشر أي قيمة تفصيلية.',
+  'limit.productProfit': 'ربح المنتج: المبيعات ناقص المشتريات، دون الإعلانات والتوصيل والتأكيد.',
+  'limit.dimensionSubset': 'تفاصيل محدودة: هذه السطور لا تمثل بالضرورة إجمالي الفترة.',
   'dim.city': 'المدينة',
   'dim.product': 'المنتج',
   'dim.agent': 'الموظف',
@@ -274,6 +283,7 @@ const AR_REST: Dictionary = {
   'chart.revenue': 'رقم المعاملات',
   'voice.label': 'تسجيل صوتي',
   'voice.recording': 'جاري التسجيل',
+  'voice.encoding': 'جاري تجهيز الصوت…',
   'voice.ready': 'التسجيل جاهز',
   'voice.transcribing': 'جاري التفريغ…',
   'voice.cancel': 'إلغاء التسجيل',
@@ -322,6 +332,8 @@ const DARIJA_ARABIC: Dictionary = {
  */
 const DARIJA_LATIN: Dictionary = {
   ...FR,
+  'analysis.decomposition': '{period}: l-bi3 {revenue} na9es chra, tawsil, ta2kid w pub kay3ti marge {margin}. Machi ribh safi.',
+  'analysis.hypothesis': 'Iftirad khaso ta7a9o9 f {metric} ({period}): t2ekked mn taghtiya w no3 talabat. L-far9 bo7do ma kaytbet ta sabab.',
   'metric.totalOrders': 'Talabat',
   'metric.deliveredOrders': 'Tawselou',
   'metric.returnedOrders': 'Rjou3',
@@ -346,6 +358,9 @@ const DARIJA_LATIN: Dictionary = {
   'absence.no_coverage': 'Had l-fatra mazal ma 3andha tajmi3.',
   'absence.unavailable': 'L-qira2a ma nj7atch: ma n9droch n9oulo belli ma kaynch mo3tayat.',
   'voice.ready': 'Tasjil wajed',
+  'voice.encoding': 'Kanwejjed s-sout…',
+  'limit.productProfit': 'Ribh l-produit: l-bi3 na9es chra, bla pub, tawsil w ta2kid.',
+  'limit.dimensionSubset': 'Tafsil m7doud: had s-sotor machi darori majmou3 l-fatra.',
   'voice.send': 'Sift tasjil',
   'voice.stop': 'Wqef tasjil',
   'voice.cancel': 'Lghi tasjil',
@@ -375,6 +390,8 @@ const DARIJA_LATIN: Dictionary = {
 
 const EN: Dictionary = {
   ...FR,
+  'analysis.decomposition': '{period}: realized revenue of {revenue}, less purchases, delivery, confirmation and advertising, yields contribution margin of {margin}. This is not net profit.',
+  'analysis.hypothesis': 'Hypothesis to investigate for {metric} ({period}): check coverage and order mix. This change alone does not establish a cause.',
   'metric.totalOrders': 'Orders',
   'metric.deliveredOrders': 'Delivered',
   'metric.returnedOrders': 'Returns',
@@ -421,6 +438,8 @@ const EN: Dictionary = {
   'limit.netProfit': 'Net profit is not defined by the current analytics contract: contribution margin is published instead, before fixed costs.',
   'limit.metricUnavailable': '{metric} is not published for this period.',
   'limit.dimensionUnavailable': 'The requested breakdown could not be read: no detail values are published.',
+  'limit.productProfit': 'Product profit: sales minus purchases, excluding advertising, delivery and confirmation.',
+  'limit.dimensionSubset': 'Limited breakdown: these rows do not necessarily represent the period total.',
   'dim.city': 'City',
   'dim.product': 'Product',
   'dim.agent': 'Agent',
@@ -466,6 +485,7 @@ const EN: Dictionary = {
   'chart.delivered': 'Delivered',
   'chart.revenue': 'Realized revenue',
   'voice.recording': 'Recording',
+  'voice.encoding': 'Preparing audio…',
   'voice.ready': 'Recording ready',
   'voice.transcribing': 'Transcribing…',
   'voice.cancel': 'Cancel recording',

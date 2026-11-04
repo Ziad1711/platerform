@@ -11,12 +11,15 @@
  * - compatibilité assurée par `version`, les anciens messages restant lisibles.
  */
 import type { TextDirection, TextScript, AssistantLocale } from '@/lib/assistant/semantic/locale'
+import type { PeriodPlan } from '@/lib/assistant/semantic/periods'
+import type { AnalysisEvidence, EvidenceClaim } from '@/lib/assistant/fact-registry'
 
 export const RESPONSE_DOCUMENT_VERSION = 1
 
 export type BlockNoticeSeverity = 'info' | 'warning'
 
 export interface KpiItem {
+  evidenceIds?: string[]
   /** Identifiant du fait (métrique ou dérivée), jamais un libellé. */
   id: string
   label: string
@@ -35,6 +38,7 @@ export interface TableColumn {
 }
 
 export interface TableCell {
+  evidenceIds?: string[]
   value: string
   direction: TextDirection
 }
@@ -54,6 +58,7 @@ export interface ChartSeries {
 }
 
 export interface ChartPoint {
+  evidenceIds?: string[]
   x: string
   values: Record<string, number | null>
 }
@@ -66,7 +71,7 @@ export interface ChartBlock {
   points: ChartPoint[]
 }
 
-export type ResponseBlock =
+export type ResponseBlock = (
   | { type: 'summary'; text: string }
   | { type: 'kpi'; title?: string; items: KpiItem[] }
   | { type: 'table'; table: TableBlock }
@@ -75,6 +80,8 @@ export type ResponseBlock =
   | { type: 'recommendations'; title: string; items: string[] }
   | { type: 'notice'; severity: BlockNoticeSeverity; text: string; details?: string[] }
   | { type: 'clarification'; question: string }
+  | { type: 'analysis'; title: string; claims: EvidenceClaim[] }
+) & { evidenceIds?: string[] }
 
 /** Choix de présentation retenu par le serveur pour cette demande. */
 export type PresentationMode = 'short' | 'table' | 'chart' | 'mixed'
@@ -86,6 +93,14 @@ export interface ResponseDocument {
   direction: TextDirection
   presentation: PresentationMode
   blocks: ResponseBlock[]
+  evidence?: AnalysisEvidence[]
+  analysis?: {
+    schema: 1
+    periodPlan: PeriodPlan
+    requestedMetrics: string[]
+    requestedDimensions: string[]
+    windows: Array<{ id: string; state: string; publishedMetrics: string[] }>
+  }
 }
 
 export function isResponseDocument(value: unknown): value is ResponseDocument {

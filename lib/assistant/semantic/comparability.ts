@@ -73,7 +73,7 @@ function endsWithinDays(endsAt: string | null | undefined, today: string | null 
   // `endsAt` est exclusif : la dernière journée couverte est `endsAt - 1 jour`.
   const lastCovered = endExclusive - DAY_MS
   const gap = (todayStart - lastCovered) / DAY_MS
-  return gap >= 0 && gap <= days
+  return gap <= days
 }
 
 /** Une métrique publiée sans valeur ne peut jamais produire d'écart. */
@@ -146,7 +146,11 @@ export function decideMetricComparability(input: {
 
   const partial = currentValue!.state === 'partial' || baselineValue!.state === 'partial' ||
     current.state === 'partial' || baseline.state === 'partial'
-  if (partial) reasons.push('reason.coverage_partial')
+  if (partial) {
+    reasons.push('reason.coverage_partial')
+    // Sans population alignée, aucune variation métier ne peut être prouvée.
+    return { ...base, decision: 'side_by_side_only', reasons }
+  }
 
   // Une différence de durée n'interdit plus la comparaison : elle la nuance.
   if (durationDiffers) reasons.push('reason.duration_differs')

@@ -12,6 +12,55 @@
  */
 import type { AnalyticsState } from '@/lib/assistant/analytics-contract'
 
+/** Preuve V2 : une identité sémantique, pas une simple égalité numérique. */
+export interface AnalysisEvidence {
+  id: string
+  kind: 'metric' | 'comparison' | 'dimension' | 'derived' | 'series'
+  metric: string
+  value: string
+  unit: 'count' | 'decimal' | 'percent'
+  currency: string | null
+  storeIds: string[]
+  windowId: string
+  range: VerifiedFactRange
+  population: 'order_cohort' | 'ranked_subset' | 'sample' | 'dimension_population'
+  state: AnalyticsState
+  axis: 'order' | 'delivery' | 'event'
+  definition: string
+  numerator?: number | null
+  denominator?: number | null
+  coverage: unknown
+  provenance: string[]
+  parents: string[]
+  direction?: 'up' | 'down' | 'flat'
+  baselineWindowId?: string
+  dimension?: string
+  member?: string
+  memberId?: string
+  reserves: string[]
+}
+
+export interface EvidenceClaim {
+  kind: 'fact' | 'trend' | 'decomposition' | 'hypothesis' | 'recommendation'
+  evidenceIds: string[]
+  /** Texte rendu par le serveur depuis les preuves, jamais du texte LLM brut. */
+  text: string
+}
+
+export function validateEvidenceRegistry(facts: readonly AnalysisEvidence[]): boolean {
+  const ids = new Set(facts.map((fact) => fact.id))
+  const validDay = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) &&
+    Number.isFinite(Date.parse(`${day}T00:00:00Z`)) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day
+  return ids.size === facts.length && facts.every((fact) =>
+    /^-?\d+(?:\.\d+)?$/.test(fact.value) && fact.storeIds.length > 0 &&
+    validDay(fact.range.from) && validDay(fact.range.to) && fact.range.from < fact.range.to && fact.provenance.length > 0 &&
+    PUBLISHABLE_STATES.has(fact.state) &&
+    (fact.unit !== 'decimal' || fact.currency !== null) &&
+    fact.parents.every((id) => ids.has(id) && facts.findIndex((entry) => entry.id === id) < facts.indexOf(fact)) && fact.coverage !== undefined &&
+    Boolean(fact.definition) && Boolean(fact.axis) &&
+    (fact.kind !== 'comparison' || (fact.parents.length === 2 && Boolean(fact.baselineWindowId))))
+}
+
 /** États dont la valeur peut être citée (avec réserve pour `partial`). */
 const PUBLISHABLE_STATES: ReadonlySet<string> = new Set(['complete', 'empty', 'partial'])
 

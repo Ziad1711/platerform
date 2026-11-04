@@ -44,6 +44,7 @@ import { runSecureAssistantAgent } from '@/lib/assistant/agent'
 import { runAnalyticEngine } from '@/lib/assistant/agent/engine'
 import { isEngineV2Enabled } from '@/lib/assistant/engine/policy'
 import { assertDistributedAdmission } from '@/lib/assistant/engine/admission'
+import { monthMentions } from '@/lib/assistant/semantic/periods'
 
 /** Longueur maximale d'un message utilisateur (caractères). */
 const MAX_MESSAGE_LENGTH = 2000
@@ -324,7 +325,15 @@ export async function POST(request: Request) {
     const conversationalHistory = previousMessages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .slice(-CONVERSATION_HISTORY_LIMIT)
-      .map((m) => ({ role: m.role as 'user' | 'assistant', content: String(m.content || '') }))
+      .map((m) => {
+        const metadata = m.metadata as { structured_response?: AssistantStructuredResponse } | null
+        const analysis = isEngineV2Enabled() ? metadata?.structured_response?.document?.analysis : undefined
+        return {
+          role: m.role as 'user' | 'assistant',
+          content: `${String(m.content || '').slice(0, MAX_MESSAGE_LENGTH)}${analysis
+            ? `\nContexte analytique vérifié : ${JSON.stringify(analysis)}` : ''}`,
+        }
+      })
 
     // Mémoire analytique : restaurée depuis le dernier message assistant.
     const lastAssistantMsg = [...previousMessages].reverse().find((m) => m.role === 'assistant')
@@ -360,7 +369,8 @@ export async function POST(request: Request) {
     // débit, mais message tracé avec la clé d'idempotence.
     let smallResponse: AssistantStructuredResponse | null = null
 
-    if (needsPeriodClarification(body.message, range)) {
+    if (needsPeriodClarification(body.message, range) &&
+        !(isEngineV2Enabled() && monthMentions(body.message).length > 0)) {
       // Période explicitement demandée mais non résolue : on demande une
       // précision courte, sans appel IA et sans débit de crédits.
       smallResponse = language === 'ar'
@@ -481,6 +491,7 @@ export async function POST(request: Request) {
 
     let agentResult: Awaited<ReturnType<typeof runSecureAssistantAgent>>
     const agentInput = {
+      requestId,
       supabase,
       scopeStoreIds: targetStoreIds,
       scopeContext: {
@@ -494,6 +505,7 @@ export async function POST(request: Request) {
       range,
       userMessage: body.message,
       conversationHistory: conversationalHistory,
+      previousAnalysis: (threadMeta?.structured_response as AssistantStructuredResponse | undefined)?.document?.analysis,
       providerModel: model,
       language,
       signal: controller.signal,
@@ -640,6 +652,7 @@ export async function POST(request: Request) {
     const consumedCredits = finalization.replayed ? 0 : finalization.creditsConsumed
 
     console.info('[assistant] request_done', {
+      requestId,
       intent,
       storeId: selectedStoreId,
       durationMs: Date.now() - startedAt,

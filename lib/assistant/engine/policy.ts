@@ -87,6 +87,10 @@ export function isDeepeningEnabled(env: EnvLike = process.env): boolean {
 }
 
 export const NARRATIVE_ENV = 'ASSISTANT_NARRATIVE'
+/** Nouvelle interprétation temporelle : rollback sans changement du moteur. */
+export function isSemanticPlannerEnabled(env: EnvLike = process.env): boolean {
+  return readStrictFlag(env, 'ASSISTANT_SEMANTIC_PLANNER')
+}
 
 /**
  * Rédaction par le modèle : **activée par défaut** pour conserver la parité de
