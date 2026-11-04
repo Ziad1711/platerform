@@ -24,6 +24,8 @@ import {
   assignYears,
   buildPeriodPlan,
   comparisonPeriodPlan,
+  mentionsCurrentYear,
+  mentionsPreviousYear,
   monthMentions,
   resolveRelativeYears,
   singlePeriodPlan,
@@ -185,9 +187,13 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
   const years = yearMentions(message)
   const relativeYears = resolveRelativeYears(message, currentYear)
   const comparisonIntent = isComparisonIntent(message)
-  const followUp = /(?:ces mois|ces p[ée]riodes|m[êe]mes mois|et par|et les|ann[ée]e pr[ée]c[ée]dente|previous year|those months|these months|same months|by city|by product|هاد الشهور|نفس الشهور|نفس الفترة|حسب المدينة|حسب المنتج|العام لي فات)/i.test(message)
+  // Les références d'année passent par le même extracteur que le plan : une
+  // variante orthographique ne peut plus être reconnue ici et ignorée là.
+  const followUp = /(?:ces mois|ces p[ée]riodes|m[êe]mes mois|et par|et les|previous year|those months|these months|same months|by city|by product|هاد الشهور|نفس الشهور|نفس الفترة|حسب المدينة|حسب المنتج)/i.test(message) ||
+    mentionsPreviousYear(message)
   const previous = input.previousAnalysis
-  const hasCurrentPeriod = /(?:ce mois|mois dernier|cette ann[ée]e|aujourd|hier|this month|last month|this year|today|yesterday|هاد الشهر|هاد العام|اليوم|البارح)/i.test(message)
+  const hasCurrentPeriod = /(?:ce mois|mois dernier|aujourd|hier|this month|last month|today|yesterday|هاد الشهر|اليوم|البارح)/i.test(message) ||
+    mentionsCurrentYear(message)
 
   let plan: PeriodPlan
   if (months.length > 0) {

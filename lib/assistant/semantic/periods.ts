@@ -94,8 +94,27 @@ const MONTH_ALIASES: ReadonlyArray<{ month: number; pattern: RegExp }> = (() => 
   }))
 })()
 
-const RELATIVE_YEAR_BACK = /(?:l['’]année derni[eè]re|l['’]an dernier|année pr[eé]c[eé]dente|العام لي فات|السنة الماضية|العام الماضي|last year)/
-const RELATIVE_YEAR_CURRENT = /(?:cette ann[eé]e|ann[eé]e en cours|هاد العام|هذه السنة|this year)/
+/**
+ * Références d'année relative.
+ *
+ * Les motifs sont écrits en forme **repliée** (`foldForMatching`) : la ta
+ * marbouta, le ya et les variantes de hamza ne changent pas le sens, mais
+ * cassent une comparaison littérale. L'article arabe du pronom relatif est
+ * optionnel (`اللي` / `لي`) et l'année courante accepte ses deux démonstratifs
+ * (`هاد` / `هذا`) : ce sont des variantes orthographiques, pas des phrases.
+ */
+const RELATIVE_YEAR_BACK = /(?:l['’]ann[ée]e derni[eè]re|l['’]an dernier|ann[ée]e pr[ée]c[ée]dente|العام\s+(?:ال)?لي\s+فات|العام\s+الماضي|السنه\s+الماضيه|السنه\s+(?:ال)?لي\s+فاتت|last year)/
+const RELATIVE_YEAR_CURRENT = /(?:cette ann[ée]e|ann[ée]e en cours|هاد\s+العام|هذا\s+العام|هذه\s+السنه|السنه\s+الحاليه|this year)/
+
+/** L'utilisateur situe la demande sur l'année en cours. */
+export function mentionsCurrentYear(message: string): boolean {
+  return RELATIVE_YEAR_CURRENT.test(foldForMatching(String(message ?? '')))
+}
+
+/** L'utilisateur situe la demande sur l'année précédente. */
+export function mentionsPreviousYear(message: string): boolean {
+  return RELATIVE_YEAR_BACK.test(foldForMatching(String(message ?? '')))
+}
 
 function toMonthRange(ref: MonthRef): BusinessRange {
   const start = new Date(Date.UTC(ref.year, ref.month - 1, 1))
@@ -194,7 +213,7 @@ export function assignYears(
 
 /** Années cibles lorsque seules des clés relatives sont citées. */
 export function resolveRelativeYears(message: string, currentYear: number): number[] {
-  const text = String(message ?? '')
+  const text = foldForMatching(String(message ?? ''))
   if (RELATIVE_YEAR_BACK.test(text) && RELATIVE_YEAR_CURRENT.test(text)) {
     return [currentYear, currentYear - 1]
   }

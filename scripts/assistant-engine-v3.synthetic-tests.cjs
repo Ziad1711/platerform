@@ -688,6 +688,105 @@ async function runEngine(message, extra = {}) {
   })
 }
 
+/* -------------------------------------------------------------------------- */
+/* 12. Agent : interprétation fusionnée, validation stricte, budgets          */
+/* -------------------------------------------------------------------------- */
+
+const interpretation = loadTs('lib/assistant/agent/interpretation.ts')
+const answerModule = loadTs('lib/assistant/agent/answer.ts')
+
+const AGENT_PAYLOAD = {
+  schema: 1,
+  locale: 'darija',
+  intent: 'analysis',
+  periods: [
+    { kind: 'month', year: 2026, month: 9 },
+    { kind: 'month', year: 2026, month: 10 },
+    { kind: 'month', year: 2025, month: 9 },
+    { kind: 'month', year: 2025, month: 10 },
+  ],
+  comparisons: [{ current: 0, baseline: 2 }, { current: 1, baseline: 3 }],
+  metrics: ['revenue', 'totalOrders'],
+  dimensions: ['city'],
+  wantsSeries: false,
+  tools: [{ tool: 'read_kpis' }, { tool: 'read_dimension', dimension: 'city' }],
+  clarify: null,
+}
+
+const DARIJA_MESSAGE = 'قارن ليا شتنبر وأكتوبر ديال هاد العام مع نفس الشهور ديال العام اللي فات'
+
+check('AG01', 'interprétation validée : quatre fenêtres et trois correspondances', () => {
+  const parsed = interpretation.parseInterpretation(JSON.stringify(AGENT_PAYLOAD), 'full', DARIJA_MESSAGE)
+  assert(parsed !== null, 'interprétation acceptée')
+  assertEqual(parsed.plan.periods.length, 4, 'quatre fenêtres')
+  assertEqual(parsed.plan.pairs.length, 3, 'trois correspondances')
+  assertEqual(parsed.metrics.join(','), 'revenue,totalOrders', 'métriques du modèle')
+  assertEqual(parsed.dimensions.join(','), 'city', 'dimension validée')
+})
+
+check('AG02', 'texte libre ou JSON invalide : aucune interprétation inventée', () => {
+  assertEqual(interpretation.parseInterpretation('je pense que septembre est meilleur', 'full', DARIJA_MESSAGE), null, 'texte refusé')
+  assertEqual(interpretation.parseInterpretation('{"schema":1}', 'full', DARIJA_MESSAGE), null, 'schéma incomplet refusé')
+})
+
+check('AG03', 'périodes incohérentes : clarification, jamais exécution partielle', () => {
+  const mixed = { ...AGENT_PAYLOAD, periods: [{ kind: 'month', year: 2026, month: 9 }, { kind: 'range', from: '2026-10-01', to: '2026-11-01' }] }
+  assertEqual(interpretation.parseInterpretation(JSON.stringify(mixed), 'full', DARIJA_MESSAGE), null, 'conventions mélangées')
+  const inverted = { ...AGENT_PAYLOAD, periods: [{ kind: 'range', from: '2026-11-01', to: '2026-10-01' }], comparisons: [] }
+  assertEqual(interpretation.parseInterpretation(JSON.stringify(inverted), 'full', DARIJA_MESSAGE), null, 'bornes inversées')
+  const badIndex = { ...AGENT_PAYLOAD, periods: [{ kind: 'range', from: '2026-09-01', to: '2026-10-01' }], comparisons: [{ current: 0, baseline: 5 }] }
+  assertEqual(interpretation.parseInterpretation(JSON.stringify(badIndex), 'full', DARIJA_MESSAGE), null, 'indice hors bornes')
+})
+
+check('AG04', 'SQL ou table dans le plan : rejeté par le schéma strict', () => {
+  const injected = { ...AGENT_PAYLOAD, sql: 'select * from orders' }
+  assertEqual(interpretation.parseInterpretation(JSON.stringify(injected), 'full', DARIJA_MESSAGE), null, 'propriété inconnue refusée')
+  const badTool = { ...AGENT_PAYLOAD, tools: [{ tool: 'run_sql' }] }
+  assertEqual(interpretation.parseInterpretation(JSON.stringify(badTool), 'full', DARIJA_MESSAGE), null, 'outil inconnu refusé')
+})
+
+check('AG05', 'métriques et dimensions hors catalogue : filtrées, jamais exécutées', () => {
+  const payload = { ...AGENT_PAYLOAD, metrics: ['revenue', 'satisfaction'], dimensions: ['city', 'weather'] }
+  const parsed = interpretation.parseInterpretation(JSON.stringify(payload), 'full', DARIJA_MESSAGE)
+  assert(parsed !== null, 'interprétation acceptée')
+  assertEqual(parsed.metrics.includes('satisfaction'), false, 'métrique inconnue retirée')
+  assertEqual(parsed.dimensions.join(','), 'city', 'dimension inconnue retirée')
+})
+
+check('AG06', 'réponse explicative : chiffres et preuves inconnues refusés', () => {
+  const allowed = new Set(['p0:metric:revenue'])
+  const valid = answerModule.sanitizeAgentAnswer(JSON.stringify({
+    schema: 1, summary: 'La période comparée montre une évolution nette.',
+    hypotheses: [{ factIds: ['p0:metric:revenue'], text: 'La saisonnalité peut expliquer une partie de l’écart.' }],
+    recommendations: [],
+  }), allowed)
+  assert(valid !== null, 'réponse sans chiffre acceptée')
+  assertEqual(valid.hypotheses.length, 1, 'hypothèse conservée')
+  const withDigits = answerModule.sanitizeAgentAnswer(JSON.stringify({
+    schema: 1, summary: 'Le CA a progressé de 12 %.', hypotheses: [], recommendations: [],
+  }), allowed)
+  assertEqual(withDigits, null, 'résumé chiffré refusé')
+  const unknownFact = answerModule.sanitizeAgentAnswer(JSON.stringify({
+    schema: 1, summary: 'Évolution notable.', hypotheses: [{ factIds: ['inconnu'], text: 'Hypothèse.' }], recommendations: [],
+  }), allowed)
+  assertEqual(unknownFact, null, 'preuve inconnue refusée')
+})
+
+check('AG07', 'budgets IA : appels, tokens et coût plafonnés', () => {
+  const tracker = policy.createBudgetTracker({ ...policy.DEFAULT_BUDGETS, maxProviderCalls: 1, maxTotalTokens: 100, maxEstimatedCostUsd: 0.001 }, () => 0)
+  tracker.consumeProviderCall()
+  let calls = 0
+  try { tracker.consumeProviderCall() } catch (error) { calls += 1; assertEqual(error.code, 'BUDGET_AI_CALLS', 'code appels') }
+  assertEqual(calls, 1, 'second appel refusé')
+  let tokens = 0
+  try { tracker.consumeUsage({ tokens: 500, costUsd: 0 }) } catch (error) { tokens += 1; assertEqual(error.code, 'BUDGET_AI_TOKENS', 'code tokens') }
+  assertEqual(tokens, 1, 'plafond tokens appliqué')
+  const cost = policy.createBudgetTracker({ ...policy.DEFAULT_BUDGETS, maxEstimatedCostUsd: 0.001 }, () => 0)
+  let costHits = 0
+  try { cost.consumeUsage({ tokens: 1, costUsd: 0.5 }) } catch (error) { costHits += 1; assertEqual(error.code, 'BUDGET_AI_COST', 'code coût') }
+  assertEqual(costHits, 1, 'plafond coût appliqué')
+})
+
 check('R01', 'quatre périodes : trois comparaisons réellement publiées', async () => {
   const outcome = await runEngine('Compare septembre et octobre 2026 avec septembre et octobre 2025')
   const tables = outcome.structuredResponse.document.blocks.filter((block) => block.type === 'table')
@@ -1596,6 +1695,49 @@ check('ASTRA11', 'parcours multilingue moteur et composant React réels', () => 
   }
 }))
 
+check('ASTRA17', 'darija : « هاد العام » + « العام اللي فات » conservent quatre fenêtres', () => {
+  for (const message of [
+    'قارن ليا شتنبر وأكتوبر ديال هاد العام مع نفس الشهور ديال العام اللي فات',
+    'قارن ليا أكتوبر ونونبر ديال هاد العام مع نفس الشهور ديال العام اللي فات',
+  ]) {
+    const built = request.buildAnalysisRequest({
+      message,
+      intent: 'period_comparison',
+      resolvedRange: { from: '2026-01-01', to: '2026-11-04' },
+      access: 'full',
+      maxPeriods: 6,
+      now: new Date('2026-11-04T12:00:00.000Z'),
+    })
+    assertEqual(built.plan.periods.length, 4, `quatre fenêtres (obtenu ${built.plan.periods.length}) : ${message}`)
+    assertEqual(built.plan.pairs.length, 3, `trois correspondances (obtenu ${built.plan.pairs.length}) : ${message}`)
+    // Quatre mois élémentaires + deux agrégats pluri-mois effectivement lus.
+    assertEqual(request.planWindows(built.plan).length, 6, `fenêtres planifiées (obtenu ${request.planWindows(built.plan).length}) : ${message}`)
+    const years = [...new Set(built.plan.periods.map((period) => period.year))]
+    assertEqual(years.length, 2, `deux années distinctes (obtenu ${years.join(',')})`)
+    assertEqual(Math.max(...years) - Math.min(...years), 1, 'années consécutives')
+  }
+})
+
+check('ASTRA18', 'darija : variantes « لي فات » / « هذا العام » et formulation française', () => {
+  for (const message of [
+    'قارن ليا شتنبر وأكتوبر ديال هذا العام مع نفس الشهور ديال العام لي فات',
+    'قارن ليا شتنبر وأكتوبر ديال هاد العام مع نفس الشهور ديال العام اللي فات',
+    'Compare septembre et octobre de cette année avec les mêmes mois de l’année dernière',
+  ]) {
+    const built = request.buildAnalysisRequest({
+      message,
+      intent: 'period_comparison',
+      resolvedRange: { from: '2026-01-01', to: '2026-11-04' },
+      access: 'full',
+      maxPeriods: 6,
+      now: new Date('2026-11-04T12:00:00.000Z'),
+    })
+    assertEqual(built.plan.periods.length, 4, `quatre fenêtres (obtenu ${built.plan.periods.length}) : ${message}`)
+    const years = [...new Set(built.plan.periods.map((period) => period.year))]
+    assertEqual(Math.max(...years) - Math.min(...years), 1, `années consécutives : ${message}`)
+  }
+})
+
 check('ASTRA12', 'relance : ces mois et année précédente conservent métrique et contexte', () => serial(async () => {
   const outcome = await runEngine('Compare le CA de septembre et octobre 2025 avec les mêmes mois de 2024')
   const previousAnalysis = outcome.structuredResponse.document.analysis
@@ -1657,6 +1799,41 @@ check('ASTRA16', 'décomposition vérifiée uniquement si l’identité comptabl
   assert(compose.buildEvidenceClaims(facts, req).some((claim) => claim.kind === 'decomposition'), 'identité exacte expliquée')
   facts.find((fact) => fact.metric === 'contributionMargin').value = '501'
   assert(!compose.buildEvidenceClaims(facts, req).some((claim) => claim.kind === 'decomposition'), 'écart non expliqué rejeté')
+}))
+
+check('AG08', 'orchestrateur réel : un appel fusionné pilote le plan validé', () => serial(async () => {
+  const provider = {
+    chat: async () => ({
+      text: JSON.stringify(AGENT_PAYLOAD),
+      inputTokens: 200, outputTokens: 80, providerName: 'mock', modelName: 'mock',
+      providerCostUsd: 0.0002, usageKnown: true, usageState: 'measured',
+    }),
+  }
+  const previous = process.env.ASSISTANT_AGENT_LLM
+  process.env.ASSISTANT_AGENT_LLM = 'enabled'
+  try {
+    const outcome = await withProvider(provider, () => runEngine(DARIJA_MESSAGE))
+    const document = outcome.structuredResponse.document
+    assertEqual(document.analysis.periodPlan.periods.length, 4, 'quatre fenêtres dans le document')
+    assert(outcome.activitySteps.some((step) => step.label === 'Interprétation'), 'étape Interprétation tracée')
+    assert(outcome.providerUsage.inputTokens >= 200, 'usage de l’interprétation comptabilisé')
+  } finally {
+    if (previous === undefined) delete process.env.ASSISTANT_AGENT_LLM
+    else process.env.ASSISTANT_AGENT_LLM = previous
+  }
+}))
+
+check('AG09', 'agent indisponible : repli annoncé, jamais silencieux', () => serial(async () => {
+  const previous = process.env.ASSISTANT_AGENT_LLM
+  process.env.ASSISTANT_AGENT_LLM = 'enabled'
+  try {
+    const outcome = await withProvider(failingProvider(undefined), () => runEngine('Compare septembre 2026 avec octobre 2026'))
+    const warnings = (outcome.structuredResponse.warnings ?? []).join(' ')
+    assert(warnings.includes('Compréhension automatique indisponible'), 'limitation annoncée')
+  } finally {
+    if (previous === undefined) delete process.env.ASSISTANT_AGENT_LLM
+    else process.env.ASSISTANT_AGENT_LLM = previous
+  }
 }))
 
 const passed = results.filter((result) => result.pass).length

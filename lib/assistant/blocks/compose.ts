@@ -801,6 +801,11 @@ export function validateDocumentEvidence(document: ResponseDocument): boolean {
     if (block.type === 'insights' || block.type === 'recommendations') return false
     if (block.type === 'summary') {
       if (!document.analysis) return false
+      // Réponse agent : résumé libre, mais sans aucun chiffre et borné. Les
+      // valeurs restent exclusivement dans les blocs vérifiés.
+      if (document.analysis.agent === true) {
+        return block.text.trim().length > 0 && block.text.length <= 260 && !/\d/.test(block.text)
+      }
       const dict = resolveDictionary(document.locale, document.script)
       const plan = document.analysis.periodPlan
       const all = [...plan.periods, ...plan.groups]
@@ -815,10 +820,25 @@ export function validateDocumentEvidence(document: ResponseDocument): boolean {
           : translate(dict, 'summary.single', { period: label(plan.periods[0]?.id ?? '') })
       return block.text === expected || block.text === translate(dict, 'summary.noFigures')
     }
-    if (block.type === 'analysis') return block.claims.every((claim) => valid(claim.evidenceIds) &&
-      allowedClaims.some((allowed) => allowed.kind === claim.kind && allowed.text === claim.text &&
-        JSON.stringify(allowed.evidenceIds) === JSON.stringify(claim.evidenceIds)))
-    if (block.type === 'kpi') return block.items.every((item) => matchingValue(item.value, item.evidenceIds))
+    if (block.type === 'analysis') return block.claims.every((claim) => {
+      if (!valid(claim.evidenceIds)) return false
+      // Réponse agent : seules les hypothèses et recommandations portent du
+      // texte libre. Elles restent étiquetées, sans chiffre, adossées à une
+      // preuve réelle. La validation ne prétend pas comprendre la phrase.
+      if (document.analysis?.agent === true &&
+        (claim.kind === 'hypothesis' || claim.kind === 'recommendation')) {
+        return claim.text.trim().length > 0 && claim.text.length <= 200 && !/\d/.test(claim.text)
+      }
+      return allowedClaims.some((allowed) => allowed.kind === claim.kind && allowed.text === claim.text &&
+        JSON.stringify(allowed.evidenceIds) === JSON.stringify(claim.evidenceIds))
+    })
+    // Un KPI doit être prouvé par la métrique qu'il affiche : une valeur
+    // identique pour un autre indicateur ne valide jamais l'item.
+    if (block.type === 'kpi') return block.items.every((item) => matchingValue(item.value, item.evidenceIds) &&
+      (item.evidenceIds ?? []).some((id) => {
+        const fact = document.evidence!.find((entry) => entry.id === id)
+        return Boolean(fact) && fact!.metric === item.id
+      }))
     if (block.type === 'table') return block.table.rows.every((row) => row.cells.every((cell, index) =>
       index === 0 || cell.value === '—' || !/^[+−-]?\d/.test(cell.value) || matchingValue(cell.value, cell.evidenceIds)))
     if (block.type === 'chart') return block.chart.points.every((point) => valid(point.evidenceIds) &&

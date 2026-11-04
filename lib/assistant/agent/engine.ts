@@ -26,6 +26,7 @@ import {
   createBudgetTracker,
   DEFAULT_BUDGETS,
   EngineBudgetError,
+  isAgentLlmEnabled,
   isDeepeningEnabled,
   isNarrativeEnabled,
   isPlannerLlmEnabled,
@@ -40,6 +41,8 @@ import { sanitizePublicText, sanitizeWarnings } from '@/lib/assistant/blocks/san
 import type { ResponseDocument } from '@/lib/assistant/blocks/types'
 import { getAssistantProvider } from '@/lib/assistant/providers'
 import { requestDeepeningPlan, requestDynamicPlan, MAX_DEEPENING_DIMENSIONS, type DynamicPlan } from '@/lib/assistant/agent/planner'
+import { requestInterpretation, type AgentInterpretation } from '@/lib/assistant/agent/interpretation'
+import { buildAgentAnswerPrompt, sanitizeAgentAnswer, type AgentAnswer } from '@/lib/assistant/agent/answer'
 import type { AssistantStructuredResponse } from '@/lib/assistant/types'
 import type { RunSecureAgentInput, RunSecureAgentOutput, AgentStep } from '@/lib/assistant/agent/types'
 
@@ -103,9 +106,9 @@ export function buildSuggestions(locale: AssistantRequestLocale, script: 'latin'
 type AssistantRequestLocale = AnalysisRequest['profile']['locale']
 
 /** Message de clarification : aucune lecture n'est lancée. */
-export function clarificationOutcome(request: AnalysisRequest): EngineOutcome {
+export function clarificationOutcome(request: AnalysisRequest, questionOverride?: string | null): EngineOutcome {
   const dict = resolveDictionary(request.profile.locale, request.profile.script)
-  const question = translate(dict, 'clarify.period')
+  const question = questionOverride?.trim() || translate(dict, 'clarify.period')
   const document: ResponseDocument = {
     version: 1,
     locale: request.profile.locale,
@@ -328,6 +331,85 @@ export function applyDynamicPlan(base: AnalysisRequest, plan: DynamicPlan | null
     metrics: merged.length > 0 ? merged : base.metrics,
     dimensions: dimensions.length > 0 ? dimensions : base.dimensions,
     needsSeries: base.needsSeries || plan.needsSeries,
+  }
+}
+
+/**
+ * Applique une interprétation agentique validée.
+ *
+ * Le plan du modèle **remplace** le plan déterministe (il a été validé fenêtre
+ * par fenêtre), mais aucune métrique explicitement demandée n'est perdue : les
+ * indicateurs demandés, ceux du modèle et la sélection par défaut sont fusionnés
+ * sous la contrainte d'accès.
+ */
+export function applyInterpretation(base: AnalysisRequest, interpretation: AgentInterpretation): AnalysisRequest {
+  const merged: AnalysisRequest['metrics'] = []
+  for (const metric of [...interpretation.requestedMetrics, ...interpretation.metrics, ...base.metrics]) {
+    if (!merged.includes(metric) && isMetricAllowed(metric, base.access)) merged.push(metric)
+  }
+  const dimensions: AnalysisRequest['dimensions'] = []
+  for (const dimension of [...interpretation.dimensions, ...base.dimensions]) {
+    if (!dimensions.includes(dimension)) dimensions.push(dimension)
+  }
+  return {
+    ...base,
+    plan: interpretation.plan,
+    metrics: merged.length > 0 ? merged : base.metrics,
+    requestedMetrics: interpretation.requestedMetrics.length > 0
+      ? interpretation.requestedMetrics
+      : base.requestedMetrics,
+    dimensions,
+    needsSeries: interpretation.needsSeries,
+    clarification: null,
+  }
+}
+
+/**
+ * Applique une réponse explicative validée.
+ *
+ * Le résumé est remplacé, et les hypothèses/recommandations sont jointes comme
+ * affirmations **étiquetées**. Aucune valeur numérique ne peut y entrer : les
+ * chiffres restent dans les blocs calculés et le registre de preuves.
+ */
+export function applyAgentAnswer(
+  structured: AssistantStructuredResponse,
+  answer: AgentAnswer,
+  title: string,
+): AssistantStructuredResponse {
+  const document = structured.document
+  if (!document) return structured
+
+  const blocks = document.blocks.map((block) =>
+    block.type === 'summary' ? { ...block, text: answer.summary } : block)
+
+  const claims = [
+    ...answer.hypotheses.map((claim) => ({
+      kind: 'hypothesis' as const, evidenceIds: claim.factIds, text: claim.text,
+    })),
+    ...answer.recommendations.map((claim) => ({
+      kind: 'recommendation' as const, evidenceIds: claim.factIds, text: claim.text,
+    })),
+  ]
+  if (claims.length > 0) {
+    const existing = blocks.find((block) => block.type === 'analysis')
+    if (existing && existing.type === 'analysis') {
+      existing.claims = [...existing.claims, ...claims]
+      existing.evidenceIds = existing.claims.flatMap((claim) => claim.evidenceIds)
+    } else {
+      blocks.push({
+        type: 'analysis',
+        title,
+        claims,
+        evidenceIds: claims.flatMap((claim) => claim.evidenceIds),
+      })
+    }
+  }
+
+  const analysis = document.analysis ? { ...document.analysis, agent: true } : document.analysis
+  return {
+    ...structured,
+    message_text: [answer.summary, ...claims.map((claim) => claim.text)].join(' '),
+    document: { ...document, blocks, analysis },
   }
 }
 
@@ -608,10 +690,58 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
   const tracker = createBudgetTracker()
   let budgetExceeded = false
 
-  // 2. Planification dynamique bornée : le modèle propose, le backend dispose.
+  // 2. Interprétation agentique (opt-in) : un seul appel fusionne compréhension
+  // et planification. Le serveur valide ensuite chaque période et chaque outil ;
+  // un échec retombe sur l'interprétation déterministe, qui annonce sa limite.
+  let interpretationUsage: RunSecureAgentOutput['providerUsage'] | null = null
+  let interpretation: AgentInterpretation | null = null
+  let interpretationFellBack = false
+  if (isAgentLlmEnabled()) {
+    tracker.assertTime()
+    try {
+      tracker.consumeProviderCall()
+    } catch (error) {
+      if (!(error instanceof EngineBudgetError)) throw error
+      budgetExceeded = true
+    }
+    if (!budgetExceeded) {
+      const interpreted = await requestInterpretation({
+        message: input.userMessage,
+        access: deterministic.access,
+        model: input.providerModel,
+        signal: input.signal,
+        history: input.conversationHistory,
+        previousAnalysis: input.previousAnalysis
+          ? { periodPlan: input.previousAnalysis.periodPlan }
+          : undefined,
+      })
+      interpretationUsage = interpreted.usage
+      if (interpreted.usage) {
+        try {
+          tracker.consumeUsage({
+            tokens: Number(interpreted.usage.inputTokens) + Number(interpreted.usage.outputTokens),
+            costUsd: interpreted.usage.providerCostUsd,
+          })
+        } catch (error) {
+          if (!(error instanceof EngineBudgetError)) throw error
+          budgetExceeded = true
+        }
+      }
+      interpretation = interpreted.interpretation
+      interpretationFellBack = !interpretation
+      activitySteps.push({
+        label: 'Interprétation',
+        detail: interpretation
+          ? `${interpretation.plan.periods.length} fenêtre(s) validée(s), ${interpretation.metrics.length} métrique(s)`
+          : `repli déterministe (${interpreted.reason})`,
+      })
+    }
+  }
+
+  // 3. Planification dynamique bornée : le modèle propose, le backend dispose.
   let plannerUsage: RunSecureAgentOutput['providerUsage'] | null = null
   let plan: DynamicPlan | null = null
-  if (isPlannerLlmEnabled()) {
+  if (!interpretation && isPlannerLlmEnabled()) {
     tracker.assertTime()
     const planned = await requestDynamicPlan({
       message: input.userMessage,
@@ -633,7 +763,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
     plannerUsage = planned.usage
     if (!tracker.canContinue()) {
       const limited = failureOutcome(profile.locale, profile.script, 'absence.budget')
-      return { ...limited, providerUsage: mergeUsage(plannerUsage) }
+      return { ...limited, providerUsage: mergeUsage(interpretationUsage, plannerUsage) }
     }
     plan = planned.plan
     activitySteps.push({
@@ -644,12 +774,22 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
     })
   }
 
-  const request: AnalysisRequest = applyDynamicPlan(deterministic, plan)
+  // Une clarification proposée par le modèle est publiée telle quelle : aucune
+  // lecture supplémentaire, aucun crédit au-delà de l'interprétation mesurée.
+  if (interpretation?.clarify) {
+    return {
+      ...clarificationOutcome(deterministic, interpretation.clarify),
+      providerUsage: mergeUsage(interpretationUsage, plannerUsage),
+    }
+  }
+  const request: AnalysisRequest = interpretation
+    ? applyInterpretation(deterministic, interpretation)
+    : applyDynamicPlan(deterministic, plan)
   if (request.plan.periods.length > 1 && request.plan.periods.some((period) =>
     !request.plan.pairs.some((pair) => pair.currentId === period.id || pair.baselineId === period.id))) {
     // Des fenêtres non appariées ne doivent jamais être lues puis ignorées.
     const clarification = clarificationOutcome(request)
-    return { ...clarification, providerUsage: mergeUsage(plannerUsage) }
+    return { ...clarification, providerUsage: mergeUsage(interpretationUsage, plannerUsage) }
   }
 
   activitySteps.push({
@@ -661,7 +801,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
   const windows = planWindows(request.plan)
   if (windows.length > ENGINE_MAX_WINDOWS) {
     const limited = failureOutcome(profile.locale, profile.script, 'absence.budget')
-    return { ...limited, providerUsage: mergeUsage(plannerUsage) }
+    return { ...limited, providerUsage: mergeUsage(interpretationUsage, plannerUsage) }
   }
   tracker.consumePeriod(request.plan.periods.length)
   let readings = new Map<string, WindowReading>()
@@ -867,6 +1007,13 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
   // déterministe que si chaque phrase est prouvée par un fait calculé (aucun
   // chiffre, aucune causalité, aucune appréciation sans donnée).
   let structured = toStructuredResponse(composed, scopedRequest)
+  // L'agent indisponible n'est jamais silencieux : la compréhension déterministe
+  // utilisée est annoncée, avec l'invitation à reformuler si une période manque.
+  if (interpretationFellBack) {
+    const dict = resolveDictionary(scopedRequest.profile.locale, scopedRequest.profile.script)
+    const note = translate(dict, 'limit.interpretationFallback')
+    if (note) structured = { ...structured, warnings: sanitizeWarnings([...(structured.warnings ?? []), note]) }
+  }
   let narrativeUsage: RunSecureAgentOutput['providerUsage'] | null = null
 
   const hasFigures = composed.tables.length > 0 || composed.kpiItems.length > 0 || Boolean(composed.chart)
@@ -880,7 +1027,71 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
       allClaims.filter((claim) => claim.kind === 'fact' && claim.evidenceIds.some((id) =>
         composed.document.evidence?.find((fact) => fact.id === id)?.dimension === dimension)).slice(0, 4)),
   ]
-  if (isNarrativeEnabled() && facts.length > 0 && hasFigures && tracker.canContinue()) {
+  // 6. Réponse explicative naturelle : constats, hypothèses et recommandations
+  // formulés à partir des résultats autorisés. Aucun chiffre ne peut y entrer ;
+  // un échec conserve la synthèse factuelle déjà vérifiée.
+  let agentAnswerApplied = false
+  let answerUsage: RunSecureAgentOutput['providerUsage'] | null = null
+  if (isAgentLlmEnabled() && interpretation && facts.length > 0 && tracker.canContinue()) {
+    const allowedIds = new Set((composed.document.evidence ?? []).map((fact) => fact.id))
+    if (allowedIds.size > 0) {
+      try {
+        tracker.consumeProviderCall()
+      } catch (error) {
+        if (!(error instanceof EngineBudgetError)) throw error
+        budgetExceeded = true
+      }
+      if (!budgetExceeded) {
+        try {
+          const provider = getAssistantProvider()
+          const result = await provider.chat({
+            model: input.providerModel,
+            systemPrompt: buildAgentAnswerPrompt({
+              message: scopedRequest.question,
+              locale: scopedRequest.profile.locale,
+              facts,
+              claimCatalog,
+            }),
+            messages: [{ role: 'user', content: input.userMessage }],
+            signal: input.signal,
+            maxOutputTokens: 500,
+          })
+          answerUsage = {
+            text: result.text,
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            providerName: result.providerName,
+            modelName: result.modelName,
+            providerCostUsd: result.providerCostUsd,
+            usageKnown: result.usageKnown,
+            usageState: result.usageState,
+          }
+          tracker.consumeUsage({
+            tokens: Number(result.inputTokens) + Number(result.outputTokens),
+            costUsd: result.providerCostUsd,
+          })
+          const answer = sanitizeAgentAnswer(result.text, allowedIds)
+          if (answer) {
+            const title = translate(
+              resolveDictionary(scopedRequest.profile.locale, scopedRequest.profile.script),
+              'title.verdict',
+            )
+            structured = applyAgentAnswer(structured, answer, title)
+            agentAnswerApplied = true
+          }
+        } catch (error) {
+          const code = error instanceof Error ? error.message : ''
+          if (input.signal?.aborted || code === 'ASSISTANT_ABORTED' || code.endsWith('_ABORTED')) {
+            throw new Error('ASSISTANT_ABORTED')
+          }
+          if (error instanceof EngineBudgetError) budgetExceeded = true
+          // Un échec de rédaction ne dégrade jamais la réponse factuelle.
+        }
+      }
+    }
+  }
+
+  if (isNarrativeEnabled() && !agentAnswerApplied && facts.length > 0 && hasFigures && tracker.canContinue()) {
     let narrative: Awaited<ReturnType<typeof requestNarrative>> | null = null
     try {
       narrative = await requestNarrative({
@@ -945,7 +1156,7 @@ export async function runAnalyticEngine(input: RunSecureAgentInput): Promise<Eng
 
   return {
     structuredResponse: structured,
-    providerUsage: mergeUsage(plannerUsage, deepeningUsage, narrativeUsage),
+    providerUsage: mergeUsage(interpretationUsage, plannerUsage, deepeningUsage, answerUsage, narrativeUsage),
     activitySteps,
   }
 }

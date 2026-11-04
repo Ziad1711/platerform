@@ -100,6 +100,11 @@ export interface ResponseDocument {
     requestedMetrics: string[]
     requestedDimensions: string[]
     windows: Array<{ id: string; state: string; publishedMetrics: string[] }>
+    /**
+     * Réponse explicative produite par l'agent : le résumé et les affirmations
+     * étiquetées (hypothèse/recommandation) ont été validés sans chiffre.
+     */
+    agent?: boolean
   }
 }
 

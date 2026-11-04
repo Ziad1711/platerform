@@ -103,6 +103,19 @@ export function isNarrativeEnabled(env: EnvLike = process.env): boolean {
   return readRaw(env, NARRATIVE_ENV) !== 'disabled'
 }
 
+export const AGENT_LLM_ENV = 'ASSISTANT_AGENT_LLM'
+
+/**
+ * Interprétation agentique : **désactivée par défaut**.
+ *
+ * Quand elle est ouverte, un seul appel fournisseur fusionne compréhension et
+ * planification, puis un appel de réponse explicative peut suivre. Toute
+ * anomalie retombe sur l'interprétation déterministe, qui annonce sa limite.
+ */
+export function isAgentLlmEnabled(env: EnvLike = process.env): boolean {
+  return readStrictFlag(env, AGENT_LLM_ENV)
+}
+
 export interface EngineBudgets {
   /** Fenêtres élémentaires + agrégats. */
   maxPeriods: number
@@ -120,6 +133,12 @@ export interface EngineBudgets {
   maxDeepeningSteps: number
   /** Lignes conservées par dimension. */
   maxRowsPerDimension: number
+  /** Appels fournisseur (interprétation, approfondissement, réponse). */
+  maxProviderCalls: number
+  /** Tokens fournisseur cumulés sur le tour. */
+  maxTotalTokens: number
+  /** Coût fournisseur estimé cumulé, en USD. */
+  maxEstimatedCostUsd: number
 }
 
 export const DEFAULT_BUDGETS: EngineBudgets = {
@@ -131,6 +150,10 @@ export const DEFAULT_BUDGETS: EngineBudgets = {
   maxWallClockMs: 20_000,
   maxDeepeningSteps: 2,
   maxRowsPerDimension: 20,
+  // Un tour agentique = interprétation + réponse, approfondissement compris.
+  maxProviderCalls: 4,
+  maxTotalTokens: 12_000,
+  maxEstimatedCostUsd: 0.05,
 }
 
 export type BudgetCode =
@@ -140,6 +163,9 @@ export type BudgetCode =
   | 'BUDGET_READS'
   | 'BUDGET_TIME'
   | 'BUDGET_DEEPENING'
+  | 'BUDGET_AI_CALLS'
+  | 'BUDGET_AI_TOKENS'
+  | 'BUDGET_AI_COST'
 
 export class EngineBudgetError extends Error {
   readonly code: BudgetCode
@@ -157,6 +183,9 @@ export interface BudgetSnapshot {
   dimensions: number
   reads: number
   deepeningSteps: number
+  providerCalls: number
+  tokens: number
+  costUsd: number
   elapsedMs: number
 }
 
@@ -167,6 +196,10 @@ export interface BudgetTracker {
   consumeDimension(count?: number): void
   consumeRead(count?: number): void
   consumeDeepening(count?: number): void
+  /** Comptabilise un appel fournisseur avant son envoi. */
+  consumeProviderCall(count?: number): void
+  /** Comptabilise l'usage réellement mesuré (tokens et coût estimé). */
+  consumeUsage(usage: { tokens?: number | null; costUsd?: number | null }): void
   /** Lève `BUDGET_TIME` si la durée totale est dépassée. */
   assertTime(): void
   snapshot(): BudgetSnapshot
@@ -179,7 +212,7 @@ export function createBudgetTracker(
   now: () => number = Date.now,
 ): BudgetTracker {
   const startedAt = now()
-  const counters = { periods: 0, operations: 0, dimensions: 0, reads: 0, deepeningSteps: 0 }
+  const counters = { periods: 0, operations: 0, dimensions: 0, reads: 0, deepeningSteps: 0, providerCalls: 0, tokens: 0, costUsd: 0 }
 
   const guard = (value: number, limit: number, code: BudgetCode) => {
     if (value > limit) throw new EngineBudgetError(code)
@@ -206,6 +239,18 @@ export function createBudgetTracker(
     consumeDeepening(count = 1) {
       counters.deepeningSteps += count
       guard(counters.deepeningSteps, budgets.maxDeepeningSteps, 'BUDGET_DEEPENING')
+    },
+    consumeProviderCall(count = 1) {
+      counters.providerCalls += count
+      guard(counters.providerCalls, budgets.maxProviderCalls, 'BUDGET_AI_CALLS')
+    },
+    consumeUsage(usage) {
+      // Un usage inconnu ne devient jamais un zéro : il n'est simplement pas
+      // compté ici, la facturation le classe déjà `usage_unknown`.
+      counters.tokens += Math.max(0, Math.trunc(Number(usage.tokens) || 0))
+      counters.costUsd = Number((counters.costUsd + Math.max(0, Number(usage.costUsd) || 0)).toFixed(6))
+      guard(counters.tokens, budgets.maxTotalTokens, 'BUDGET_AI_TOKENS')
+      if (counters.costUsd > budgets.maxEstimatedCostUsd) throw new EngineBudgetError('BUDGET_AI_COST')
     },
     assertTime() {
       if (now() - startedAt > budgets.maxWallClockMs) throw new EngineBudgetError('BUDGET_TIME')
