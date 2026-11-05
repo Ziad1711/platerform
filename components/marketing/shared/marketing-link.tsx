@@ -8,6 +8,7 @@ type MarketingLinkProps = {
   children: ReactNode
   variant?: 'primary' | 'secondary' | 'ghost'
   className?: string
+  wrapperClassName?: string
 }
 
 const variants = {
@@ -21,9 +22,10 @@ export function MarketingLink({
   children,
   variant = 'primary',
   className,
+  wrapperClassName,
 }: MarketingLinkProps) {
   return (
-    <AnimatedButton href={href} variant={variants[variant]} className={cn(className)}>
+    <AnimatedButton href={href} variant={variants[variant]} className={cn(className)} wrapperClassName={wrapperClassName}>
       {children}
       {variant === 'primary' ? <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" /> : null}
     </AnimatedButton>

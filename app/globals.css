@@ -70,14 +70,14 @@
     font-size: calc(16px * var(--ui-scale));
     min-height: 100vh;
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
     min-height: 100vh;
-    overflow-x: hidden;
+    overflow-x: clip;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -175,6 +175,13 @@
 
   .text-gradient-brand {
     background: linear-gradient(135deg, #f3efe6 0%, #b9f0d8 35%, #2dd18f 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .text-gradient-ads {
+    background: linear-gradient(135deg, #8ec5ff 0%, #3b82f6 45%, #2dd18f 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;

@@ -27,7 +27,18 @@ export const heroHighlights = [
   },
 ]
 
-export const logoMarquee = ['YouCan', 'LightFunnels', 'Meta Ads', 'Rapid Delivery']
+export const logoMarquee: { name: string; color: string }[] = [
+  { name: 'YouCan', color: '#E1116F' },
+  { name: 'LightFunnels', color: '#FFC83D' },
+  { name: 'Meta Ads', color: '#60a5fa' },
+  { name: 'Rapid Delivery', color: '#60a5fa' },
+  { name: 'digylog', color: '#5EA2D9' },
+  { name: 'forcelog', color: '#FECE00' },
+  { name: 'sendit', color: '#60a5fa' },
+  { name: 'ameex', color: '#60a5fa' },
+  { name: 'OZONE', color: '#E41C29' },
+  { name: 'Rushliv', color: '#600512' },
+]
 
 export const logoMarqueeNotice =
   'Outils connectables selon les intégrations disponibles et la configuration de votre compte.'

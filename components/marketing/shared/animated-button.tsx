@@ -9,6 +9,7 @@ type AnimatedButtonProps = {
   href: string
   children: ReactNode
   className?: string
+  wrapperClassName?: string
   variant?: 'primary' | 'secondary' | 'ghost'
 }
 
@@ -21,9 +22,9 @@ const variants = {
     'border border-white/10 bg-white/[0.03] text-jisra-cream hover:bg-white/[0.07]',
 }
 
-export function AnimatedButton({ href, children, className, variant = 'primary' }: AnimatedButtonProps) {
+export function AnimatedButton({ href, children, className, wrapperClassName, variant = 'primary' }: AnimatedButtonProps) {
   return (
-    <motion.div whileHover={{ scale: 1.02, y: -1 }} whileTap={{ scale: 0.985 }}>
+    <motion.div whileHover={{ scale: 1.02, y: -1 }} whileTap={{ scale: 0.985 }} className={cn(wrapperClassName)}>
       <Link
         href={href}
         className={cn(

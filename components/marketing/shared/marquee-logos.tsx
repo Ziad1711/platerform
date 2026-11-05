@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
 type MarqueeLogosProps = {
-  items: string[]
+  items: { name: string; color: string }[]
   className?: string
 }
 
@@ -18,14 +18,15 @@ export function MarqueeLogos({ items, className }: MarqueeLogosProps) {
       <motion.div
         className="flex min-w-max items-center gap-3 px-3"
         animate={{ x: ['0%', '-50%'] }}
-        transition={{ duration: 18, ease: 'linear', repeat: Infinity }}
+        transition={{ duration: 40, ease: 'linear', repeat: Infinity }}
       >
         {duplicated.map((item, index) => (
           <div
-            key={`${item}-${index}`}
-            className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-jisra-cream/68"
+            key={`${item.name}-${index}`}
+            className="inline-flex items-center rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-jisra-cream"
+            style={{ backgroundColor: `${item.color}66`, borderColor: `${item.color}a6` }}
           >
-            {item}
+            {item.name}
           </div>
         ))}
       </motion.div>

@@ -46,7 +46,7 @@ export function MarketingHeader() {
               </div>
               <div className="flex flex-col">
                 <JisraWordmark size={18} ink="#f3efe6" accent="#1fa971" />
-                <span className="text-[10px] uppercase tracking-[0.28em] text-jisra-cream/42">commerce operating system</span>
+                <span className="mt-[3px] whitespace-nowrap text-[8.5px] uppercase leading-none tracking-[0.16em] text-jisra-cream/42 sm:mt-0 sm:text-[10px] sm:tracking-[0.28em]">commerce operating system</span>
               </div>
             </Link>
 
@@ -94,9 +94,9 @@ export function MarketingHeader() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.22 }}
-            className="lg:hidden"
+            className="absolute inset-x-0 top-full z-[70] px-3 pt-3 sm:px-4 lg:hidden"
           >
-            <Container className="mt-3 px-0">
+            <Container className="px-0">
               <div className="overflow-hidden rounded-[24px] border border-white/10 bg-jisra-ink-light/94 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
 
                 <div className="grid gap-2">
