@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Calculator, Check, Maximize, Minimize, Pause, Play, Receipt, ShoppingCart, Sparkles, Truck, Volume2, VolumeX } from 'lucide-react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { heroHighlights, logoMarquee, logoMarqueeNotice } from '@/lib/marketing/site'
 import { Container } from '@/components/marketing/shared/container'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
@@ -14,6 +14,7 @@ import { fadeUp, heroVisualFloat } from '@/lib/marketing/motion'
 const highlightIcons = [ShoppingCart, Receipt, Truck, Calculator]
 
 export function HomeHero() {
+  const prefersReducedMotion = useReducedMotion()
   const videoRef = useRef<HTMLVideoElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -99,14 +100,28 @@ export function HomeHero() {
     <section className="relative overflow-hidden pb-0 pt-0 text-jisra-cream">
       <Spotlight />
 
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#60a5fa]/40 to-transparent" />
+        <motion.div
+          className="absolute -left-24 top-10 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(59,130,246,0.30),transparent_66%)] blur-3xl sm:h-96 sm:w-96"
+          animate={prefersReducedMotion ? undefined : { opacity: [0.45, 0.85, 0.45], scale: [1, 1.08, 1] }}
+          transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute -right-16 top-[42%] h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(96,165,250,0.24),transparent_66%)] blur-3xl sm:h-[420px] sm:w-[420px]"
+          animate={prefersReducedMotion ? undefined : { opacity: [0.35, 0.7, 0.35] }}
+          transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
+        />
+      </div>
+
       <Container className="relative z-10">
         <MotionSection withStagger className="grid items-center gap-6 pb-12 pt-8 max-sm:pt-5 lg:grid-cols-[0.95fr_1.05fr] lg:gap-14 lg:py-20">
           <div className="max-lg:contents lg:space-y-8">
             <motion.div
               variants={fadeUp}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-medium uppercase tracking-[0.24em] text-jisra-cream/74 max-lg:order-1 max-lg:self-start max-sm:gap-1.5 max-sm:self-center max-sm:px-3 max-sm:py-1 max-sm:text-[9px] max-sm:tracking-[0.12em]"
+              className="inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-jisra-cream/70 max-lg:order-1 max-lg:self-start max-sm:justify-center max-sm:self-center max-sm:text-[9.5px] max-sm:tracking-[0.14em]"
             >
-              <Sparkles className="h-5 w-5 shrink-0 text-jisra-green-light max-sm:h-3.5 max-sm:w-3.5 sm:h-3.5 sm:w-3.5" />
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-jisra-green-light max-sm:h-3 max-sm:w-3" />
               <span className="max-sm:text-center">conçu pour les marchands marocains qui scalent</span>
             </motion.div>
 
@@ -120,11 +135,11 @@ export function HomeHero() {
             </motion.div>
 
             <motion.div variants={fadeUp} className="flex flex-wrap items-center gap-3 max-lg:order-4 max-sm:justify-center">
-              <MarketingLink href="/signup" className="max-sm:px-3 max-sm:text-[12px]">Commencer gratuitement</MarketingLink>
+              <MarketingLink href="/signup" className="px-6 sm:text-[15px] max-sm:min-h-12 max-sm:px-3.5 max-sm:text-[13px]">Commencer gratuitement</MarketingLink>
               <MarketingLink
                 href="mailto:contact@jisra.io?subject=Demande%20de%20contact%20jisra"
                 variant="ghost"
-                className="max-sm:px-3 max-sm:text-[12px]"
+                className="px-6 sm:text-[15px] max-sm:min-h-12 max-sm:px-3.5 max-sm:text-[13px]"
               >
                 Contactez-nous
               </MarketingLink>
