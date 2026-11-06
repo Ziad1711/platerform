@@ -2,13 +2,34 @@
 
 import { useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { nodes, branches } from './workflow-data'
+import { ArrowDown } from 'lucide-react'
+import { nodes, branches, type WorkflowNode as WorkflowNodeType } from './workflow-data'
 import { WorkflowNode } from './WorkflowNode'
 import WorkflowPaths from './WorkflowPaths'
 import { reducedMotionVariants } from './workflow-variants'
 
 const GRID_WIDTH = 1400
 const GRID_HEIGHT = 600
+
+const MOBILE_FLOW_IDS = ['provider', 'jisra-receive', 'ads', 'notif-push', 'confirm', 'delivery', 'stock', 'delivered', 'kpis']
+
+const mobileFlow: WorkflowNodeType[] = MOBILE_FLOW_IDS.flatMap((id) => {
+  const node = nodes.find((item) => item.id === id)
+  if (node) return [node]
+  const branch = branches.find((item) => item.id === id)
+  if (!branch) return []
+  return [
+    {
+      id: branch.id,
+      title: branch.title,
+      description: branch.description,
+      logo: branch.logo,
+      position: branch.position,
+      type: 'integration' as const,
+      tooltip: branch.tooltip,
+    },
+  ]
+})
 
 export function WorkflowDiagram() {
   const prefersReducedMotion = useReducedMotion()
@@ -26,18 +47,7 @@ export function WorkflowDiagram() {
     })
   }
 
-  // Define the logical flow for mobile
-  const mobileFlow = [
-    nodes.find(n => n.id === 'provider'),
-    nodes.find(n => n.id === 'jisra-receive'),
-    branches.find(n => n.id === 'ads'),
-    nodes.find(n => n.id === 'notif-push'),
-    nodes.find(n => n.id === 'confirm'),
-    nodes.find(n => n.id === 'delivery'),
-    branches.find(n => n.id === 'stock'),
-    nodes.find(n => n.id === 'delivered'),
-    nodes.find(n => n.id === 'kpis'),
-  ].filter(Boolean)
+  // Define the logical flow for mobile (module-level `mobileFlow`)
 
   return (
     <div
@@ -118,26 +128,48 @@ export function WorkflowDiagram() {
         ))}
       </div>
 
-      {/* --- MOBILE VIEW (< 1024px) --- */}
-      <div className="flex flex-col items-center gap-12 py-10 lg:hidden">
+      {/* --- MOBILE / TABLET VIEW (< 1024px) --- */}
+      <div className="relative flex flex-col items-center px-4 py-8 lg:hidden">
+        <div className="pointer-events-none absolute inset-y-6 left-1/2 -z-10 w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-white/10 to-transparent" />
+
         {mobileFlow.map((node, i) => (
-          <div key={node!.id} className="relative flex flex-col items-center">
-            {/* Simple vertical connector */}
-            {i < mobileFlow.length - 1 && (
-              <div className="absolute top-full h-12 w-px bg-gradient-to-b from-jisra-green/40 to-cyan-500/40 shadow-[0_0_8px_rgba(31,169,113,0.3)]" />
-            )}
-            
+          <div key={node.id} className="flex w-full flex-col items-center">
             <WorkflowNode
-              node={node as any}
+              node={node}
               index={i}
-              isActive={activeNodes.has(node!.id)}
-              isHovered={hoveredNode === node!.id}
+              isActive={activeNodes.has(node.id)}
+              isHovered={hoveredNode === node.id}
               onHover={setHoveredNode}
-              className="w-full max-w-[260px]"
+              className="w-full max-w-[300px]"
             />
+
+            {i < mobileFlow.length - 1 && (
+              <div className="relative flex h-10 w-full items-center justify-center">
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 overflow-hidden bg-white/10">
+                  <motion.div
+                    className="h-full w-full bg-gradient-to-b from-jisra-green/80 via-jisra-green/50 to-cyan-400/70"
+                    initial={prefersReducedMotion ? false : { scaleY: 0 }}
+                    whileInView={prefersReducedMotion ? undefined : { scaleY: 1 }}
+                    viewport={{ once: true, margin: '-20% 0px -20% 0px' }}
+                    transition={{ duration: 0.45, ease: 'easeOut' }}
+                    style={{ transformOrigin: 'top' }}
+                  />
+                </div>
+                <motion.span
+                  initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.85 }}
+                  whileInView={prefersReducedMotion ? undefined : { opacity: 1, scale: 1 }}
+                  viewport={{ once: true, margin: '-20% 0px -20% 0px' }}
+                  transition={{ delay: 0.12, duration: 0.28, ease: 'easeOut' }}
+                  className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border border-jisra-green/30 bg-jisra-ink/90 text-jisra-green-light shadow-[0_0_14px_rgba(31,169,113,0.25)]"
+                >
+                  <ArrowDown className="h-3 w-3" aria-hidden="true" />
+                </motion.span>
+              </div>
+            )}
           </div>
         ))}
       </div>
     </div>
   )
 }
+

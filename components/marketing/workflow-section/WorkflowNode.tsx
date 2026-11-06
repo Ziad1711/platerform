@@ -61,6 +61,7 @@ export function WorkflowNode({
         'group relative flex w-full max-w-[260px] flex-col items-center gap-3 rounded-2xl p-4 transition-all duration-300 lg:w-[170px]',
         'bg-white/[0.03] backdrop-blur-md',
         'border border-white/10 shadow-lg',
+        'max-sm:gap-2 max-sm:p-3.5',
         isHovered && 'border-jisra-green/40 bg-white/[0.06] shadow-jisra-green/10',
         isActive && 'border-jisra-green/50',
         className,
@@ -76,6 +77,7 @@ export function WorkflowNode({
         "flex h-12 w-12 items-center justify-center rounded-xl transition-all duration-300",
         "bg-gradient-to-br from-white/10 to-white/5 ring-1 ring-white/10",
         "group-hover:scale-110 group-hover:ring-jisra-green/30 group-hover:bg-jisra-green/5",
+        "max-sm:h-14 max-sm:w-14",
         node.glow && "ring-jisra-green/50 bg-jisra-green/10"
       )}>
         {typeof Icon === 'string' ? (
@@ -84,21 +86,22 @@ export function WorkflowNode({
             alt=""
             width={28}
             height={28}
-            className="h-7 w-7 object-contain brightness-110"
+            className="h-7 w-7 object-contain brightness-110 max-sm:h-8 max-sm:w-8"
             aria-hidden="true"
           />
         ) : (
           <Icon className={cn(
             "h-6 w-6 transition-colors duration-300",
             node.glow ? "text-jisra-green" : "text-jisra-cream/80",
-            "group-hover:text-jisra-green"
+            "group-hover:text-jisra-green",
+            "max-sm:h-7 max-sm:w-7"
           )} aria-hidden="true" />
         )}
       </div>
 
       <div className="flex flex-col items-center text-center">
-        <h3 className="text-[13px] font-bold tracking-tight text-jisra-cream">{node.title}</h3>
-        <p className="mt-0.5 line-clamp-1 text-[11px] text-jisra-cream/50">{node.description}</p>
+        <h3 className="text-[13px] font-bold tracking-tight text-jisra-cream max-sm:text-[14px]">{node.title}</h3>
+        <p className="mt-0.5 line-clamp-1 text-[11px] text-jisra-cream/50 max-sm:text-[12px]">{node.description}</p>
       </div>
 
       {isHovered && node.tooltip && (

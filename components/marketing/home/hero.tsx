@@ -24,6 +24,26 @@ export function HomeHero() {
   const [scrubbing, setScrubbing] = useState(false)
   const [controlsVisible, setControlsVisible] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = null
+    }
+  }
+
+  const scheduleHide = (delay = 2500) => {
+    clearHideTimer()
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), delay)
+  }
+
+  const revealControls = (autoHide = true) => {
+    setControlsVisible(true)
+    if (autoHide) scheduleHide()
+  }
+
+  useEffect(() => () => clearHideTimer(), [])
 
   useEffect(() => {
     const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement))
@@ -128,13 +148,25 @@ export function HomeHero() {
                 ref={wrapperRef}
                 className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[#0b100e]"
                 onPointerEnter={(event) => {
-                  if (event.pointerType === 'mouse') setControlsVisible(true)
+                  if (event.pointerType === 'mouse') {
+                    clearHideTimer()
+                    setControlsVisible(true)
+                  }
                 }}
                 onPointerLeave={(event) => {
-                  if (event.pointerType === 'mouse') setControlsVisible(false)
+                  if (event.pointerType === 'mouse') {
+                    clearHideTimer()
+                    setControlsVisible(false)
+                  }
                 }}
-                onFocus={() => setControlsVisible(true)}
-                onBlur={() => setControlsVisible(false)}
+                onFocus={() => {
+                  clearHideTimer()
+                  setControlsVisible(true)
+                }}
+                onBlur={() => {
+                  clearHideTimer()
+                  setControlsVisible(false)
+                }}
               >
                 <video
                   ref={videoRef}
@@ -146,7 +178,7 @@ export function HomeHero() {
                   playsInline
                   preload="metadata"
                   aria-label="Aperçu animé du cockpit jisra montrant commandes, profit, publicité et livraison"
-                  onClick={() => setControlsVisible(true)}
+                  onClick={() => revealControls()}
                   onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
                   onTimeUpdate={(event) => {
                     const video = event.currentTarget
@@ -166,7 +198,10 @@ export function HomeHero() {
                 >
                   <button
                     type="button"
-                    onClick={togglePlay}
+                    onClick={() => {
+                      togglePlay()
+                      scheduleHide()
+                    }}
                     aria-label={isPaused ? 'Lire la vidéo' : 'Mettre la vidéo en pause'}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-jisra-cream backdrop-blur transition hover:bg-white/20"
                   >
@@ -187,14 +222,21 @@ export function HomeHero() {
                     aria-valuenow={Math.round(progress)}
                     onPointerDown={(event) => {
                       event.currentTarget.setPointerCapture(event.pointerId)
+                      clearHideTimer()
                       setScrubbing(true)
                       seekTo(event.clientX)
                     }}
                     onPointerMove={(event) => {
                       if (scrubbing) seekTo(event.clientX)
                     }}
-                    onPointerUp={() => setScrubbing(false)}
-                    onPointerCancel={() => setScrubbing(false)}
+                    onPointerUp={() => {
+                      setScrubbing(false)
+                      scheduleHide()
+                    }}
+                    onPointerCancel={() => {
+                      setScrubbing(false)
+                      scheduleHide()
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'ArrowRight') {
                         event.preventDefault()
@@ -216,7 +258,10 @@ export function HomeHero() {
 
                   <button
                     type="button"
-                    onClick={() => setIsMuted((value) => !value)}
+                    onClick={() => {
+                      setIsMuted((value) => !value)
+                      scheduleHide()
+                    }}
                     aria-label={isMuted ? 'Activer le son' : 'Couper le son'}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-jisra-cream backdrop-blur transition hover:bg-white/20"
                   >
@@ -225,7 +270,10 @@ export function HomeHero() {
 
                   <button
                     type="button"
-                    onClick={toggleFullscreen}
+                    onClick={() => {
+                      toggleFullscreen()
+                      scheduleHide()
+                    }}
                     aria-label={isFullscreen ? 'Quitter le plein écran' : 'Passer en plein écran'}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-jisra-cream backdrop-blur transition hover:bg-white/20"
                   >
