@@ -301,8 +301,13 @@ export function HomeSections() {
                   Intégrations disponibles, fonctionnalité native et connexion à venir sont distinguées explicitement.
                 </p>
               </div>
-              <div className="rounded-full border border-jisra-green/20 bg-jisra-green/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-jisra-green-light">
-                {integrations.filter((integration) => integration.status === 'Disponible').length} intégrations disponibles
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="rounded-full border border-jisra-green/20 bg-jisra-green/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-jisra-green-light">
+                  {integrations.filter((integration) => integration.status === 'Disponible').length} intégrations disponibles
+                </div>
+                <MarketingLink href="/catalogue-integrations" variant="secondary" className="gap-2">
+                  Voir toutes les intégrations <ArrowRight className="h-4 w-4" />
+                </MarketingLink>
               </div>
             </div>
 

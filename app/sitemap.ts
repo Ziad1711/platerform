@@ -5,6 +5,7 @@ const routes = [
   '',
   '/pricing',
   '/features',
+  '/catalogue-integrations',
   '/features/ventes',
   '/features/publicite',
   '/features/livraison',

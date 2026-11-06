@@ -4,7 +4,7 @@ export const marketingNav = [
   { href: '#ai', label: 'IA' },
   { href: '#ads', label: 'Publicité' },
   { href: '#logistics', label: 'Logistique' },
-  { href: '#integrations', label: 'Intégrations' },
+  { href: '/catalogue-integrations', label: 'Intégrations' },
   { href: '/pricing', label: 'Tarifs' },
 ]
 
