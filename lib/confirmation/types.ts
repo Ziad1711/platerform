@@ -40,6 +40,12 @@ export type ConfirmationOrder = {
   confirmation_attempt_count: number
   next_callback_at: string | null
   confirmation_last_action_at: string | null
+  /**
+   * Note du dernier rappel programmé (dernier événement « postponed »).
+   * Renseignée par la file uniquement pour les vues « À rappeler » et
+   * « En retard » ; `null` lorsque le rappel a été fait sans note.
+   */
+  confirmation_note?: string | null
   cancellation_reason_code: string | null
   cancellation_note: string | null
   confirmation_agent_id: string | null

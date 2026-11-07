@@ -19,6 +19,8 @@ type ConfirmationOrderCardProps = {
   onConfirm: () => void
   onEdit: () => void
   onOpenDetails: () => void
+  /** Affiche la note du dernier rappel (files « À rappeler » / « En retard »). */
+  showNote?: boolean
 }
 
 function toWhatsAppLink(phone: string | null | undefined) {
@@ -89,6 +91,7 @@ export default function ConfirmationOrderCard({
   onConfirm,
   onEdit,
   onOpenDetails,
+  showNote = false,
 }: ConfirmationOrderCardProps) {
   const supabase = useMemo(() => createClient(), [])
   const attempts = Number(order.confirmation_attempt_count || 0)
@@ -239,6 +242,12 @@ export default function ConfirmationOrderCard({
               <span className="rounded-full bg-secondary px-2 py-0.5">Suivi : {order.tracking_number}</span>
             ) : null}
           </div>
+
+          {showNote && order.confirmation_note ? (
+            <div className="rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-xs text-cyan-900 break-words">
+              Note : {order.confirmation_note}
+            </div>
+          ) : null}
 
           <div className="hidden flex-wrap items-center gap-2 sm:flex">{contactActions}</div>
         </div>

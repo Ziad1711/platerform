@@ -606,7 +606,7 @@ export default function ConfirmationPage() {
       }
       return payload as ActionPayload
     },
-    onMutate: async ({ order, action, callbackAt }) => {
+    onMutate: async ({ order, action, callbackAt, note }) => {
       // Retour visuel immédiat : la commande affichée (statut, compteur d'appels,
       // prochain rappel) reflète l'action sans attendre le rechargement de la file.
       await queryClient.cancelQueries({ queryKey: ['confirmation-queue'] })
@@ -633,6 +633,11 @@ export default function ConfirmationPage() {
               confirmation_last_action_at: nowIso,
               next_callback_at:
                 action === 'POSTPONE' && callbackAt ? callbackAt : queuedOrder.next_callback_at,
+              // La note du rappel est celle qui vient d'être saisie (affichée dans
+              // les files « À rappeler » / « En retard »).
+              ...(action === 'POSTPONE'
+                ? { confirmation_note: note && note.trim() ? note.trim() : null }
+                : {}),
             }
           }),
         }
@@ -1031,6 +1036,7 @@ export default function ConfirmationPage() {
                   order={order}
                   maxAttempts={maxAttempts}
                   busy={actionMutation.isPending || !canProcess}
+                  showNote={filter === 'to_callback' || filter === 'late'}
                   onNoAnswer={() => handleNoAnswer(order)}
                   onPostpone={() => setPostponeOrder(order)}
                   onCancel={() => setCancelOrder(order)}

@@ -254,6 +254,44 @@ async function readPageBlacklist(
   }
 }
 
+/**
+ * Note du dernier rappel programmé pour les commandes de la page affichée.
+ * Uniquement lue pour les files « À rappeler » / « En retard » : c'est la note
+ * saisie au moment du report (`order_confirmation_events.event_type = 'postponed'`).
+ * Un échec de lecture ne casse jamais la file : les notes sont simplement absentes.
+ */
+async function readCallbackNotes(
+  scope: QueueScope,
+  orderIds: string[]
+): Promise<Record<string, string | null>> {
+  if (orderIds.length === 0) return {}
+
+  try {
+    const { data, error } = await scope.supabase
+      .from('order_confirmation_events')
+      .select('order_id, note, created_at')
+      .in('order_id', orderIds)
+      .eq('event_type', 'postponed')
+      .order('created_at', { ascending: false })
+      // Borne de sécurité : plusieurs reports par commande restent couverts.
+      .limit(orderIds.length * 20)
+
+    if (error) throw error
+
+    const notes: Record<string, string | null> = {}
+    for (const event of (data || []) as Array<{ order_id: string; note: string | null }>) {
+      // Tri décroissant : la première occurrence rencontrée est la plus récente.
+      if (event.order_id in notes) continue
+      const note = typeof event.note === 'string' ? event.note.trim() : ''
+      notes[event.order_id] = note || null
+    }
+    return notes
+  } catch (error) {
+    console.error('CONFIRMATION_CALLBACK_NOTES_FAILED', error)
+    return {}
+  }
+}
+
 export async function GET(request: Request) {
   const view = parseView(new URL(request.url).searchParams.get('view'))
 
@@ -328,8 +366,20 @@ export async function GET(request: Request) {
     // Aucune donnée blacklist dans cette réponse : l'état reste explicitement
     // « vérification en cours » côté interface tant que la vue secondaire n'a
     // pas répondu. Un numéro n'est jamais présenté comme non blacklisté ici.
-    const orders = ((ordersResult.data || []) as any[]).map((order) => ({
+    const baseOrders = (ordersResult.data || []) as any[]
+
+    // Note du dernier rappel : utile seulement aux files « À rappeler » / « En retard ».
+    const wantsCallbackNotes = scope.filter === 'to_callback' || scope.filter === 'late'
+    const callbackNotes = wantsCallbackNotes
+      ? await readCallbackNotes(
+          scope,
+          baseOrders.map((order) => String(order.id))
+        )
+      : {}
+
+    const orders = baseOrders.map((order) => ({
       ...order,
+      confirmation_note: callbackNotes[order.id] ?? null,
       blacklist_status: 'pending' as const,
     }))
 
