@@ -12,6 +12,25 @@ import { StockLevels } from '@/components/dashboard/stock/stock-levels'
 
 import { Suspense, useEffect, useMemo, useState } from 'react'
 
+/**
+ * Messages des refus renvoyés par `rpc_update_stock_movement` /
+ * `rpc_update_stock_purchase` : une édition ne peut pas réécrire en silence
+ * des quantités déjà sorties depuis le lot.
+ */
+const STOCK_MOVEMENT_ERROR_MESSAGES: Record<string, string> = {
+  QUANTITY_BELOW_CONSUMED:
+    'La quantité est inférieure aux unités déjà sorties depuis ce lot. Corrigez d’abord les sorties concernées.',
+  MOVEMENT_HAS_CONSUMPTIONS:
+    'Ce lot a déjà des sorties de stock : son type ne peut plus être changé.',
+  MOVEMENT_NOT_EDITABLE:
+    'Ce mouvement est généré par une commande (FIFO) et ne peut pas être modifié.',
+  FORBIDDEN: 'Vous n’avez pas le droit de modifier le stock de ce store.',
+  INVALID_QUANTITY: 'La quantité doit être supérieure à 0.',
+  INVALID_UNIT_COST: 'Le coût unitaire doit être positif.',
+  SUPPLIER_REQUIRED: 'Un fournisseur est obligatoire pour un achat déjà enregistré.',
+  PURCHASE_ALREADY_PAID: 'Cet achat a déjà été (partiellement) réglé : il ne peut plus être modifié.',
+}
+
 function StocksPageContent() {
   const PAGE_SIZE = 10
   const { currentStoreId, accessibleStoreIds, accessibleStores: stores } = useStore()
@@ -385,21 +404,17 @@ function StocksPageContent() {
         return
       }
 
-      const { error } = await supabase
-        .from('inventory_movements')
-        .update({
-          product_id: editProductId,
-          product_variant_id: editVariantId || null,
-          movement_type: editMovementType,
-          adjustment_direction: editMovementType === 'adjustment' ? editAdjustmentDirection : null,
-          supplier_id: editSupplierId || null,
-          quantity,
-          remaining_qty: editMovementType === 'in' ? quantity : null,
-          unit_cost: unitCost,
-          total_cost: quantity * unitCost,
-          invoice_number: editInvoiceNumber.trim() || null,
-        })
-        .eq('id', editingMovement.id)
+      const { error } = await supabase.rpc('rpc_update_stock_movement', {
+        p_movement_id: editingMovement.id,
+        p_product_id: editProductId,
+        p_movement_type: editMovementType,
+        p_quantity: quantity,
+        p_unit_cost: unitCost,
+        p_product_variant_id: editVariantId || null,
+        p_adjustment_direction: editMovementType === 'adjustment' ? editAdjustmentDirection : null,
+        p_supplier_id: editSupplierId || null,
+        p_invoice_reference: editInvoiceNumber.trim() || null,
+      })
 
       if (error) throw error
     },
@@ -417,7 +432,11 @@ function StocksPageContent() {
       setEditError('')
     },
     onError: (error: any) => {
-      setEditError(error?.message || 'Erreur lors de la modification du mouvement.')
+      setEditError(
+        STOCK_MOVEMENT_ERROR_MESSAGES[String(error?.message || '')] ||
+          error?.message ||
+          'Erreur lors de la modification du mouvement.'
+      )
     },
   })
 
