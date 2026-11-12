@@ -13,6 +13,7 @@ import { sanitizeTrackingUrl } from '@/lib/analytics/sanitize'
  *   `/delivery/vouchers/*`) : aucun évènement n'est transmis.
  */
 export function VercelAnalytics() {
+  if (process.env.NEXT_PUBLIC_JISRA_QUALIFICATION === '1') return null
   return (
     <Analytics
       beforeSend={(event: BeforeSendEvent): BeforeSendEvent | null => {

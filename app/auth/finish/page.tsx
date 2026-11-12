@@ -40,7 +40,7 @@ function AuthFinishInner() {
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
 
-      if (!cancelled) router.replace('/login')
+      if (!cancelled) router.replace(`/login?next=${encodeURIComponent(next)}`)
     }
 
     finish()

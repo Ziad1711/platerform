@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Script from 'next/script'
+import { isUntrackableRoute } from '@/lib/analytics/sanitize'
 import { hasAnalyticsConsent, subscribeAnalyticsConsent } from '@/lib/analytics/consent'
 import {
   GA_MEASUREMENT_ID,
@@ -45,7 +46,7 @@ export function GoogleAnalytics() {
     trackPageView(pathname)
   }, [granted, pathname])
 
-  if (!granted || !isValidMeasurementId(GA_MEASUREMENT_ID)) return null
+  if (!granted || isUntrackableRoute(pathname) || !isValidMeasurementId(GA_MEASUREMENT_ID)) return null
 
   return (
     <Script

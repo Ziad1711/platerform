@@ -24,7 +24,7 @@ export function ScrollToTopButton() {
           exit={{ opacity: 0, y: 20, scale: 0.9 }}
           transition={{ duration: 0.25 }}
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed bottom-5 right-5 z-[70] inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-jisra-ink-light/85 text-jisra-cream shadow-[0_10px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-colors hover:bg-jisra-green hover:text-white"
+          className="fixed bottom-5 right-4 z-[60] inline-flex h-12 w-12 sm:bottom-6 sm:right-6 items-center justify-center rounded-full border border-white/10 bg-jisra-ink-light/85 text-jisra-cream shadow-[0_10px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-colors hover:bg-jisra-green hover:text-white"
           aria-label="Revenir en haut"
         >
           <ArrowUp className="h-4 w-4" />

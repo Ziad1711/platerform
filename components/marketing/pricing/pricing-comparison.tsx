@@ -3,10 +3,10 @@
 import { motion } from 'framer-motion'
 import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Plan } from '@/services/plans'
+import type { CatalogPrice } from '@/lib/billing/catalog'
 
 type PricingComparisonProps = {
-  plans: Plan[]
+  plans: CatalogPrice[]
 }
 
 const comparisonRows = [
@@ -35,7 +35,7 @@ export function PricingComparison({ plans }: PricingComparisonProps) {
             </th>
             {plans.map((plan) => (
               <th
-                key={plan.id}
+                key={plan.price_id}
                 className={cn(
                   'py-4 px-4 text-center text-sm font-semibold',
                   plan.name === 'Pro' ? 'text-jisra-green' : 'text-jisra-cream'
@@ -51,8 +51,10 @@ export function PricingComparison({ plans }: PricingComparisonProps) {
             <tr key={row.key} className={cn('border-b border-white/5', i % 2 === 0 && 'bg-white/[0.02]')}>
               <td className="py-3 pr-6 text-jisra-cream/65">{row.label}</td>
               {plans.map((plan) => (
-                <td key={plan.id} className="py-3 px-4 text-center text-jisra-cream/75">
-                  {row.format((plan as Record<string, unknown>)[row.key] as never)}
+                <td key={plan.price_id} className="py-3 px-4 text-center text-jisra-cream/75">
+                  <div className="flex items-center justify-center">
+                    {row.format((plan as unknown as Record<string, unknown>)[row.key] as never)}
+                  </div>
                 </td>
               ))}
             </tr>

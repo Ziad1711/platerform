@@ -22,9 +22,7 @@ import {
   Users,
   Bot,
   HelpCircle,
-  Check,
 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   automations,
@@ -33,7 +31,7 @@ import {
   integrations,
   modules,
 } from '@/lib/marketing/site'
-import { getPlans } from '@/services/plans'
+import { CatalogOffers } from '@/components/marketing/pricing/catalog-offers'
 import { Container } from '@/components/marketing/shared/container'
 import { SectionHeading } from '@/components/marketing/shared/section-heading'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
@@ -47,6 +45,7 @@ import { AdsIntegrationSection } from './ads-integration-section'
 import { NormalizationSection } from './normalization-section'
 import { LogisticsSection } from './logistics-section'
 import { StoreIntegrationSection } from './store-integration-section'
+import { FeatureDemo } from './feature-demo'
 
 const problemIcons = [
   FileSpreadsheet,
@@ -90,40 +89,7 @@ const moduleLinks: Record<string, string> = {
   'Publicité & ROI': '/features/publicite',
 }
 
-const homePlanFeatures: Record<string, string[]> = {
-  Gratuit: [
-    'Jusqu\'à 250 commandes / mois',
-    '10 000 crédits IA / mois',
-    '1 store',
-    'Dashboard KPI',
-    'Commandes & stock',
-  ],
-  Pro: [
-    'Jusqu\'à 1 000 commandes / mois',
-    '50 000 crédits IA / mois',
-    '5 stores',
-    'Facebook Ads',
-    'Profit net par commande',
-    'Assistant IA',
-    'Livraison automatisée',
-  ],
-  Ultimate: [
-    'Commandes illimitées',
-    '100 000 crédits IA / mois',
-    'Stores illimités',
-    'Tout le plan Pro',
-    'Équipe & rôles',
-    'Support prioritaire',
-    'API access',
-  ],
-}
-
 export function HomeSections() {
-  const { data: plans = [] } = useQuery({
-    queryKey: ['plans'],
-    queryFn: getPlans,
-  })
-
   return (
     <>
       <MotionSection className="py-20 sm:py-24" withStagger>
@@ -151,7 +117,7 @@ export function HomeSections() {
 
       <WorkflowSection />
 
-      <MotionSection className="py-20 sm:py-28" withStagger>
+      <MotionSection id="fonctionnalites" className="py-20 sm:py-28" withStagger>
         <Container className="space-y-12">
           <SectionHeading
             eyebrow="Fonctionnalités"
@@ -159,19 +125,21 @@ export function HomeSections() {
             description="Suivez vos opérations, automatisez les tâches répétitives et retrouvez vos données dans une seule interface."
           />
           <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
-            {homeFeatureHighlights.map((item) => (
-              <Card3D key={item.title} className="overflow-hidden">
-                <div className="relative aspect-[4/3] overflow-hidden border-b border-white/10 bg-black/20">
-                  <Image src={item.image} alt={item.title} fill className="object-cover" />
-                  <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-jisra-cream/72 backdrop-blur-xl">
-                    {item.accent}
-                  </div>
-                </div>
+            <article className="min-w-0 overflow-hidden rounded-[28px] border border-jisra-green/25 bg-white/[0.04] lg:col-span-2 xl:col-span-3">
+              <FeatureDemo index={6} />
+              <div className="p-6">
+                <h3 className="text-xl font-semibold text-jisra-cream">Le Dashboard, votre centre de pilotage</h3>
+                <p className="mt-3 text-sm leading-7 text-jisra-cream/62">Choisissez votre période et retrouvez vos commandes, vos ventes livrées, votre chiffre d’affaires, vos charges et votre profit dans une même vue.</p>
+              </div>
+            </article>
+            {homeFeatureHighlights.map((item, index) => (
+              <article key={item.title} className="min-w-0 overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] shadow-[0_24px_80px_rgba(0,0,0,0.16)]">
+                <FeatureDemo index={index} />
                 <div className="p-6">
                   <h3 className="text-xl font-semibold text-jisra-cream">{item.title}</h3>
                   <p className="mt-3 text-sm leading-7 text-jisra-cream/62">{item.description}</p>
                 </div>
-              </Card3D>
+              </article>
             ))}
           </div>
         </Container>
@@ -355,42 +323,7 @@ export function HomeSections() {
             </MarketingLink>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-3">
-            {plans.map((plan) => {
-              const features = homePlanFeatures[plan.name] ?? []
-              const isPro = plan.name === 'Pro'
-              return (
-                <Card3D
-                  key={plan.id}
-                  className={`rounded-[2rem] border p-7 ${
-                    isPro
-                      ? 'border-jisra-green/30 bg-jisra-green/10'
-                      : 'border-white/10 bg-white/[0.03]'
-                  }`}
-                >
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-jisra-green">{plan.name}</p>
-                  <p className="mt-4 text-3xl font-bold">
-                    {plan.price === 0 ? 'Gratuit' : `${plan.price} DHS`}
-                  </p>
-                  <p className="mt-3 text-sm leading-7 text-jisra-cream/62">
-                    {plan.name === 'Gratuit'
-                      ? 'Pour découvrir jisra sans engagement.'
-                      : plan.name === 'Pro'
-                        ? 'Pour les marques qui veulent scaler avec des données fiables.'
-                        : 'Pour les équipes multi-stores avec pilotage consolidé.'}
-                  </p>
-                  <ul className="mt-6 space-y-3 text-sm text-jisra-cream/75">
-                    {features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-3">
-                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-jisra-green" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </Card3D>
-              )
-            })}
-          </div>
+          <CatalogOffers />
         </Container>
       </MotionSection>
 

@@ -1,30 +1,12 @@
-import { createClient } from '@/lib/supabase/client'
+import { publicCatalogSchema, type CatalogPrice } from '@/lib/billing/catalog'
 
-export type Plan = {
-  id: string
-  name: string
-  order_limit: number
-  ai_credits_monthly: number
-  stores_limit: number
-  delivery_integrations_limit: number
-  confirmation_agents_limit: number
-  ads_automation_enabled: boolean
-  api_access_enabled: boolean
-  price: number
-}
-
-export async function getPlans(): Promise<Plan[]> {
-  const supabase = createClient()
-
-  const { data, error } = await supabase
-    .from('plans')
-    .select('*')
-    .order('price', { ascending: true })
-
-  if (error) {
-    console.error('Error fetching plans:', error)
-    return []
+/** Source commerciale unique, sans lecture de plans.price. */
+export async function getPublicPlanCatalog(): Promise<CatalogPrice[]> {
+  const response = await fetch('/api/billing/catalog', { cache: 'no-store' })
+  if (!response.ok) throw new Error('Les offres sont temporairement indisponibles.')
+  const payload: unknown = await response.json()
+  if (!payload || typeof payload !== 'object' || !('prices' in payload)) {
+    throw new Error('Catalogue indisponible')
   }
-
-  return data ?? []
+  return publicCatalogSchema.parse(payload.prices)
 }

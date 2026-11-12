@@ -6,6 +6,7 @@ import { MarketingFooter } from '@/components/marketing/layout/footer'
 import { PageTransition } from '@/components/marketing/shared/page-transition'
 import { ScrollToTopButton } from '@/components/marketing/shared/scroll-to-top'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
+import { AssistantGateway } from '@/components/marketing/assistant/assistant-gateway'
 
 export { metadata }
 
@@ -29,6 +30,7 @@ export default function HomePage() {
       </main>
       <MarketingFooter />
       <CookieBanner />
+      <AssistantGateway />
       <ScrollToTopButton />
     </div>
   )

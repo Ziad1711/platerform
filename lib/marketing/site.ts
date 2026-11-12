@@ -1,9 +1,11 @@
 import { v } from '@/lib/asset'
 
 export const marketingNav = [
-  { href: '#ai', label: 'IA' },
-  { href: '#ads', label: 'Publicité' },
-  { href: '#logistics', label: 'Logistique' },
+  { href: '/', label: 'Accueil' },
+  { href: '/#fonctionnalites', label: 'Fonctionnalités' },
+  { href: '/#ai', label: 'IA' },
+  { href: '/#ads', label: 'Publicité' },
+  { href: '/#logistics', label: 'Logistique' },
   { href: '/catalogue-integrations', label: 'Intégrations' },
   { href: '/pricing', label: 'Tarifs' },
 ]

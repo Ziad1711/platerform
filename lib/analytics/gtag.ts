@@ -31,7 +31,7 @@ export const GA_DEBUG_MODE =
   (process.env.NEXT_PUBLIC_GA_DEBUG || '').trim().toLowerCase() === 'true'
 
 /** Format accepté pour un identifiant de mesure (validation avant injection). */
-const MEASUREMENT_ID_PATTERN = /^(G|GT|GTM|AW)-[A-Z0-9]{4,}$/i
+const MEASUREMENT_ID_PATTERN = /^G-[A-Z0-9]{6,}$/i
 
 export function isValidMeasurementId(id: string): boolean {
   return MEASUREMENT_ID_PATTERN.test(id)

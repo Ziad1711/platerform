@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, Lock, Mail, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { trackEvent } from '@/lib/analytics/gtag'
+import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 const passwordLevels = [
   { label: 'Faible', color: 'bg-red-500', test: (v: string) => v.length >= 8 },
@@ -24,7 +25,7 @@ export default function SignupForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
-  const next = searchParams.get('next')
+  const next = sanitizeRedirectPath(searchParams.get('next'), '')
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')

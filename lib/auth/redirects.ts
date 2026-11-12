@@ -93,7 +93,7 @@ export function resolvePostLoginRedirect(options: {
 
   // Redirection explicite demandée par l'appelant, limitée aux chemins internes.
   const requestedNext =
-    next && next.startsWith('/') && !next.startsWith('//') ? next : null
+    sanitizeRedirectPath(next, '') || null
   // `/welcome` n'est jamais honoré « sur demande » : c'est la règle de finalisation
   // ci-dessous qui décide, sinon un compte déjà finalisé pourrait y être renvoyé.
   const nextIsWelcome =
@@ -144,5 +144,10 @@ export function sanitizeRedirectPath(
   if (value.startsWith('//')) return fallback
   if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)) return fallback
   if (value.includes('\\')) return fallback
+  if (/[\u0000-\u0020\u007f]/.test(value)) return fallback
+  try {
+    const decoded = decodeURIComponent(value)
+    if (decoded.startsWith('//') || decoded.includes('\\') || /[\u0000-\u001f\u007f]/.test(decoded)) return fallback
+  } catch { return fallback }
   return value
 }

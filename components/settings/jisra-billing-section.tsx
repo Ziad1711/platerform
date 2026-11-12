@@ -2,18 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useStore } from '@/lib/store-context'
 import { usePermissions } from '@/lib/auth/use-permissions'
-import JisraPlanCatalog, { type CatalogPlan } from '@/components/settings/jisra-plan-catalog'
-import UsageProgress, { formatCount, formatLimit } from '@/components/settings/jisra-usage-progress'
-
-/**
- * Numéro WhatsApp de l'équipe Jisra, au format international sans « + ».
- * Tant qu'il n'est pas renseigné, aucun lien n'est généré : le bouton de demande
- * d'offre supérieure reste désactivé au lieu de pointer vers une destination inconnue.
- */
-const JISRA_WHATSAPP_NUMBER = ''
+import JisraPlanCatalog from '@/components/settings/jisra-plan-catalog'
+import UsageProgress from '@/components/settings/jisra-usage-progress'
 
 type UsageBlock = { used?: number; limit?: number | null; enforced?: boolean }
 
@@ -21,12 +15,11 @@ type BillingStatus = {
   period_start?: string
   plan?: {
     name?: string
-    price?: number
     order_limit?: number | null
     ai_credits_monthly?: number | null
   }
   /** Abonnement réellement appliqué par la base, ou null (offre gratuite). */
-  subscription?: { plan_name?: string; status?: string; expires_at?: string | null } | null
+  subscription?: { plan_name?: string; status?: string; expires_at?: string | null; amount_paid?: number; currency?: string } | null
   orders?: UsageBlock
   /** Crédits IA consommés sur le mois en cours (compteur remis à zéro chaque mois). */
   credits?: UsageBlock
@@ -34,11 +27,9 @@ type BillingStatus = {
 type BillingDetailsProps = {
   data: BillingStatus
   planName: string
-  plans: CatalogPlan[]
-  whatsappNumber: string
 }
 
-function BillingDetails({ data, planName, plans, whatsappNumber }: BillingDetailsProps) {
+function BillingDetails({ data, planName }: BillingDetailsProps) {
   const ordersUsed = Number(data.orders?.used ?? 0)
   const ordersLimit = data.orders?.limit ?? data.plan?.order_limit ?? null
   const creditsUsed = Number(data.credits?.used ?? 0)
@@ -46,10 +37,6 @@ function BillingDetails({ data, planName, plans, whatsappNumber }: BillingDetail
   const periodNote = data.period_start
     ? `Comptage depuis le ${new Date(data.period_start).toLocaleDateString('fr-FR')} sur la date des commandes.`
     : undefined
-  // Consommation du mois reprise dans la demande transmise à l'équipe Jisra.
-  const usageSummary =
-    `Commandes du mois : ${formatCount(ordersUsed)} sur ${formatLimit(ordersLimit)}. ` +
-    `Crédits IA : ${formatCount(creditsUsed)} sur ${formatLimit(creditsLimit)}.`
 
   return (
     <div className="mt-5 space-y-5">
@@ -57,7 +44,7 @@ function BillingDetails({ data, planName, plans, whatsappNumber }: BillingDetail
         <div className="rounded-lg border p-3">
           <p className="text-xs text-muted-foreground">Offre appliquée</p>
           <p className="text-sm font-medium text-foreground">{planName}</p>
-          <p className="text-xs text-muted-foreground">{data.plan?.price ?? 0} MAD / mois</p>
+          <p className="text-xs text-muted-foreground">Montant historiquement payé : {data.subscription?.amount_paid ?? '—'} {data.subscription?.currency || ''}</p>
         </div>
         <div className="rounded-lg border p-3">
           <p className="text-xs text-muted-foreground">Échéance</p>
@@ -93,12 +80,8 @@ function BillingDetails({ data, planName, plans, whatsappNumber }: BillingDetail
         />
       </div>
 
-      <JisraPlanCatalog
-        plans={plans}
-        currentPlanName={planName}
-        whatsappNumber={whatsappNumber}
-        usageSummary={usageSummary}
-      />
+      <JisraPlanCatalog currentPlanName={planName} />
+      <Link href="/payment-requests" className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm font-medium">Suivre mes demandes de paiement</Link>
     </div>
   )
 }
@@ -123,23 +106,7 @@ export default function JisraBillingSection() {
     },
   })
 
-  // Catalogue des offres : comparatif indicatif. Le passage à une offre
-  // supérieure reste traité par l'équipe Jisra, sans paiement en ligne.
-  const { data: plans = [] } = useQuery({
-    queryKey: ['settings-plans-catalog'],
-    queryFn: async () => {
-      const { data: catalog, error } = await supabase
-        .from('plans')
-        .select('id, name, price, order_limit, ai_credits_monthly, stores_limit')
-        .order('price', { ascending: true })
-
-      if (error) throw error
-      return (catalog || []) as CatalogPlan[]
-    },
-  })
-
   const planName = data?.plan?.name || 'Offre actuelle'
-  const whatsappNumber = JISRA_WHATSAPP_NUMBER.replace(/\D/g, '')
 
   if (role && !can('billing.manage')) {
     return (
@@ -178,7 +145,7 @@ export default function JisraBillingSection() {
           </button>
         </div>
       ) : (
-        <BillingDetails data={data} planName={planName} plans={plans} whatsappNumber={whatsappNumber} />
+        <BillingDetails data={data} planName={planName} />
       )}
     </section>
   )

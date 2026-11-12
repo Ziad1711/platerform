@@ -4,7 +4,7 @@ import { createClient, getServerUserResult, hasSessionCookie } from '@/lib/supab
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
-import { resolvePostLoginRedirect } from '@/lib/auth/redirects'
+import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
 import { getUserAccess } from '@/lib/auth/access'
 
 type LoginPageProps = {
@@ -88,7 +88,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 )}
                 <p className="mt-3 text-sm text-jisra-cream/45">
                   Nouveau sur Jisra ?{' '}
-                  <Link href="/signup" className="font-medium text-jisra-green-light hover:text-jisra-green">
+                  <Link href={params.next ? `/signup?next=${encodeURIComponent(sanitizeRedirectPath(params.next))}` : '/signup'} className="font-medium text-jisra-green-light hover:text-jisra-green">
                     Créer un compte
                   </Link>
                 </p>

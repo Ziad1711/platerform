@@ -2,8 +2,10 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
 import type { User } from '@supabase/supabase-js'
+import { assertQualificationIsolation } from '@/lib/env/qualification-guard'
 
 export const createClient = async () => {
+  assertQualificationIsolation()
   const cookieStore = await cookies()
 
   return createServerClient(

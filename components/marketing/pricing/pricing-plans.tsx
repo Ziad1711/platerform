@@ -1,62 +1,31 @@
 'use client'
 
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { MessageCircle } from 'lucide-react'
-import { getPlans } from '@/services/plans'
+import { CatalogOffers, publicCatalogQuery } from './catalog-offers'
 import { PageHero } from '@/components/marketing/shared/page-hero'
 import { Container } from '@/components/marketing/shared/container'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
-import { PricingToggle } from '@/components/marketing/shared/pricing-toggle'
 import { MotionSection } from '@/components/marketing/shared/motion-section'
-import { PricingCard } from '@/components/marketing/pricing/pricing-card'
 import { PricingComparison } from '@/components/marketing/pricing/pricing-comparison'
 import { PricingFAQ } from '@/components/marketing/pricing/pricing-faq'
 
 export function PricingPlans() {
-  const [billing, setBilling] = useState<'monthly' | 'yearly'>('monthly')
-
-  const { data: plans = [], isLoading } = useQuery({
-    queryKey: ['plans'],
-    queryFn: getPlans,
-  })
+  const { data: catalog = [] } = useQuery(publicCatalogQuery)
+  const plans = catalog.filter((price) => price.billing_period === 'monthly')
 
   return (
     <>
       <PageHero
         eyebrow="Tarifs"
         title="Des plans simples pour transformer vos opérations en machine rentable"
-        description="Choisissez un cadre adapté à votre phase de croissance. Pas de frais cachés, pas d'engagement."
+        description="Choisissez un cadre adapté à votre phase de croissance. Mensuel ou annuel prépayé, avec un montant total clairement indiqué."
       />
 
       <MotionSection className="py-20 sm:py-24" withStagger>
         <Container className="space-y-10">
-          <div className="flex flex-col items-center gap-4">
-            <PricingToggle value={billing} onChange={setBilling} />
-            {billing === 'yearly' && (
-              <span className="rounded-full border border-jisra-green/20 bg-jisra-green/10 px-4 py-1 text-xs font-medium text-jisra-green">
-                Bientôt disponible
-              </span>
-            )}
-          </div>
-
-          {isLoading ? (
-            <div className="flex justify-center py-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-jisra-green border-t-transparent" />
-            </div>
-          ) : (
-            <div className="grid gap-6 lg:grid-cols-3">
-              {plans.map((plan, index) => (
-                <PricingCard
-                  key={plan.id}
-                  plan={plan}
-                  featured={plan.name === 'Pro'}
-                  index={index}
-                />
-              ))}
-            </div>
-          )}
+          <CatalogOffers />
         </Container>
       </MotionSection>
 

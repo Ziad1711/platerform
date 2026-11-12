@@ -5,7 +5,7 @@ import { PricingPlans } from '@/components/marketing/pricing/pricing-plans'
 export const metadata: Metadata = {
   title: 'Tarifs — ERP e-commerce pour le Maroc',
   description:
-    'Comparez les plans jisra pour e-commerçants marocains : commandes, stock, publicité, livraison et rentabilité dans une seule interface. Sans frais cachés ni engagement.',
+    'Comparez les forfaits Jisra : mensuel ou annuel prépayé, avec montant total indiqué. Commandes, stock, publicité, livraison et rentabilité.',
   alternates: {
     canonical: `${SITE_URL}/pricing`,
   },

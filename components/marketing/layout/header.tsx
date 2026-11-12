@@ -28,13 +28,13 @@ export function MarketingHeader() {
           animate={{
             y: 0,
             borderColor: isScrolled ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.08)',
-            backgroundColor: isScrolled ? 'rgba(24,32,28,0.88)' : 'rgba(24,32,28,0.56)',
+            backgroundColor: '#18201c',
             boxShadow: isScrolled
               ? '0 18px 70px rgba(0,0,0,0.34)'
               : '0 10px 40px rgba(0,0,0,0.18)',
           }}
           transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-          className="relative rounded-[22px] border backdrop-blur-2xl"
+          className="relative rounded-[22px] border"
 
         >
           <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-jisra-green/50 to-transparent" />
@@ -50,12 +50,12 @@ export function MarketingHeader() {
               </div>
             </Link>
 
-            <nav className="hidden items-center gap-1 lg:flex">
+            <nav aria-label="Navigation principale" className="hidden items-center gap-0 xl:flex">
               {marketingNav.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="group relative rounded-xl px-4 py-2.5 text-sm font-medium text-jisra-cream/68 transition-colors duration-300 hover:text-jisra-cream"
+                  className="group relative rounded-xl px-2.5 py-2.5 text-sm font-medium text-jisra-cream/68 transition-colors duration-300 hover:text-jisra-cream"
                 >
                   <span>{item.label}</span>
                   <span className="absolute inset-x-4 bottom-1 h-px origin-left scale-x-0 bg-jisra-green transition-transform duration-300 group-hover:scale-x-100" />
@@ -63,7 +63,7 @@ export function MarketingHeader() {
               ))}
             </nav>
 
-            <div className="hidden items-center gap-3 lg:flex">
+            <div className="hidden items-center gap-3 xl:flex">
               <div onClick={() => setNavigating(true)} className="contents">
                 <MarketingLink href="/login" variant="ghost">
                   {navigating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Se connecter'}
@@ -77,7 +77,7 @@ export function MarketingHeader() {
             <button
               type="button"
               onClick={() => setOpen((value) => !value)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-jisra-cream transition hover:bg-white/[0.08] lg:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-jisra-cream transition hover:bg-white/[0.08] xl:hidden"
               aria-label={open ? 'Fermer le menu' : 'Ouvrir le menu'}
               aria-expanded={open}
             >
@@ -94,10 +94,10 @@ export function MarketingHeader() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.22 }}
-            className="absolute inset-x-0 top-full z-[70] px-3 pt-3 sm:px-4 lg:hidden"
+            className="absolute inset-x-0 top-full z-[70] px-3 pt-3 sm:px-4 xl:hidden"
           >
             <Container className="px-0">
-              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-jisra-ink-light/94 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-jisra-ink-light p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
 
                 <div className="grid gap-2">
                   {marketingNav.map((item) => (

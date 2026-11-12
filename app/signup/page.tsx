@@ -4,7 +4,7 @@ import { createClient, getServerUserResult } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
-import { resolvePostLoginRedirect } from '@/lib/auth/redirects'
+import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
 import { getUserAccess } from '@/lib/auth/access'
 
 type SignupPageProps = {
@@ -118,7 +118,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
 
               <p className="text-sm text-jisra-cream/55">
                 Déjà inscrit ?{' '}
-                <Link href="/login" className="font-medium text-jisra-green-light transition hover:text-jisra-green">
+                  <Link href={params.next ? `/login?next=${encodeURIComponent(sanitizeRedirectPath(params.next))}` : '/login'} className="font-medium text-jisra-green-light hover:text-jisra-green">
                   Se connecter
                 </Link>
               </p>

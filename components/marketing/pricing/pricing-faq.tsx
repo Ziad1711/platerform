@@ -19,7 +19,7 @@ const faqItems = [
   {
     question: 'Puis-je commencer gratuitement puis évoluer ?',
     answer:
-      'Absolument. Le plan Gratuit vous permet de tester toutes les fonctionnalités de base. Vous pouvez passer au plan Pro ou Ultimate à tout moment.',
+      'Le compte gratuit permet de démarrer. Vous pouvez consulter les forfaits et préparer votre sélection ; la souscription payante n’est pas encore disponible.',
   },
   {
     question: 'Puis-je gérer plusieurs stores ?',

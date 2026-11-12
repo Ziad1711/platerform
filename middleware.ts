@@ -3,6 +3,19 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getFirstAllowedRoute, hasPermission, MENU_PERMISSIONS } from '@/lib/auth/permissions'
 import { isProtectedAppRoute } from '@/lib/auth/redirects'
+import {
+  assertQualificationIsolation,
+  qualificationBlockedPath,
+  QualificationIsolationError,
+} from '@/lib/env/qualification-guard'
+import {
+  isMaintenancePilot,
+  maintenanceDecision,
+  maintenanceEnabled,
+  maintenanceHeaders,
+  maintenanceHtml,
+  maintenancePilotEmails,
+} from '@/lib/maintenance/guard'
 
 /** Budget du garde de navigation : au-delà, le rendu serveur reste seul juge. */
 const MIDDLEWARE_AUTH_DEADLINE_MS = 4_000
@@ -16,6 +29,80 @@ function withDeadline<T>(promise: Promise<T>): Promise<T | null> {
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
+
+  // 1. Isolation de qualification, vérifiée avant tout traitement. En production
+  //    (JISRA_QUALIFICATION différent de '1'), ce contrôle ne fait rien.
+  try {
+    assertQualificationIsolation()
+  } catch (error) {
+    const reason =
+      error instanceof QualificationIsolationError ? error.reason : 'isolation non vérifiable'
+    return NextResponse.json(
+      { error: 'QUALIFICATION_ISOLATION_DENIED', reason },
+      { status: 500 }
+    )
+  }
+
+  // 2. Gel des écritures pendant la bascule. Prioritaire sur les routes API :
+  //    un webhook ou un cron reçoit un refus explicite (503), jamais un faux succès.
+  //    Le compte pilote est identifié côté serveur (JWT vérifié par l'API Auth),
+  //    jamais à partir d'un en-tête client.
+  let maintenancePilot = false
+  if (maintenanceEnabled() && maintenancePilotEmails().length > 0) {
+    try {
+      const pilotClient = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return request.cookies.getAll()
+            },
+            setAll() {
+              // Aucun cookie n'est écrit pendant ce contrôle en lecture seule.
+            },
+          },
+        }
+      )
+      const { data: pilotUser } = await pilotClient.auth.getUser()
+      maintenancePilot = isMaintenancePilot(pilotUser?.user?.email)
+    } catch {
+      maintenancePilot = false
+    }
+  }
+
+  const maintenance = maintenanceDecision(pathname, request.method, maintenancePilot)
+  if (maintenance) {
+    if (maintenance.asPage) {
+      return new NextResponse(maintenanceHtml(maintenance.reason), {
+        status: 503,
+        headers: { ...maintenanceHeaders(), 'Content-Type': 'text/html; charset=utf-8' },
+      })
+    }
+    return NextResponse.json(
+      { error: 'MAINTENANCE_MODE', reason: maintenance.reason },
+      { status: 503, headers: maintenanceHeaders() }
+    )
+  }
+
+  const qualificationBlock = qualificationBlockedPath(pathname)
+  if (qualificationBlock) {
+    return NextResponse.json({ error: 'QUALIFICATION_ROUTE_DISABLED', reason: qualificationBlock }, { status: 503 })
+  }
+
+  // 3. Routes API : seuls les contrôles d'isolation s'appliquent. Le middleware
+  //    ne les inspectait pas auparavant ; le comportement est préservé hors
+  //    qualification.
+  if (pathname.startsWith('/api')) {
+    const blocked = qualificationBlockedPath(pathname)
+    if (blocked) {
+      return NextResponse.json(
+        { error: 'QUALIFICATION_ROUTE_DISABLED', reason: blocked },
+        { status: 503 }
+      )
+    }
+    return NextResponse.next()
+  }
 
   // Page d'accueil publique : aucun traitement Auth ni appel Supabase requis
   // pour son affichage. Le renouvellement de session reste assuré lors du
@@ -121,5 +208,8 @@ function redirectWithSessionCookies(
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: [
+    '/api/:path*',
+    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 }

@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
 import { useStore } from '@/lib/store-context'
 import { usePermissions } from '@/lib/auth/use-permissions'
+import JisraPlanCatalog from '@/components/settings/jisra-plan-catalog'
+import Link from 'next/link'
 
 /** `enforced: false` = limite affichée à titre informatif, non bloquée en base. */
 type UsageBlock = { used?: number; limit?: number | null; enforced?: boolean }
@@ -18,12 +20,16 @@ type BillingSubscription = {
   plan_name?: string
 }
 
+type SubscriptionHistoryRow = {
+  id?: string; status?: string; amount_paid?: number; currency?: string
+  started_at?: string | null; expires_at?: string | null; plans?: { name?: string } | null
+}
+
 type BillingStatus = {
   period_start?: string
   plan?: {
     id?: string
     name?: string
-    price?: number
     order_limit?: number | null
     stores_limit?: number | null
     confirmation_agents_limit?: number | null
@@ -115,19 +121,6 @@ export default function AbonnementPage() {
     },
   })
 
-  const { data: plans = [] } = useQuery({
-    queryKey: ['settings-plans-list-dashboard'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('plans')
-        .select('id, name, price, order_limit')
-        .order('price', { ascending: true })
-
-      if (error) throw error
-      return data || []
-    },
-  })
-
   // Abonnement réellement appliqué par la base (et non « la dernière ligne ») :
   // il peut différer de la ligne la plus récente si celle-ci est expirée ou moins
   // élevée. Voir `rpc_billing_status`.
@@ -155,6 +148,7 @@ export default function AbonnementPage() {
 
       <div className="bg-card rounded-xl shadow p-6">
         <h2 className="text-lg font-semibold text-foreground mb-2">Abonnement Jisra</h2>
+        <Link href="/payment-requests" className="inline-flex min-h-11 items-center underline">Mes demandes de paiement</Link>
         <p className="text-sm text-muted-foreground">
           Plan, statut et échéance de votre abonnement à Jisra. Les factures émises pour vos
           propres clients se configurent dans Paramètres &gt; Factures clients.
@@ -174,10 +168,6 @@ export default function AbonnementPage() {
                 {billingStatus.plan.name || '-'}
               </p>
               <p>
-                <span className="text-muted-foreground">Montant de l&apos;offre :</span>{' '}
-                {billingStatus.plan.price ?? 0} MAD / mois
-              </p>
-              <p>
                 <span className="text-muted-foreground">Abonnement appliqué :</span>{' '}
                 {appliedSubscription
                   ? appliedSubscription.plan_name || billingStatus.plan.name || '-'
@@ -186,9 +176,10 @@ export default function AbonnementPage() {
               {appliedSubscription && (
                 <>
                   <p><span className="text-muted-foreground">Statut :</span> {appliedSubscription.status || '-'}</p>
-                  <p><span className="text-muted-foreground">Montant payé :</span> {appliedSubscription.amount_paid ?? 0} {appliedSubscription.currency || ''}</p>
+                  <p><span className="text-muted-foreground">Montant historiquement payé :</span> {appliedSubscription.amount_paid ?? 0} {appliedSubscription.currency || ''}</p>
                   <p><span className="text-muted-foreground">Début :</span> {appliedSubscription.started_at ? new Date(appliedSubscription.started_at).toLocaleString() : '-'}</p>
                   <p><span className="text-muted-foreground">Fin :</span> {appliedSubscription.expires_at ? new Date(appliedSubscription.expires_at).toLocaleString() : '-'}</p>
+                  <p className="text-muted-foreground">Tarif actuel du catalogue (information) : voir la section « Tarifs actuels des offres Jisra » ci-dessous — distinct du montant payé.</p>
                 </>
               )}
             </div>
@@ -247,20 +238,12 @@ export default function AbonnementPage() {
       <div id="upgrade" className="bg-card rounded-xl shadow p-6 space-y-3">
         <h3 className="text-base font-semibold text-foreground">Offres disponibles</h3>
         <p className="text-sm text-muted-foreground">Comparatif des offres Jisra.</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {plans.map((plan: any) => (
-            <div key={plan.id} className="border rounded-lg p-3">
-              <p className="text-sm font-semibold text-foreground">{plan.name}</p>
-              <p className="text-xs text-muted-foreground">{plan.price ?? 0} MAD / mois</p>
-              <p className="text-xs text-muted-foreground">Limite commandes: {plan.order_limit ?? '-'}</p>
-            </div>
-          ))}
-        </div>
+        <JisraPlanCatalog currentPlanName={billingStatus?.plan?.name} />
       </div>
 
       <div className="bg-card rounded-xl shadow p-6">
         <h3 className="text-base font-semibold text-foreground mb-3">Historique des abonnements</h3>
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border rounded-lg overflow-x-auto">
           <table className="min-w-full divide-y divide-border text-sm">
             <thead className="bg-secondary">
               <tr>
@@ -276,7 +259,7 @@ export default function AbonnementPage() {
                   <td colSpan={4} className="px-4 py-3 text-muted-foreground">Aucun historique disponible.</td>
                 </tr>
               ) : (
-                subscriptionsHistory.map((row: any) => (
+                subscriptionsHistory.map((row: SubscriptionHistoryRow) => (
                   <tr key={row.id}>
                     <td className="px-4 py-3">{row?.plans?.name || '-'}</td>
                     <td className="px-4 py-3 text-muted-foreground">

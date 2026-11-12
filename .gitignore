@@ -5,3 +5,5 @@ node_modules/
 .gemini/
 
 .vercel
+.q4.local.json
+.next-q4/

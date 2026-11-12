@@ -1,0 +1,1 @@
+export default function AdminLoading() { return <div role="status" aria-live="polite" className="animate-pulse rounded-2xl border border-white/10 p-6">Vérification des habilitations et chargement…</div> }

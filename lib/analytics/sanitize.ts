@@ -29,6 +29,10 @@ export const OPAQUE_SEGMENT_PATTERNS: RegExp[] = [
  * d'invitation, lien d'authentification, bon de livraison consultable par clé).
  */
 export const UNTRACKABLE_ROUTE_PREFIXES: string[] = [
+  '/admin',
+  '/payment-requests',
+  '/subscribe',
+  '/api',
   '/auth',
   '/invite',
   '/delivery/vouchers',

@@ -1,0 +1,149 @@
+.demo { position: relative; margin: 0; padding: 18px 18px 0; overflow: hidden; background: radial-gradient(ellipse at 70% 0%, #1fa97118, transparent 65%), #151e19; border-bottom: 1px solid #ffffff12; }
+.topline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 8px; letter-spacing: .12em; color: #c2ccc5; }
+.topline > span:first-child { display: flex; align-items: center; gap: 6px; }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: #38c48b; }
+.interactionHint { display: flex; align-items: center; gap: 8px; margin: -3px 0 13px; color: #c6e8d6; font-size: 9px; line-height: 1.6; }
+.interactionHint svg { flex-shrink: 0; color: #4ec491; }
+.interactionHint[data-playing='true'] svg { animation: inviteInteraction 3.5s ease-in-out infinite; }
+@keyframes inviteInteraction { 0%, 60%, 100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(4px) rotate(-12deg); } 40% { transform: translateX(1px) rotate(5deg); } }
+.window { position: relative; overflow: hidden; border: 1px solid #d8dfda; border-radius: 12px; background: #f8faf9; color: #1f2a23; box-shadow: 0 12px 32px #0003; font-size: 11px; }
+.windowBar { display: flex; align-items: center; gap: 5px; padding: 10px 12px; background: white; border-bottom: 1px solid #e4e9e5; }
+.windowBar > b { font-size: 15px; letter-spacing: -.8px; }
+.windowBar > b > span { color: #1fa971; }
+.windowPath { margin-left: 8px; font-size: 9px; color: #65756a; }
+.avatar { margin-left: auto; border-radius: 50%; background: #edf3ef; padding: 4px; font-size: 8px; color: #456651; }
+.content { padding: 14px 12px 10px; }
+.heading { display: flex; align-items: center; gap: 7px; margin-bottom: 13px; color: #177d54; }
+.heading h4 { font-size: 13px; color: #1f2a23; font-weight: 650; }
+.demoPill { margin-left: auto; padding: 2px 6px; border-radius: 4px; background: #e9eeeb; color: #5c6f62; font-size: 8px; }
+.scene { height: 234px; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 12px; font-size: 9px; color: #627267; }
+.action { display: inline-flex; align-items: center; gap: 4px; background: #1fa971; color: white; padding: 7px 8px; border-radius: 5px; font-size: 8px; font-weight: 600; }
+.tableHead, .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 11px 6px; border-bottom: 1px solid #e5ebe7; }
+.tableHead { background: #eef2ef; font-size: 9px; color: #607266; padding: 7px 6px; }
+.row { font-size: 10px; }
+.row b { font-weight: 600; }
+.row small, .product small { display: block; font-size: 8px; color: #6d7b72; margin-top: 3px; }
+.highlight { background: #eaf8f0; }
+.pending { border-radius: 4px; padding: 3px 5px; background: #fff2d0; color: #8a6010; font-size: 8px; }
+.status { border: 0; background: #e1f3e9; color: #176d49; padding: 3px 6px; font-size: 8px; white-space: nowrap; }
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-top: 12px; font-size: 9px; color: #27704e; background: #eaf4ee; padding: 8px; border-radius: 5px; }
+.notice svg { flex-shrink: 0; }
+.selector { display: flex; align-items: center; gap: 7px; border: 1px solid #dbe4de; border-radius: 6px; padding: 8px; background: white; font-size: 10px; }
+.selector svg:last-child { margin-left: auto; }
+.storeList { border: 1px solid #e0e7e2; background: white; border-radius: 6px; margin: 5px 0 10px; padding: 5px; }
+.storeList > span { display: flex; align-items: center; gap: 8px; padding: 7px; font-size: 10px; border-radius: 4px; }
+.storeList > span svg:last-child:not(:first-child) { margin-left: auto; }
+.selected { background: #e4f5eb; color: #13724b; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.metrics > div { border: 1px solid #e1e8e3; padding: 10px; border-radius: 7px; background: white; }
+.metrics small { display: block; font-size: 8px; color: #5d7063; }
+.metrics b { display: flex; align-items: baseline; gap: 4px; margin-top: 5px; font-size: 20px; letter-spacing: -.6px; }
+.metrics b small { font-size: 8px; letter-spacing: 0; }
+.question { margin: 0 0 12px 25px; background: #e0f2e8; padding: 10px; border-radius: 9px 9px 2px 9px; font-size: 10px; }
+.answer { border: 1px solid #e4eae6; border-radius: 8px; background: white; padding: 12px; height: 151px; }
+.assistant { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; color: #158556; }
+.answer p { font-size: 9px; line-height: 1.6; margin-top: 9px; }
+.answer strong { display: block; margin-top: 5px; font-size: 23px; }
+.answer strong small { font-size: 11px; font-weight: 400; }
+.source { font-size: 8px; color: #6e7b73; margin-top: 3px; }
+.answer .answerDetail { margin-top: 5px; }
+.input { display: flex; justify-content: space-between; margin-top: 10px; border: 1px solid #dce5df; border-radius: 6px; padding: 8px; color: #758178; font-size: 8px; }
+.input span { color: #198657; }
+.checkbox { display: flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 3px; background: #e6f5ec; border: 1px solid #78b794; color: #158454; }
+.actionBar { position: relative; display: flex; justify-content: flex-end; padding-top: 15px; }
+.actionBar button:disabled { background: #e1f3e9; color: #176d49; }
+.actionBar button:focus-visible { outline: 2px solid #176d49; outline-offset: 3px; }
+.connection { display: inline-flex; align-items: center; gap: 5px; color: #27704e; font-size: 8px; }
+.deliveryCursor { position: absolute; right: 18px; bottom: -10px; color: white; pointer-events: none; filter: drop-shadow(0 2px 2px #0004); animation: deliveryClick 2.2s ease both; }
+.clickTarget { animation: buttonClick 2.2s ease both; }
+.voucher { display: flex; align-items: center; gap: 9px; padding: 10px; margin-top: 12px; border: 1px solid #b8dfc9; border-radius: 7px; background: #eef9f2; }
+.voucherCheck { display: flex; padding: 6px; border-radius: 50%; background: #d5efdf; color: #15774c; }
+.voucher b { display: block; font-size: 10px; }
+.voucher small { display: block; margin-top: 4px; color: #53715e; font-size: 8px; }
+.voucherLabel { margin-left: auto; padding: 5px; border: 1px solid #bdd9c7; border-radius: 4px; color: #23734a; font-size: 8px; }
+.period { display: flex; align-items: center; gap: 4px; border: 1px solid #dce5df; border-radius: 4px; padding: 5px; background: white; }
+.adsPeriodControl { position: relative; z-index: 5; }
+.adsPeriodControl .period { min-height: 25px; }
+.adsPeriodControl button:focus-visible { outline: 2px solid #1fa971; outline-offset: 2px; }
+.adsPeriodMenu { position: absolute; top: calc(100% + 5px); right: 0; width: 140px; padding: 4px; background: white; border: 1px solid #dce5df; border-radius: 6px; box-shadow: 0 8px 20px #1f2a2329; }
+.adsPeriodMenu button { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 30px; padding: 6px 8px; border-radius: 4px; font-size: 9px; text-align: left; }
+.adsPeriodMenu button:hover { background: #eaf6ef; }
+.adsCursor { position: absolute; top: 11px; right: 22px; color: white; pointer-events: none; filter: drop-shadow(0 2px 2px #0004); transform-origin: 2px 2px; }
+.adsPeriodControl[data-phase='0'] .adsCursor { animation: adsApproach 1.8s linear both; }
+.adsPeriodControl[data-phase='1'] .adsCursor { animation: adsChoose 2.2s linear both; }
+.chart { margin-top: 12px; padding: 10px 8px 0; background: white; border: 1px solid #e4eae6; border-radius: 6px; }
+.lineChart { display: block; width: 100%; height: 66px; overflow: visible; }
+.adsMetrics > div { padding: 7px 9px; }
+.adsMetrics b { font-size: 17px; margin-top: 3px; }
+.adsMetrics small { font-size: 7px; }
+.dashboardDemo .scene { height: auto; }
+.dashboardDemo .content { padding: 20px; }
+.dashboardDemo .heading h4 { font-size: 18px; }
+.dashboardToolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 18px; }
+.dashboardToolbar > span { display: flex; align-items: center; gap: 6px; padding: 9px; border: 1px solid #dce5df; border-radius: 6px; background: white; }
+.periodControl { position: relative; z-index: 5; }
+.periodButton { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 150px; padding: 9px; border: 1px solid #dce5df; border-radius: 6px; background: white; color: #1f2a23; font-size: 11px; }
+.periodButton:focus-visible, .periodMenu button:focus-visible { outline: 2px solid #1fa971; outline-offset: 2px; }
+.periodMenu { position: absolute; top: calc(100% + 6px); right: 0; width: 210px; max-height: 370px; overflow-y: auto; padding: 5px; background: white; border: 1px solid #dce5df; border-radius: 7px; box-shadow: 0 10px 28px #1f2a2326; }
+.customDates { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.customDates label { display: grid; gap: 5px; font-size: 10px; color: #52675a; }
+.customDates input { padding: 6px; border: 1px solid #dce5df; border-radius: 5px; background: white; color: #1f2a23; }
+.periodMenu button { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 9px 10px; border-radius: 4px; text-align: left; font-size: 11px; }
+.periodMenu button:hover { background: #eaf6ef; }
+.periodCursor { position: absolute; right: 18px; top: 17px; color: white; pointer-events: none; filter: drop-shadow(0 2px 2px #0004); animation: periodClick 1.8s ease both; }
+.optionCursor { top: 126px; right: 32px; animation: optionSelect 2.2s ease both; }
+.dashboardKpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.dashboardKpis > div { position: relative; min-width: 0; padding: 16px; background: white; border: 1px solid #e0e8e2; border-radius: 10px; }
+.dashboardKpis small { display: block; color: #5b6c61; font-size: 11px; }
+.dashboardKpis strong { display: block; margin-top: 9px; font-size: clamp(17px, 2vw, 27px); font-weight: 650; letter-spacing: -.7px; }
+.kpiDot { float: right; width: 8px; height: 8px; margin: 2px 0 0 6px; border-radius: 3px; }
+.dailyChart { margin-top: 14px; padding: 16px; background: white; border: 1px solid #e0e8e2; border-radius: 10px; }
+.chartHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.chartHeader > b { font-size: 13px; }
+.legend { display: flex; gap: 5px; flex-wrap: wrap; }
+.legend button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid #e0e8e2; border-radius: 4px; font-size: 9px; }
+.legend button[aria-pressed='false'] { opacity: .4; }
+.legend button:focus-visible { outline: 2px solid #1fa971; }
+.legend i, .dayValues i { display: inline-block; flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; }
+.chartSubtitle { color: #6e7c73; font-size: 9px; margin-top: 5px; }
+.dailySvg { display: block; width: 100%; height: auto; margin-top: 10px; overflow: visible; }
+.dailySvg text { fill: #66776c; font-size: 10px; }
+.dayValues { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 0 0; border-top: 1px solid #edf1ee; font-size: 10px; }
+.dayValues > span { display: inline-flex; align-items: center; gap: 4px; }
+.dayValues strong { font-weight: 600; }
+.marketingChart { padding: 8px; margin-top: 9px; }
+.marketingChart .chartHeader > b { font-size: 9px; }
+.marketingChart .legend button { font-size: 7px; padding: 2px 4px; }
+.marketingChart .dailySvg { margin-top: 5px; height: 140px; }
+.marketingChart .dayValues { gap: 7px; font-size: 7px; padding-top: 5px; }
+.marketingDemo .scene { height: 360px; }
+.chartLabel { display: flex; justify-content: space-between; padding: 7px 0; font-size: 7px; color: #687c6f; }
+.product { display: flex; align-items: center; gap: 8px; padding: 12px 0; }
+.productIcon { padding: 10px; background: #e8f0eb; border-radius: 7px; color: #368660; }
+.product b { font-size: 11px; }
+.product strong { margin-left: auto; font-size: 27px; line-height: 1; text-align: right; }
+.product strong small { font-weight: 400; margin-top: 5px; }
+.stockForm { display: flex; gap: 8px; background: white; padding: 10px; border: 1px solid #e1e8e3; border-radius: 6px; }
+.stockForm > span { flex: 1; font-size: 8px; color: #69796f; }
+.stockForm b { display: flex; justify-content: space-between; padding: 6px; margin-top: 5px; border: 1px solid #e1e8e3; border-radius: 4px; color: #273c2e; font-size: 10px; }
+.cursor { position: absolute; right: 22px; top: 90px; color: white; filter: drop-shadow(0 2px 2px #0004); pointer-events: none; animation: point .6s ease-out both; }
+.caption { display: flex; align-items: center; gap: 7px; min-height: 52px; color: #d3dfd6; font-size: 10px; }
+.stepNumber { color: #4ec491; font-size: 9px; font-variant-numeric: tabular-nums; }
+.caption button { display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: auto; width: 28px; height: 28px; border: 1px solid #ffffff24; border-radius: 50%; color: #d3dfd6; }
+.caption button:focus-visible { outline: 2px solid #4ec491; outline-offset: 3px; }
+.caption button:disabled { opacity: .45; }
+.progress { height: 2px; background: #ffffff09; margin: 0 -18px; }
+.progress span { display: block; height: 100%; background: #1fa971; transform-origin: left; transform: scaleX(1); }
+.progress[data-playing='true'] span { animation: progress 7s linear infinite; }
+@keyframes progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes point { from { transform: translate(15px, 20px); opacity: 0; } to { transform: translate(0, 0); opacity: 1; } }
+@keyframes deliveryClick { 0% { opacity: 0; transform: translate(25px, 20px); } 35%, 65% { opacity: 1; transform: translate(0, 0); } 72% { transform: scale(.82); } 85%, 100% { opacity: 1; transform: scale(1); } }
+@keyframes buttonClick { 0%, 65%, 85%, 100% { box-shadow: 0 0 0 0 #1fa97100; } 72% { box-shadow: 0 0 0 6px #1fa97133; background: #158456; } }
+@keyframes periodClick { 0% { opacity: 0; transform: translate(30px, 30px); } 45%, 80% { opacity: 1; transform: translate(0, 0); } 90% { transform: scale(.8); } 100% { transform: scale(1); } }
+@keyframes optionSelect { 0% { transform: translate(0, -105px); } 60%, 80% { transform: translate(0, 0); } 90% { transform: scale(.8); } 100% { transform: scale(1); } }
+@keyframes adsApproach { 0% { opacity: 0; transform: translate(20px, 35px); } 30% { opacity: 1; } 70%, 92% { transform: translate(0, 0); } 97% { transform: scale(.82); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes adsChoose { 0%, 15% { transform: translate(0, 0); } 65%, 92% { transform: translate(-28px, 63px); } 97% { transform: translate(-28px, 63px) scale(.82); } 100% { transform: translate(-28px, 63px) scale(1); } }
+@media (max-width: 639px) { .dashboardDemo .content { padding: 14px 10px; } .dashboardKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .dashboardKpis > div { padding: 12px 9px; } .dashboardKpis small { font-size: 9px; } .dashboardKpis strong { font-size: 18px; } .dashboardToolbar { gap: 5px; } .dashboardToolbar > span { font-size: 9px; } .dailyChart { padding: 10px; } .dayValues { font-size: 8px; gap: 8px; } .marketingChart .dayValues { font-size: 7px; } }
+@media (prefers-reduced-motion: reduce) { .demo *, .demo *::before, .demo *::after { animation: none !important; transition: none !important; } .cursor, .periodCursor, .adsCursor { display: none; } }
+@media (max-width: 380px) { .demo { padding: 14px 12px 0; } .caption { font-size: 9px; } .topline { font-size: 7px; } }
