@@ -958,30 +958,6 @@ export async function upsertYouCanOrderFromPayload(params: {
     roundOrderTotal ?? (await isStoreOrderTotalRoundingEnabled(storeId, supabase))
   const roundedTotal = applyOrderTotalRounding(total, roundingEnabled)
 
-  const { data: insertedOrder, error: insertOrderError } = await supabase
-    .from('orders')
-    .insert({
-      store_id: storeId,
-      customer_name: customerName,
-      phone,
-      address,
-      city: city,
-      status: 'new',
-      order_date: orderCreatedAt ? orderCreatedAt.toISOString() : new Date().toISOString(),
-      total_selling_price: roundedTotal.total,
-      rounding_adjustment: roundedTotal.adjustment,
-      delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0,
-      source: 'ads',
-    })
-    .select('id')
-    .single()
-
-  if (insertOrderError) {
-    await releaseClaim()
-    throw insertOrderError
-  }
-  internalOrderId = insertedOrder.id
-
   const lines = Array.isArray(order?.variants) ? order.variants : []
   const orderItems: any[] = []
 
@@ -1000,7 +976,6 @@ export async function upsertYouCanOrderFromPayload(params: {
 
     orderItems.push({
       store_id: storeId,
-      order_id: internalOrderId,
       product_id: resolved.internalProductId,
       product_variant_id: resolved.internalVariantId,
       quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
@@ -1010,53 +985,23 @@ export async function upsertYouCanOrderFromPayload(params: {
     })
   }
 
-  if (orderItems.length > 0) {
-    const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-    if (itemsError) {
-      // La commande vient d'être créée dans ce flux : on la supprime si ses articles échouent,
-      // puis on libère la réservation pour qu'un rejeu soit possible sans doublon.
-      await supabase.from('orders').delete().eq('id', internalOrderId)
-      await releaseClaim()
-      throw itemsError
-    }
-  }
-
-  const { error: mappingError } = await supabase.from('youcan_entity_mappings').upsert(
-    {
-      user_id: userId,
-      integration_id: integrationId,
-      store_id: storeId,
-      entity_type: 'order',
-      youcan_id: youcanOrderId,
-      internal_id: internalOrderId,
-      payload: order,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'integration_id,entity_type,youcan_id' }
-  )
-
-  if (mappingError) {
-    // Sans mapping, un rejeu du webhook créerait une seconde commande : la commande
-    // vient d'être créée dans ce flux, on la supprime pour que la reprise soit sûre.
-    await supabase.from('orders').delete().eq('id', internalOrderId)
-    await releaseClaim()
-    throw mappingError
-  }
-
-  // Clôture de la réservation : elle devient la preuve durable de l'import. Si elle
-  // échoue, on retire la commande pour que le rejeu reste sans doublon.
-  const finishResult = await supabase.rpc('rpc_finish_youcan_order_claim', {
-    p_integration_id: integrationId,
-    p_youcan_order_id: youcanOrderId,
-    p_token: claimToken,
-    p_order_id: internalOrderId,
+  const { data: committedOrderId, error: commitError } = await supabase.rpc('rpc_commit_youcan_order', {
+    p_integration_id: integrationId, p_youcan_order_id: youcanOrderId, p_token: claimToken,
+    p_user_id: userId, p_store_id: storeId,
+    p_order: { customer_name: customerName, phone, address, city,
+      order_date: orderCreatedAt ? orderCreatedAt.toISOString() : new Date().toISOString(),
+      total_selling_price: roundedTotal.total, rounding_adjustment: roundedTotal.adjustment,
+      delivery_charge_to_customer: Number.isFinite(shippingPrice) ? shippingPrice : 0 },
+    p_items: orderItems, p_payload: order,
   })
-
-  if (finishResult.error) {
-    await supabase.from('orders').delete().eq('id', internalOrderId)
+  if (commitError) {
+    // Une perte de réponse ne prouve pas un rollback : ne jamais supprimer la
+    // commande. La réservation finalisée et le mapping atomiques servent au retry.
     await releaseClaim()
-    throw finishResult.error
+    throw commitError
   }
+  if (!committedOrderId) throw new Error('YOUCAN_COMMIT_UNCONFIRMED')
+  internalOrderId = String(committedOrderId)
 
   return { skipped: false, internalOrderId }
 }
