@@ -1,0 +1,97 @@
+{
+  "base": "aace84a5e90b1f4516e27801e250af5071001f6e",
+  "commercial": "238cb96fddd75147682cadfaa7058a34ba6536eb",
+  "code": "afc921aa593722224d85c817bdc60df72a422b54",
+  "count": 22,
+  "prerequisite": "20261109_youcan_order_claims.sql restored byte-for-byte from production base; check presence, never reapply if present",
+  "migrations": [
+    {
+      "path": "supabase/migrations/20261111010000_versioned_plan_catalog.sql",
+      "sha256": "8084fe18e2193c66a91c3699b7ad535b0c2e1bd02cbe04ac695cae89c87dd1ea"
+    },
+    {
+      "path": "supabase/migrations/20261111010100_official_plan_prices.sql",
+      "sha256": "ba9f0664e0658d3e8ec8d8df705d3732cb5130e9150b607e7dcbba754c508cf2"
+    },
+    {
+      "path": "supabase/migrations/20261111020000_bank_payment_requests.sql",
+      "sha256": "e477b94c5164ac1d531f38550a5e937e728d7e2953f43fb608b72dba13a68e2c"
+    },
+    {
+      "path": "supabase/migrations/20261111030000_saas_admin_foundation.sql",
+      "sha256": "8e7a4ee234976842c7e8abefc183ea2d13215e3e1cf5463fbbe16fc26f9e5175"
+    },
+    {
+      "path": "supabase/migrations/20261113040000_verified_bank_activation.sql",
+      "sha256": "0d96222d23de3eec7d71828c8f2a296e2051e26b16bd9da0aa42cda7dbdf76d7"
+    },
+    {
+      "path": "supabase/migrations/20261113050000_saas_finance_ledger.sql",
+      "sha256": "63910d5925d1cb355d32beb27655a58bd0c6d0c5840968d2e23c5b09d343a0e0"
+    },
+    {
+      "path": "supabase/migrations/20261113050100_saas_finance_operations.sql",
+      "sha256": "7dd5c2e5b2a1b9d5435df1ba0a72db5841c331b0d00977005bd1ca56af31ba30"
+    },
+    {
+      "path": "supabase/migrations/20261113050200_saas_finance_reports.sql",
+      "sha256": "defe307d40ef7a401aaa609d88bdfd246ad4b91aa08db268014d9f128b07ad0b"
+    },
+    {
+      "path": "supabase/migrations/20261113050300_saas_finance_corrections.sql",
+      "sha256": "060751bf5f6df66331c6ec9eb24fefe238673662e590bc79b0b66c2196b1cbbe"
+    },
+    {
+      "path": "supabase/migrations/20261113050400_finance_recognition_retention.sql",
+      "sha256": "ce52cdc6478d0f8833fc6114efefd5a91c610ebed838563787308ac4df5f3678"
+    },
+    {
+      "path": "supabase/migrations/20261114060000_saas_kpi_dashboard.sql",
+      "sha256": "e37483f78bb3753b4745de14df0ac16d380a9b0571a4707d965af1143082c83e"
+    },
+    {
+      "path": "supabase/migrations/20261114070000_ga4_admin_cache.sql",
+      "sha256": "c7a051eb72a7b3f04a2b3105cec36b3362971eb4280ecf96a839986bc1105038"
+    },
+    {
+      "path": "supabase/migrations/20261114070100_ga4_commercial_funnel.sql",
+      "sha256": "e54425a3ae037a6a2ed203184dd8992e232916ef2a3d82f11438b34962d84e28"
+    },
+    {
+      "path": "supabase/migrations/20261114070200_ga4_cache_server_write.sql",
+      "sha256": "7ba44a85453d0a9ec3f90452bb884b8a769c016267b3154b2bdd03bff1a740a8"
+    },
+    {
+      "path": "supabase/migrations/20261115080000_public_assistant_core.sql",
+      "sha256": "6a03b96c3599be06b36b170bfec39d37e4fa05748c1fe527908ee0a1e238cefc"
+    },
+    {
+      "path": "supabase/migrations/20261115080100_public_assistant_guard.sql",
+      "sha256": "081b01f0af2d2e232093d97601150455547ef9778e21a4bc02dc72193ac8d4bb"
+    },
+    {
+      "path": "supabase/migrations/20261115080200_public_assistant_contact_fix.sql",
+      "sha256": "788d5bad1d350c1c1fdc2a8e62fd9c833c0220893d60272270ef56c0bd80cb6f"
+    },
+    {
+      "path": "supabase/migrations/20261116090000_lot5_subscription_lifecycle.sql",
+      "sha256": "3a77bd5cf08e2d887dd40b2ed6f4fb1cd8beee63de477bae47a60f41b4e8c41f"
+    },
+    {
+      "path": "supabase/migrations/20261117090000_public_contact_guard.sql",
+      "sha256": "680332cf8c9ceefb2d13aef4fa1c810fdafa09ee0fb53cb52c4682bbc5091f58"
+    },
+    {
+      "path": "supabase/migrations/20261117090100_public_chat_budget_reservation.sql",
+      "sha256": "900ce8068877d89942917c512e159030c9c76ade3910ada36ca9c172f07a5ba0"
+    },
+    {
+      "path": "supabase/migrations/20261117090200_public_ai_owner_guard.sql",
+      "sha256": "13e36b6d0529819ade9c3ecb13b2dd29dff0b6c814f716a07b90ff8e07b44f5e"
+    },
+    {
+      "path": "supabase/migrations/20261118010000_youcan_atomic_order_commit.sql",
+      "sha256": "7d4b46e2d26285e8f594e09c5de9c02d3a1121f9ac3d7bfd3a12c098224285f6"
+    }
+  ]
+}

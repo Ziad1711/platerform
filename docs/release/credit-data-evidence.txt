@@ -1,0 +1,6 @@
+ai_credit_wallets PASS 4 4
+ai_usage PASS 78 78
+assistant_requests PASS 47 47
+assistant_transcription_budget PASS 5 5
+assistant_transcription_requests PASS 16 16
+subscriptions PASS 45 45
