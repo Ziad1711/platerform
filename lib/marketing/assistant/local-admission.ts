@@ -36,3 +36,42 @@ export function localRelease(key: string) {
   const slot = slots.get(key)
   if (slot) slot.inFlight = false
 }
+
+/**
+ * Comptabilisation locale (développement uniquement, mémoire du processus).
+ * Le coût est conservé pour plafonner la journée sans écrire dans Supabase.
+ */
+let localSpentMicro = 0
+let localSpentDay = new Date().toISOString().slice(0, 10)
+
+function rollLocalDay(now = new Date()) {
+  const day = now.toISOString().slice(0, 10)
+  if (day !== localSpentDay) {
+    localSpentDay = day
+    localSpentMicro = 0
+  }
+}
+
+export function localBudgetRemainingMicro(limitMicro: number, now = new Date()) {
+  if (!localAdmissionAvailable()) return 0
+  rollLocalDay(now)
+  return Math.max(0, Math.round(limitMicro) - localSpentMicro)
+}
+
+export function localRecordUsage(costMicro: number, inputTokens: number, outputTokens: number, now = new Date()) {
+  if (!localAdmissionAvailable()) return
+  rollLocalDay(now)
+  const cost = Math.max(0, Math.round(costMicro))
+  localSpentMicro += cost
+  console.info('[public-assistant] local_usage', {
+    day: localSpentDay,
+    requestCostMicro: cost,
+    inputTokens,
+    outputTokens,
+    daySpentMicro: localSpentMicro,
+  })
+}
+
+export function localUsageSnapshot() {
+  return { day: localSpentDay, spentMicro: localSpentMicro }
+}

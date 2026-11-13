@@ -23,8 +23,11 @@ function plansFromPrompt(prompt: string): PlanFact[] {
 }
 
 function selectedLocale(prompt: string): Locale {
-  const match = /Langue sélectionnée par le visiteur : (ary|ar|fr)/.exec(prompt)
-  return (match?.[1] as Locale) || 'fr'
+  // Le prompt est la seule source : il porte « Langue choisie par le visiteur : … ».
+  const line = /Langue (?:choisie|sélectionnée) par le visiteur *: *([^.]+)/i.exec(prompt)?.[1] || ''
+  if (/arabe standard/i.test(line)) return 'ar'
+  if (/darija/i.test(line)) return 'ary'
+  return 'fr'
 }
 
 /** Fournisseur simulé : moteur déterministe d’intentions (aucun réseau, coût nul). */
@@ -154,7 +157,7 @@ export class SyntheticPublicProvider implements AssistantProvider {
   private reply(text: string, input: AssistantProviderInput, last: string, cost: number): AssistantProviderOutput {
     return {
       text, inputTokens: Math.ceil((input.systemPrompt.length + last.length) / 4),
-      outputTokens: Math.ceil(text.length / 4), providerName: 'synthetic', modelName: 'synthetic-q4',
+      outputTokens: Math.ceil(text.length / 4), providerName: 'synthetic-technical', modelName: 'synthetic-technical',
       providerCostUsd: cost, usageKnown: true, usageState: 'measured',
     }
   }
@@ -165,21 +168,56 @@ export function publicAssistantEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return String(env.PUBLIC_AI_ENABLED || '').trim().toLowerCase() === 'enabled' || env.NODE_ENV !== 'production'
 }
 
-export type PublicProviderChoice = { provider: AssistantProvider; model: string; live: boolean }
+export type PublicProviderChoice =
+  | { kind: 'openai'; provider: AssistantProvider; model: string; live: true }
+  | { kind: 'synthetic'; provider: AssistantProvider; model: string; live: false }
+  | { kind: 'unavailable'; reason: string; live: false }
+
+function externalCallsEnabled(env: NodeJS.ProcessEnv) {
+  return String(env.PUBLIC_AI_EXTERNAL_CALLS || '').trim().toLowerCase() === 'enabled'
+}
+
+/** Le simulateur reste réservé aux tests techniques explicitement déclarés. */
+function syntheticAllowed(env: NodeJS.ProcessEnv) {
+  return env.JISRA_QUALIFICATION === '1' || env.NODE_ENV !== 'production'
+}
+
 /**
- * En qualification ou sans clé, seul le fournisseur simulé est utilisable.
- * Aucun appel externe implicite : `PUBLIC_AI_PROVIDER=openai` + clé + drapeau requis.
+ * Un fournisseur explicitement demandé ne retombe jamais silencieusement sur
+ * le simulateur. Sans configuration exploitable, la route répond 503.
  */
 export async function publicProvider(env: NodeJS.ProcessEnv = process.env): Promise<PublicProviderChoice> {
-  const requested = (env.PUBLIC_AI_PROVIDER || 'synthetic').trim().toLowerCase()
-  // Double verrou explicite : fournisseur choisi ET appels externes autorisés.
-  const live = requested === 'openai' && env.JISRA_QUALIFICATION !== '1'
-    && String(env.PUBLIC_AI_EXTERNAL_CALLS || '').trim().toLowerCase() === 'enabled'
-  if (live && env.OPENAI_API_KEY) {
-    const { OpenAIProvider } = await import('@/lib/assistant/providers/openai')
-    return { provider: new OpenAIProvider(), model: (env.PUBLIC_AI_MODEL || 'gpt-4o-mini').trim(), live: true }
+  const requested = (env.PUBLIC_AI_PROVIDER || '').trim().toLowerCase()
+  if (requested === 'openai') {
+    if (env.JISRA_QUALIFICATION === '1') return { kind: 'unavailable', reason: 'qualification', live: false }
+    if (!externalCallsEnabled(env)) return { kind: 'unavailable', reason: 'external_calls_disabled', live: false }
+    if (!env.OPENAI_API_KEY) return { kind: 'unavailable', reason: 'missing_key', live: false }
+    const { OpenAIResponsesProvider } = await import('./openai-responses')
+    return {
+      kind: 'openai',
+      provider: new OpenAIResponsesProvider(),
+      model: (env.PUBLIC_AI_MODEL || 'gpt-4o-mini').trim(),
+      live: true,
+    }
   }
-  return { provider: new SyntheticPublicProvider(), model: 'synthetic-q4', live: false }
+  if (requested === 'synthetic') {
+    if (!syntheticAllowed(env)) return { kind: 'unavailable', reason: 'synthetic_forbidden', live: false }
+    return { kind: 'synthetic', provider: new SyntheticPublicProvider(), model: 'synthetic-technical', live: false }
+  }
+  if (!requested && env.JISRA_QUALIFICATION === '1') {
+    return { kind: 'synthetic', provider: new SyntheticPublicProvider(), model: 'synthetic-technical', live: false }
+  }
+  return { kind: 'unavailable', reason: 'not_configured', live: false }
+}
+
+/** Décision synchrone : le widget n’est pas affiché s’il ne peut pas répondre réellement. */
+export function publicAssistantConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  const requested = (env.PUBLIC_AI_PROVIDER || '').trim().toLowerCase()
+  if (requested === 'openai') {
+    return env.JISRA_QUALIFICATION !== '1' && externalCallsEnabled(env) && Boolean(env.OPENAI_API_KEY)
+  }
+  if (requested === 'synthetic') return syntheticAllowed(env)
+  return !requested && env.JISRA_QUALIFICATION === '1'
 }
 
 /** Clé pseudonymisée : HMAC serveur, jamais l’IP brute. */

@@ -4,51 +4,14 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, HelpCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-const faqItems = [
-  {
-    question: 'Jisra est-il conçu pour le Maroc ?',
-    answer:
-      'Oui. Le produit est pensé pour les e-commerçants marocains : français, MAD, workflows de confirmation et sociétés de livraison locales.',
-  },
-  {
-    question: 'Est-ce que jisra remplace mes tableaux Excel ?',
-    answer:
-      'Oui. L\'objectif est de centraliser commandes, coûts, livraison, stock et rentabilité dans une seule interface.',
-  },
-  {
-    question: 'Puis-je commencer gratuitement puis évoluer ?',
-    answer:
-      'Le compte gratuit permet de démarrer. Vous pouvez consulter les forfaits et préparer votre sélection ; la souscription payante n’est pas encore disponible.',
-  },
-  {
-    question: 'Puis-je gérer plusieurs stores ?',
-    answer:
-      'Oui, dès le plan Pro vous pouvez connecter jusqu\'à 5 stores. Le plan Ultimate vous permet d\'en gérer un nombre illimité.',
-  },
-  {
-    question: 'Comment calculez-vous le vrai profit ?',
-    answer:
-      'Jisra combine revenus, coût produit, coûts pub, livraison et coûts opérationnels pour sortir la rentabilité réelle par commande.',
-  },
-  {
-    question: 'Dois-je connecter mes intégrations dès le début ?',
-    answer:
-      'Non, vous pouvez démarrer progressivement puis brancher vos stores et vos sources de dépenses quand vous êtes prêt.',
-  },
-  {
-    question: 'Qu\'est-ce que les crédits IA ?',
-    answer:
-      'Les crédits IA vous permettent d\'interagir avec l\'assistant intelligent de jisra. Chaque question consomme quelques crédits. Les plans incluent un quota mensuel renouvelé automatiquement.',
-  },
-]
+import { pricingFaqItems } from '@/lib/marketing/faq'
 
 export function PricingFAQ() {
   const [openIndex, setOpenIndex] = useState<number | null>(null)
 
   return (
     <div className="mx-auto max-w-3xl space-y-3">
-      {faqItems.map((item, index) => (
+      {pricingFaqItems.map((item, index) => (
         <motion.div
           key={index}
           initial={{ opacity: 0, y: 10 }}
