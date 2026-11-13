@@ -44,6 +44,7 @@ import { AiFeatureSection } from './ai-feature-section'
 import { AdsIntegrationSection } from './ads-integration-section'
 import { NormalizationSection } from './normalization-section'
 import { LogisticsSection } from './logistics-section'
+import { ConfirmationAgentsSection } from './confirmation-agents-section'
 import { StoreIntegrationSection } from './store-integration-section'
 import { FeatureDemo } from './feature-demo'
 
@@ -188,6 +189,8 @@ export function HomeSections() {
       <NormalizationSection />
 
       <LogisticsSection />
+
+      <ConfirmationAgentsSection />
 
       <StoreIntegrationSection />
 

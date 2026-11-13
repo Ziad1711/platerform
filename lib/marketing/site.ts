@@ -1,14 +1,53 @@
-import { v } from '@/lib/asset'
+export type MarketingSolutionIcon = 'layout' | 'sparkles' | 'megaphone' | 'truck' | 'userCheck'
 
-export const marketingNav = [
+export type MarketingSolution = {
+  href: string
+  title: string
+  description: string
+  icon: MarketingSolutionIcon
+}
+
+/** Entrées du menu « Solutions » — liens vers des sections réellement présentes. */
+export const marketingSolutions: MarketingSolution[] = [
+  {
+    href: '/#fonctionnalites',
+    title: 'Fonctionnalités',
+    description: 'Tous les outils pour gérer votre e-commerce.',
+    icon: 'layout',
+  },
+  {
+    href: '/#ai',
+    title: 'Intelligence artificielle',
+    description: 'Analyse et automatisation intelligente.',
+    icon: 'sparkles',
+  },
+  {
+    href: '/#ads',
+    title: 'Publicité',
+    description: 'Suivi des dépenses et performances publicitaires.',
+    icon: 'megaphone',
+  },
+  {
+    href: '/#logistics',
+    title: 'Logistique',
+    description: 'Gestion des livraisons et transporteurs.',
+    icon: 'truck',
+  },
+  {
+    href: '/#confirmation',
+    title: 'Confirmation des commandes',
+    description: 'Agents, répartition du travail et suivi des performances.',
+    icon: 'userCheck',
+  },
+]
+
+export const marketingNav: { href: string; label: string; items?: MarketingSolution[] }[] = [
   { href: '/', label: 'Accueil' },
-  { href: '/#fonctionnalites', label: 'Fonctionnalités' },
-  { href: '/#ai', label: 'IA' },
-  { href: '/#ads', label: 'Publicité' },
-  { href: '/#logistics', label: 'Logistique' },
+  { href: '/#solutions', label: 'Solutions', items: marketingSolutions },
   { href: '/catalogue-integrations', label: 'Intégrations' },
   { href: '/pricing', label: 'Tarifs' },
 ]
+
 
 export const heroHighlights = [
   {

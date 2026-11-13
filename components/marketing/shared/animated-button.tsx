@@ -10,16 +10,20 @@ type AnimatedButtonProps = {
   children: ReactNode
   className?: string
   wrapperClassName?: string
-  variant?: 'primary' | 'secondary' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'primarySolid'
 }
 
 const variants = {
+  // Vert Jisra avec texte encre : 4,93:1 (7,52:1 au survol) — blanc sur vert tombe à 3:1.
   primary:
-    'bg-jisra-green text-white shadow-[0_12px_40px_rgba(31,169,113,0.24)] hover:bg-jisra-green-light',
+    'bg-jisra-green text-jisra-ink shadow-[0_12px_40px_rgba(31,169,113,0.24)] hover:bg-jisra-green-light hover:text-jisra-ink active:bg-jisra-green-light active:brightness-[0.97] focus-visible:ring-jisra-cream/80',
+  // Variante à texte blanc : vert assombri pour garder 5,34:1 (AA).
+  primarySolid:
+    'bg-[#157a50] text-white shadow-[0_12px_40px_rgba(21,122,80,0.28)] hover:bg-[#126b46] active:bg-[#0f5f3e] focus-visible:ring-jisra-cream/80',
   secondary:
-    'bg-white/10 text-jisra-cream border border-white/10 hover:bg-white/14',
+    'bg-white/10 text-jisra-cream border border-white/10 hover:bg-white/[0.18] hover:text-jisra-cream active:bg-white/[0.22] focus-visible:ring-jisra-green/60',
   ghost:
-    'border border-white/10 bg-white/[0.03] text-jisra-cream hover:bg-white/[0.07]',
+    'border border-white/20 bg-white/[0.06] text-jisra-cream hover:border-white/30 hover:bg-white/[0.12] hover:text-jisra-cream active:bg-white/[0.16] focus-visible:ring-jisra-green/70',
 }
 
 export function AnimatedButton({ href, children, className, wrapperClassName, variant = 'primary' }: AnimatedButtonProps) {

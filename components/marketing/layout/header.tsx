@@ -1,18 +1,35 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Loader2, Menu, X } from 'lucide-react'
+import { ChevronDown, Loader2, Menu, X } from 'lucide-react'
 import { marketingNav } from '@/lib/marketing/site'
 import { Container } from '@/components/marketing/shared/container'
 import { MarketingLink } from '@/components/marketing/shared/marketing-link'
+import { SolutionsMenu } from '@/components/marketing/layout/solutions-menu'
+import { SOLUTION_ICONS } from '@/components/marketing/layout/solution-icons'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 
 export function MarketingHeader() {
   const [open, setOpen] = useState(false)
+  const [mobileSolutions, setMobileSolutions] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
   const [navigating, setNavigating] = useState(false)
+  const headerRef = useRef<HTMLElement | null>(null)
+
+  // Menu mobile : fermeture au toucher/clic en dehors de l'en-tête.
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (headerRef.current && !headerRef.current.contains(event.target as Node)) {
+        setOpen(false)
+        setMobileSolutions(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [open])
 
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 16)
@@ -22,7 +39,7 @@ export function MarketingHeader() {
   }, [])
 
   return (
-    <header className="sticky top-0 z-[60] px-3 pt-3 sm:px-4">
+    <header ref={headerRef} className="sticky top-0 z-[60] px-3 pt-3 sm:px-4">
       <Container className="px-0">
         <motion.div
           animate={{
@@ -51,7 +68,7 @@ export function MarketingHeader() {
             </Link>
 
             <nav aria-label="Navigation principale" className="hidden items-center gap-0 xl:flex">
-              {marketingNav.map((item) => (
+              {marketingNav.map((item) => item.items ? <SolutionsMenu key={item.label} items={item.items} /> : (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -97,10 +114,47 @@ export function MarketingHeader() {
             className="absolute inset-x-0 top-full z-[70] px-3 pt-3 sm:px-4 xl:hidden"
           >
             <Container className="px-0">
-              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-jisra-ink-light p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+              <div className="max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain rounded-[24px] border border-white/10 bg-jisra-ink-light p-4 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
 
                 <div className="grid gap-2">
-                  {marketingNav.map((item) => (
+                  {marketingNav.map((item) => item.items ? (
+                    <div key={item.label}>
+                      <button
+                        type="button"
+                        onClick={() => setMobileSolutions((value) => !value)}
+                        aria-expanded={mobileSolutions}
+                        aria-controls="mobile-solutions"
+                        className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium text-jisra-cream/78 transition hover:bg-white/[0.05] hover:text-jisra-cream"
+                      >
+                        <span>{item.label}</span>
+                        <ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${mobileSolutions ? 'rotate-180' : ''}`} />
+                      </button>
+                      {mobileSolutions ? (
+                        <ul id="mobile-solutions" className="mt-1 grid gap-1 pl-3">
+                          {item.items.map((entry) => {
+                            const Icon = SOLUTION_ICONS[entry.icon]
+                            return (
+                              <li key={entry.href}>
+                                <Link
+                                  href={entry.href}
+                                  onClick={() => { setMobileSolutions(false); setOpen(false) }}
+                                  className="flex min-h-11 items-start gap-3 rounded-xl px-3 py-2.5 text-sm text-jisra-cream/75 transition hover:bg-white/[0.05] hover:text-jisra-cream"
+                                >
+                                  <span aria-hidden className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-jisra-green/10">
+                                    <Icon className="h-4 w-4 text-jisra-green" />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block font-medium">{entry.title}</span>
+                                    <span className="mt-0.5 block text-xs leading-5 text-jisra-cream/55">{entry.description}</span>
+                                  </span>
+                                </Link>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : (
                     <Link
                       key={item.href}
                       href={item.href}

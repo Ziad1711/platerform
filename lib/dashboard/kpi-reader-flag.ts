@@ -13,6 +13,8 @@
 const PRODUCTION_PROJECT_REF = 'attvfeoqgbxsnnsllatt'
 const TEST_PROJECT_REF = 'goqedvcdmgtejtyrawsp'
 
+import { kpiV5TargetAllowed, supabaseTargetKind } from '@/lib/env/qualification-guard'
+
 export type KpiReaderMode = 'legacy' | 'shadow' | 'v5'
 /** Alias historique conservé pour les composants existants. */
 export type KpiReaderV5Source = 'legacy' | 'v5'
@@ -39,6 +41,14 @@ export function isProductionSupabase(): boolean {
  */
 export function kpiReaderV5Enabled(): boolean {
   if (process.env.KPI_READER_V5 !== '1') return false
+
+  // Cible auto-hébergée de qualification : autorisée uniquement via l'hôte
+  // explicitement approuvé et son drapeau dédié. Aucune autre cible non-Cloud
+  // n'ouvre le lecteur V5.
+  if (supabaseTargetKind() === 'qualification') {
+    return kpiV5TargetAllowed()
+  }
+
   const ref = supabaseProjectRef()
   if (!ref) return false
   if (ref === PRODUCTION_PROJECT_REF) {
