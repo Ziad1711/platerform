@@ -3,7 +3,7 @@
 Ne lancer AUCUNE commande Production ci-dessous avant levée des blocages de FINAL-QUALIFICATION.md et autorisation explicite. Ce document prépare la procédure ; il n'autorise rien et ne constitue pas une qualification achevée.
 
 ## 0. Conditions GO et points d'arrêt
-GO uniquement si : lint accepté/corrigé, import applicatif YouCan réel et quatre webhooks HTTP avec reprise autonome qualifiés, ancien build complet sur les 22 migrations qualifié, crédits/usage comparés, URL/clefs Q3 effectives attestées, inscriptions fermées, sauvegarde fraîche restaurable et protection post-sauvegarde démontrée. Chaque échec = STOP, sans promotion, sans down migration, sans rejouer 52 événements historiques.
+GO uniquement si : absence de régression lint (qualifiée le 14/11), import applicatif YouCan réel et quatre webhooks HTTP avec reprise autonome qualifiés, ancien build complet sur les 22 migrations qualifié, crédits/usage comparés, URL/clefs Q3 effectives attestées, inscriptions fermées, sauvegarde fraîche restaurable et protection post-sauvegarde démontrée. Chaque échec = STOP, sans promotion, sans down migration, sans rejouer 52 événements historiques.
 Le SHA immuable est le tag local `jisra-final-candidate-20261113` ; vérifier `git rev-parse jisra-final-candidate-20261113^{commit}`. La preuve est attachée au commit, pas à une branche mutable.
 Cible : projet Vercel platerform `prj_h26koUauo1YWLE1a4dPs9LAiUr5l`, domaine jisra.io ; Q3 Contabo, pas Q4 : hostname réseau doit être attesté par l'opérateur car URL Vercel non relisible. Ancien déploiement `dpl_3F3xjas4aq2WXS3LPgDfze17Pmc9`, SHA aace84a5e90b1f4516e27801e250af5071001f6e.
 
@@ -70,8 +70,18 @@ vercel rollback https://platerform-dto87yc7s-ziadzerouala11-8743s-projects.verce
 vercel inspect jisra.io
 ```
 Syntaxe CLI 64.3.1 vérifiée avec rollback --help ; vérifier le projet avant exécution. Garder les 22 migrations et les anciennes RPC ; ne supprimer ni commandes, ni réservations, ni mapping, ni fichiers post-T0. Garder l'inbox et les workers compatibles pendant le retour, vérifier idempotence entre les deux versions et reprendre les événements uniquement après confirmation du schéma final. Pas de down migration, pas de restore ancien dump sur la base active.
-Le rollback complet sur schéma final doit encore être testé avant GO ; la qualification existante sur 21 migrations ne suffit pas.
+Le rollback runtime sur schéma final a été exécuté le 14/11 : Auth/MFA, ERP, crédits, assistant simulé, commandes et rétention PASS. Toutefois aace84a reproduit un faux succès Digylog sous erreur SQL : retour vers cet artefact INTERDIT comme rollback sûr tant qu’un ingress durable indépendant ou une cible de secours corrigée n’est pas qualifié.
 Si corruption physique : isoler la cible atteinte, restaurer sur NOUVEL environnement, reprendre journal incrémental/versions fichiers prouvés, réconcilier jusqu'au dernier événement puis décider de la bascule. Sans cette preuve, pas de garantie de conservation des données post-backup, STOP et décision métier explicite.
 
 ## Autorisations restantes
 Seules les actions Production (Q3, variables/inscriptions, sauvegarde fraîche et stockage distant, création/promotion/rollback Vercel), push GitHub et éventuelle décision RPO nécessitent autorisation. Les qualifications isolées restantes n'en nécessitent pas ; elles demeurent techniquement inachevées dans ce dossier.
+
+
+## Addendum de clôture du 14/11 — points d'arrêt confirmés
+- Branche locale contient le correctif Digylog démontré ; sélectionner le NOUVEAU SHA de clôture (voir `git log -1` et rapport final), pas seulement le tag précédent 5f3a29a. Aucun nouveau SQL : 22 empreintes inchangées.
+- Lint : zéro régression par rapport à aace84a sur 114 fichiers ; ne pas exiger la correction des 851 erreurs historiques indépendantes.
+- Q3/Vercel : origine supabase.jisra.io, signature anon et inscriptions fermées confirmées en lecture seule. Désactiver NEXT_PUBLIC_GA_MEASUREMENT_ID avant build Production autorisé ; conserver les variables ERP et vérifier service_role via contrat interne sûr, sans supplier calls.
+- Continuité interrompue réellement reproduite : événement YouCan durable pending mais pas repris après restart. Ajouter/qualifier une inbox/reprise autonome pour les quatre AVANT autorisation de promotion. Aucune commande de déploiement ne compense cette absence.
+- Ancien aace84a n’est PAS une cible de rollback certifiée à cause du faux ACK Digylog. Préparer une cible de secours corrigée ou conserver un traitement webhook durable indépendant ; tester la bascule avant GO.
+- Storage post-backup conservé après bascule/restart avec hash identique. Ce PASS ne couvre pas un sinistre disque. Q3 WAL non archivé ; script rollback-capture-replay actuel utilise session_replication_role=replica : NE PAS l’exécuter, même en dry-run, selon les règles de cette mission. Reprise sans contournement des contraintes et protection hors domaine de panne encore à qualifier.
+- PRODUCTION_GO reste NO. Ne pas exécuter les commandes de promotion/rollback ci-dessus tant que ces arrêts ne sont pas levés. Aucun besoin d'autorisation pour poursuivre les corrections/tests isolés ; les actions Production restent soumises à accord explicite.

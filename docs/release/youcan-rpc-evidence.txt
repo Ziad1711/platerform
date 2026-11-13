@@ -6,3 +6,24 @@ FAILED_COMMIT_RETRY=PASS
 ORDER_ITEMS_MAPPING_CLAIM=PASS
 RPC_PERMISSIONS=PASS
 MISSION_FIXTURES_CLEANED=PASS
+
+HTTP closure 14/11:
+EIGHT_HTTP=[(202, '{"ok":true,"queued":true}'), (202, '{"ok":true,"queued":true}'), (202, '{"ok":true,"queued":true}'), (200, '{"ok":true}'), (202, '{"ok":true,"queued":true}'), (202, '{"ok":true,"queued":true}'), (202, '{"ok":true,"queued":true}'), (202, '{"ok":true,"queued":true}')]
+INVARIANTS=1|1|1|1|1
+
+RETRY=(200, '{"ok":true}')
+lost_response_retry=200
+client_timeout=observed
+ddl_retry=200
+2|2
+2
+
+HTTP killed before business commit: ConnectionResetError
+Durable pending before kill=1
+After legacy restart, without supplier retry:
+f
+4
+4
+4
+
+Pending event not autonomously recovered; no events deleted by application switch.

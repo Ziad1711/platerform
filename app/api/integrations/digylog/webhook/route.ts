@@ -55,17 +55,18 @@ async function handleEvent(body: any, request: Request) {
 
   // 1. Cible resolue par la DONNEE, jamais par les identifiants du payload :
   //    un appelant ne choisit ni le store ni l'integration.
-  const { data: order } = await admin
+  const { data: order, error: orderError } = await admin
     .from('orders')
     .select('store_id, delivery_company_id')
     .eq('tracking_number', tracking)
     .maybeSingle()
 
+  if (orderError) throw orderError
   if (!order?.store_id) {
     return NextResponse.json({ ok: false, error: 'ORDER_NOT_FOUND' }, { status: 404 })
   }
 
-  const { data: integration } = await admin
+  const { data: integration, error: integrationError } = await admin
     .from('integrations')
     .select('id')
     .eq('store_id', order.store_id)
@@ -73,18 +74,20 @@ async function handleEvent(body: any, request: Request) {
     .eq('status', 'connected')
     .maybeSingle()
 
+  if (integrationError) throw integrationError
   if (!integration?.id) {
     return NextResponse.json({ ok: false, error: 'INTEGRATION_NOT_CONNECTED' }, { status: 404 })
   }
 
   // 2. Authenticite : refus par defaut tant qu'aucun secret n'est configure
   //    (aucune ecriture sur un evenement non verifie).
-  const { data: config } = await admin
+  const { data: config, error: configError } = await admin
     .from('digylog_configs')
     .select('webhook_secret')
     .eq('store_id', order.store_id)
     .maybeSingle()
 
+  if (configError) throw configError
   const expected = String(config?.webhook_secret || '').trim()
   if (!expected) {
     return NextResponse.json({ ok: false, error: 'WEBHOOK_NOT_CONFIGURED' }, { status: 503 })
@@ -104,5 +107,5 @@ async function handleEvent(body: any, request: Request) {
     payload,
   })
 
-  return NextResponse.json(result)
+  return NextResponse.json(result, { status: result.ok ? 200 : 500 })
 }

@@ -203,6 +203,7 @@ export async function processDigylogWebhook(params: {
       const { data: existing } = await admin
         .from('digylog_webhook_events')
         .select('id, processed')
+        .eq('integration_id', integrationId)
         .eq('event_key', eventKey)
         .maybeSingle()
 
@@ -240,13 +241,14 @@ export async function processDigylogWebhook(params: {
       }
 
       // Trouver la commande par tracking
-      const { data: order } = await admin
+      const { data: order, error: orderError } = await admin
         .from('orders')
         .select('id, status')
         .eq('store_id', storeId)
         .eq('tracking_number', tracking)
         .maybeSingle()
 
+      if (orderError) throw orderError
       if (!order) {
         logger.warn('webhook-order-not-found', `Commande ${tracking} introuvable`, { eventType })
         await admin.from('digylog_webhook_events').update({ processed: true, error: 'ORDER_NOT_FOUND' }).eq('id', eventRecord.id)
@@ -267,7 +269,8 @@ export async function processDigylogWebhook(params: {
           updateData[mapping.statusDateField] = now
         }
 
-        await admin.from('orders').update(updateData).eq('id', order.id)
+        const { error: updateError } = await admin.from('orders').update(updateData).eq('id', order.id)
+        if (updateError) throw updateError
         logger.info('webhook-status-updated', `Statut mis à jour: ${order.status} → ${mapping.orderStatus}`, {
           tracking,
           oldStatus: order.status,
@@ -277,7 +280,8 @@ export async function processDigylogWebhook(params: {
     }
 
     // Marquer comme traité
-    await admin.from('digylog_webhook_events').update({ processed: true, processed_at: new Date().toISOString() }).eq('id', eventRecord.id)
+    const { error: finishError } = await admin.from('digylog_webhook_events').update({ processed: true, processed_at: new Date().toISOString() }).eq('id', eventRecord.id)
+    if (finishError) throw finishError
 
     return { ok: true, skipped: false }
   } catch (error) {

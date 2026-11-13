@@ -1,5 +1,7 @@
 # Qualification finale locale — NO-GO
 
+> La clôture du 14/11 ci-dessous remplace les verdicts intermédiaires des sections précédentes. Aucun PASS historique n’a été transformé en preuve de continuité après interruption.
+
 ## Identité et périmètre
 - Base Production confirmée par métadonnées Vercel en lecture seule : aace84a5e90b1f4516e27801e250af5071001f6e.
 - Déploiement inspecté via jisra.io : dpl_3F3xjas4aq2WXS3LPgDfze17Pmc9, platerform-dto87yc7s-ziadzerouala11-8743s-projects.vercel.app.
@@ -50,3 +52,39 @@ ENV_CONSISTENCY=FAIL (incomplète, pas secrets déclarés faux)
 BUILD=PASS
 DATA_INTEGRITY=PASS (copie restaurée, données historiques et crédits/usage contrôlés ; ne constitue pas une garantie RPO=0 Production)
 TECHNICAL_GO=NO
+
+
+## Clôture ciblée du 14/11 — candidat parent 5f3a29a
+
+### Tests réellement exécutés
+- **YOUCAN_HTTP_E2E=PASS** : endpoint Next réel + PostgREST réel + PostgreSQL final existant, signature HMAC synthétique valide. 8 POST simultanés : 7 HTTP202, 1 HTTP200 ; exactement 1 commande, 1 article, 1 mapping, 1 claim finalisé, 1 événement traité. Retry HTTP200 sans doublon. Connexion HTTP abandonnée après envoi, commit puis retry : une commande. Timeout client 200ms sous verrou DDL orders 3s puis retry : une commande. Deux événements de faute : 2 mappings distincts et 2 événements traités, pas de doublon. Les premiers 500 provenaient uniquement du montage de test (préfixe /rest/v1 absent du proxy), corrigé sans modifier le code applicatif.
+- **LINT_REGRESSION=PASS** : comparaison ESLint avec mêmes dépendances/config et `lintText` du contenu Git aace84a pour les 114 fichiers AM de release. Base : 36 erreurs ; candidat : 33 erreurs/1 warning. Comparaison multiensemble par fichier/règle/message : zéro diagnostic ajouté. Les deux fichiers Digylog corrigés ont aussi zéro diagnostic supplémentaire par rapport à 5f3a29a. Le total historique 851/104 n'est pas une régression release et n'a pas déclenché de refonte générale.
+- **BUILD=PASS** : TypeScript `--noEmit --incremental false`, build Production final et ancien build aace84a réussis. Ancien build reconstruit car NEXT_PUBLIC_SUPABASE_URL est incorporée à la compilation : aucun ancien artefact lié à une cible précédente n'a été utilisé pour le verdict. Tous les builds sont de qualification, non promouvables vers Q3.
+- Auth isolé attaché à la copie existante, sans restauration répétée : admin test user, login200, refresh200, TOTP enroll/challenge/verify200 AAL2, signup422. Routes ancien build authentifiées dashboard200, subscription200, api/stores200 hasStores=true, assistant/wallet200. Assistant/chat200 avec intercepteur local fournisseur, preuve `ISOLATED_PROVIDER_STUB` ; aucune requête OpenAI réelle. Ne prouve pas un appel fournisseur ni une qualification navigateur visuelle.
+- Ancien endpoint YouCan reçoit une nouvelle commande après les trois commandes du candidat : 4 commandes/articles/mappings/claims/événements traités conservés. Retour candidat puis ancien build réellement effectué, sans rollback SQL.
+- Lightfunnels : endpoint signé base64 sur liaison synthétique et mapping existant, deux requêtes concurrentes sous DDL : HTTP200 already_imported. **Ce test n'est PAS un import Lightfunnels nouveau ni une reprise autonome**.
+- AMEEX : endpoint HMAC synthétique sur colis isolé, requêtes concurrentes sous DDL : HTTP200 ; contrat conforme à l'implémentation configurée, pas preuve du contrat effectif fournisseur (non contacté).
+- Digylog : endpoint secret synthétique, concurrence sous DDL HTTP200. Injection trigger isolé rejetant une mise à jour : avant correctif HTTP200 ok=true, statut inchangé, événement processed=true. **Défaut prouvé corrigé** : erreurs de lectures/écriture/confirmation propagées, HTTP500 si traitement échoue, déduplication bornée à l'intégration. Après correction : HTTP500, statut inchangé, processed=false ; retrait du trigger puis retry200. Aucun trigger historique modifié ; trigger de faute supprimé.
+- Storage isolé réel (image déjà disponible) : création bucket privé, upload33 octets HTTP200, GET200 avec SHA256 `4a9988426faa7e9995cfcf64c957e778e2ac6c0311b60e39830d1df967ea57b3`. Métadonnée et rollback_capture présents (1/1). Même fichier lisible et hash inchangé après changement applicatif et redémarrage Storage. Cela prouve la rétention sans restauration destructive, pas une récupération sur perte du disque.
+- Nettoyage exact des fixtures uniquement : après suppression via SQL/Auth/Storage appropriés, 4083 commandes, 5320 articles, 722 événements, 52 erreurs historiques, 44 users et 59 objets Storage retrouvés. Journaux préexistants et quarantaine intacts. Ni désactivation de contrainte ni changement de session Auth Q3.
+
+### Contrats Production contrôlés uniquement en lecture
+Projet Vercel platerform vérifié précédemment. `vercel env pull --environment production --project platerform` confirme URL HTTPS **supabase.jisra.io**, aucun localhost/:8443/Q4 ; aucune variable qualification/Q4. Signature cryptographique de la clé anon Vercel vérifiée en mémoire contre le JWT Q3, rôle anon confirmé, sans divulgation. Les 29 secrets sensibles non relisibles restent **non vérifiables**, pas déclarés invalides. Auth Q3 : DISABLE_SIGNUP=true, SITE_URL=https://jisra.io, callbacks jisra.io/www.jisra.io. PUBLIC_AI_ENABLED et GA4_EXTERNAL_CALLS absents => fail-closed serveur. Identifiant GA4 navigateur présent => collecte possible après consentement. Q3 archive_mode=off et archive_command désactivé, lus sans modification. Table bancaire absente dans Q3 avant migrations, ce n'est pas une erreur de migration ; valeur initiale false dans le SQL déjà qualifié.
+
+### FAIL définitifs, test exact et condition de sortie
+1. **WEBHOOK_CONTINUITY=FAIL**. Test : verrou claims, réception HTTP YouCan authentifiée persistée pending=1, destruction du processus avant commit, redémarrage ancien build sans retry fournisseur. Résultat : pending=false pour processed, 4 commandes seulement ; événement non repris automatiquement. Aucun événement déjà confirmé traité n'a été supprimé, mais la continuité sans retry n'est pas assurée. Lightfunnels n'a pas d'inbox brute durable ; AMEEX ne possède qu'un journal diagnostique ; Digylog n'a pas de worker/reprise atomique. Condition : inbox/worker authentifiés et planifiés, bornés aux nouveaux événements, avec leases/idempotence et effets atomiques/CAS, puis tests HTTP coupures/DDL/restarts pour les quatre. Ce composant n'a PAS été implémenté ni qualifié dans cette clôture ; pas de nouvelle migration prétendument prête. Absence de worker = défaut technique restant, pas attente d'une autorisation utilisateur.
+2. **LEGACY_ROLLBACK=FAIL**. Test : ancien aace84a sur 22 migrations, endpoint Digylog avec mise à jour rejetée par trigger isolé. Résultat HTTP200 ok=true, commande restée sent, processed=true. Parcours Auth/MFA/ERP/assistant simulé et rétention réussis, mais rollback complet non sûr. Condition : cible de rollback contenant le correctif Digylog, ou ingress durable indépendant de la version applicative avec traitement compatible et preuve anti-perte. Ne pas promouvoir aace84a comme rollback garanti sans ce correctif/ingress.
+3. **ENV_CONSISTENCY=FAIL**. Test : env Production relu + contrat JWT anon + configuration Auth. Origines/signup/anon PASS ; GA4 navigateur encore configuré ; service_role et autres secrets sensibles ne permettent pas de contrat croisé complet sans divulgation ou endpoint sûr. Condition : désactiver GA4 navigateur au build, attester service_role et flags runtime par contrat interne sans fournisseur. Ce changement Production nécessite autorisation ; secrets non lisibles ne sont pas considérés faux.
+4. **POST_BACKUP_WRITES=FAIL** au sens récupération complète après sinistre. Test : upload/restart/rétention PASS ; inspection Q3 WAL => archivage off ; script existant de replay contient `session_replication_role=replica`, **interdit et non exécuté**. Le journal reste sur le même disque et aucun rejeu sûr avec contraintes ni réplication Storage hors panne n'a été démontré. Condition : capture/extraction durable hors domaine de panne, reprise incrémentale ordonnée avec contraintes actives et fichiers versionnés, ou stratégie WAL réellement activée/restaurée ; aucune promesse PITR/RPO0 aujourd'hui.
+
+### Verdict actuel
+YOUCAN_HTTP_E2E=PASS
+WEBHOOK_CONTINUITY=FAIL
+LEGACY_ROLLBACK=FAIL
+ENV_CONSISTENCY=FAIL
+POST_BACKUP_WRITES=FAIL
+BUILD=PASS
+LINT_REGRESSION=PASS
+PRODUCTION_GO=NO
+
+22 migrations et manifeste inchangés. Seul correctif applicatif : Digylog, 2 fichiers. Aucun push, déploiement Vercel, écriture Q3/Cloud ou appel fournisseur. Les détails ci-dessus ne constituent pas une finalisation complète ; les FAIL listés restent des conditions d'arrêt.
