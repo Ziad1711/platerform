@@ -908,6 +908,50 @@ export async function upsertYouCanOrderFromPayload(params: {
     return { skipped: true, alreadyImported: true, internalOrderId }
   }
 
+  // Réservation atomique : deux webhooks simultanés (ou un rejeu immédiat) ne peuvent
+  // pas créer deux commandes. La clé primaire (integration_id, youcan_order_id) est le
+  // point de sérialisation ; aucun verrou applicatif n'est nécessaire.
+  const claimResult = await supabase.rpc('rpc_claim_youcan_order', {
+    p_integration_id: integrationId,
+    p_youcan_order_id: youcanOrderId,
+  })
+
+  if (claimResult.error) throw claimResult.error
+
+  const claimRow = (Array.isArray(claimResult.data) ? claimResult.data[0] : claimResult.data) as
+    | { state?: string; claim_token?: string | null; order_id?: string | null }
+    | null
+  const claimState = String(claimRow?.state || '')
+  const claimToken = claimRow?.claim_token ? String(claimRow.claim_token) : null
+
+  const releaseClaim = async () => {
+    if (!claimToken) return
+    await supabase.rpc('rpc_release_youcan_order_claim', {
+      p_integration_id: integrationId,
+      p_youcan_order_id: youcanOrderId,
+      p_token: claimToken,
+    })
+  }
+
+  if (claimState === 'in_progress') {
+    // Un autre traitement détient la réservation : on répond sans créer de doublon.
+    console.info('[youcan][order] import déjà en cours', { integrationId, storeId, youcanOrderId })
+    return { skipped: true, alreadyImported: false, inProgress: true, internalOrderId: null }
+  }
+
+  if (claimState === 'already') {
+    return {
+      skipped: true,
+      alreadyImported: true,
+      inProgress: false,
+      internalOrderId: claimRow?.order_id ? String(claimRow.order_id) : null,
+    }
+  }
+
+  if (claimState !== 'claimed' || !claimToken) {
+    throw new Error('YOUCAN_CLAIM_UNEXPECTED_STATE')
+  }
+
   // Arrondi optionnel du total encaissé (option par boutique), appliqué uniquement à la
   // création de la commande.
   const roundingEnabled =
@@ -932,7 +976,10 @@ export async function upsertYouCanOrderFromPayload(params: {
     .select('id')
     .single()
 
-  if (insertOrderError) throw insertOrderError
+  if (insertOrderError) {
+    await releaseClaim()
+    throw insertOrderError
+  }
   internalOrderId = insertedOrder.id
 
   const lines = Array.isArray(order?.variants) ? order.variants : []
@@ -966,13 +1013,15 @@ export async function upsertYouCanOrderFromPayload(params: {
   if (orderItems.length > 0) {
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
     if (itemsError) {
-      // La commande vient d'être créée dans ce flux : on la supprime si ses articles échouent.
+      // La commande vient d'être créée dans ce flux : on la supprime si ses articles échouent,
+      // puis on libère la réservation pour qu'un rejeu soit possible sans doublon.
       await supabase.from('orders').delete().eq('id', internalOrderId)
+      await releaseClaim()
       throw itemsError
     }
   }
 
-  await supabase.from('youcan_entity_mappings').upsert(
+  const { error: mappingError } = await supabase.from('youcan_entity_mappings').upsert(
     {
       user_id: userId,
       integration_id: integrationId,
@@ -986,7 +1035,71 @@ export async function upsertYouCanOrderFromPayload(params: {
     { onConflict: 'integration_id,entity_type,youcan_id' }
   )
 
+  if (mappingError) {
+    // Sans mapping, un rejeu du webhook créerait une seconde commande : la commande
+    // vient d'être créée dans ce flux, on la supprime pour que la reprise soit sûre.
+    await supabase.from('orders').delete().eq('id', internalOrderId)
+    await releaseClaim()
+    throw mappingError
+  }
+
+  // Clôture de la réservation : elle devient la preuve durable de l'import. Si elle
+  // échoue, on retire la commande pour que le rejeu reste sans doublon.
+  const finishResult = await supabase.rpc('rpc_finish_youcan_order_claim', {
+    p_integration_id: integrationId,
+    p_youcan_order_id: youcanOrderId,
+    p_token: claimToken,
+    p_order_id: internalOrderId,
+  })
+
+  if (finishResult.error) {
+    await supabase.from('orders').delete().eq('id', internalOrderId)
+    await releaseClaim()
+    throw finishResult.error
+  }
+
   return { skipped: false, internalOrderId }
+}
+
+/** Reprise opérateur bornée aux identifiants capturés pendant la fenêtre.
+ * Aucun balayage des erreurs historiques, aucun appel au fournisseur.
+ */
+export async function replayYouCanMaintenanceEvents(params: {
+  supabase: SupabaseAdmin
+  eventIds: string[]
+  receivedAfter: string
+  receivedBefore: string
+}) {
+  const { supabase, eventIds, receivedAfter, receivedBefore } = params
+  const start = Date.parse(receivedAfter)
+  const end = Date.parse(receivedBefore)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || eventIds.length === 0
+    || eventIds.length > 100 || eventIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) {
+    throw new Error('YOUCAN_REPLAY_SCOPE_INVALID')
+  }
+  const { data: events, error } = await supabase.from('youcan_webhook_events')
+    .select('id,integration_id,payload').in('id', [...new Set(eventIds)])
+    .eq('event_type', 'order.create').eq('processed', false).is('error', null)
+    .gte('created_at', receivedAfter).lt('created_at', receivedBefore).order('created_at')
+  if (error) throw error
+  let processed = 0
+  for (const event of events || []) {
+    const { data: integration, error: integrationError } = await supabase.from('integrations')
+      .select('id,user_id').eq('id', event.integration_id).eq('provider', 'youcan').single()
+    if (integrationError || !integration) throw integrationError || new Error('INTEGRATION_NOT_FOUND')
+    const { data: config, error: configError } = await supabase.from('youcan_integration_configs')
+      .select('store_id').eq('integration_id', integration.id).single()
+    if (configError || !config?.store_id) throw configError || new Error('MISSING_STORE_MAPPING')
+    const result = await upsertYouCanOrderFromPayload({ supabase, integrationId: integration.id,
+      userId: integration.user_id, storeId: config.store_id, order: event.payload })
+    if ('inProgress' in result && result.inProgress) continue
+    if (!result.internalOrderId) throw new Error('YOUCAN_REPLAY_UNCONFIRMED')
+    const { error: confirmError } = await supabase.from('youcan_webhook_events')
+      .update({ processed: true, error: null }).eq('id', event.id)
+    if (confirmError) throw confirmError
+    processed += 1
+  }
+  return { selected: (events || []).length, processed }
 }
 
 export async function importYouCanOrders(params: {

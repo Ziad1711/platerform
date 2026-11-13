@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { verifyYouCanWebhookSignature } from '@/lib/integrations/youcan'
 import { upsertYouCanOrderFromPayload } from '@/lib/integrations/youcan-sync'
+import { maintenanceEnabled } from '@/lib/maintenance/guard'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
 
     const payload = JSON.parse(rawBody || '{}')
     const youcanEventId = payload?.id ? String(payload.id) : null
+    if (!youcanEventId) return NextResponse.json({ error: 'MISSING_ORDER_ID' }, { status: 400 })
 
     console.info('[youcan][webhook][order.create] payload parsed', {
       requestId,
@@ -104,6 +106,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'INTEGRATION_NOT_FOUND' }, { status: 404 })
     }
 
+    // Persister après authentification du fournisseur et avant toute écriture
+    // métier. Un doublon ne réinitialise jamais un événement déjà traité.
+    const eventKey = { integration_id: integration.id, event_type: 'order.create', youcan_event_id: youcanEventId }
+    const { error: persistError } = await supabase.from('youcan_webhook_events').upsert(
+      { ...eventKey, payload, signature, processed: false, error: null },
+      { onConflict: 'integration_id,event_type,youcan_event_id', ignoreDuplicates: true }
+    )
+    if (persistError) throw persistError
+    const { data: insertedEvent, error: readEventError } = await supabase.from('youcan_webhook_events')
+      .select('id,processed').match(eventKey).single()
+    if (readEventError || !insertedEvent) throw readEventError || new Error('WEBHOOK_PERSISTENCE_UNCONFIRMED')
+    if (insertedEvent.processed) return NextResponse.json({ ok: true })
+    if (maintenanceEnabled()) {
+      return NextResponse.json({ ok: true, queued: true }, { status: 202 })
+    }
+
     const { data: cfg } = await supabase
       .from('youcan_integration_configs')
       .select('store_id')
@@ -128,9 +146,9 @@ export async function POST(request: Request) {
 
       if (memberStoresError) throw memberStoresError
 
-      const ownedStores = (memberStores || []).map((m: any) => ({
+      const ownedStores = (memberStores || []).map((m) => ({
         id: m.store_id,
-        name: m.stores?.name || null
+        name: (Array.isArray(m.stores) ? m.stores[0]?.name : (m.stores as { name?: string } | null)?.name) || null
       }))
 
       const matchedStore = ownedStores.find((store: { id: string; name: string | null }) => {
@@ -187,27 +205,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'MISSING_STORE_MAPPING' }, { status: 400 })
     }
 
-    const { data: insertedEvent, error: eventError } = await supabase
-      .from('youcan_webhook_events')
-      .upsert(
-        {
-          integration_id: integration.id,
-          event_type: 'order.create',
-          youcan_event_id: youcanEventId,
-          payload,
-          signature,
-          processed: false,
-          error: null,
-        },
-        { onConflict: 'integration_id,event_type,youcan_event_id' }
-      )
-      .select('id')
-      .single()
-
-    if (eventError) throw eventError
-
     try {
-      await upsertYouCanOrderFromPayload({
+      const result = await upsertYouCanOrderFromPayload({
         supabase,
         integrationId: integration.id,
         userId: integration.user_id,
@@ -215,10 +214,15 @@ export async function POST(request: Request) {
         order: payload,
       })
 
-      await supabase
+      if ('inProgress' in result && result.inProgress) {
+        return NextResponse.json({ ok: true, queued: true }, { status: 202 })
+      }
+
+      const { error: confirmError } = await supabase
         .from('youcan_webhook_events')
         .update({ processed: true, error: null })
         .eq('id', insertedEvent.id)
+      if (confirmError) throw confirmError
     } catch (error) {
       const message = error instanceof Error ? error.message : 'WEBHOOK_PROCESSING_FAILED'
       await supabase

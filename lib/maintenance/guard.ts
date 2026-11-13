@@ -5,8 +5,8 @@
  * de l'application est inchangé.
  *
  * Règles :
- * - routes de traitement (cron, webhooks fournisseurs, API publique) : refusées en
- *   toutes circonstances, **même pour le compte pilote** ;
+ * - routes de traitement (cron, webhooks fournisseurs, API publique) : refusées,
+ *   même pour le compte pilote ; seule la réception persistante YouCan est permise ;
  * - compte pilote explicitement autorisé (`JISRA_MAINTENANCE_ALLOWED_EMAILS`) : accès
  *   applicatif complet (lecture et écriture) pour valider la nouvelle production ;
  * - autres utilisateurs : pages et écritures refusées (503) ; lectures d'API permises
@@ -101,6 +101,10 @@ export function maintenanceDecision(
 
   const normalizedMethod = (method || 'GET').toUpperCase()
   const isApi = pathname.startsWith('/api')
+
+  // Exception étroite : la route vérifie la signature et conserve l'événement
+  // sans importer de commande pendant la maintenance. Aucune autre API ouverte.
+  if (pathname === '/api/integrations/youcan/webhook/order-create' && normalizedMethod === 'POST') return null
 
   // 1. Traitement automatique : jamais ouvert, pilote compris.
   for (const prefix of PROCESSING_PREFIXES) {
