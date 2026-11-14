@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { receiveWebhook } from '@/lib/integrations/webhook-inbox'
 import { processDigylogWebhook } from '@/lib/integrations/delivery/digylog-adapter'
 
 /**
@@ -33,15 +34,16 @@ export async function PUT(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
-    return handleEvent(body, request)
+    const rawBody = await request.text()
+    const body = JSON.parse(rawBody)
+    return handleEvent(body, request, rawBody)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'WEBHOOK_POST_FAILED'
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
-async function handleEvent(body: any, request: Request) {
+async function handleEvent(body: any, request: Request, rawBody = JSON.stringify(body)) {
   const admin = createAdminClient()
 
   const eventType = body.event || body.type || body.event_type || 'order_status'
@@ -97,6 +99,10 @@ async function handleEvent(body: any, request: Request) {
   if (provided !== expected) {
     return NextResponse.json({ ok: false, error: 'INVALID_WEBHOOK_SECRET' }, { status: 401 })
   }
+
+  const queued = await receiveWebhook({ provider: 'digylog', integrationId: integration.id,
+    request, rawBody, eventKey: eventKey ? String(eventKey) : undefined })
+  if (queued) return queued
 
   const result = await processDigylogWebhook({
     admin,

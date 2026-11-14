@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { receiveWebhook } from '@/lib/integrations/webhook-inbox'
 import {
   LIGHTFUNNELS_PROVIDER,
   countLightfunnelsAccountStores,
@@ -191,6 +192,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'ACCOUNT_MISMATCH' }, { status: 403 })
     }
 
+    const queued = await receiveWebhook({ provider: 'lightfunnels', integrationId: integration.id,
+      request, rawBody, eventKey: externalOrderId, signature })
+    if (queued) return queued
+
     const warnings: string[] = []
 
     // Une commande sans `store_id` ne peut pas être routée avec certitude : la preuve exigée
@@ -277,6 +282,7 @@ export async function POST(request: Request) {
       allowMissingStoreId: !remoteStoreId,
     })
 
+    if (!result.orderId && result.status !== 'already_imported') throw new Error('LIGHTFUNNELS_IMPORT_UNCONFIRMED')
     for (const warning of result.warnings || []) {
       if (!warnings.includes(warning)) warnings.push(warning)
     }

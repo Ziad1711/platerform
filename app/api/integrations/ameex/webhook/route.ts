@@ -23,6 +23,7 @@
 
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { receiveWebhook } from '@/lib/integrations/webhook-inbox'
 import { getAmeexWebhookSecret } from '@/lib/integrations/ameex-credentials'
 import { resolveAmeexStatus } from '@/lib/integrations/ameex-status'
 import {
@@ -224,7 +225,7 @@ export async function POST(request: Request) {
         signatureValid: false,
         detail: 'Aucune commande associee a ce code colis',
       })
-      return NextResponse.json({ ok: true })
+      return NextResponse.json({ error: 'WEBHOOK_SCOPE_UNRESOLVED' }, { status: 409 })
     }
 
     // 4. Ne conserver que les commandes rattachees a un transporteur AMEEX
@@ -264,7 +265,7 @@ export async function POST(request: Request) {
         signatureValid: false,
         detail: 'La commande liee a ce colis n\'appartient pas a un transporteur AMEEX',
       })
-      return NextResponse.json({ ok: true })
+      return NextResponse.json({ error: 'WEBHOOK_SCOPE_UNRESOLVED' }, { status: 409 })
     }
 
     // 5. Verification de la signature, store par store (aucune ecriture).
@@ -339,7 +340,7 @@ export async function POST(request: Request) {
         signatureValid: true,
         detail: 'Code colis present dans plusieurs stores : aucune mise a jour appliquee',
       })
-      return NextResponse.json({ ok: true })
+      return NextResponse.json({ error: 'WEBHOOK_SCOPE_UNRESOLVED' }, { status: 409 })
     }
 
     const target = verified[0]
@@ -358,13 +359,18 @@ export async function POST(request: Request) {
         signatureValid: true,
         detail: `Code colis present sur ${targets.length} commandes du store : aucune mise a jour appliquee`,
       })
-      return NextResponse.json({ ok: true })
+      return NextResponse.json({ error: 'WEBHOOK_SCOPE_UNRESOLVED' }, { status: 409 })
     }
 
     // 6. Application du statut via la fonction metier partagee.
+    const queued = await receiveWebhook({ provider: 'ameex', integrationId: target.integrationId,
+      request, rawBody, signature: request.headers.get(process.env.AMEEX_WEBHOOK_SIGNATURE_HEADER || 'x-ameex-signature') })
+    if (queued) return queued
+
     const order = targets[0]
     const resolved = resolveAmeexStatus(rawStatut, rawStatutS || undefined)
     const result = await applyAmeexStatusToOrder({ admin, order, resolved, statusDate })
+    if (result.outcome === 'stale_order') throw new Error('AMEEX_RETRY_REQUIRED')
 
     await logWebhookEvent(admin, {
       integrationId: target.integrationId,

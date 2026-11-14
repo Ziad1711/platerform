@@ -1,8 +1,8 @@
 {
   "base": "aace84a5e90b1f4516e27801e250af5071001f6e",
   "commercial": "238cb96fddd75147682cadfaa7058a34ba6536eb",
-  "code": "afc921aa593722224d85c817bdc60df72a422b54",
-  "count": 22,
+  "code": "8d25c641b973cb6b0b15e1a2b199cf8abbf2817b",
+  "count": 23,
   "prerequisite": "20261109_youcan_order_claims.sql restored byte-for-byte from production base; check presence, never reapply if present",
   "migrations": [
     {
@@ -92,6 +92,11 @@
     {
       "path": "supabase/migrations/20261118010000_youcan_atomic_order_commit.sql",
       "sha256": "7d4b46e2d26285e8f594e09c5de9c02d3a1121f9ac3d7bfd3a12c098224285f6"
+    },
+    {
+      "path": "supabase/migrations/20261119010000_webhook_durable_inbox.sql",
+      "sha256": "e12914676177209f206db81cb18b990b4493072aa8315486167673b15a4c4ff2"
     }
-  ]
+  ],
+  "note": "First 22 checksums unchanged; additive inbox required for crash recovery, no historical replay"
 }

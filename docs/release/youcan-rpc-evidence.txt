@@ -27,3 +27,16 @@ f
 4
 
 Pending event not autonomously recovered; no events deleted by application switch.
+
+DURABLE INBOX TARGETED TESTS (14/11)
+RECEIVE=[('youcan', 202, '{"ok":true,"queued":true}'), ('lightfunnels', 202, '{"ok":true,"queued":true}'), ('ameex', 202, '{"ok":true,"queued":true}'), ('digylog', 202, '{"ok":true,"queued":true}')]
+RECOVERY_AFTER_RESTART={"paused":false,"processed":4,"failed":0}
+32 duplicates PASS; finish-loss HTTP500 PASS; concurrent worker retry [{'paused': False, 'processed': 2, 'failed': 0}, {'paused': False, 'processed': 2, 'failed': 0}]; invariants 4
+0
+3
+2
+52
+FALLBACK_MAINTENANCE=[('youcan', 202), ('lightfunnels', 202), ('ameex', 202), ('digylog', 202)] ERP503; worker paused
+FALLBACK_DRAIN={"paused":false,"processed":4,"failed":0}
+FALLBACK_SQL_FAILURE={'paused': False, 'processed': 0, 'failed': 1} retry={'paused': False, 'processed': 1, 'failed': 0}
+RETURN_CANDIDATE_REPLAY={'paused': False, 'processed': 9, 'failed': 0} commands6 pending0 historical52

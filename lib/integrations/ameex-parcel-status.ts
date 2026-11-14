@@ -119,7 +119,8 @@ export async function applyAmeexStatusToOrder(params: {
 
   // 1. Statut inconnu : on conserve uniquement la trace brute.
   if (!resolved.recognized) {
-    await admin.from('orders').update(baseUpdate).eq('id', order.id)
+    const { error: touchError } = await admin.from('orders').update(baseUpdate).eq('id', order.id)
+    if (touchError) throw touchError
     return {
       outcome: 'unrecognized_status',
       detail: `Statut AMEEX non reconnu conserve pour diagnostic: ${resolved.rawStatus || '(vide)'}`,
@@ -128,7 +129,8 @@ export async function applyAmeexStatusToOrder(params: {
 
   // 2. Correction manuelle : ne jamais ecraser silencieusement.
   if (order.delivery_status_source === 'manual') {
-    await admin.from('orders').update(baseUpdate).eq('id', order.id)
+    const { error: touchError } = await admin.from('orders').update(baseUpdate).eq('id', order.id)
+    if (touchError) throw touchError
     return {
       outcome: 'manual_protected',
       detail: `Statut manuel (${order.status || '-'}/${order.delivery_status || '-'}) conserve face au statut transporteur ${resolved.rawStatus || '-'}`,
@@ -143,7 +145,8 @@ export async function applyAmeexStatusToOrder(params: {
   // 3. Statut commande cible.
   if (resolved.orderStatus && resolved.orderStatus !== order.status) {
     if (!isTransitionAllowed(order.status, resolved.orderStatus)) {
-      await admin.from('orders').update(baseUpdate).eq('id', order.id)
+      const { error: touchError } = await admin.from('orders').update(baseUpdate).eq('id', order.id)
+      if (touchError) throw touchError
       return {
         outcome: 'regression_blocked',
         detail: `Transition refusee ${order.status || '-'} -> ${resolved.orderStatus}`,
@@ -174,7 +177,8 @@ export async function applyAmeexStatusToOrder(params: {
   }
 
   if (!statusChanged && !deliveryChanged) {
-    await admin.from('orders').update(baseUpdate).eq('id', order.id)
+    const { error: touchError } = await admin.from('orders').update(baseUpdate).eq('id', order.id)
+    if (touchError) throw touchError
     if (deliveryRegressionBlocked) {
       return {
         outcome: 'regression_blocked',

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { receiveWebhook } from '@/lib/integrations/webhook-inbox'
 import { verifyYouCanWebhookSignature } from '@/lib/integrations/youcan'
 import { upsertYouCanOrderFromPayload } from '@/lib/integrations/youcan-sync'
 import { maintenanceEnabled } from '@/lib/maintenance/guard'
@@ -108,6 +109,10 @@ export async function POST(request: Request) {
 
     // Persister après authentification du fournisseur et avant toute écriture
     // métier. Un doublon ne réinitialise jamais un événement déjà traité.
+    const queued = await receiveWebhook({ provider: 'youcan', integrationId: integration.id,
+      request, rawBody, eventKey: youcanEventId, signature })
+    if (queued) return queued
+
     const eventKey = { integration_id: integration.id, event_type: 'order.create', youcan_event_id: youcanEventId }
     const { error: persistError } = await supabase.from('youcan_webhook_events').upsert(
       { ...eventKey, payload, signature, processed: false, error: null },

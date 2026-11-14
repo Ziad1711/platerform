@@ -6,7 +6,7 @@
  *
  * Règles :
  * - routes de traitement (cron, webhooks fournisseurs, API publique) : refusées,
- *   même pour le compte pilote ; seule la réception persistante YouCan est permise ;
+ *   même pour le compte pilote ; la réception persistante des quatre webhooks est permise ;
  * - compte pilote explicitement autorisé (`JISRA_MAINTENANCE_ALLOWED_EMAILS`) : accès
  *   applicatif complet (lecture et écriture) pour valider la nouvelle production ;
  * - autres utilisateurs : pages et écritures refusées (503) ; lectures d'API permises
@@ -102,9 +102,13 @@ export function maintenanceDecision(
   const normalizedMethod = (method || 'GET').toUpperCase()
   const isApi = pathname.startsWith('/api')
 
-  // Exception étroite : la route vérifie la signature et conserve l'événement
-  // sans importer de commande pendant la maintenance. Aucune autre API ouverte.
-  if (pathname === '/api/integrations/youcan/webhook/order-create' && normalizedMethod === 'POST') return null
+  // Réception durable uniquement ; le worker authentifié reste suspendu en maintenance.
+  const inboxPaths = ['/api/integrations/youcan/webhook/order-create',
+    '/api/integrations/lightfunnels/webhook', '/api/integrations/ameex/webhook',
+    '/api/integrations/digylog/webhook']
+  if (inboxPaths.includes(pathname) && (normalizedMethod === 'POST'
+    || (pathname.endsWith('/digylog/webhook') && normalizedMethod === 'PUT'))) return null
+  if (pathname === '/api/cron/webhook-recovery' && normalizedMethod === 'GET') return null
 
   // 1. Traitement automatique : jamais ouvert, pilote compris.
   for (const prefix of PROCESSING_PREFIXES) {

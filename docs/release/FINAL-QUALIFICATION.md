@@ -1,4 +1,4 @@
-# Qualification finale locale — NO-GO
+# Qualification finale locale — décisions de déploiement requises
 
 > La clôture du 14/11 ci-dessous remplace les verdicts intermédiaires des sections précédentes. Aucun PASS historique n’a été transformé en preuve de continuité après interruption.
 
@@ -88,3 +88,43 @@ LINT_REGRESSION=PASS
 PRODUCTION_GO=NO
 
 22 migrations et manifeste inchangés. Seul correctif applicatif : Digylog, 2 fichiers. Aucun push, déploiement Vercel, écriture Q3/Cloud ou appel fournisseur. Les détails ci-dessus ne constituent pas une finalisation complète ; les FAIL listés restent des conditions d'arrêt.
+
+
+## Finalisation ciblée — parent 8d25c641 (fait foi sur les verdicts antérieurs)
+
+### Livraison et périmètre
+- 22 migrations précédentes strictement inchangées (SHA256 vérifiés). **23e migration additive nécessaire** : `20261119010000_webhook_durable_inbox.sql`, sans backfill des anciens événements.
+- `webhook_inbox` privée, RLS, aucun droit anon/authenticated ; fonctions SECURITY DEFINER supabase_admin, search_path fixé, EXECUTE service_role uniquement. Réservation par SKIP LOCKED, token de lease, récupération après 5 minutes, FIFO par intégration incluant échecs et délais. Retries sans limite destructive ; événement problématique reste visible et bloque sa seule intégration (intervention opérateur, jamais suppression automatique).
+- Réception des quatre fournisseurs : authentification et résolution du scope existantes préservées ; persistance du corps et contrôle erreur avant HTTP202. HTTP202 signifie **reçu durablement**, jamais « commande déjà traitée ». Événements non authentifiés, cible inconnue/ambiguë : pas d'ACK positif. Handshake PUT Digylog conservé (contrôle de connexion, pas événement métier).
+- Worker authentifié `/api/cron/webhook-recovery`, appel serveur interne des handlers via contexte AsyncLocalStorage inaccessible au client : ni signature de replay publique ni appel HTTP au fournisseur. Échec SQL, claim déjà en cours, confirmation incertaine ou résultat métier incomplet => retry, pas processed. Les 52 erreurs historiques ne sont jamais sélectionnées : seule la nouvelle inbox est balayée.
+- Script Linux `scripts/webhook-recovery-worker.sh` : URL HTTPS exacte, fichier d'autorisation 0600, flock, timeout, zéro redirection, validation JSON. Ordonnanceur hôte à installer après autorisation ; pas de supposition d'abonnement Vercel permettant un cron minute. Aucun nouveau cron Vercel commercial ajouté.
+
+### Preuves ciblées
+**WEBHOOK_RECOVERY=PASS (qualification isolée, activation Production pas exécutée).**
+1. Quatre POST authentifiés => HTTP202 ; quatre lignes pending, zéro tentative. Processus tué puis redémarré : premier appel worker => processed4 failed0, sans nouvel envoi fournisseur. Nouveau véritable import Lightfunnels créé (pas seulement un mapping préexistant).
+2. 32 doublons reçus en concurrence => HTTP202 ; inbox toujours4. Échec de confirmation injecté après effet métier => HTTP500 du worker. Expiration du lease avancée uniquement sur fixtures isolées ; deux workers concurrents => 2+2 traitements, inbox vide et aucune commande dupliquée. Aucun bail Production touché.
+3. Version de secours en maintenance : ERP503, réception des quatre HTTP202 et worker paused. Redémarrage hors maintenance => quatre événements repris. Erreur SQL métier injectée : failed1, puis retry autonome processed1 après retrait du trigger de faute. Pas de dépendance au retry fournisseur.
+4. Retour vers le build candidat : replay des neuf événements => processed9 failed0, mêmes six commandes, zéro doublon. Les effets AMEEX/Digylog sont rejoués avec protections existantes et déduplication ; ordre de réception sérialisé par intégration, pas garantie d'ordre global entre fournisseurs.
+5. Script worker exercé sous Linux réel via tunnel isolé : `WEBHOOK_RECOVERY ok 0`. Seulement le filtre HTTPS a été adapté en mémoire pour ce test HTTP loopback, jamais modifié dans le fichier livré. Auth et pipeline curl/JSON/flock effectivement exécutés ; HTTPS Production à valider T0.
+6. Build Production candidat et secours PASS ; TypeScript PASS ; nouveaux modules ESLint PASS ; zéro diagnostic ajouté aux fichiers existants. Contrôles SQL : inbox inaccessible anon, claim inexécutable authenticated.
+7. Nettoyage fixtures précis : 4083 commandes, 5320 articles, 722 événements YouCan et 52 erreurs historiques retrouvés. Journaux préexistants, Auth historique et archives préservés. Aucun disable constraint/trigger historique.
+
+**ROLLBACK=PASS (secours local corrigé, pas aace84a brut).**
+SHA secours : **ff3943bcd8f666fdbe9b92c35b693e287fb6c450**, branche `release/jisra-safe-fallback`, base aace84a avec uniquement protections webhook/YouCan/maintenance. Build isolé réussi ; bascule runtime réelle candidat -> secours -> candidat, réception et reprise testées, données nouvelles conservées. Parcours Auth/MFA/dashboard/abonnements/crédits/assistant simulé de la base aace84a réutilisés car pas de changement de ces modules. Il reste à construire un artefact Vercel de secours avec env Production autorisé ; **ne jamais rollback vers l'ancien aace84a non corrigé**.
+
+**BACKUP_SAFETY=FAIL pour la récupération hors panne non encore installée ; protections locales validées.**
+Rapport Auth/Storage/quarantaine précédent réutilisé, aucune restauration générale répétée. Nouveau script `release-checkpoint.sh` : dump complet DB/Auth/Storage metadata, rôles et archive fichiers, chiffrement CMS AES256-GCM au fil de l'eau avec certificat public, pas de dump clair écrit par le script, dossier0700, SHA256. Script exécuté contre la copie isolée, ciphertext checksums PASS, déchiffrement PASS. Restauration ciblée du nouveau checkpoint : public+auth+saas_admin avec dépendances extensions/rollback_capture, post-data/FK complets, zéro contrainte non validée ; **8 événements et 4088 commandes (dont les nouvelles), 5324 articles, 44 users** récupérés. Archive Storage déchiffrée/lisible ; la conservation réelle d'un fichier uploadé et son hash après bascule/redémarrage est couverte par la preuve précédente inchangée.
+Les essais de restore ont arrêté sur dépendances manquantes puis repris avec les dépendances légitimes, aucune contrainte désactivée. La quarantaine des 69 lignes source reste nécessaire pour un nouveau dump Q3 brut ; pas nécessaire pour le checkpoint pris depuis la copie déjà corrigée.
+La sauvegarde Q3 existante est horaire et chiffrée hors hôte ; contrôles de téléchargement/restauration complets T0 à refaire sur le nouveau backup (sans le lancer aujourd'hui). Q3 WAL off confirmé précédemment : **PITR absent, RPO0 sinistre non garanti**. Choix opérationnel proposé : accepter RPO maximum d'une heure via checkpoints chiffrés complets vérifiés hors hôte, raccourci à cinq minutes pendant la bascule si capacité prouvée ; sauvegarde après migration et avant réouverture. Un rollback applicatif seul ne restaure pas la DB et conserve immédiatement toutes les écritures/fichiers. Couverture des écritures après le dernier checkpoint en cas de perte physique : non garantie, décision RPO explicite nécessaire. Off-host et ordonnanceur Production sont des actions à autoriser, pas un test isolé à déclarer effectué.
+
+**ENV_CONFIG=PASS pour les contrats/configuration préparée ; application Production soumise à autorisation.**
+Origine HTTPS supabase.jisra.io, contrat cryptographique anon, domaines Auth, inscriptions fermées déjà confirmés en lecture seule et inchangés. Secrets non relisibles conservés, jamais déclarés invalides. `PUBLIC_AI_ENABLED=disabled`, `GA4_EXTERNAL_CALLS=disabled`, banque `billing_bank_settings.enabled=false` (défaut SQL) requis au premier déploiement. `NEXT_PUBLIC_GA_MEASUREMENT_ID` vide recommandé pour zéro GA4 navigateur ; rebuild obligatoire, aucun changement Production aujourd'hui. Ne pas toucher aux flags assistant ERP/clefs intégrations existantes. Aucun env localhost/Q4 de test à promouvoir. Contrat service_role réel à vérifier par lecture interne autorisée lors de la qualification du build Production, sans appel fournisseur.
+
+### Décision actuelle
+WEBHOOK_RECOVERY=PASS
+ROLLBACK=PASS
+BACKUP_SAFETY=FAIL
+ENV_CONFIG=PASS
+PRODUCTION_GO=NO
+
+Arrêts Production restants : accord RPO borné, sauvegarde fraîche et copie hors hôte/restauration T0 ; installation et vérification du worker récurrent ; construction artefacts candidat+secours avec bonnes variables et flags fermés. Aucun push, déploiement, écriture Q3/Cloud ni appel fournisseur exécuté. Ces points ne justifient pas de rejouer les 22 migrations déjà qualifiées ou les anciens audits.

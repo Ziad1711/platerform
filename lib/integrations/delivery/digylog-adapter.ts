@@ -205,6 +205,7 @@ export async function processDigylogWebhook(params: {
         .select('id, processed')
         .eq('integration_id', integrationId)
         .eq('event_key', eventKey)
+        .order('created_at', { ascending: false }).limit(1)
         .maybeSingle()
 
       if (existing?.processed) {
