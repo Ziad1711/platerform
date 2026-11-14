@@ -25,6 +25,7 @@ const columns = [
   {
     title: 'Ressources',
     links: [
+      { href: '/faq', label: 'FAQ' },
       { href: '/documentation', label: 'Documentation API' },
       { href: '/features/assistant-ia', label: 'Assistant IA' },
       { href: '/features/publicite', label: 'Publicité & ROI' },

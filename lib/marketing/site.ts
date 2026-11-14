@@ -45,6 +45,7 @@ export const marketingNav: { href: string; label: string; items?: MarketingSolut
   { href: '/', label: 'Accueil' },
   { href: '/#solutions', label: 'Solutions', items: marketingSolutions },
   { href: '/catalogue-integrations', label: 'Intégrations' },
+  { href: '/faq', label: 'FAQ' },
   { href: '/pricing', label: 'Tarifs' },
 ]
 
@@ -169,34 +170,6 @@ export const pricingPlans = [
     price: 'Sur devis',
     description: 'Pour les équipes multi-stores avec pilotage consolidé.',
     features: ['Stores illimités', 'Équipe & rôles', 'Priorité support', 'Intégrations avancées'],
-  },
-]
-
-export const faqItems = [
-  {
-    question: 'Jisra est-il conçu pour le Maroc ?',
-    answer:
-      'Oui. Le produit est pensé pour les e-commerçants marocains: français, MAD, workflows de confirmation et sociétés de livraison locales.',
-  },
-  {
-    question: 'Est-ce que jisra remplace mes tableaux Excel ?',
-    answer:
-      'Oui. L’objectif est de centraliser commandes, coûts, livraison, stock et rentabilité dans une seule interface.',
-  },
-  {
-    question: 'Puis-je gérer plusieurs stores ? ',
-    answer:
-      'Oui, jisra propose une vue consolidée multi-stores pour suivre votre activité globale sans changer d’outil.',
-  },
-  {
-    question: 'Comment calculez-vous le vrai profit ?',
-    answer:
-      'Jisra combine revenus, coût produit, coûts pub, livraison et coûts opérationnels pour sortir la rentabilité réelle par commande.',
-  },
-  {
-    question: 'Dois-je connecter mes intégrations dès le début ?',
-    answer:
-      'Non, vous pouvez démarrer progressivement puis brancher vos stores et vos sources de dépenses quand vous êtes prêt.',
   },
 ]
 

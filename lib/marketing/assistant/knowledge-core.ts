@@ -25,6 +25,7 @@ export type PublicPlanPrice = {
 export type PublicFeature = { title: string; description: string }
 export type PublicIntegration = { name: string; status: string; kind: string; description: string }
 export type PublicFaq = { question: string; answer: string }
+export type PublicFaqTopic = { category: string; questions: string[] }
 
 export type PublicAssistantNavigationItem = { href: string; label: string }
 
@@ -41,6 +42,8 @@ export type SnapshotInput = {
   modules: string[]
   integrations: PublicIntegration[]
   faq: PublicFaq[]
+  /** Index compact des sujets FAQ (questions seules, sans réponses). */
+  faqTopics?: PublicFaqTopic[]
 }
 
 const UNLIMITED = 999999
@@ -176,6 +179,13 @@ function renderFaq(faq: PublicFaq[]) {
   return faq.map((item) => `Q — ${item.question}\nR — ${item.answer}`).join('\n')
 }
 
+function renderFaqTopics(topics: PublicFaqTopic[]) {
+  return [
+    'FAQ PUBLIQUE (/faq) — sujets couverts. Pour le détail, oriente le visiteur vers /faq :',
+    ...topics.map((topic) => `- ${topic.category} : ${topic.questions.join(' ; ')}.`),
+  ].join('\n')
+}
+
 /** Instantané public complet : aucune donnée de boutique, aucun secret. */
 export function buildCommercialSnapshot(input: SnapshotInput): PublicKnowledge {
   const catalog = input.catalog
@@ -202,6 +212,7 @@ export function buildCommercialSnapshot(input: SnapshotInput): PublicKnowledge {
     '',
     'RÉPONSES OFFICIELLES CONNUES (faits à reformuler, jamais à réciter mécaniquement) :',
     renderFaq(input.faq),
+    ...(input.faqTopics && input.faqTopics.length > 0 ? ['', renderFaqTopics(input.faqTopics)] : []),
   ]
   return { snapshot: sections.join('\n'), catalogVersion, planCount }
 }

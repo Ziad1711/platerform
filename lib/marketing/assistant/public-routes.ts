@@ -38,6 +38,11 @@ export const PUBLIC_ASSISTANT_ROUTES: PublicAssistantRoute[] = [
     keywords: ['integration', 'intégration', 'transporteur', 'carrier', 'التكاملات', 'التوصيل'],
   },
   {
+    href: '/faq',
+    label: 'Questions fréquentes',
+    keywords: ['faq', 'question', 'questions', 'aide', 'help', 'أسئلة', 'مساعدة'],
+  },
+  {
     href: '/features',
     label: 'Fonctionnalités',
     keywords: ['fonctionnalite', 'fonctionnalité', 'features', 'module', 'الميزات', 'الوظائف'],

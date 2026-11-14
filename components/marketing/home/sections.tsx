@@ -26,11 +26,11 @@ import {
 import { motion } from 'framer-motion'
 import {
   automations,
-  faqItems,
   homeFeatureHighlights,
   integrations,
   modules,
 } from '@/lib/marketing/site'
+import { homeFaqItems } from '@/lib/marketing/faq'
 import { CatalogOffers } from '@/components/marketing/pricing/catalog-offers'
 import { Container } from '@/components/marketing/shared/container'
 import { SectionHeading } from '@/components/marketing/shared/section-heading'
@@ -340,7 +340,7 @@ export function HomeSections() {
             description="Les réponses clés avant de lancer votre mise en place."
           />
           <div className="grid gap-4 lg:grid-cols-2">
-            {faqItems.map((item) => (
+            {homeFaqItems.map((item) => (
               <Card3D key={item.question} className="p-6">
                 <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-jisra-green/10">
                   <HelpCircle className="h-5 w-5 text-jisra-green" />

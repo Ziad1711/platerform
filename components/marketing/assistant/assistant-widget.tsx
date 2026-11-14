@@ -15,10 +15,10 @@ const labels: Record<Locale, Record<string, string>> = {
 }
 
 const linkLabels: Record<Locale, Record<string, string>> = {
-  fr: { '/pricing': 'Voir les tarifs', '/signup': 'Créer un compte', '/login': 'Se connecter', '/subscribe': 'Récapitulatif', '/contact': 'Contact', '/catalogue-integrations': 'Intégrations', '/features': 'Fonctionnalités', '/documentation': 'Documentation API' },
-  en: { '/pricing': 'View plans', '/signup': 'Create an account', '/login': 'Sign in', '/subscribe': 'Subscription summary', '/contact': 'Contact', '/catalogue-integrations': 'Integrations', '/features': 'Features', '/documentation': 'API documentation' },
-  ar: { '/pricing': 'عرض الأسعار', '/signup': 'إنشاء حساب', '/login': 'تسجيل الدخول', '/subscribe': 'ملخص الاشتراك', '/contact': 'تواصل', '/catalogue-integrations': 'التكاملات', '/features': 'الميزات', '/documentation': 'توثيق API' },
-  ary: { '/pricing': 'شوف الأثمنة', '/signup': 'دير حساب', '/login': 'دخول', '/subscribe': 'ملخص الاشتراك', '/contact': 'تواصل', '/catalogue-integrations': 'التكاملات', '/features': 'الميزات', '/documentation': 'توثيق API' },
+  fr: { '/pricing': 'Voir les tarifs', '/signup': 'Créer un compte', '/login': 'Se connecter', '/subscribe': 'Récapitulatif', '/contact': 'Contact', '/catalogue-integrations': 'Intégrations', '/features': 'Fonctionnalités', '/faq': 'FAQ', '/documentation': 'Documentation API' },
+  en: { '/pricing': 'View plans', '/signup': 'Create an account', '/login': 'Sign in', '/subscribe': 'Subscription summary', '/contact': 'Contact', '/catalogue-integrations': 'Integrations', '/features': 'Features', '/faq': 'FAQ', '/documentation': 'API documentation' },
+  ar: { '/pricing': 'عرض الأسعار', '/signup': 'إنشاء حساب', '/login': 'تسجيل الدخول', '/subscribe': 'ملخص الاشتراك', '/contact': 'تواصل', '/catalogue-integrations': 'التكاملات', '/features': 'الميزات', '/faq': 'الأسئلة الشائعة', '/documentation': 'توثيق API' },
+  ary: { '/pricing': 'شوف الأثمنة', '/signup': 'دير حساب', '/login': 'دخول', '/subscribe': 'ملخص الاشتراك', '/contact': 'تواصل', '/catalogue-integrations': 'التكاملات', '/features': 'الميزات', '/faq': 'الأسئلة الشائعة', '/documentation': 'توثيق API' },
 }
 
 /** Langue du navigateur : FR/EN/AR, avec ar-MA interprété comme darija. Repli français. */

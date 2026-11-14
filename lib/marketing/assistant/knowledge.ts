@@ -2,7 +2,7 @@ import 'server-only'
 import { readPublicPlanCatalog } from '@/lib/billing/catalog.server'
 import { PUBLIC_ASSISTANT_ROUTES } from './public-routes'
 import { featurePages, integrations, modules } from '@/lib/marketing/site'
-import { pricingFaqItems } from '@/lib/marketing/faq'
+import { faqAssistantTopics, pricingFaqItems } from '@/lib/marketing/faq'
 import {
   buildCommercialSnapshot,
   buildSystemPrompt,
@@ -37,6 +37,7 @@ export async function publicKnowledge(): Promise<PublicKnowledge> {
     modules,
     integrations,
     faq: pricingFaqItems,
+    faqTopics: faqAssistantTopics,
   })
   return {
     ...snapshot,
