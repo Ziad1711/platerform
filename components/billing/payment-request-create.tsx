@@ -29,9 +29,9 @@ export function PaymentRequestCreate({ priceId }: { priceId: string }) {
     finally { lock.current = false; setBusy(false) }
   }
   return <div className="space-y-3">
-    <p className="text-sm">Créer une demande réserve une référence et le tarif affiché, sans payer ni activer un abonnement. Le virement reste indisponible tant que les coordonnées officielles ne sont pas configurées.</p>
+    <p className="text-sm text-jisra-cream/70">Aucun paiement n&apos;est encaissé à cette étape. Votre abonnement sera confirmé après vérification bancaire.</p>
     <button onClick={() => void create()} disabled={busy} className="min-h-11 w-full rounded-xl bg-jisra-green px-5 py-3 font-semibold text-white disabled:opacity-50">
-      {busy ? 'Création en cours…' : 'Créer ou reprendre ma demande'}
+      {busy ? 'Préparation…' : 'Continuer vers le paiement'}
     </button>
     {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
   </div>

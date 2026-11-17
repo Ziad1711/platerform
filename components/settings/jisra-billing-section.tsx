@@ -24,12 +24,24 @@ type BillingStatus = {
   /** Crédits IA consommés sur le mois en cours (compteur remis à zéro chaque mois). */
   credits?: UsageBlock
 }
+
+type BillingPeriodRow = {
+  id: string
+  plan_name: string
+  started_at: string | null
+  expires_at: string | null
+  amount_paid: number | null
+  currency: string | null
+  future?: boolean
+}
+
 type BillingDetailsProps = {
   data: BillingStatus
   planName: string
+  periods: BillingPeriodRow[]
 }
 
-function BillingDetails({ data, planName }: BillingDetailsProps) {
+function BillingDetails({ data, planName, periods }: BillingDetailsProps) {
   const ordersUsed = Number(data.orders?.used ?? 0)
   const ordersLimit = data.orders?.limit ?? data.plan?.order_limit ?? null
   const creditsUsed = Number(data.credits?.used ?? 0)
@@ -80,6 +92,20 @@ function BillingDetails({ data, planName }: BillingDetailsProps) {
         />
       </div>
 
+      {periods.length > 0 && (
+        <div className="rounded-lg border p-3 space-y-2">
+          <p className="text-xs text-muted-foreground">Périodes d&apos;abonnement</p>
+          {periods.map((period) => (
+            <div key={period.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="font-medium">{period.plan_name}</span>
+              <span className="text-muted-foreground">
+                {period.started_at ? new Date(period.started_at).toLocaleDateString('fr-FR') : '—'} → {period.expires_at ? new Date(period.expires_at).toLocaleDateString('fr-FR') : '—'}
+                {period.future && <span className="ml-2 rounded-full bg-jisra-green/10 px-2 py-0.5 text-xs text-jisra-green-light">Programmé</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <JisraPlanCatalog currentPlanName={planName} />
       <Link href="/payment-requests" className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm font-medium">Suivre mes demandes de paiement</Link>
     </div>
@@ -103,6 +129,16 @@ export default function JisraBillingSection() {
 
       if (error) throw error
       return (data || null) as BillingStatus | null
+    },
+  })
+
+  const { data: periods = [] } = useQuery({
+    queryKey: ['settings-billing-periods', userId],
+    enabled: !!userId,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('rpc_billing_periods')
+      if (error) throw error
+      return ((data?.periods || []) as BillingPeriodRow[])
     },
   })
 
@@ -145,7 +181,7 @@ export default function JisraBillingSection() {
           </button>
         </div>
       ) : (
-        <BillingDetails data={data} planName={planName} />
+        <BillingDetails data={data} planName={planName} periods={periods} />
       )}
     </section>
   )

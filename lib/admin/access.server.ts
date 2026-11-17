@@ -46,6 +46,10 @@ export function adminError(error: unknown) {
     PAYMENT_SUBSCRIPTION_CONFLICT: 'Un abonnement existant nécessite un traitement manuel ; aucune période n’a été modifiée.',
     PAYMENT_SELF_APPROVAL: 'Vous ne pouvez pas valider votre propre demande.',
     BANK_PUBLIC_ENABLE_NOT_AUTHORIZED: 'L’activation publique du paiement n’est pas autorisée.',
+    BANK_ALREADY_PUBLISHED: 'Le paiement est déjà publié.',
+    BANK_PUBLICATION_INCOMPLETE: 'Coordonnées incomplètes ou conditions commerciales non approuvées.',
+    BANK_NOT_PUBLISHED: 'Le paiement n’est pas publié ; rien à suspendre.',
+    BANK_PUBLISHED_IMMUTABLE: 'Suspendez d’abord la publication avant de modifier les coordonnées.',
   }
   if (conflicts[code]) return NextResponse.json({ error: conflicts[code] }, { status: 409, headers: { 'Cache-Control': 'no-store' } })
   const status = code === 'ADMIN_AUTH' ? 401 : code === 'PAYMENT_NOT_FOUND' || code === 'FINANCE_NOT_FOUND' ? 404 : code === 'ADMIN_RATE_LIMIT' ? 429 : code === 'ADMIN_FORBIDDEN' || code === 'ADMIN_MFA_REQUIRED' ? 403 : code === 'ADMIN_INVALID' ? 400 : 503

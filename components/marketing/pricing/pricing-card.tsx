@@ -65,7 +65,7 @@ export function PricingCard({ plan, featured, index, appearance = 'marketing', c
       </ul>
 
       <MarketingLink href={subscribePath(plan)} className="mt-8 w-full">
-        {plan.requires_payment ? 'Choisir ce forfait' : 'Commencer gratuitement'}
+        {!plan.requires_payment ? 'Commencer gratuitement' : current ? 'Renouveler' : appearance === 'app' ? 'Changer d’offre' : 'Choisir ce forfait'}
       </MarketingLink>
     </motion.div>
   )

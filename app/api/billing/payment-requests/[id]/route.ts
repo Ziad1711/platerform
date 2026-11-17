@@ -8,14 +8,15 @@ export async function GET(request: Request, context: Context) {
     const { id } = await context.params
     const { backend, supabase, user } = await paymentContext(request)
     await paymentAction(backend, user.id, id, 'read')
-    const [row, proofs, events, bank] = await Promise.all([
+    const [row, proofs, events, bank, receipt] = await Promise.all([
       supabase.from('payment_requests').select(requestFields).eq('id', id).single(),
       supabase.from('payment_proofs').select('id,mime_type,size_bytes,created_at').eq('request_id', id).order('created_at'),
       supabase.from('payment_request_events').select('id,event_type,created_at,reason').eq('request_id', id).order('id'),
       bankInstructions(backend),
+      backend.from('subscriptions').select('started_at,expires_at').eq('payment_request_id', id).maybeSingle(),
     ])
-    if (row.error || proofs.error || events.error) throw new Error('PAYMENT_READ_FAILED')
-    return paymentResponse({ request: row.data, proofs: proofs.data, events: events.data, bank })
+    if (row.error || proofs.error || events.error || receipt.error) throw new Error('PAYMENT_READ_FAILED')
+    return paymentResponse({ request: row.data, proofs: proofs.data, events: events.data, bank, receipt: receipt.data })
   } catch (error) { return paymentError(error) }
 }
 

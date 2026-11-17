@@ -13,12 +13,17 @@ export async function POST(request: Request) {
   try {
     assertAdminOrigin(request)
     const input = z.object({
-      beneficiary: z.string().trim().min(2).max(200), bank_name: z.string().trim().min(2).max(200),
-      rib: z.string().regex(/^\d{24}$/), instructions: z.string().max(1000), reason: z.string().trim().min(10).max(300),
+      action: z.enum(['save_draft', 'publish', 'suspend']),
+      beneficiary: z.string().trim().max(200),
+      bank_name: z.string().trim().max(200),
+      rib: z.string().trim().refine((value) => value === '' || /^\d{24}$/.test(value), 'RIB marocain de 24 chiffres attendu.'),
+      instructions: z.string().max(1000),
+      commercial_conditions_approved: z.boolean(),
+      reason: z.string().trim().min(10).max(300),
     }).strict().parse(await adminPaymentJson(request))
     const { reason, ...values } = input
     const data = await adminPaymentRpc('rpc_admin_bank_settings', {
-      p_values: { ...values, enabled: false }, p_reason: reason,
+      p_values: values, p_reason: reason,
     }, 'bank_settings.manage')
     return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) { return adminError(error) }
