@@ -1,0 +1,13 @@
+.git
+.next
+.next-q4
+node_modules
+.q4.local.json
+.env
+.env.local
+.env.production
+.env.production.local
+1105.mp4
+docs
+*.tsbuildinfo
+tsconfig.tsbuildinfo
