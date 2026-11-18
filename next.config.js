@@ -23,6 +23,12 @@ const nextConfig = {
           { key: 'Referrer-Policy', value: 'no-referrer' },
         ],
       })),
+      {
+        source: '/admin/marketing/acquisition',
+        // A native same-origin POST submits Origin: null under no-referrer.
+        // Keep the strict Origin guard and still suppress referrers to Meta.
+        headers: [{ key: 'Referrer-Policy', value: 'same-origin' }],
+      },
       ...(process.env.JISRA_Q4_RUNNER === '1' ? [{
         source: '/:path*',
         headers: [{ key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://supabase-qualif.jisra.io:8443; connect-src 'self' https://supabase-qualif.jisra.io:8443; font-src 'self' data:; media-src 'self' blob:; frame-src 'none'" }],
