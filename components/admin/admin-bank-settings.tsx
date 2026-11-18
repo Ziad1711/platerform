@@ -2,7 +2,6 @@
 
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
 
 type BankStatus = 'draft' | 'published' | 'suspended'
 type BankSettings = {
@@ -23,6 +22,12 @@ const STATUS_LABEL: Record<BankStatus, string> = {
   suspended: 'Suspendu',
 }
 
+const btnBase = 'inline-flex min-h-11 items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50'
+const btnPrimary = `${btnBase} bg-jisra-green text-white hover:bg-jisra-green-dark`
+const btnOutline = `${btnBase} border border-white/20 bg-white/5 text-jisra-cream hover:bg-white/10`
+const btnDanger = `${btnBase} border border-red-400/40 bg-red-400/10 text-red-200 hover:bg-red-400/20`
+const inputClass = 'min-h-11 w-full rounded-xl border border-white/15 bg-jisra-ink px-3 text-jisra-cream placeholder:text-jisra-cream/40 focus:border-jisra-green focus:outline-none'
+
 type Field = {
   name: 'beneficiary' | 'bank_name' | 'rib' | 'instructions' | 'reason'
   label: string
@@ -31,6 +36,7 @@ type Field = {
   value: string | null
   numeric?: boolean
   minLength?: number
+  hint?: string
 }
 
 export function AdminBankSettings() {
@@ -57,17 +63,30 @@ export function AdminBankSettings() {
     setBusy(true); setMessage(''); setError('')
     try {
       const data = new FormData(form)
+      const reason = String(data.get('reason') ?? '').trim()
+      const beneficiary = String(data.get('beneficiary') ?? '').trim()
+      const bankName = String(data.get('bank_name') ?? '').trim()
+      const rib = String(data.get('rib') ?? '').trim()
+
+      if (reason.length < 10) throw new Error('Le motif doit contenir au moins 10 caractères.')
+      if (action === 'publish') {
+        if (!approved) throw new Error('Cochez la case d’approbation des conditions commerciales.')
+        if (beneficiary.length < 2) throw new Error('Indiquez le bénéficiaire officiel (au moins 2 caractères).')
+        if (bankName.length < 2) throw new Error('Indiquez le nom de la banque (au moins 2 caractères).')
+        if (!/^\d{24}$/.test(rib)) throw new Error('Le RIB doit contenir exactement 24 chiffres.')
+      }
+
       const response = await fetch('/api/admin/bank-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action,
-          beneficiary: String(data.get('beneficiary') ?? ''),
-          bank_name: String(data.get('bank_name') ?? ''),
-          rib: String(data.get('rib') ?? ''),
+          beneficiary,
+          bank_name: bankName,
+          rib,
           instructions: String(data.get('instructions') ?? ''),
           commercial_conditions_approved: approved,
-          reason: String(data.get('reason') ?? ''),
+          reason,
         }),
       })
       const result = await response.json()
@@ -86,81 +105,82 @@ export function AdminBankSettings() {
     }
   }
 
-  if (query.isPending) return <p role="status">Vérification des paramètres…</p>
-  if (query.isError) return <p role="alert">{query.error.message}</p>
+  if (query.isPending) return <p role="status" className="text-jisra-cream">Vérification des paramètres…</p>
+  if (query.isError) return <p role="alert" className="text-red-300">{query.error.message}</p>
   const settings = query.data.settings
   const status = settings.status
+  const published = status === 'published'
+
   const fields: Field[] = [
     { name: 'beneficiary', label: 'Bénéficiaire officiel (nom légal)', max: 200, required: false, value: settings.beneficiary },
     { name: 'bank_name', label: 'Banque', max: 200, required: false, value: settings.bank_name },
-    { name: 'rib', label: 'RIB marocain — 24 chiffres', max: 24, required: false, value: settings.rib, numeric: true },
+    { name: 'rib', label: 'RIB marocain — 24 chiffres', max: 24, required: false, value: settings.rib, numeric: true, hint: '24 chiffres, sans espaces' },
     { name: 'instructions', label: 'Instructions affichées au client', max: 1000, required: false, value: settings.instructions },
-    { name: 'reason', label: 'Motif de la modification — sans secret', max: 300, required: true, value: null, minLength: 10 },
+    { name: 'reason', label: 'Motif de la modification', max: 300, required: true, value: null, minLength: 10, hint: '10 à 300 caractères' },
   ]
 
   return (
-    <section className="max-w-2xl space-y-5">
-      <h1 className="text-2xl font-bold">Coordonnées bancaires — publication contrôlée</h1>
+    <section className="max-w-2xl space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-jisra-cream">Coordonnées bancaires</h1>
+        <p className="mt-1 text-sm text-jisra-cream/70">Configurer, publier, suspendre et modifier les coordonnées du virement.</p>
+      </div>
 
-      <div role="status" className={`rounded-xl border p-4 ${status === 'published'
-        ? 'border-jisra-green/40 bg-jisra-green/10'
+      <div role="status" className={`rounded-xl border p-4 ${published
+        ? 'border-jisra-green/50 bg-jisra-green/15 text-jisra-green-light'
         : status === 'suspended'
-          ? 'border-orange-400/40 bg-orange-400/10'
-          : 'border-amber-400/30 bg-amber-400/10'}`}>
+          ? 'border-orange-400/50 bg-orange-400/15 text-orange-200'
+          : 'border-amber-400/40 bg-amber-400/10 text-amber-200'}`}>
         <p className="font-semibold">État actuel : {STATUS_LABEL[status]}</p>
-        <p className="text-sm text-jisra-cream/80">
-          {status === 'published'
-            ? 'Les coordonnées officielles sont visibles des clients. Toute modification passe par une suspension préalable.'
+        <p className="mt-1 text-sm">
+          {published
+            ? 'Les coordonnées sont visibles des clients. Vous pouvez les modifier puis les republier, ou suspendre le paiement.'
             : status === 'suspended'
               ? 'Le paiement est suspendu : les nouvelles demandes sont bloquées, les coordonnées restent enregistrées sans être exposées.'
               : 'Le paiement public est verrouillé. Aucune coordonnée n’est exposée tant qu’elle n’est pas publiée.'}
         </p>
       </div>
 
-      <p className="text-sm text-jisra-cream/70">
-        Ne saisissez aucune coordonnée fictive. Chaque action est historisée et réservée à un administrateur authentifié avec vérification récente.
-      </p>
-
       <form ref={formRef} className="space-y-4">
         {fields.map((field) => (
-          <label key={field.name} className="block space-y-2">
-            <span>{field.label}</span>
+          <label key={field.name} className="block space-y-1.5">
+            <span className="text-sm font-medium text-jisra-cream">{field.label}</span>
             <input
               name={field.name}
               required={field.required}
               minLength={field.minLength}
               maxLength={field.max}
               defaultValue={field.value ?? ''}
-              disabled={status === 'published' && field.name !== 'reason'}
               autoComplete="off"
               inputMode={field.numeric ? 'numeric' : undefined}
-              className="min-h-11 w-full rounded-xl border border-white/20 bg-jisra-ink px-3 disabled:opacity-60"
+              className={inputClass}
             />
+            {field.hint && <span className="text-xs text-jisra-cream/50">{field.hint}</span>}
           </label>
         ))}
 
-        {status !== 'published' && (
-          <label className="flex items-start gap-3 text-sm">
-            <input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} className="mt-0.5" />
-            <span>J’approuve les conditions commerciales et je confirme que ces coordonnées officielles sont exactes (obligatoire pour publier).</span>
-          </label>
-        )}
+        <label className="flex items-start gap-3 text-sm text-jisra-cream">
+          <input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} className="mt-0.5 h-4 w-4" />
+          <span>J’approuve les conditions commerciales et confirme l’exactitude de ces coordonnées (obligatoire pour publier).</span>
+        </label>
 
-        <div className="flex flex-wrap gap-3">
-          {status !== 'published' && (
+        <div className="flex flex-wrap gap-3 pt-1">
+          {!published ? (
             <>
-              <Button type="button" size="lg" variant="outline" disabled={busy} onClick={() => void submitAction('save_draft')}>Enregistrer le brouillon</Button>
-              <Button type="button" size="lg" disabled={busy || !approved} onClick={() => void submitAction('publish')}>Publier et ouvrir le paiement</Button>
+              <button type="button" disabled={busy} onClick={() => void submitAction('save_draft')} className={btnOutline}>Enregistrer le brouillon</button>
+              <button type="button" disabled={busy || !approved} onClick={() => void submitAction('publish')} className={btnPrimary}>Publier et ouvrir le paiement</button>
             </>
-          )}
-          {status === 'published' && (
-            <Button type="button" size="lg" variant="destructive" disabled={busy} onClick={() => void submitAction('suspend')}>Suspendre le paiement</Button>
+          ) : (
+            <>
+              <button type="button" disabled={busy || !approved} onClick={() => void submitAction('publish')} className={btnPrimary}>Enregistrer et republier</button>
+              <button type="button" disabled={busy} onClick={() => void submitAction('suspend')} className={btnDanger}>Suspendre le paiement</button>
+            </>
           )}
         </div>
       </form>
 
-      {message && <p role="status" className="text-jisra-green">{message}</p>}
-      {error && <p role="alert" className="text-red-400">{error}</p>}
+      {message && <p role="status" className="rounded-lg border border-jisra-green/40 bg-jisra-green/10 p-3 text-sm text-jisra-green-light">{message}</p>}
+      {error && <p role="alert" className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-200">{error}</p>}
     </section>
   )
 }

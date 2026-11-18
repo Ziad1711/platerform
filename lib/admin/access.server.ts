@@ -30,7 +30,12 @@ export function assertAdminOrigin(request: Request) {
 }
 
 export function adminError(error: unknown) {
-  const code = error instanceof ZodError || (error instanceof Error && error.message === 'invalid_period') ? 'ADMIN_INVALID' : error instanceof Error ? error.message : ''
+  if (error instanceof ZodError) {
+    const issue = error.issues[0]
+    const message = issue?.message || 'Paramètres invalides.'
+    return NextResponse.json({ error: message }, { status: 400, headers: { 'Cache-Control': 'no-store' } })
+  }
+  const code = error instanceof Error && error.message === 'invalid_period' ? 'ADMIN_INVALID' : error instanceof Error ? error.message : ''
   const conflicts: Record<string, string> = {
     FINANCE_CURRENCY: 'Les devises ne correspondent pas. Aucune conversion automatique n’est autorisée.',
     FINANCE_OVERPAYMENT: 'Le règlement ou remboursement dépasse le montant disponible.',
@@ -50,6 +55,8 @@ export function adminError(error: unknown) {
     BANK_PUBLICATION_INCOMPLETE: 'Coordonnées incomplètes ou conditions commerciales non approuvées.',
     BANK_NOT_PUBLISHED: 'Le paiement n’est pas publié ; rien à suspendre.',
     BANK_PUBLISHED_IMMUTABLE: 'Suspendez d’abord la publication avant de modifier les coordonnées.',
+    BANK_REASON_INVALID: 'Le motif doit contenir entre 10 et 300 caractères.',
+    BANK_RIB_INVALID: 'Le RIB doit contenir exactement 24 chiffres.',
   }
   if (conflicts[code]) return NextResponse.json({ error: conflicts[code] }, { status: 409, headers: { 'Cache-Control': 'no-store' } })
   const status = code === 'ADMIN_AUTH' ? 401 : code === 'PAYMENT_NOT_FOUND' || code === 'FINANCE_NOT_FOUND' ? 404 : code === 'ADMIN_RATE_LIMIT' ? 429 : code === 'ADMIN_FORBIDDEN' || code === 'ADMIN_MFA_REQUIRED' ? 403 : code === 'ADMIN_INVALID' ? 400 : 503
