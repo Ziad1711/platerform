@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
+import { Suspense } from 'react'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { THEME_INIT_SCRIPT } from '@/lib/theme-init'
@@ -7,6 +8,8 @@ import { SITE_URL } from '@/lib/marketing/site-url'
 import HashErrorHandler from '@/components/marketing/hash-error-handler'
 import { GoogleAnalytics } from '@/components/analytics/google-analytics'
 import { VercelAnalytics } from '@/components/analytics/vercel-analytics'
+import { MetaPageEvents } from '@/components/analytics/meta-page-events'
+import { metaRuntimeEnabled } from '@/lib/analytics/meta.server'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -55,6 +58,7 @@ export default function RootLayout({
           <VercelAnalytics />
           {/* Mesure détaillée GA4, chargée uniquement après consentement */}
           <GoogleAnalytics />
+          {metaRuntimeEnabled() && <Suspense fallback={null}><MetaPageEvents /></Suspense>}
         </Providers>
       </body>
     </html>

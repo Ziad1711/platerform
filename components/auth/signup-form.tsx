@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, Lock, Mail, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { trackEvent } from '@/lib/analytics/gtag'
+import { confirmMetaSignup, metaSignup } from '@/lib/analytics/meta-browser'
+import { acquisitionSignup } from '@/lib/acquisition/browser'
 import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 
 const passwordLevels = [
@@ -69,6 +71,8 @@ export default function SignupForm() {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()
       const nextPath = safeInternalPath(next)
       const redirectUrl = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
+      const acquisition = await acquisitionSignup()
+      const meta = metaSignup('/signup')
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -78,6 +82,8 @@ export default function SignupForm() {
             first_name: firstName.trim(),
             last_name: lastName.trim(),
             full_name: fullName,
+            ...meta,
+            ...acquisition,
           },
         },
       })
@@ -99,6 +105,7 @@ export default function SignupForm() {
       const identities = data.user?.identities
       const accountCreated =
         Boolean(data.user?.id) && !(Array.isArray(identities) && identities.length === 0)
+      if (accountCreated) await confirmMetaSignup(meta?._jisra_meta_event, data.user?.id)
 
       if (data.user && data.session) {
         await fetch('/api/auth/finalize-profile', { method: 'POST' }).catch(() => null)

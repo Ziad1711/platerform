@@ -19,5 +19,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <Link href="/" className="mt-6 inline-block underline">Retour au site</Link>
     </div></div>
   }
-  return <AdminSessionBoundary><AdminShell>{result.context.strong ? children : <AdminMfa />}</AdminShell></AdminSessionBoundary>
+  return <AdminSessionBoundary><AdminShell permissions={result.context.permissions}>{result.context.strong ? children : <AdminMfa />}</AdminShell></AdminSessionBoundary>
 }

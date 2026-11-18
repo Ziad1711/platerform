@@ -4,6 +4,7 @@ import { createClient, getServerUserResult } from '@/lib/supabase/server'
 import SignupForm from '@/components/auth/signup-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
+import { metaRuntimeEnabled } from '@/lib/analytics/meta.server'
 import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
 import { getUserAccess } from '@/lib/auth/access'
 
@@ -127,7 +128,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
         </div>
       </div>
 
-      <CookieBanner />
+      <CookieBanner metaActive={metaRuntimeEnabled()} />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { PageTransition } from '@/components/marketing/shared/page-transition'
 import { ScrollToTopButton } from '@/components/marketing/shared/scroll-to-top'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
 import { AssistantGateway } from '@/components/marketing/assistant/assistant-gateway'
+import { metaRuntimeEnabled } from '@/lib/analytics/meta.server'
 
 export const metadata: Metadata = {
   title: {
@@ -36,7 +37,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
         <PageTransition>{children}</PageTransition>
       </main>
       <MarketingFooter />
-      <CookieBanner />
+      <CookieBanner metaActive={metaRuntimeEnabled()} />
       <ScrollToTopButton />
       <AssistantGateway />
     </div>

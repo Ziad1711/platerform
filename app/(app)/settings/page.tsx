@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Lock, RefreshCcw, Settings2, ShieldAlert, ShieldCheck, User2, Loader2, Trash2, Upload, Building2, Users, PhoneCall, FileText, ChevronLeft, ChevronRight, CreditCard, type LucideIcon } from 'lucide-react'
 import { JisraMark } from '@/components/logo'
@@ -494,6 +495,7 @@ export default function SettingsPage() {
             <p className="mt-2 text-sm text-muted-foreground">La mesure d’audience (Google Analytics) n’est activée qu’avec votre accord et vous pouvez le retirer à tout moment.</p>
             <div className="mt-4">
               <AnalyticsConsentControl variant="app" />
+              <Link href="/legal/confidentialite" className="mt-3 inline-block text-sm underline">Préférences publicitaires dans la politique de confidentialité</Link>
             </div>
             </section>}
 

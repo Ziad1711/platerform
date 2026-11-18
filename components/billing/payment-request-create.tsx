@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { sendPixel } from '@/lib/analytics/meta-browser'
 
 export function PaymentRequestCreate({ priceId }: { priceId: string }) {
   const [busy, setBusy] = useState(false)
@@ -23,6 +24,7 @@ export function PaymentRequestCreate({ priceId }: { priceId: string }) {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error)
+      if (result.metaEventId) sendPixel('InitiateCheckout', result.metaEventId)
       sessionStorage.removeItem(storageKey)
       router.push(`/payment-requests/${result.id}`)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Demande indisponible.') }

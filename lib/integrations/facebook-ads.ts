@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 
-const FACEBOOK_GRAPH_API_BASE = 'https://graph.facebook.com/v25.0'
+export const FACEBOOK_GRAPH_API_BASE = 'https://graph.facebook.com/v25.0'
 const FACEBOOK_SCOPES = ['ads_read', 'business_management']
 
 type FacebookOAuthStatePayload = {
@@ -48,13 +48,14 @@ export function buildFacebookAdsAuthorizeUrl(params: {
   clientId: string
   redirectUri: string
   state: string
+  scopes?: string[]
 }) {
   const url = new URL('https://www.facebook.com/v25.0/dialog/oauth')
   url.searchParams.set('client_id', params.clientId)
   url.searchParams.set('redirect_uri', params.redirectUri)
   url.searchParams.set('state', params.state)
   url.searchParams.set('response_type', 'code')
-  url.searchParams.set('scope', FACEBOOK_SCOPES.join(','))
+  url.searchParams.set('scope', (params.scopes ?? FACEBOOK_SCOPES).join(','))
   return url.toString()
 }
 
@@ -63,6 +64,7 @@ export async function exchangeFacebookCodeForToken(params: {
   clientSecret: string
   redirectUri: string
   code: string
+  safe?: boolean
 }) {
   const url = buildGraphUrl('/oauth/access_token', {
     client_id: params.clientId,
@@ -71,8 +73,8 @@ export async function exchangeFacebookCodeForToken(params: {
     code: params.code,
   })
 
-  const response = await fetch(url.toString())
-  if (!response.ok) throw new Error(`FACEBOOK_TOKEN_EXCHANGE_FAILED:${await response.text()}`)
+  const response = await fetch(url.toString(), params.safe ? { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(6000) } : undefined)
+  if (!response.ok) throw new Error(params.safe ? 'FACEBOOK_TOKEN_EXCHANGE_FAILED' : `FACEBOOK_TOKEN_EXCHANGE_FAILED:${await response.text()}`)
   return response.json() as Promise<{ access_token?: string; token_type?: string; expires_in?: number }>
 }
 
@@ -80,6 +82,7 @@ export async function exchangeFacebookLongLivedToken(params: {
   clientId: string
   clientSecret: string
   accessToken: string
+  safe?: boolean
 }) {
   const url = buildGraphUrl('/oauth/access_token', {
     grant_type: 'fb_exchange_token',
@@ -88,8 +91,8 @@ export async function exchangeFacebookLongLivedToken(params: {
     fb_exchange_token: params.accessToken,
   })
 
-  const response = await fetch(url.toString())
-  if (!response.ok) throw new Error(`FACEBOOK_LONG_LIVED_TOKEN_FAILED:${await response.text()}`)
+  const response = await fetch(url.toString(), params.safe ? { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(6000) } : undefined)
+  if (!response.ok) throw new Error(params.safe ? 'FACEBOOK_LONG_LIVED_TOKEN_FAILED' : `FACEBOOK_LONG_LIVED_TOKEN_FAILED:${await response.text()}`)
   return response.json() as Promise<{ access_token?: string; token_type?: string; expires_in?: number }>
 }
 

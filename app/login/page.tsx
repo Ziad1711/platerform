@@ -4,6 +4,7 @@ import { createClient, getServerUserResult, hasSessionCookie } from '@/lib/supab
 import AuthForm from '@/components/auth/auth-form'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 import { CookieBanner } from '@/components/marketing/shared/cookie-banner'
+import { metaRuntimeEnabled } from '@/lib/analytics/meta.server'
 import { resolvePostLoginRedirect, sanitizeRedirectPath } from '@/lib/auth/redirects'
 import { getUserAccess } from '@/lib/auth/access'
 
@@ -113,7 +114,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </div>
       </div>
 
-      <CookieBanner />
+      <CookieBanner metaActive={metaRuntimeEnabled()} />
     </div>
   )
 }

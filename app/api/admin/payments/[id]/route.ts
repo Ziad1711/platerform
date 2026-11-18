@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { adminPaymentJson, adminPaymentRpc, decisionSchema } from '@/lib/admin/payments.server'
+import { adminPaymentJson, adminPaymentRpc, decideAdminPayment, decisionSchema } from '@/lib/admin/payments.server'
 import { adminError, assertAdminOrigin, requireAdmin } from '@/lib/admin/access.server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -29,12 +29,7 @@ export async function POST(request: Request, context: Context) {
     assertAdminOrigin(request)
     const id = z.string().uuid().parse((await context.params).id)
     const input = decisionSchema.parse(await adminPaymentJson(request))
-    const data = await adminPaymentRpc('rpc_admin_payment_decide', {
-      p_request: id, p_action: input.action, p_key: input.key, p_reason: input.reason,
-      p_amount: input.amountMinor ?? null, p_currency: input.currency ?? null,
-      p_bank_account: input.bankAccount ?? null, p_bank_reference: input.bankReference ?? null,
-      p_value_date: input.valueDate ?? null,
-    }, 'payments.approve')
+    const data = await decideAdminPayment(id, input)
     return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) { return adminError(error) }
 }

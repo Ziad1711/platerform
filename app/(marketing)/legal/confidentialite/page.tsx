@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import { SITE_URL } from '@/lib/marketing/site-url'
 import { LegalPage } from '@/components/marketing/legal/legal-page'
 import { AnalyticsConsentControl } from '@/components/analytics/analytics-consent-control'
+import { MetaConsentControl } from '@/components/analytics/meta-consent-control'
+import { metaRuntimeEnabled } from '@/lib/analytics/meta.server'
 
 export const metadata: Metadata = {
   title: 'Politique de confidentialité',
@@ -64,9 +66,14 @@ export default function PrivacyPage() {
             'Le site utilise des cookies et un stockage local limités à des finalités essentielles : maintien de votre session authentifiée, mémorisation de vos préférences d’interface (par exemple le choix exprimé dans le bandeau de consentement) et protection contre les abus.',
             'Mesure d’audience agrégée (Vercel Analytics) : afin de disposer d’une vision fiable de la fréquentation, y compris auprès des visiteurs qui refusent la mesure détaillée, nous utilisons Vercel Web Analytics (Vercel Inc.). Ce dispositif ne dépose aucun cookie et n’enregistre rien sur votre appareil ; il ne conserve aucune adresse IP. Le visiteur est identifié par une empreinte calculée à partir de la requête, dont la durée de vie est de 24 heures maximum et qui est ensuite automatiquement supprimée. Les informations conservées sont agrégées : page consultée, domaine d’origine, indication géographique (pays, région, ville), type d’appareil, système et navigateur, horodatage. Les adresses sont nettoyées avant transmission : paramètres de requête supprimés, identifiants et jetons remplacés par un libellé générique. Les pages dont l’adresse ne peut pas être anonymisée de façon certaine — échanges d’authentification, invitations, bons de ramassage — ne sont jamais mesurées, et aucune donnée de votre activité commerciale n’est transmise.',
             'Mesure d’audience détaillée (Google Analytics 4) : le site charge Google Analytics 4, fourni par Google LLC, uniquement si vous l’avez accepté. Cet outil produit des statistiques de fréquentation à l’aide des cookies de mesure `_ga`. Il est configuré sans page vue automatique, sans identifiant utilisateur, sans adresse email et sans donnée de votre activité commerciale : les adresses sont nettoyées (paramètres de requête supprimés, identifiants et jetons masqués) et le titre de la page n’est pas transmis dans l’espace applicatif privé.',
-            'Aucun cookie publicitaire ni traceur de profilage marketing n’est déposé. Si vous refusez la mesure détaillée ou retirez votre consentement, Google Analytics 4 n’est pas chargé, sa collecte est arrêtée et les cookies de mesure déjà déposés sont supprimés ; la mesure agrégée sans cookie décrite ci-dessus reste alors active. Vous pouvez également vous opposer à cette mesure agrégée en désactivant JavaScript ou en bloquant le script de mesure depuis votre navigateur.',
+            'Si vous refusez la mesure détaillée ou retirez votre consentement, Google Analytics 4 n’est pas chargé, sa collecte est arrêtée et les cookies de mesure déjà déposés sont supprimés. La mesure agrégée sans cookie reste active. Vous pouvez vous y opposer en désactivant JavaScript ou en bloquant son script.',
             'Vous pouvez à tout moment supprimer ou bloquer les cookies et le stockage local depuis les réglages de votre navigateur. Le blocage des cookies strictement nécessaires peut toutefois empêcher la connexion à la plateforme.',
             <AnalyticsConsentControl key="analytics-consent-control" />,
+            ...(metaRuntimeEnabled() ? [
+              'Avec ce même accord, Jisra conserve les identifiants publicitaires et les paramètres de campagne du premier et du dernier contact Meta avant l’inscription. Ils servent à rapprocher en interne la création du compte et son premier paiement vérifié, même plus tard. Les identifiants navigateur ne sont pas conservés dans ces rapports. Le retrait efface l’attribution liée à votre compte lorsque le compte ou son consentement est identifiable.',
+              'Mesure publicitaire Meta, distincte de Google Analytics : avec votre accord, le Pixel Meta et l’API de conversions transmettent à Meta les visites de pages publiques, les inscriptions réussies, les créations de demandes de paiement et le premier abonnement payant après validation bancaire. Ces événements servent à mesurer et optimiser nos publicités. Peuvent être utilisés les cookies `_fbp` et `_fbc`, l’identifiant de clic Meta, l’adresse IP, le navigateur et un identifiant de compte pseudonymisé. Aucun e-mail, montant, justificatif ni donnée bancaire n’est transmis. Le choix est valable 180 jours au maximum ; son retrait arrête les nouveaux envois, sans effacer les événements déjà reçus par Meta.',
+              <MetaConsentControl key="meta-consent-control" />,
+            ] : []),
           ],
         },
         {

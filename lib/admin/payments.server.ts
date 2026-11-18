@@ -1,6 +1,8 @@
 import 'server-only'
 import { z } from 'zod'
+import { after } from 'next/server'
 import { requireAdmin } from './access.server'
+import { drainMetaOutbox, metaRuntimeEnabled } from '@/lib/analytics/meta.server'
 
 export async function adminPaymentRpc(name: string, params: object, permission = 'payments.read') {
   const { supabase } = await requireAdmin(permission)
@@ -32,3 +34,24 @@ export const decisionSchema = z.object({
   currency: z.literal('MAD').optional(), bankAccount: z.string().trim().min(2).max(80).optional(),
   bankReference: z.string().trim().min(3).max(120).optional(), valueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 }).strict()
+
+export async function decideAdminPayment(id: string, input: z.infer<typeof decisionSchema>) {
+  const result = await adminPaymentRpc('rpc_admin_payment_decide', {
+    p_request: id, p_action: input.action, p_key: input.key, p_reason: input.reason,
+    p_amount: input.amountMinor ?? null, p_currency: input.currency ?? null,
+    p_bank_account: input.bankAccount ?? null, p_bank_reference: input.bankReference ?? null,
+    p_value_date: input.valueDate ?? null,
+  }, 'payments.approve')
+
+  // PostgREST has committed the decision. Never put Meta I/O on the response path.
+  if (input.action === 'approve' && result?.ok === true && result.replayed === false &&
+      result.status === 'validated' && typeof result.subscription_id === 'string' && metaRuntimeEnabled()) {
+    try {
+      after(async () => {
+        try { await drainMetaOutbox(result.subscription_id) }
+        catch { console.warn('META_IMMEDIATE_DISPATCH_FAILED') }
+      })
+    } catch { console.warn('META_IMMEDIATE_DISPATCH_NOT_SCHEDULED') }
+  }
+  return result
+}

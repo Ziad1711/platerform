@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react'
 import { sanitizeRedirectPath } from '@/lib/auth/redirects'
 import { trackEvent } from '@/lib/analytics/gtag'
+import { confirmMetaSignup, metaSignup } from '@/lib/analytics/meta-browser'
+import { acquisitionSignup } from '@/lib/acquisition/browser'
 
 /**
  * Message utilisateur d'une erreur Auth : une panne réseau ou de service ne doit
@@ -125,15 +127,19 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       } else {
         if (!isValidEmail(email.trim())) throw new Error('Veuillez saisir une adresse email valide')
 
+        const acquisition = await acquisitionSignup()
+        const meta = metaSignup('/login')
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
+          options: { data: { ...meta, ...acquisition } },
         })
         if (error) throw error
 
         const identities = data?.user?.identities
         signupAccountCreated =
           Boolean(data?.user?.id) && !(Array.isArray(identities) && identities.length === 0)
+        if (signupAccountCreated) await confirmMetaSignup(meta?._jisra_meta_event, data.user?.id)
       }
 
       if (mode === 'login') {

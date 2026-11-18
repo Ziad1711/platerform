@@ -136,8 +136,8 @@ export function assertQualificationIsolation(): void {
     throw new QualificationIsolationError('CRON_SECRET présent : secret de production interdit')
   }
   const externalSecrets = ['OPENAI_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY',
-    'YOUCAN_CLIENT_SECRET', 'FACEBOOK_APP_SECRET', 'LIGHTFUNNELS_CLIENT_SECRET',
-    'INTEGRATIONS_ENCRYPTION_KEY']
+    'YOUCAN_CLIENT_SECRET', 'FACEBOOK_APP_SECRET', 'JISRA_META_ADS_APP_SECRET', 'LIGHTFUNNELS_CLIENT_SECRET',
+    'INTEGRATIONS_ENCRYPTION_KEY', 'META_CAPI_ACCESS_TOKEN', 'META_TEST_EVENT_CODE']
   if (externalSecrets.some((key) => process.env[key])) {
     throw new QualificationIsolationError('secret fournisseur interdit en qualification')
   }

@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { adminSections } from '@/lib/admin/navigation'
 import { JisraMark, JisraWordmark } from '@/components/logo'
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({ children, permissions }: { children: React.ReactNode; permissions?: string[] }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   return <div className="min-h-screen bg-jisra-ink text-jisra-cream">
@@ -19,7 +19,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
       <nav id="admin-navigation" aria-label="Administration Jisra" className={`${open ? 'block' : 'hidden'} border-b border-white/10 p-4 lg:block lg:min-h-[calc(100vh-80px)] lg:border-b-0 lg:border-r`}>
         <p className="mb-5 flex items-center gap-2 px-3 text-xs text-jisra-green"><ShieldCheck size={16} /> Espace plateforme indépendant</p>
-        {adminSections.map((section) => {
+        {adminSections.filter(section => !('permission' in section) || permissions?.includes(section.permission)).map((section) => {
           const href = `/admin${section.slug ? `/${section.slug}` : ''}`
           return <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined} onClick={() => setOpen(false)}
             className={`mb-1 flex min-h-11 items-center rounded-xl px-3 text-sm focus-visible:outline focus-visible:outline-jisra-green ${pathname === href ? 'bg-jisra-green/15 text-jisra-green-light' : 'text-jisra-cream/75 hover:bg-white/5'}`}>{section.title}</Link>
