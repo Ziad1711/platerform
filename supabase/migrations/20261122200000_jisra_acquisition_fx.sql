@@ -99,7 +99,7 @@ begin
       count(*) filter(where campaign_id is not null and currency is distinct from 'MAD') non_mad_receipts
     from cohort where paid_at>=from_day::timestamp at time zone tz_name and paid_at<until_day::timestamp at time zone tz_name
   ), daily as (
-    select g.day::date day,r.effective_on,r.rate from generate_series(from_day::timestamp,(until_day-1)::timestamp,'1 day') g(day)
+    select g.day::date as day,r.effective_on,r.rate from generate_series(from_day::timestamp,(until_day-1)::timestamp,'1 day') g(day)
     left join lateral (select effective_on,rate from saas_admin.acquisition_fx_rates
       where effective_on<=g.day::date order by effective_on desc limit 1) r on c.currency='USD'
   ), daily_media as (
