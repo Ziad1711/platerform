@@ -13,9 +13,14 @@ export default async function AdminPage() {
   return <div className="min-w-0 space-y-10">
     <AdminDashboard />
     <section className="space-y-4"><h2 className="text-xl font-semibold">Administration</h2>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{adminSections.slice(1).map((section) => <Link key={section.slug} href={`/admin/${section.slug}`} className="min-w-0 space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-5 hover:border-jisra-green/40">
-        <h3 className="font-semibold">{section.title}</h3><p className="break-words text-sm leading-6 text-jisra-cream/65">{section.description}</p>
-      </Link>)}</div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{adminSections.slice(1).map((section) => {
+        const href = `/admin/${section.slug}`
+        const className = 'min-w-0 space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-5 hover:border-jisra-green/40'
+        const content = <><h3 className="font-semibold">{section.title}</h3><p className="break-words text-sm leading-6 text-jisra-cream/65">{section.description}</p></>
+        return 'documentNavigation' in section
+          ? <a key={section.slug} href={href} className={className}>{content}</a>
+          : <Link key={section.slug} href={href} className={className}>{content}</Link>
+      })}</div>
     </section>
   </div>
 }

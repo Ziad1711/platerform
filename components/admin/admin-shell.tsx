@@ -21,8 +21,12 @@ export function AdminShell({ children, permissions }: { children: React.ReactNod
         <p className="mb-5 flex items-center gap-2 px-3 text-xs text-jisra-green"><ShieldCheck size={16} /> Espace plateforme indépendant</p>
         {adminSections.filter(section => !('permission' in section) || permissions?.includes(section.permission)).map((section) => {
           const href = `/admin${section.slug ? `/${section.slug}` : ''}`
-          return <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined} onClick={() => setOpen(false)}
-            className={`mb-1 flex min-h-11 items-center rounded-xl px-3 text-sm focus-visible:outline focus-visible:outline-jisra-green ${pathname === href ? 'bg-jisra-green/15 text-jisra-green-light' : 'text-jisra-cream/75 hover:bg-white/5'}`}>{section.title}</Link>
+          const className = `mb-1 flex min-h-11 items-center rounded-xl px-3 text-sm focus-visible:outline focus-visible:outline-jisra-green ${pathname === href ? 'bg-jisra-green/15 text-jisra-green-light' : 'text-jisra-cream/75 hover:bg-white/5'}`
+          const current = pathname === href ? 'page' : undefined
+          if ('documentNavigation' in section) {
+            return <a key={href} href={href} aria-current={current} className={className}>{section.title}</a>
+          }
+          return <Link key={href} href={href} aria-current={current} onClick={() => setOpen(false)} className={className}>{section.title}</Link>
         })}
       </nav>
       <main className="min-w-0 p-4 sm:p-8 lg:p-10"><div className="mx-auto max-w-6xl">{children}</div></main>
