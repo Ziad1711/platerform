@@ -11,10 +11,24 @@ const options = { path: oauthPath, secure: true, httpOnly: true, sameSite: 'lax'
 type Route = { params: Promise<{ action: string }> }
 
 export async function POST(request: Request, { params }: Route) {
-  if ((await params).action !== 'connect') return new Response(null, { status: 404 })
+  const { action } = await params
+  if (action !== 'connect' && action !== 'rates') return new Response(null, { status: 404 })
   try {
     assertAdminOrigin(request)
     const { supabase } = await requireAdmin('acquisition.manage')
+    if (action === 'rates') {
+      const length = Number(request.headers.get('content-length'))
+      if (length < 1 || length > 256 || !request.headers.get('content-type')?.startsWith('application/x-www-form-urlencoded')) throw new Error('ADMIN_INVALID')
+      const input = new URLSearchParams(await request.text())
+      const day = input.get('day') ?? '', rate = (input.get('rate') ?? '').trim().replace(',', '.')
+      let outcome = 'invalid'
+      if (/^20\d{2}-\d{2}-\d{2}$/.test(day) && /^\d{1,3}(\.\d{1,8})?$/.test(rate) && Number(rate) > 0) {
+        const { error } = await supabase.rpc('rpc_admin_acquisition_fx_save', { p_day: day, p_rate: rate })
+        if (error?.code === '42501') throw new Error('ADMIN_FORBIDDEN')
+        outcome = !error ? 'saved' : ['22023', '22007', '22008'].includes(error.code) ? 'invalid' : 'unavailable'
+      }
+      return NextResponse.redirect(new URL(`${acquisitionPath}?fx=${outcome}`, request.url), 303)
+    }
     const { data: { user }, error } = await supabase.auth.getUser()
     if (!user || error) throw new Error('ADMIN_AUTH')
     const config = acquisitionConfig()
